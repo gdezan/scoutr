@@ -60,6 +60,23 @@ class CockpitUiTest {
     }
 
     @Test
+    fun connectScreen_showsScanQrButton() {
+        val context = androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().targetContext
+        val connectionStore = ConnectionStore(context).also { it.clear() }
+        val vm = dev.cockpit.app.state.ConnectViewModel(
+            BridgeClient(OkHttpClient(), connectionStore),
+            connectionStore,
+        )
+        composeRule.setContent {
+            CockpitTheme {
+                ConnectScreen(onConnected = {}, viewModel = vm)
+            }
+        }
+        composeRule.onNodeWithTag("connect_scan").assertExists()
+        composeRule.onNodeWithText("Scan QR code").assertExists()
+    }
+
+    @Test
     fun boardScreen_rendersNeedsYouSectionFirst() {
         val state = BoardUiState(
             connected = true,

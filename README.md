@@ -240,6 +240,9 @@ cleartext).
 
 ## 5. Using the app
 
+- **Connect** — bridge address + pairing token, or **Scan QR code** to scan the
+  code printed by `cockpit-bridge pair` (fills both fields and connects
+automatically).
 - **Board** — live agent cards grouped Needs you / Working / Done / Idle with
   counts, status dots, and time-in-state pills. 3s polling; self-heals when the
   bridge restarts. The **+** button starts a new app-owned pi session.
@@ -269,6 +272,7 @@ cleartext).
 | ntfy topic | `cockpit_<12 random bytes>` (shared secret, also in config.json) |
 | Env override `PI_BIN` | path to the pi script (else `~/.local/bin/pi`, mise paths, PATH) |
 | Env override `PI_NODE_BIN` | node used to run pi (else the node next to pi, mise paths) |
+| `publicHost` / `COCKPIT_PUBLIC_HOST` | public bridge URL for QR pairing (else tailscale DNS name, else loopback) |
 | App data | SharedPreferences `cockpit_connection` (host, token, ntfy) |
 
 ---

@@ -56,6 +56,22 @@ pi agents, as an alternative to Moshi's paid herdr integration.
   extension reports — the last report wins. Status transitions for testing must
   come from a real pi (steer it to block, answer to unblock).
 
+## QR pairing (added with the library-first rule)
+
+- Pairing is a QR code printed by `cockpit-bridge pair`: compact v1 JSON
+  `{v, host, token, ntfy}` — the address, the pairing token, and ntfy discovery
+  in one scan. The app's Connect screen has a **Scan QR code** button
+  (zxing-android-embedded, the standard Android QR scanner) that fills the
+  fields and connects automatically, mirroring Moshi's Easy Pair flow.
+- The public host is resolved automatically from `tailscale status` (Self
+  DNSName), overridable via `publicHost` in config or `COCKPIT_PUBLIC_HOST`.
+- Carrying the token in the QR is equivalent to typing it: the code is printed
+  only on the host terminal, and the token remains the sole credential.
+- Libraries: QR generation uses `qrcode-terminal` (battle-tested, no native
+  deps); scanning uses zxing-android-embedded. The payload format itself is
+  hand-rolled (a 60-line parser) because no library covers the cockpit-specific
+  pairing payload.
+
 ## Testing (self-served)
 
 - Bridge: `npm test` (26 live-socket/unit tests), `tsc --noEmit`.

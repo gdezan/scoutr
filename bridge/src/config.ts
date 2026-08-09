@@ -17,6 +17,8 @@ export interface BridgeConfig {
   ntfyUrl?: string;
   /** Random topic under which the bridge publishes blocked-agent events. */
   ntfyTopic?: string;
+  /** Public base URL the app reaches the bridge at (e.g. https://host.ts.net); used for QR pairing. */
+  publicHost?: string;
 }
 
 export function defaultConfigPath(): string {
@@ -39,6 +41,7 @@ export async function loadOrCreateConfig(path = defaultConfigPath()): Promise<Br
       port: parsed.port,
       ntfyUrl: typeof parsed.ntfyUrl === "string" ? parsed.ntfyUrl : undefined,
       ntfyTopic: typeof parsed.ntfyTopic === "string" ? parsed.ntfyTopic : `cockpit_${randomBytes(12).toString("base64url")}`,
+      publicHost: typeof parsed.publicHost === "string" ? parsed.publicHost : undefined,
     };
     // Persist the topic (and any other missing fields) so subsequent runs are stable.
     await writeFile(path, `${JSON.stringify(config, null, 2)}\n`, { mode: 0o600 });

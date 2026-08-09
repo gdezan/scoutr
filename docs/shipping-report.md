@@ -18,6 +18,7 @@ dependencies.
 | 5 | ntfy push: bridge publishes blocked events; app polls + shows notifications | live push E2E, commits edc937a, 4dad68b |
 | 6 | Polish: status-since pills, header counts, dark-first fix, empty states | taste-reviewed board, commit ea30b0b |
 | 7 | RPC: app-owned `pi --mode rpc` sessions + programmatic ask_user_question answers; done push | commit c6f966d (this round) |
+| 8 | QR pairing: `cockpit-bridge pair` prints a scannable code; app Connect has **Scan QR code** (zxing) | this round, pending commit |
 
 ## Confirmed evidence
 
@@ -58,7 +59,8 @@ dependencies.
 6. Push (done) — publisher emits "π finished" on `agent_status done`; app-side
    delivery verified by publishing the same payload → notification shade showed
    "Cockpit" + "π finished". Screenshot 12-done-push.png.
-7. RPC sessions — board **+ FAB** spawns a bridge-owned `pi --mode rpc`
+7. QR pairing — `cockpit-bridge pair` prints a QR whose module matrix is bit-identical to the payload encoded by the reference encoder (verified by decoding the rendered code with zbarimg); the app's **Scan QR code** opens the zxing capture activity (verified on the emulator with the camera permission flow). The camera→decode step itself is a documented approximation: the headless emulator's virtual-scene camera cannot present a QR to the lens, so the scan was not completed end-to-end on-device; zxing's decode path and the payload round-trip are each verified independently.
+8. RPC sessions — board **+ FAB** spawns a bridge-owned `pi --mode rpc`
    session and opens its chat; the transcript renders; when the agent calls
    ask_user_question the chat shows a "Waiting for your answer" banner with the
    question + options and the input switches to "Answer the question…"; an

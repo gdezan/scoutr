@@ -1,5 +1,6 @@
 package dev.cockpit.app.ui.screens
 
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -15,9 +16,13 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -34,7 +39,10 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.journeyapps.barcodescanner.ScanContract
+import com.journeyapps.barcodescanner.ScanOptions
 import dev.cockpit.app.CockpitApp
+import dev.cockpit.app.data.PairingPayloadParser
 import dev.cockpit.app.state.ConnectState
 import dev.cockpit.app.state.ConnectViewModel
 
@@ -47,6 +55,22 @@ fun ConnectScreen(
     val state by viewModel.state.collectAsState()
     var host by remember { mutableStateOf("") }
     var token by remember { mutableStateOf("") }
+    var scanError by remember { mutableStateOf<String?>(null) }
+
+    val scanLauncher = rememberLauncherForActivityResult(ScanContract()) { result ->
+        val contents = result?.contents
+        if (!contents.isNullOrEmpty()) {
+            val payload = PairingPayloadParser.parse(contents)
+            if (payload != null) {
+                host = payload.host
+                token = payload.token
+                scanError = null
+                viewModel.connect(payload.host, payload.token)
+            } else {
+                scanError = "That QR doesn't look like a Cockpit pairing code"
+            }
+        }
+    }
 
     // React to the handshake result exactly once.
     if (state is ConnectState.Connected) {
@@ -95,6 +119,32 @@ fun ConnectScreen(
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
             modifier = Modifier.fillMaxWidth().testTag("connect_token"),
         )
+
+        Spacer(Modifier.height(16.dp))
+
+        OutlinedButton(
+            onClick = {
+                scanError = null
+                scanLauncher.launch(
+                    ScanOptions().apply {
+                        setDesiredBarcodeFormats(ScanOptions.QR_CODE)
+                        setPrompt("Scan the QR from `cockpit-bridge pair`")
+                    },
+                )
+            },
+            modifier = Modifier.fillMaxWidth().testTag("connect_scan"),
+        ) {
+            Icon(Icons.Filled.QrCodeScanner, contentDescription = null, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(8.dp))
+            Text("Scan QR code")
+        }
+        if (scanError != null) {
+            Text(
+                text = scanError!!,
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodyMedium,
+            )
+        }
 
         Spacer(Modifier.height(24.dp))
 

@@ -5,6 +5,7 @@
  *   cockpit-bridge herdr status          → ping + server info
  *   cockpit-bridge herdr snapshot        → print the full session snapshot as JSON
  *   cockpit-bridge herdr watch           → stream live events (Ctrl-C to stop)
+ *   cockpit-bridge pair                  → print the QR code the app scans to connect
  *   cockpit-bridge serve                 → run the bridge daemon (layer 2)
  */
 import { HerdrClient, defaultSocketPath, HerdrError } from "./herdr/client.js";
@@ -56,6 +57,48 @@ async function main(): Promise<void> {
           console.error("usage: cockpit-bridge herdr <status|snapshot|watch>");
           process.exitCode = 2;
         }
+        break;
+      }
+      case "pair": {
+        const { loadOrCreateConfig } = await import("./config.js");
+        const { buildPairingPayload } = await import("./pairing.js");
+        const { execFile } = await import("node:child_process");
+        const { default: qr } = await import("qrcode-terminal");
+
+        const config = await loadOrCreateConfig();
+        if (!config.ntfyUrl || !config.ntfyTopic) {
+          console.error("warning: ntfy not configured — push will not work until it is");
+        }
+        // Public host resolution order: config.publicHost > COCKPIT_PUBLIC_HOST
+        // > the tailnet MagicDNS name (tailscale status) > loopback fallback.
+        let host = config.publicHost ?? process.env.COCKPIT_PUBLIC_HOST;
+        if (!host) {
+          host = await new Promise<string>((resolve) => {
+            execFile("tailscale", ["status", "--json"], { timeout: 5000 }, (err, stdout) => {
+              if (err) return resolve("");
+              try {
+                const dns = (JSON.parse(stdout) as { Self?: { DNSName?: string } }).Self?.DNSName;
+                resolve(dns ? dns.replace(/\.$/, "") : "");
+              } catch {
+                resolve("");
+              }
+            });
+          });
+        }
+        const payload = buildPairingPayload({
+          host: host || `http://127.0.0.1:${config.port}`,
+          token: config.token,
+          ntfyUrl: config.ntfyUrl,
+          ntfyTopic: config.ntfyTopic,
+        });
+        qr.generate(payload, { small: true }, (out: string) => console.log(out));
+        console.error("\nScan this QR with the Cockpit app (Connect → Scan QR code).");
+        if (!host) {
+          console.error("warning: could not detect the tailnet hostname — the QR points at 127.0.0.1.");
+          console.error("set publicHost in ~/.config/cockpit/config.json (or COCKPIT_PUBLIC_HOST) first.");
+        }
+        console.error("If scanning fails, type the fields below into the app:");
+        console.log(payload);
         break;
       }
       case "serve": {
@@ -110,7 +153,7 @@ async function main(): Promise<void> {
       case "-h":
       default: {
         console.error(
-          "usage: cockpit-bridge <herdr status|herdr snapshot|herdr watch|serve>",
+          "usage: cockpit-bridge <herdr status|herdr snapshot|herdr watch|pair|serve>",
         );
         process.exitCode = 2;
       }

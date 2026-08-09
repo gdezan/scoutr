@@ -43,6 +43,9 @@ android {
                     device = "Pixel 2"
                     apiLevel = 36
                     systemImageSource = "aosp-atd"
+                    // aosp-atd lacks NDK translation; pin the test ABI so the
+                    // managed device does not fail setup (see gradle warning).
+                    testedAbi = "x86_64"
                 }
             }
         }
@@ -70,6 +73,7 @@ dependencies {
     implementation(libs.okhttp)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.kotlinx.coroutines.android)
+    implementation(libs.zxing.android.embedded)
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
