@@ -6,6 +6,7 @@ import type { SessionSnapshot } from "./herdr/types.js";
 import { readPiSessionFile, entryText, inspectSessionFile, type PiMessageEntry } from "./pi/session.js";
 import { UsageService, type UsageSnapshot } from "./usage/providers.js";
 import { loadOrCreateConfig, type BridgeConfig } from "./config.js";
+import { NtfyPublisher } from "./notify.js";
 import { basename, resolve } from "node:path";
 import { existsSync } from "node:fs";
 
@@ -35,6 +36,8 @@ export interface ServerDeps {
   feed: HerdrEventFeed;
   usage: UsageService;
   config: BridgeConfig;
+  /** Push publisher for blocked-agent events (layer 5); optional. */
+  publisher?: NtfyPublisher;
 }
 
 export interface CockpitServer {
@@ -75,9 +78,18 @@ function readBody(request: IncomingMessage): Promise<string> {
 }
 
 export function createCockpitServer(deps: ServerDeps, options: CreateServerOptions = {}): CockpitServer {
-  const { herdr, feed, usage, config } = deps;
+  const { herdr, feed, usage, config, publisher } = deps;
   const token = config.token;
   const listen = options.listen ?? true;
+
+  // Push publisher consumes feed events independently of any WS client.
+  if (publisher) {
+    feed.onMessage((message) => {
+      if ("kind" in message) {
+        void publisher.handleEvent(message).catch(() => {});
+      }
+    });
+  }
 
   const server = createServer(async (request, response) => {
     const url = new URL(request.url ?? "/", "http://localhost");
@@ -171,6 +183,7 @@ export function createCockpitServer(deps: ServerDeps, options: CreateServerOptio
         service: "cockpit-bridge",
         version: "0.1.0",
         herdr: { connected: herdrConnected, version: herdrVersion, protocol: herdrProtocol },
+        ntfy: config.ntfyUrl && config.ntfyTopic ? { url: config.ntfyUrl, topic: config.ntfyTopic } : undefined,
       });
       return;
     }
@@ -217,6 +230,14 @@ export function createCockpitServer(deps: ServerDeps, options: CreateServerOptio
   }
 
   if (listen) {
+    server.on("error", (error) => {
+      if (error instanceof Error && "code" in error && error.code === "EADDRINUSE") {
+        console.error(`port ${config.port} already in use; is another cockpit-bridge running?`);
+      } else {
+        console.error(`server error: ${error.message}`);
+      }
+      process.exit(1);
+    });
     server.listen(config.port, "127.0.0.1");
   }
 
@@ -249,7 +270,9 @@ async function handleCommand(command: CommandMessage, ws: WebSocket, deps: Serve
     case "answer_question": {
       const { paneId, text } = command;
       if (!paneId || !text) throw new Error("answer_question requires paneId and text");
+      // Type the answer, then Enter to submit it in pi's questionnaire UI.
       await deps.herdr.paneSendText(paneId, text);
+      await deps.herdr.paneSendKeys(paneId, ["Enter"]);
       ws.send(JSON.stringify({ type: "answered", paneId, text }));
       return;
     }

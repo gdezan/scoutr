@@ -62,6 +62,7 @@ async function main(): Promise<void> {
         const { createCockpitServer } = await import("./server.js");
         const { loadOrCreateConfig } = await import("./config.js");
         const { UsageService } = await import("./usage/providers.js");
+        const { NtfyPublisher } = await import("./notify.js");
 
         const config = await loadOrCreateConfig();
         const feed = new HerdrEventFeed(socketPath);
@@ -73,16 +74,30 @@ async function main(): Promise<void> {
           feed,
           usage: new UsageService(),
           config,
+          publisher:
+            config.ntfyUrl && config.ntfyTopic
+              ? new NtfyPublisher({ baseUrl: config.ntfyUrl, topic: config.ntfyTopic })
+              : undefined,
         });
         console.error(`cockpit bridge listening on ${server.url}`);
         console.error(`token: ${config.token}`);
+        if (config.ntfyUrl && config.ntfyTopic) {
+          console.error(`push: ntfy at ${config.ntfyUrl}/topic/${config.ntfyTopic}`);
+        }
         console.error(
           `front with: tailscale serve --bg 443 ${server.url} (then the app uses https://<host>/ws + token)`,
         );
 
         await new Promise<void>((resolve) => {
+          let done = false;
           const shutdown = (): void => {
+            if (done) return;
+            done = true;
             console.error("shutting down…");
+            // Give the server a moment to drain, then force-exit so the port
+            // is always released (stuck keep-alive sockets would hang it).
+            const timer = setTimeout(() => process.exit(0), 2000);
+            timer.unref();
             void server.close().then(resolve);
           };
           process.on("SIGINT", shutdown);

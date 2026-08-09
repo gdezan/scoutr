@@ -13,8 +13,10 @@ export interface BridgeConfig {
   token: string;
   /** Loopback port the bridge listens on (tailscale serve fronts it with TLS). */
   port: number;
-  /** Host for ntfy push (layer 5); empty = disabled. */
+  /** Base URL of the self-hosted ntfy server (layer 5); empty = disabled. */
   ntfyUrl?: string;
+  /** Random topic under which the bridge publishes blocked-agent events. */
+  ntfyTopic?: string;
 }
 
 export function defaultConfigPath(): string {
@@ -32,15 +34,20 @@ export async function loadOrCreateConfig(path = defaultConfigPath()): Promise<Br
     if (typeof parsed.token !== "string" || parsed.token.length < 16 || typeof parsed.port !== "number") {
       throw new Error("invalid cockpit config (token or port missing)");
     }
-    return {
+    const config: BridgeConfig = {
       token: parsed.token,
       port: parsed.port,
       ntfyUrl: typeof parsed.ntfyUrl === "string" ? parsed.ntfyUrl : undefined,
+      ntfyTopic: typeof parsed.ntfyTopic === "string" ? parsed.ntfyTopic : `cockpit_${randomBytes(12).toString("base64url")}`,
     };
+    // Persist the topic (and any other missing fields) so subsequent runs are stable.
+    await writeFile(path, `${JSON.stringify(config, null, 2)}\n`, { mode: 0o600 });
+    return config;
   } catch {
     const config: BridgeConfig = {
       token: generateToken(),
       port: 8737,
+      ntfyTopic: `cockpit_${randomBytes(12).toString("base64url")}`,
     };
     await mkdir(join(path, ".."), { recursive: true });
     await writeFile(path, `${JSON.stringify(config, null, 2)}\n`, { mode: 0o600 });
