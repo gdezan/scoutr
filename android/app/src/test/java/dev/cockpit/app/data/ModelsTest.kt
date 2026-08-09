@@ -60,23 +60,6 @@ class ModelsTest {
     }
 
     @Test
-    fun `rpc session and entries decode from bridge json`() {
-        val sessionJson = """{"ok":true,"session":{"id":"r1","status":"running","name":"cockpit-app","lastEntryId":"e2","uiRequests":[{"id":"ui-9","method":"select","title":"Approve the change?","options":["Approve","Reject"]}]}}"""
-        val session = Json { ignoreUnknownKeys = true }.decodeFromString(RpcSessionResponse.serializer(), sessionJson)
-        assertEquals("r1", session.session?.id)
-        assertEquals("running", session.session?.status)
-        assertEquals(1, session.session?.uiRequests?.size)
-        assertEquals("ui-9", session.session?.uiRequests?.first()?.id)
-        assertEquals(listOf("Approve", "Reject"), session.session?.uiRequests?.first()?.options)
-
-        val entriesJson = """{"ok":true,"entries":[{"entryId":"e1","role":"user","content":[{"type":"text","text":"hi"}]}],"leafId":"e1"}"""
-        val entries = Json { ignoreUnknownKeys = true }.decodeFromString(RpcEntriesResponse.serializer(), entriesJson)
-        assertEquals(1, entries.entries.size)
-        assertEquals("user", entries.entries.first().role)
-        assertEquals("hi", entries.entries.first().content.first().text)
-    }
-
-    @Test
     fun `entryText flattens text and toolCall blocks`() {
         val content = listOf(
             ContentBlock(type = "thinking", thinking = "skip me"),

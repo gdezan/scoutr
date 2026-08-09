@@ -8,7 +8,8 @@ import { UsageService, type UsageSnapshot } from "./usage/providers.js";
 import { loadOrCreateConfig, type BridgeConfig } from "./config.js";
 import { NtfyPublisher } from "./notify.js";
 import { StatusTracker } from "./status.js";
-import { PiRpcManager, type PiRpcSession } from "./pi/rpc.js";
+import { listDirs, DirListingError } from "./dirs.js";
+import { readModelsCatalog } from "./pi/models.js";
 import { basename, resolve } from "node:path";
 import { existsSync } from "node:fs";
 
@@ -52,10 +53,6 @@ export interface CreateServerOptions {
   listen?: boolean;
 }
 
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
 function sendJson(response: ServerResponse, status: number, body: unknown): void {
   const payload = JSON.stringify(body);
   response.writeHead(status, {
@@ -65,36 +62,13 @@ function sendJson(response: ServerResponse, status: number, body: unknown): void
   response.end(payload);
 }
 
-async function readJsonBody(request: IncomingMessage): Promise<Record<string, unknown>> {
-  const text = await readBody(request);
-  return text ? (JSON.parse(text) as Record<string, unknown>) : {};
-}
-
-function readBody(request: IncomingMessage): Promise<string> {
-  return new Promise((resolveBody, reject) => {
-    const chunks: Buffer[] = [];
-    let size = 0;
-    request.on("data", (chunk: Buffer) => {
-      size += chunk.length;
-      if (size > 1_000_000) {
-        reject(new Error("request body too large"));
-        request.destroy();
-        return;
-      }
-      chunks.push(chunk);
-    });
-    request.on("end", () => resolveBody(Buffer.concat(chunks).toString("utf8")));
-    request.on("error", reject);
-  });
-}
-
 export function createCockpitServer(deps: ServerDeps, options: CreateServerOptions = {}): CockpitServer {
   const { herdr, feed, usage, config, publisher } = deps;
   const token = config.token;
   const listen = options.listen ?? true;
 
-  // App-owned pi --mode rpc sessions (chat + programmatic UI answers).
-  const rpc = new PiRpcManager();
+  // App-owned pane sessions are created via herdr directly (see the create
+  // flow in layer 3); no pi --mode rpc processes live here anymore.
 
   // Track status entry times so cards can show "time in state".
   const tracker = new StatusTracker();
@@ -256,85 +230,30 @@ export function createCockpitServer(deps: ServerDeps, options: CreateServerOptio
       return;
     }
 
-    const [seg0, seg1, rpcId, rpcSub] = pathname.split("/").filter(Boolean);
-    if (seg0 === "api" && seg1 === "rpc") {
-      if (request.method === "GET" && !rpcId) {
-        sendJson(response, 200, { ok: true, sessions: rpc.list() });
-        return;
-      }
-      if (request.method === "POST" && !rpcId) {
-        const body = await readJsonBody(request) as { name?: string };
-        try {
-          const session = await rpc.create(body.name);
-          sendJson(response, 200, { ok: true, session: session.info });
-        } catch (error) {
-          sendJson(response, 500, { ok: false, error: errorMessage(error) });
-        }
-        return;
-      }
-      if (rpcId && !rpcSub) {
-        const session = rpc.get(rpcId);
-        if (!session) {
-          sendJson(response, 404, { ok: false, error: "no such rpc session" });
-          return;
-        }
-        if (request.method === "GET") {
-          sendJson(response, 200, { ok: true, session: session.info });
-        } else if (request.method === "DELETE") {
-          rpc.dispose(rpcId);
-          sendJson(response, 200, { ok: true });
-        }
-        return;
-      }
-      const session = rpc.get(rpcId ?? "");
-      if (!session) {
-        sendJson(response, 404, { ok: false, error: "no such rpc session" });
-        return;
-      }
-      if (rpcSub === "entries" && request.method === "GET") {
-        try {
-          const result = await session.getEntries(url.searchParams.get("since"));
-          sendJson(response, 200, { ok: true, ...result });
-        } catch (error) {
-          sendJson(response, 500, { ok: false, error: errorMessage(error) });
-        }
-        return;
-      }
-      if (rpcSub === "prompt" && request.method === "POST") {
-        const body = await readJsonBody(request) as { message?: string; steer?: boolean };
-        if (!body.message) {
-          sendJson(response, 400, { ok: false, error: "missing message" });
-          return;
-        }
-        try {
-          await session.prompt(body.message, { steer: body.steer === true });
-          sendJson(response, 200, { ok: true });
-        } catch (error) {
-          sendJson(response, 500, { ok: false, error: errorMessage(error) });
-        }
-        return;
-      }
-      if (rpcSub === "respond" && request.method === "POST") {
-        const body = await readJsonBody(request) as {
-          uiId?: string; value?: string; confirmed?: boolean; cancelled?: boolean;
-        };
-        if (!body.uiId) {
-          sendJson(response, 400, { ok: false, error: "missing uiId" });
-          return;
-        }
-        session.respondToUi(body.uiId, {
-          value: body.value,
-          confirmed: body.confirmed,
-          cancelled: body.cancelled === true,
+    if (request.method === "GET" && pathname === "/api/models") {
+      try {
+        sendJson(response, 200, { ok: true, catalog: readModelsCatalog() });
+      } catch (error) {
+        sendJson(response, 404, {
+          ok: false,
+          error: "models-store.json not readable: " + (error instanceof Error ? error.message : String(error)),
         });
-        sendJson(response, 200, { ok: true });
-        return;
       }
-      if (rpcSub === "abort" && request.method === "POST") {
-        await session.abort();
-        sendJson(response, 200, { ok: true });
-        return;
+      return;
+    }
+
+    if (request.method === "GET" && pathname === "/api/dirs") {
+      const requested = url.searchParams.get("path") ?? undefined;
+      try {
+        sendJson(response, 200, { ok: true, listing: listDirs(requested ?? process.env.HOME ?? "") });
+      } catch (error) {
+        const status = error instanceof DirListingError ? 400 : 500;
+        sendJson(response, status, {
+          ok: false,
+          error: error instanceof Error ? error.message : String(error),
+        });
       }
+      return;
     }
 
     sendJson(response, 404, { ok: false, error: "not found" });
@@ -355,7 +274,6 @@ export function createCockpitServer(deps: ServerDeps, options: CreateServerOptio
   return {
     url: `http://127.0.0.1:${config.port}`,
     close: async () => {
-      rpc.disposeAll();
       for (const client of wss.clients) client.terminate();
       await new Promise<void>((resolveClose) => server.close(() => resolveClose()));
     },

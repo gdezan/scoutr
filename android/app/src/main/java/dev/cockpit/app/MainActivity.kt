@@ -52,14 +52,11 @@ import dev.cockpit.app.ui.theme.CockpitTheme
 private object Routes {
     const val CONNECT = "connect"
     const val BOARD = "board"
-    const val CHAT = "chat/{paneId}?sessionPath={sessionPath}&status={status}&rpc={rpc}"
+    const val CHAT = "chat/{paneId}?sessionPath={sessionPath}&status={status}"
     const val USAGE = "usage"
 
     fun chat(paneId: String, sessionPath: String?, status: String): String =
-        "chat/$paneId?sessionPath=${sessionPath?.let { java.net.URLEncoder.encode(it, "UTF-8") } ?: ""}&status=$status&rpc="
-
-    fun rpcChat(rpcId: String): String =
-        "chat/rpc?sessionPath=&status=working&rpc=$rpcId"
+        "chat/$paneId?sessionPath=${sessionPath?.let { java.net.URLEncoder.encode(it, "UTF-8") } ?: ""}&status=$status"
 }
 
 class MainActivity : ComponentActivity() {
@@ -154,35 +151,10 @@ private fun CockpitAppNav() {
                     ),
                 )
                 val scope = rememberCoroutineScope()
-                var creatingSession by remember { mutableStateOf(false) }
                 Scaffold(
                     topBar = { AppTopBar("Board") },
-                    floatingActionButton = {
-                        if (creatingSession) {
-                            FloatingActionButton(onClick = {}) {
-                                CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
-                            }
-                        } else {
-                            FloatingActionButton(
-                                onClick = {
-                                    scope.launch {
-                                        creatingSession = true
-                                        try {
-                                            val session = container.bridge.rpcCreate("cockpit-app")
-                                            navController.navigate(Routes.rpcChat(session.id))
-                                        } catch (e: Exception) {
-                                            boardViewModel.reportError(e.message ?: "could not start a pi session")
-                                        } finally {
-                                            creatingSession = false
-                                        }
-                                    }
-                                },
-                                containerColor = MaterialTheme.colorScheme.primary,
-                            ) {
-                                Icon(Icons.Default.Add, contentDescription = "New pi session")
-                            }
-                        }
-                    },
+                    // The new-session create flow (folder + model picker) lands
+                    // in the sessions layer; the FAB is hidden until then.
                 ) { innerBoard ->
                     BoardScreen(
                         onOpenAgent = { agent ->
@@ -205,19 +177,14 @@ private fun CockpitAppNav() {
                         type = androidx.navigation.NavType.StringType
                         defaultValue = "working"
                     },
-                    androidx.navigation.navArgument("rpc") {
-                        type = androidx.navigation.NavType.StringType
-                        defaultValue = ""
-                    },
                 ),
             ) { backStackEntry ->
                 val paneId = backStackEntry.arguments?.getString("paneId") ?: ""
                 val sessionPath = backStackEntry.arguments?.getString("sessionPath")?.takeIf { it.isNotBlank() }
                 val agentStatus = backStackEntry.arguments?.getString("status") ?: "working"
-                val rpcId = backStackEntry.arguments?.getString("rpc")?.takeIf { it.isNotBlank() }
                 val chatViewModel: ChatViewModel = viewModel(
-                    factory = ChatViewModel.factory(container.bridge, paneId, sessionPath, agentStatus, rpcId),
-                    key = if (rpcId != null) "chat_rpc_$rpcId" else "chat_$paneId",
+                    factory = ChatViewModel.factory(container.bridge, paneId, sessionPath, agentStatus),
+                    key = "chat_$paneId",
                 )
                 ChatScreen(
                     viewModel = chatViewModel,

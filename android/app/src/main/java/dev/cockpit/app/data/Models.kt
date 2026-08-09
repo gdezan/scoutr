@@ -135,44 +135,6 @@ data class EntryUsage(
 )
 
 @Serializable
-data class RpcSessionResponse(
-    val ok: Boolean = true,
-    val session: RpcSessionInfo? = null,
-)
-
-@Serializable
-data class RpcSessionInfo(
-    val id: String = "",
-    val status: String = "starting",
-    val name: String = "",
-    val lastEntryId: String? = null,
-    val uiRequests: List<RpcUiRequest> = emptyList(),
-)
-
-@Serializable
-data class RpcUiRequest(
-    val id: String = "",
-    val method: String = "unknown",
-    val title: String? = null,
-    val message: String? = null,
-    val options: List<String>? = null,
-    val placeholder: String? = null,
-)
-
-@Serializable
-data class RpcEntriesResponse(
-    val ok: Boolean = true,
-    val entries: List<SessionEntry> = emptyList(),
-    val leafId: String? = null,
-)
-
-@Serializable
-data class RpcPromptResponse(val ok: Boolean = true)
-
-@Serializable
-data class RpcRespondResponse(val ok: Boolean = true)
-
-@Serializable
 data class UsageResponse(
     val ok: Boolean = true,
     val usage: List<UsageSnapshot> = emptyList(),
