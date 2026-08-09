@@ -7,6 +7,7 @@ import { readPiSessionFile, entryText, inspectSessionFile, type PiMessageEntry }
 import { UsageService, type UsageSnapshot } from "./usage/providers.js";
 import { loadOrCreateConfig, type BridgeConfig } from "./config.js";
 import { NtfyPublisher } from "./notify.js";
+import { StatusTracker } from "./status.js";
 import { basename, resolve } from "node:path";
 import { existsSync } from "node:fs";
 
@@ -81,6 +82,22 @@ export function createCockpitServer(deps: ServerDeps, options: CreateServerOptio
   const { herdr, feed, usage, config, publisher } = deps;
   const token = config.token;
   const listen = options.listen ?? true;
+
+  // Track status entry times so cards can show "time in state".
+  const tracker = new StatusTracker();
+  feed.onMessage((message) => {
+    if (!("kind" in message)) return;
+    if (message.kind === "pane_agent_status_changed" || message.kind === "pane.agent_status_changed") {
+      const data = message.data;
+      const paneId = typeof data.pane_id === "string" ? data.pane_id : "";
+      const status = typeof data.agent_status === "string" ? data.agent_status : "";
+      if (paneId && status) tracker.note(paneId, status);
+    } else if (message.kind === "pane_closed" || message.kind === "pane.exited") {
+      const data = message.data;
+      const paneId = typeof data.pane_id === "string" ? data.pane_id : "";
+      if (paneId) tracker.note(paneId, "closed");
+    }
+  });
 
   // Push publisher consumes feed events independently of any WS client.
   if (publisher) {
@@ -204,7 +221,7 @@ export function createCockpitServer(deps: ServerDeps, options: CreateServerOptio
         sendJson(response, 503, { ok: false, error: "no herdr snapshot yet" });
         return;
       }
-      sendJson(response, 200, { ok: true, agents: deriveAgentCards(snapshot) });
+      sendJson(response, 200, { ok: true, agents: deriveAgentCards(snapshot, (p) => tracker.since(p)) });
       return;
     }
 
@@ -321,9 +338,13 @@ export interface AgentCard {
   sessionPath?: string;
   terminalTitle?: string;
   blocked?: boolean;
+  statusSinceMs?: number;
 }
 
-export function deriveAgentCards(snapshot: SessionSnapshot): AgentCard[] {
+export function deriveAgentCards(
+  snapshot: SessionSnapshot,
+  statusSince: (paneId: string) => number | undefined = () => undefined,
+): AgentCard[] {
   const cards: AgentCard[] = [];
   for (const agent of snapshot.agents ?? []) {
     const card: AgentCard = {
@@ -337,6 +358,8 @@ export function deriveAgentCards(snapshot: SessionSnapshot): AgentCard[] {
       terminalTitle: agent.terminal_title_stripped ?? undefined,
       blocked: agent.agent_status === "blocked",
     };
+    const since = statusSince(agent.pane_id);
+    if (since !== undefined) card.statusSinceMs = since;
     if (agent.agent_session?.kind === "path") card.sessionPath = agent.agent_session.value;
     cards.push(card);
   }

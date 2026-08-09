@@ -39,7 +39,7 @@ private val LightColors = lightColorScheme(
 
 @Composable
 fun CockpitTheme(
-    darkTheme: Boolean = isSystemInDarkTheme(),
+    darkTheme: Boolean = true,
     content: @Composable () -> Unit,
 ) {
     MaterialTheme(

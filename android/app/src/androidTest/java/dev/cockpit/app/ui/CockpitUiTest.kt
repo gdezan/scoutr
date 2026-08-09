@@ -109,6 +109,6 @@ class CockpitUiTest {
                 BoardScreen(onOpenAgent = {}, viewModel = fakeVm)
             }
         }
-        composeRule.onNodeWithText("No agents on the herd yet").assertExists()
+        composeRule.onNodeWithText("No agents running").assertExists()
     }
 }

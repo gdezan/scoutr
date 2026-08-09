@@ -44,6 +44,8 @@ data class AgentCard(
     val title: String? = null,
     val terminalTitle: String? = null,
     val sessionPath: String? = null,
+    /** Epoch ms when the agent entered its current status (bridge-stamped). */
+    val statusSinceMs: Double? = null,
 ) {
     /** Derived: blocked agents are the ones that need the user. */
     val blocked: Boolean get() = status == "blocked"

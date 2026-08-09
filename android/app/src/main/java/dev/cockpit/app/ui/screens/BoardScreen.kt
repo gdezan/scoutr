@@ -16,10 +16,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Bolt
-import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.HourglassEmpty
-import androidx.compose.material.icons.filled.PriorityHigh
 import androidx.compose.material.icons.filled.WifiOff
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -34,6 +30,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -72,7 +69,7 @@ fun BoardScreen(
                     Modifier.fillMaxWidth().padding(vertical = 80.dp),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Text("No agents on the herd yet", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("No agents running", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         } else {
@@ -94,13 +91,29 @@ private fun androidx.compose.foundation.lazy.LazyListScope.boardSection(
 ) {
     if (agents.isEmpty()) return
     item(key = "header_$title") {
-        Text(
-            text = title,
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.SemiBold,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(top = 10.dp, bottom = 4.dp),
-        )
+        Row(
+            Modifier.padding(top = 20.dp, bottom = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(
+                text = agents.size.toString(),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                modifier = Modifier
+                    .background(
+                        MaterialTheme.colorScheme.surfaceVariant,
+                        RoundedCornerShape(50),
+                    )
+                    .padding(horizontal = 8.dp, vertical = 1.dp),
+            )
+        }
     }
     items(agents, key = { it.paneId }) { agent ->
         AgentCardRow(agent, onClick = { onOpenAgent(agent) })
@@ -138,12 +151,6 @@ private fun DisconnectedBanner(onRetry: () -> Unit) {
 @Composable
 private fun AgentCardRow(agent: AgentCard, onClick: () -> Unit) {
     val status = AgentStatus.fromWire(agent.status)
-    val (dot, tint) = when (status) {
-        AgentStatus.NeedsYou -> Icons.Default.PriorityHigh to MaterialTheme.colorScheme.error
-        AgentStatus.Working -> Icons.Default.Bolt to MaterialTheme.colorScheme.primary
-        AgentStatus.Done -> Icons.Default.CheckCircle to MaterialTheme.colorScheme.secondary
-        else -> Icons.Default.HourglassEmpty to MaterialTheme.colorScheme.onSurfaceVariant
-    }
     Card(
         onClick = onClick,
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -154,55 +161,91 @@ private fun AgentCardRow(agent: AgentCard, onClick: () -> Unit) {
             Modifier.padding(16.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(dot, contentDescription = null, tint = tint, modifier = Modifier.width(22.dp))
+            Box(
+                Modifier
+                    .width(6.dp)
+                    .height(6.dp)
+                    .background(statusColor(status), RoundedCornerShape(50)),
+            )
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
                 Text(
                     text = agent.title?.takeIf { it.isNotBlank() } ?: agent.agent,
                     style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-                Spacer(Modifier.height(2.dp))
+                Spacer(Modifier.height(3.dp))
                 Text(
                     text = agent.cwd ?: agent.workspaceId,
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontFamily = FontFamily.Monospace,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            StatusPill(status)
+            Spacer(Modifier.width(10.dp))
+            StatusPill(status, agent.statusSinceMs)
         }
     }
 }
 
+/** Accent dot color per status; blocked is the loud one. */
 @Composable
-private fun StatusPill(status: AgentStatus) {
-    val label = when (status) {
-        AgentStatus.NeedsYou -> "needs you"
-        AgentStatus.Working -> "working"
-        AgentStatus.Done -> "done"
-        AgentStatus.Idle -> "idle"
-        AgentStatus.Unknown -> "…"
-    }
-    val color = when (status) {
-        AgentStatus.NeedsYou -> MaterialTheme.colorScheme.error
-        AgentStatus.Working -> MaterialTheme.colorScheme.primary
-        AgentStatus.Done -> MaterialTheme.colorScheme.secondary
-        else -> MaterialTheme.colorScheme.onSurfaceVariant
-    }
+private fun statusColor(status: AgentStatus) = when (status) {
+    AgentStatus.NeedsYou -> MaterialTheme.colorScheme.error
+    AgentStatus.Working -> MaterialTheme.colorScheme.primary
+    AgentStatus.Done -> MaterialTheme.colorScheme.secondary
+    else -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+}
+
+/**
+ * The section header already names the status, so the pill only earns its
+ * place by carrying what the header cannot: time in state (blocked stays a
+ * filled accent pill — the one loud thing on screen).
+ */
+@Composable
+private fun StatusPill(status: AgentStatus, statusSinceMs: Double?) {
+    val isNeedsYou = status == AgentStatus.NeedsYou
+    val label = if (isNeedsYou) "needs you" else timeInState(statusSinceMs) ?: statusLabel(status)
+    val color = statusColor(status)
     Box(
         Modifier
-            .background(color.copy(alpha = 0.15f), RoundedCornerShape(50))
+            .background(
+                if (isNeedsYou) color else MaterialTheme.colorScheme.surfaceVariant,
+                RoundedCornerShape(50),
+            )
             .padding(horizontal = 10.dp, vertical = 4.dp),
     ) {
         Text(
             label,
             style = MaterialTheme.typography.labelMedium,
-            color = color,
+            color = if (isNeedsYou) MaterialTheme.colorScheme.onError else
+                MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
             fontWeight = FontWeight.SemiBold,
         )
+    }
+}
+
+private fun statusLabel(status: AgentStatus) = when (status) {
+    AgentStatus.NeedsYou -> "needs you"
+    AgentStatus.Working -> "working"
+    AgentStatus.Done -> "done"
+    AgentStatus.Idle -> "idle"
+    AgentStatus.Unknown -> "…"
+}
+
+/** Compact "time in state" from the bridge-stamped entry time. */
+internal fun timeInState(sinceMs: Double?): String? {
+    if (sinceMs == null) return null
+    val minutes = ((System.currentTimeMillis() - sinceMs.toLong()) / 60_000L).toInt().coerceAtLeast(0)
+    return when {
+        minutes < 1 -> "now"
+        minutes < 60 -> "${minutes}m"
+        minutes < 24 * 60 -> "${minutes / 60}h"
+        else -> "${minutes / (24 * 60)}d"
     }
 }
 
