@@ -261,7 +261,23 @@ automatically).
 
 ---
 
-## 6. Configuration reference
+## 6. Day-to-day scripts
+
+```bash
+scripts/deploy-bridge.sh   # rebuild dist + restart the bridge unit + health check
+scripts/pair.sh            # print the QR the app scans to connect
+scripts/install-app.sh     # build + install on a phone/emulator (--serial X, --no-build)
+scripts/release.sh         # deploy bridge + build + install in one go
+```
+
+`install-app.sh` targets the single connected device; with several devices use
+`--serial <serial>` (or `COCKPIT_SERIAL`). Install on the S24 over wireless adb
+today looks like: `adb pair 100.78.204.15:<port> <code>` then
+`scripts/install-app.sh`.
+
+---
+
+## 7. Configuration reference
 
 | Item | Value |
 |---|---|
