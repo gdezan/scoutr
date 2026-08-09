@@ -42,6 +42,10 @@ object PairingPayloadParser {
                 ntfyTopic = topic
             }
         }
-        return PairingPayload(host, token, ntfyUrl, ntfyTopic)
+        return PairingPayload(withScheme(host), token, ntfyUrl, ntfyTopic)
     }
+
+    /** The payload always carries a full URL; tolerate scheme-less hosts. */
+    private fun withScheme(host: String): String =
+        if (host.startsWith("http://") || host.startsWith("https://")) host else "https://$host"
 }

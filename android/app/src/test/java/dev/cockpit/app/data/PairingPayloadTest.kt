@@ -29,15 +29,22 @@ class PairingPayloadTest {
     }
 
     @Test
+    fun prependsHttpsToSchemeLessHost() {
+        val parsed = PairingPayloadParser.parse("""{"v":1,"host":"artemis.tail7dc568.ts.net","token":"t"}""")
+        assertEquals("https://artemis.tail7dc568.ts.net", parsed?.host)
+    }
+
+    @Test
     fun rejectsGarbageWrongVersionAndMissingFields() {
         assertNull(PairingPayloadParser.parse("not json"))
         assertNull(PairingPayloadParser.parse("""{"v":2,"host":"h","token":"t"}"""))
         assertNull(PairingPayloadParser.parse("""{"v":1,"host":"","token":"t"}"""))
         assertNull(PairingPayloadParser.parse("""{"v":1,"host":"h"}"""))
         assertNull(PairingPayloadParser.parse("""{"v":1,"token":"t"}"""))
-        // ntfy with only one field is dropped, not fatal
+        // ntfy with only one field is dropped, not fatal; the scheme-less
+        // host is normalized to https://
         assertEquals(
-            PairingPayload(host = "h", token = "t"),
+            PairingPayload(host = "https://h", token = "t"),
             PairingPayloadParser.parse("""{"v":1,"host":"h","token":"t","ntfy":{"url":"u"}}"""),
         )
     }

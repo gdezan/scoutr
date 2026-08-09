@@ -20,8 +20,16 @@ export interface PairingConfig {
   ntfyTopic?: string;
 }
 
+/**
+ * The payload always carries a full URL. The tailscale DNS name (and manual
+ * config) can be scheme-less, so prepend https:// when nothing else is there.
+ */
+export function withScheme(host: string): string {
+  return /^[a-z][a-z0-9+.-]*:\/\//i.test(host) ? host : `https://${host}`;
+}
+
 export function buildPairingPayload(config: PairingConfig): string {
-  const payload: PairingPayload = { v: 1, host: config.host, token: config.token };
+  const payload: PairingPayload = { v: 1, host: withScheme(config.host), token: config.token };
   if (config.ntfyUrl && config.ntfyTopic) {
     payload.ntfy = { url: config.ntfyUrl, topic: config.ntfyTopic };
   }
