@@ -183,7 +183,8 @@ export interface SessionFileInfo {
 export async function inspectSessionFile(path: string): Promise<SessionFileInfo> {
   try {
     const info = await stat(path);
-    return { path, exists: true, size: info.size, mtimeMs: info.mtimeMs };
+    // stat.mtimeMs is fractional; round to an integer millis for JSON consumers.
+    return { path, exists: true, size: info.size, mtimeMs: Math.round(info.mtimeMs) };
   } catch {
     return { path, exists: false, size: 0, mtimeMs: 0 };
   }

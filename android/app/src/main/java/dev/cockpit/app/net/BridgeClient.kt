@@ -49,20 +49,33 @@ class BridgeClient(
         return connectionStore.saved?.token ?: throw IOException("no connection configured")
     }
 
-    private fun request(path: String, query: Map<String, String> = emptyMap()): Request {
-        val url = (baseUrl() + path).toHttpUrl().newBuilder().apply {
+    private fun request(
+        path: String,
+        query: Map<String, String> = emptyMap(),
+        host: String? = null,
+        token: String? = null,
+    ): Request {
+        val base = (host?.trimEnd('/') ?: baseUrl())
+        val auth = token ?: token()
+        val url = (base + path).toHttpUrl().newBuilder().apply {
             for ((key, value) in query) addQueryParameter(key, value)
         }.build()
         return Request.Builder()
             .url(url)
-            .header("Authorization", "Bearer ${token()}")
+            .header("Authorization", "Bearer $auth")
             .build()
     }
 
     /** Calls the bridge and decodes the response body as [T]. */
-    suspend fun <T> call(path: String, query: Map<String, String> = emptyMap(), decode: (String) -> T): T =
+    suspend fun <T> call(
+        path: String,
+        query: Map<String, String> = emptyMap(),
+        host: String? = null,
+        token: String? = null,
+        decode: (String) -> T,
+    ): T =
         suspendCancellableCoroutine { continuation ->
-            val call = okHttp.newCall(request(path, query))
+            val call = okHttp.newCall(request(path, query, host, token))
             continuation.invokeOnCancellation { call.cancel() }
             call.enqueue(object : Callback {
                 override fun onFailure(call: Call, e: IOException) {
@@ -83,8 +96,14 @@ class BridgeClient(
             })
         }
 
-    suspend fun health(): HealthResponse =
-        call("/api/health") { json.decodeFromString(HealthResponse.serializer(), it) }
+    /**
+     * Probe the bridge health endpoint. Optional host/token overrides let the
+     * connect screen verify a candidate connection before saving it.
+     */
+    suspend fun health(host: String? = null, token: String? = null): HealthResponse =
+        call("/api/health", host = host, token = token) {
+            json.decodeFromString(HealthResponse.serializer(), it)
+        }
 
     suspend fun agents(): AgentsResponse =
         call("/api/agents") { json.decodeFromString(AgentsResponse.serializer(), it) }

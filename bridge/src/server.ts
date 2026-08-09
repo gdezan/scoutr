@@ -232,7 +232,7 @@ export function createCockpitServer(deps: ServerDeps, options: CreateServerOptio
 async function handleCommand(command: CommandMessage, ws: WebSocket, deps: ServerDeps): Promise<void> {
   switch (command.type) {
     case "ping":
-      ws.send(JSON.stringify({ type: "pong", ts: Date.now() }));
+      ws.send(JSON.stringify({ type: "pong", ts: Math.round(Date.now()) }));
       return;
     case "subscribe": {
       // Intentional no-op placeholder: filter wiring lives on the connection.

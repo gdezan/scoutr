@@ -49,7 +49,7 @@ data class AgentCard(
 data class WsFrame(
     val type: String,
     val payload: FeedMessage? = null,
-    val ts: Long? = null,
+    val ts: Double? = null,  // tolerant: bridge may emit fractional millis
     val target: String? = null,
     val paneId: String? = null,
     val text: String? = null,
@@ -75,7 +75,8 @@ data class SessionReadResponse(
     val entries: List<SessionEntry> = emptyList(),
     val preview: String? = null,
     val lastEntryId: String? = null,
-    val mtimeMs: Long = 0,
+    // JS Date.now() returns a float; keep Double so fractional millis parse.
+    val mtimeMs: Double = 0.0,
 )
 
 @Serializable

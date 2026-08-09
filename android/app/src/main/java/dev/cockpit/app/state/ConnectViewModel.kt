@@ -26,7 +26,8 @@ class ConnectViewModel(
         viewModelScope.launch {
             _state.value = ConnectState.Testing
             try {
-                val health = bridge.health()
+                // Probe with the form values before persisting anything.
+                val health = bridge.health(host = host, token = token)
                 if (health.ok && health.herdr?.connected == true) {
                     connectionStore.save(host, token)
                     _state.value = ConnectState.Connected(health.herdr.version, health.herdr.protocol)

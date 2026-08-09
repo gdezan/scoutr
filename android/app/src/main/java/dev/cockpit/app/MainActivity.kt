@@ -4,7 +4,14 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.DonutLarge
+import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -15,13 +22,16 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
+import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import dev.cockpit.app.data.AgentCard
 import dev.cockpit.app.state.BoardViewModel
-import dev.cockpit.app.state.ConnectViewModel
+import dev.cockpit.app.state.ChatViewModel
+import dev.cockpit.app.state.UsageViewModel
 import dev.cockpit.app.ui.screens.BoardScreen
 import dev.cockpit.app.ui.screens.ChatScreen
 import dev.cockpit.app.ui.screens.ConnectScreen
@@ -51,18 +61,54 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 private fun CockpitAppNav() {
-    val app = (androidx.compose.ui.platform.LocalContext.current.applicationContext as CockpitApp)
+    val app = LocalContext.current.applicationContext as CockpitApp
     val navController = rememberNavController()
     val container = app.container
+    val backStack by navController.currentBackStackEntryAsState()
+    val currentRoute = backStack?.destination?.route
 
-    // Decide the start destination once, based on saved credentials.
     var startDestination by remember {
         mutableStateOf(if (container.connectionStore.saved != null) Routes.BOARD else Routes.CONNECT)
     }
 
-    NavHost(navController = navController, startDestination = startDestination) {
-        composable(Routes.CONNECT) {
-            Scaffold(topBar = { AppTopBar("Cockpit") }) { inner ->
+    val showBottomBar = currentRoute == Routes.BOARD || currentRoute == Routes.USAGE
+
+    Scaffold(
+        bottomBar = {
+            if (showBottomBar) {
+                NavigationBar {
+                    NavigationBarItem(
+                        selected = currentRoute == Routes.BOARD,
+                        onClick = {
+                            navController.navigate(Routes.BOARD) {
+                                popUpTo(Routes.BOARD) { inclusive = false }
+                                launchSingleTop = true
+                            }
+                        },
+                        icon = { Icon(Icons.Default.GridView, contentDescription = null) },
+                        label = { Text("Board") },
+                    )
+                    NavigationBarItem(
+                        selected = currentRoute == Routes.USAGE,
+                        onClick = {
+                            navController.navigate(Routes.USAGE) {
+                                popUpTo(Routes.BOARD)
+                                launchSingleTop = true
+                            }
+                        },
+                        icon = { Icon(Icons.Default.DonutLarge, contentDescription = null) },
+                        label = { Text("Usage") },
+                    )
+                }
+            }
+        },
+    ) { inner ->
+        NavHost(
+            navController = navController,
+            startDestination = startDestination,
+            modifier = Modifier.padding(inner),
+        ) {
+            composable(Routes.CONNECT) {
                 ConnectScreen(
                     onConnected = {
                         startDestination = Routes.BOARD
@@ -70,70 +116,58 @@ private fun CockpitAppNav() {
                             popUpTo(Routes.CONNECT) { inclusive = true }
                         }
                     },
-                    modifier = Modifier.padding(inner),
                 )
             }
-        }
-        composable(Routes.BOARD) {
-            val boardViewModel: BoardViewModel = viewModel(
-                factory = BoardViewModel.factory(container.bridge, container.connectionStore),
-            )
-            Scaffold(
-                topBar = { AppTopBar("Board") },
-            ) { inner ->
-                BoardScreen(
-                    onOpenAgent = { agent ->
-                        navController.navigate(Routes.chat(agent.paneId, agent.sessionPath, agent.status))
+            composable(Routes.BOARD) {
+                val boardViewModel: BoardViewModel = viewModel(
+                    factory = BoardViewModel.factory(container.bridge, container.connectionStore),
+                )
+                Scaffold(topBar = { AppTopBar("Board") }) { innerBoard ->
+                    BoardScreen(
+                        onOpenAgent = { agent ->
+                            navController.navigate(Routes.chat(agent.paneId, agent.sessionPath, agent.status))
+                        },
+                        viewModel = boardViewModel,
+                        modifier = Modifier.padding(innerBoard),
+                    )
+                }
+            }
+            composable(
+                route = Routes.CHAT,
+                arguments = listOf(
+                    androidx.navigation.navArgument("paneId") { type = androidx.navigation.NavType.StringType },
+                    androidx.navigation.navArgument("sessionPath") {
+                        type = androidx.navigation.NavType.StringType
+                        defaultValue = ""
                     },
-                    viewModel = boardViewModel,
-                    modifier = Modifier.padding(inner),
-                )
-            }
-        }
-        composable(
-            route = Routes.CHAT,
-            arguments = listOf(
-                androidx.navigation.navArgument("paneId") { type = androidx.navigation.NavType.StringType },
-                androidx.navigation.navArgument("sessionPath") {
-                    type = androidx.navigation.NavType.StringType
-                    defaultValue = ""
-                },
-                androidx.navigation.navArgument("status") {
-                    type = androidx.navigation.NavType.StringType
-                    defaultValue = "working"
-                },
-            ),
-        ) { backStackEntry ->
-            val paneId = backStackEntry.arguments?.getString("paneId") ?: ""
-            val sessionPath = backStackEntry.arguments?.getString("sessionPath")?.takeIf { it.isNotBlank() }
-            val agentStatus = backStackEntry.arguments?.getString("status") ?: "working"
-            val chatViewModel: dev.cockpit.app.state.ChatViewModel = viewModel(
-                factory = dev.cockpit.app.state.ChatViewModel.factory(
-                    container.bridge,
-                    paneId,
-                    sessionPath,
-                    agentStatus,
+                    androidx.navigation.navArgument("status") {
+                        type = androidx.navigation.NavType.StringType
+                        defaultValue = "working"
+                    },
                 ),
-                key = "chat_$paneId",
-            )
-            Scaffold(topBar = { AppTopBar("Session") }) { inner ->
+            ) { backStackEntry ->
+                val paneId = backStackEntry.arguments?.getString("paneId") ?: ""
+                val sessionPath = backStackEntry.arguments?.getString("sessionPath")?.takeIf { it.isNotBlank() }
+                val agentStatus = backStackEntry.arguments?.getString("status") ?: "working"
+                val chatViewModel: ChatViewModel = viewModel(
+                    factory = ChatViewModel.factory(container.bridge, paneId, sessionPath, agentStatus),
+                    key = "chat_$paneId",
+                )
                 ChatScreen(
                     viewModel = chatViewModel,
                     onBack = { navController.popBackStack() },
-                    modifier = Modifier.padding(inner),
                 )
             }
-        }
-        composable(Routes.USAGE) {
-            val usageViewModel: dev.cockpit.app.state.UsageViewModel = viewModel(
-                factory = dev.cockpit.app.state.UsageViewModel.factory(container.bridge),
-            )
-            Scaffold(topBar = { AppTopBar("Usage") }) { inner ->
-                UsageScreen(
-                    viewModel = usageViewModel,
-                    onBack = { navController.popBackStack() },
-                    modifier = Modifier.padding(inner),
+            composable(Routes.USAGE) {
+                val usageViewModel: UsageViewModel = viewModel(
+                    factory = UsageViewModel.factory(container.bridge),
                 )
+                Scaffold(topBar = { AppTopBar("Usage") }) { innerUsage ->
+                    UsageScreen(
+                        viewModel = usageViewModel,
+                        modifier = Modifier.padding(innerUsage),
+                    )
+                }
             }
         }
     }
@@ -145,7 +179,7 @@ private fun AppTopBar(title: String) {
     TopAppBar(
         title = { Text(title) },
         colors = TopAppBarDefaults.topAppBarColors(
-            containerColor = androidx.compose.material3.MaterialTheme.colorScheme.background,
+            containerColor = MaterialTheme.colorScheme.background,
         ),
     )
 }
