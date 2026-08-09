@@ -1,0 +1,31 @@
+{
+  "name": "cockpit-bridge",
+  "version": "0.1.0",
+  "description": "Bridge daemon: owns the local herdr socket and pi sessions, exposes a private API on the Tailscale tailnet for the Cockpit Android app.",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "cockpit-bridge": "./dist/cli.js"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "tsc",
+    "test": "node --import tsx --test test/*.test.ts",
+    "cli": "tsx src/cli.ts"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/ws": "^8.5.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
+  },
+  "allowScripts": {
+    "esbuild@0.28.2": true
+  }
+}
