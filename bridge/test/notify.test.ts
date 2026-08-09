@@ -77,6 +77,24 @@ test("throttles repeat blocked events for the same pane", async () => {
   }
 });
 
+test("publishes a done event with the finished headline", async () => {
+  const { server, requests } = captureServer();
+  await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
+  const port = (server.address() as { port: number }).port;
+
+  const publisher = new NtfyPublisher({ baseUrl: `http://127.0.0.1:${port}`, topic: "t" });
+  try {
+    const sent = await publisher.handleEvent(blockedEvent("w1:p9", { agent_status: "done" }));
+    assert.equal(sent, true);
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0]!.payload.title, "π finished");
+    assert.equal(requests[0]!.payload.message, "my pane");
+    assert.equal(requests[0]!.payload.priority, 3);
+  } finally {
+    await new Promise((done) => server.close(done));
+  }
+});
+
 test("publish failure does not throw", async () => {
   const publisher = new NtfyPublisher({ baseUrl: "http://127.0.0.1:1", topic: "t" });
   await publisher.publish({ title: "x", message: "y" });

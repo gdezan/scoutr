@@ -63,6 +63,17 @@ fun BoardScreen(
         if (!ui.connected) {
             item { DisconnectedBanner(onRetry = { viewModel.connect("", "") }) }
         }
+        if (ui.error != null) {
+            item {
+                Box(
+                    Modifier.fillMaxWidth()
+                        .background(MaterialTheme.colorScheme.errorContainer, RoundedCornerShape(12.dp))
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                ) {
+                    Text(ui.error ?: "", color = MaterialTheme.colorScheme.onErrorContainer)
+                }
+            }
+        }
         if (ui.board.total == 0) {
             item {
                 Box(

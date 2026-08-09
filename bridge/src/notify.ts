@@ -1,12 +1,11 @@
 import type { FeedEvent } from "./herdr/feed.js";
 
 /**
- * Publishes blocked-agent events to a self-hosted ntfy server.
+ * Publishes agent-status events to a self-hosted ntfy server.
  *
- * Only sends when an agent transitions to blocked (needs the user). Repeated
- * blocked reports for the same pane are throttled to one notification per
- * minute, and a snapshot-derived state is only used to seed the last-known
- * state (snapshots are ignored for publishing; we only publish on live events).
+ * blocked -> "needs you" (high priority), done -> "finished" (default). Both
+ * are throttled to one notification per pane per minute, and snapshots are
+ * ignored for publishing; we only publish on live status events.
  */
 
 const THROTTLE_MS = 60_000;
@@ -28,7 +27,7 @@ export class NtfyPublisher {
     if (event.kind !== "pane_agent_status_changed" && event.kind !== "pane.agent_status_changed") return false;
     const data = event.data;
     const status = typeof data.agent_status === "string" ? data.agent_status : "";
-    if (status !== "blocked") return false;
+    if (status !== "blocked" && status !== "done") return false;
 
     const paneId = typeof data.pane_id === "string" ? data.pane_id : "";
     if (!paneId) return false;
@@ -41,11 +40,12 @@ export class NtfyPublisher {
     const displayAgent = typeof data.display_agent === "string" ? data.display_agent : agent;
     const title = typeof data.title === "string" && data.title ? data.title :
       (typeof data.message === "string" && data.message ? data.message : paneId);
-    await this.publish({ title: `${displayAgent} needs you`, message: title });
+    const headline = status === "blocked" ? `${displayAgent} needs you` : `${displayAgent} finished`;
+    await this.publish({ title: headline, message: title, priority: status === "blocked" ? 4 : 3 });
     return true;
   }
 
-  async publish({ title, message }: { title: string; message: string }): Promise<void> {
+  async publish({ title, message, priority = 3 }: { title: string; message: string; priority?: number }): Promise<void> {
     if (!this.config) return;
     // ntfy only parses JSON bodies when POSTed to the root path, with the
     // topic inside the body; POSTing to /<topic> stores the raw JSON as text.
@@ -55,7 +55,7 @@ export class NtfyPublisher {
       await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ topic: this.config.topic, title, message, priority: 4 }),
+        body: JSON.stringify({ topic: this.config.topic, title, message, priority }),
       });
     } catch (error) {
       // Push is best-effort; never let a notification failure break the bridge.

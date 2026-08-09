@@ -4,6 +4,11 @@ import dev.cockpit.app.data.AgentsResponse
 import dev.cockpit.app.data.ConnectionStore
 import dev.cockpit.app.data.FeedMessage
 import dev.cockpit.app.data.HealthResponse
+import dev.cockpit.app.data.RpcEntriesResponse
+import dev.cockpit.app.data.RpcPromptResponse
+import dev.cockpit.app.data.RpcRespondResponse
+import dev.cockpit.app.data.RpcSessionInfo
+import dev.cockpit.app.data.RpcSessionResponse
 import dev.cockpit.app.data.SessionReadResponse
 import dev.cockpit.app.data.UsageResponse
 import dev.cockpit.app.data.WsFrame
@@ -12,8 +17,10 @@ import kotlinx.serialization.json.Json
 import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.HttpUrl.Companion.toHttpUrl
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
@@ -51,16 +58,19 @@ class BridgeClient(
         query: Map<String, String> = emptyMap(),
         host: String? = null,
         token: String? = null,
+        method: String = "GET",
+        body: String? = null,
     ): Request {
         val base = (host?.trimEnd('/') ?: baseUrl())
         val auth = token ?: token()
         val url = (base + path).toHttpUrl().newBuilder().apply {
             for ((key, value) in query) addQueryParameter(key, value)
         }.build()
-        return Request.Builder()
+        val builder = Request.Builder()
             .url(url)
             .header("Authorization", "Bearer $auth")
-            .build()
+            .method(method, body?.toRequestBody("application/json".toMediaType()))
+        return builder.build()
     }
 
     /** Calls the bridge and decodes the response body as [T]. */
@@ -69,10 +79,12 @@ class BridgeClient(
         query: Map<String, String> = emptyMap(),
         host: String? = null,
         token: String? = null,
+        method: String = "GET",
+        body: String? = null,
         decode: (String) -> T,
     ): T =
         suspendCancellableCoroutine { continuation ->
-            val call = okHttp.newCall(request(path, query, host, token))
+            val call = okHttp.newCall(request(path, query, host, token, method, body))
             continuation.invokeOnCancellation { call.cancel() }
             call.enqueue(object : Callback {
                 override fun onFailure(call: Call, e: IOException) {
@@ -113,6 +125,54 @@ class BridgeClient(
 
     suspend fun usage(): UsageResponse =
         call("/api/usage") { json.decodeFromString(UsageResponse.serializer(), it) }
+
+    // ---- bridge-owned pi --mode rpc sessions ----
+
+    /** Spawn a new pi session on the bridge and return its id. */
+    suspend fun rpcCreate(name: String = "cockpit-app"): RpcSessionInfo =
+        call("/api/rpc", method = "POST", body = jsonBody("name" to name)) {
+            json.decodeFromString(RpcSessionResponse.serializer(), it)
+                .session ?: throw IOException("bridge did not return an rpc session")
+        }
+
+    /** Session info: status, last entry id, pending dialog requests. */
+    suspend fun rpcSession(id: String): RpcSessionInfo =
+        call("/api/rpc/$id") {
+            json.decodeFromString(RpcSessionResponse.serializer(), it)
+                .session ?: throw IOException("bridge did not return an rpc session")
+        }
+
+    suspend fun rpcEntries(id: String, since: String? = null): RpcEntriesResponse =
+        call("/api/rpc/$id/entries", query = buildMap {
+            if (since != null) put("since", since)
+        }) { json.decodeFromString(RpcEntriesResponse.serializer(), it) }
+
+    suspend fun rpcPrompt(id: String, message: String): Unit =
+        call("/api/rpc/$id/prompt", method = "POST", body = jsonBody("message" to message)) { Unit }
+
+    /** Answer a pending dialog request with a value (or cancelled). */
+    suspend fun rpcRespond(id: String, uiId: String, value: String? = null, cancelled: Boolean = false): Unit =
+        call("/api/rpc/$id/respond", method = "POST", body = jsonBody(
+            "uiId" to uiId,
+            "value" to value,
+            "cancelled" to cancelled.takeIf { it },
+        )) { Unit }
+
+    /** Encode a JSON body, dropping null values and keeping primitives typed. */
+    private fun jsonBody(vararg pairs: Pair<String, Any?>): String =
+        json.encodeToString(kotlinx.serialization.json.buildJsonObject {
+            for ((key, value) in pairs) {
+                if (value != null) {
+                    put(
+                        key,
+                        when (value) {
+                            is Boolean -> kotlinx.serialization.json.JsonPrimitive(value)
+                            else -> kotlinx.serialization.json.JsonPrimitive(value.toString())
+                        },
+                    )
+                }
+            }
+        })
 
     /**
      * Opens a short-lived WS, sends one command, and waits for the first ack frame.

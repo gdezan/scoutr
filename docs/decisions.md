@@ -38,8 +38,20 @@ pi agents, as an alternative to Moshi's paid herdr integration.
   on a successful first probe), so a down bridge recovers automatically.
 - **ntfy `since=<id>` cursor** makes polling resume-safe: the app seeds the last
   message id and re-polls after it, so it never re-delivers or misses messages.
-- **Publish path**: blocked-agent feed events are throttled to one per pane per 60s
-  and are best-effort (never break the bridge).
+- **Publish path**: blocked (high priority) and done events are throttled to one
+  per pane per 60s and are best-effort (never break the bridge).
+- **App-killed push**: the app does not own a push channel of its own — it polls
+  the ntfy topic (`?poll=1&since=<id>`) from a coroutine in BoardViewModel. While
+  the app is killed, messages simply accumulate on the ntfy server (48h cache);
+  on relaunch the poll seeds from the latest message id and delivers anything
+  published after it. So "push" to a killed app arrives as a normal notification
+  on next launch, not instantly; live delivery only works while the app runs.
+  A dedicated push token (FCM) or a foreground service would be needed for true
+  instant delivery to a killed app, and both are deliberately out of scope.
+- **Bridge-owned `pi --mode rpc` sessions** answer extension_ui_request dialogs
+  programmatically: the bridge surfaces pending dialogs to the app
+  (`GET /api/rpc/:id`) and the app responds with a value via
+  `POST /api/rpc/:id/respond`, unblocking the agent without any pane input.
 - herdr quirk: external `pane.report_agent` cannot override the pane's live pi
   extension reports — the last report wins. Status transitions for testing must
   come from a real pi (steer it to block, answer to unblock).

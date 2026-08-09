@@ -141,6 +141,11 @@ class BoardViewModel(
         }
     }
 
+    /** Surface a transient error (e.g. a failed session create) on the board. */
+    fun reportError(message: String) {
+        _ui.update { it.copy(error = message) }
+    }
+
     override fun onCleared() {
         pollJob?.cancel()
         ntfyJob?.cancel()

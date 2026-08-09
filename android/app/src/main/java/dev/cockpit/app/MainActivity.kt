@@ -8,10 +8,14 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.DonutLarge
 import androidx.compose.material.icons.filled.GridView
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
@@ -24,14 +28,17 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import kotlinx.coroutines.launch
 import dev.cockpit.app.data.AgentCard
 import dev.cockpit.app.state.BoardViewModel
 import dev.cockpit.app.state.ChatViewModel
@@ -45,11 +52,14 @@ import dev.cockpit.app.ui.theme.CockpitTheme
 private object Routes {
     const val CONNECT = "connect"
     const val BOARD = "board"
-    const val CHAT = "chat/{paneId}?sessionPath={sessionPath}&status={status}"
+    const val CHAT = "chat/{paneId}?sessionPath={sessionPath}&status={status}&rpc={rpc}"
     const val USAGE = "usage"
 
     fun chat(paneId: String, sessionPath: String?, status: String): String =
-        "chat/$paneId?sessionPath=${sessionPath?.let { java.net.URLEncoder.encode(it, "UTF-8") } ?: ""}&status=$status"
+        "chat/$paneId?sessionPath=${sessionPath?.let { java.net.URLEncoder.encode(it, "UTF-8") } ?: ""}&status=$status&rpc="
+
+    fun rpcChat(rpcId: String): String =
+        "chat/rpc?sessionPath=&status=working&rpc=$rpcId"
 }
 
 class MainActivity : ComponentActivity() {
@@ -143,7 +153,37 @@ private fun CockpitAppNav() {
                         container::showAgentNotification,
                     ),
                 )
-                Scaffold(topBar = { AppTopBar("Board") }) { innerBoard ->
+                val scope = rememberCoroutineScope()
+                var creatingSession by remember { mutableStateOf(false) }
+                Scaffold(
+                    topBar = { AppTopBar("Board") },
+                    floatingActionButton = {
+                        if (creatingSession) {
+                            FloatingActionButton(onClick = {}) {
+                                CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
+                            }
+                        } else {
+                            FloatingActionButton(
+                                onClick = {
+                                    scope.launch {
+                                        creatingSession = true
+                                        try {
+                                            val session = container.bridge.rpcCreate("cockpit-app")
+                                            navController.navigate(Routes.rpcChat(session.id))
+                                        } catch (e: Exception) {
+                                            boardViewModel.reportError(e.message ?: "could not start a pi session")
+                                        } finally {
+                                            creatingSession = false
+                                        }
+                                    }
+                                },
+                                containerColor = MaterialTheme.colorScheme.primary,
+                            ) {
+                                Icon(Icons.Default.Add, contentDescription = "New pi session")
+                            }
+                        }
+                    },
+                ) { innerBoard ->
                     BoardScreen(
                         onOpenAgent = { agent ->
                             navController.navigate(Routes.chat(agent.paneId, agent.sessionPath, agent.status))
@@ -165,14 +205,19 @@ private fun CockpitAppNav() {
                         type = androidx.navigation.NavType.StringType
                         defaultValue = "working"
                     },
+                    androidx.navigation.navArgument("rpc") {
+                        type = androidx.navigation.NavType.StringType
+                        defaultValue = ""
+                    },
                 ),
             ) { backStackEntry ->
                 val paneId = backStackEntry.arguments?.getString("paneId") ?: ""
                 val sessionPath = backStackEntry.arguments?.getString("sessionPath")?.takeIf { it.isNotBlank() }
                 val agentStatus = backStackEntry.arguments?.getString("status") ?: "working"
+                val rpcId = backStackEntry.arguments?.getString("rpc")?.takeIf { it.isNotBlank() }
                 val chatViewModel: ChatViewModel = viewModel(
-                    factory = ChatViewModel.factory(container.bridge, paneId, sessionPath, agentStatus),
-                    key = "chat_$paneId",
+                    factory = ChatViewModel.factory(container.bridge, paneId, sessionPath, agentStatus, rpcId),
+                    key = if (rpcId != null) "chat_rpc_$rpcId" else "chat_$paneId",
                 )
                 ChatScreen(
                     viewModel = chatViewModel,

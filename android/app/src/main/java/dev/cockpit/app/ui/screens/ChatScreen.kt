@@ -75,7 +75,7 @@ fun ChatScreen(
             Column(Modifier.weight(1f)) {
                 Text("Session", style = MaterialTheme.typography.titleMedium)
                 Text(
-                    viewModel.paneId,
+                    if (viewModel.isRpc) "pi session" else viewModel.paneId,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
@@ -113,6 +113,36 @@ fun ChatScreen(
             }
         }
 
+        ui.uiRequest?.let { request ->
+            Card(
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.primaryContainer,
+                ),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp).testTag("rpc_question"),
+            ) {
+                Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+                    Text(
+                        "Waiting for your answer",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                    )
+                    val question = request.title ?: request.message ?: "The agent asks a question."
+                    Text(
+                        question,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                    )
+                    if (!request.options.isNullOrEmpty()) {
+                        Text(
+                            request.options.joinToString("  ·  "),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f),
+                        )
+                    }
+                }
+            }
+        }
+
         if (ui.error != null) {
             Text(
                 ui.error ?: "",
@@ -126,7 +156,13 @@ fun ChatScreen(
             value = input,
             onValueChange = { input = it },
             placeholder = {
-                Text(if (viewModel.waitingForAnswer) "Answer the question…" else "Steer the agent…")
+                Text(
+                    when {
+                        viewModel.waitingForAnswer -> "Answer the question…"
+                        viewModel.isRpc -> "Message the agent…"
+                        else -> "Steer the agent…"
+                    },
+                )
             },
             enabled = !ui.sending,
             singleLine = true,

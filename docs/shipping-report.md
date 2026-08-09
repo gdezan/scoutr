@@ -79,5 +79,5 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 
 e4d972e bridge layer 1 · 3b0326e bridge layer 2 · 7baab7e vision workflow ·
 d9f76bd android 3/4 · aacdc31 E2E fixes + bottom nav · edc937a bridge ntfy ·
-4dad68b android push + resilience · ac91f84 product decisions · this commit
-(board polish + status-since + shipping report)
+4dad68b android push + resilience · ac91f84 product decisions · ea30b0b layer 6 polish + shipping report · this commit
+(RPC sessions + done push)
