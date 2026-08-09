@@ -1,0 +1,191 @@
+package dev.cockpit.app.data
+
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonObject
+
+// ── Bridge HTTP API DTOs (mirrors bridge/src/server.ts) ───────────────
+
+@Serializable
+data class HealthResponse(
+    val ok: Boolean,
+    val service: String? = null,
+    val version: String? = null,
+    val herdr: HerdrInfo? = null,
+)
+
+@Serializable
+data class HerdrInfo(
+    val connected: Boolean = false,
+    val version: String? = null,
+    val protocol: Int? = null,
+)
+
+@Serializable
+data class AgentsResponse(
+    val ok: Boolean = true,
+    val agents: List<AgentCard> = emptyList(),
+)
+
+@Serializable
+data class AgentCard(
+    val paneId: String,
+    val workspaceId: String,
+    val tabId: String,
+    val agent: String,
+    val status: String,
+    val cwd: String? = null,
+    val title: String? = null,
+    val terminalTitle: String? = null,
+    val sessionPath: String? = null,
+) {
+    /** Derived: blocked agents are the ones that need the user. */
+    val blocked: Boolean get() = status == "blocked"
+}
+
+// ── Bridge WS DTOs ────────────────────────────────────────────────────
+
+/** Top-level frames the bridge sends on /ws: {"type":"feed"|"pong"|..., "payload":...} */
+@Serializable
+data class WsFrame(
+    val type: String,
+    val payload: FeedMessage? = null,
+    val ts: Long? = null,
+    val target: String? = null,
+    val paneId: String? = null,
+    val text: String? = null,
+)
+
+/** A herdr feed message forwarded by the bridge (event or snapshot). */
+@Serializable
+data class FeedMessage(
+    val type: String? = null, // "snapshot" for snapshots
+    val kind: String? = null, // event kind, e.g. "pane_agent_status_changed"
+    val data: JsonObject? = null,
+    val snapshot: JsonObject? = null,
+    val resync: Boolean? = null,
+)
+
+@Serializable
+data class SessionReadResponse(
+    val ok: Boolean = true,
+    val path: String = "",
+    val name: String = "",
+    val exists: Boolean = false,
+    val since: String? = null,
+    val entries: List<SessionEntry> = emptyList(),
+    val preview: String? = null,
+    val lastEntryId: String? = null,
+    val mtimeMs: Long = 0,
+)
+
+@Serializable
+data class SessionEntry(
+    val entryId: String,
+    val parentId: String? = null,
+    val timestamp: String = "",
+    val role: String = "",
+    val content: List<ContentBlock> = emptyList(),
+    val toolCallId: String? = null,
+    val toolName: String? = null,
+    val isError: Boolean? = null,
+    val stopReason: String? = null,
+    val model: String? = null,
+    val usage: EntryUsage? = null,
+)
+
+@Serializable
+data class ContentBlock(
+    val type: String = "unknown",
+    val text: String? = null,
+    val thinking: String? = null,
+    val id: String? = null,
+    val name: String? = null,
+)
+
+@Serializable
+data class EntryUsage(
+    val input: Long? = null,
+    val output: Long? = null,
+    val cacheRead: Long? = null,
+    val cacheWrite: Long? = null,
+    val totalTokens: Long? = null,
+    val cost: JsonObject? = null,
+)
+
+@Serializable
+data class UsageResponse(
+    val ok: Boolean = true,
+    val usage: List<UsageSnapshot> = emptyList(),
+)
+
+@Serializable
+data class UsageSnapshot(
+    val provider: String = "",
+    val label: String = "",
+    val windows: List<UsageWindow> = emptyList(),
+    val updatedAt: Long = 0,
+    val error: String? = null,
+)
+
+@Serializable
+data class UsageWindow(
+    val label: String = "",
+    val usedPercent: Double = 0.0,
+    val amount: Double? = null,
+    val limitAmount: Double? = null,
+    val currency: String? = null,
+    val windowSeconds: Long? = null,
+    val resetAt: Long? = null,
+)
+
+// ── Board grouping (pure logic, unit-testable) ────────────────────────
+
+/** Plain-text rendering of an entry's content blocks (mirrors the bridge's entryText). */
+fun entryText(content: List<ContentBlock>): String {
+    val parts = content.mapNotNull { block ->
+        when (block.type) {
+            "text" -> block.text
+            "toolCall" -> "[${block.name}]"
+            else -> null
+        }
+    }
+    return parts.joinToString("\n").replace(Regex("\\s+"), " ").trim()
+}
+
+enum class AgentStatus(val wireName: String) {
+    NeedsYou("blocked"),
+    Working("working"),
+    Done("done"),
+    Idle("idle"),
+    Unknown("unknown");
+
+    companion object {
+        fun fromWire(name: String): AgentStatus = entries.firstOrNull { it.wireName == name } ?: Unknown
+    }
+}
+
+data class BoardState(
+    val needsYou: List<AgentCard> = emptyList(),
+    val working: List<AgentCard> = emptyList(),
+    val done: List<AgentCard> = emptyList(),
+    val idle: List<AgentCard> = emptyList(),
+    val unknown: List<AgentCard> = emptyList(),
+) {
+    val total: Int get() = needsYou.size + working.size + done.size + idle.size + unknown.size
+
+    companion object {
+        fun group(cards: List<AgentCard>): BoardState {
+            val buckets = mutableMapOf<AgentStatus, MutableList<AgentCard>>()
+            for (card in cards) {
+                buckets.getOrPut(AgentStatus.fromWire(card.status), ::mutableListOf).add(card)
+            }
+            return BoardState(
+                needsYou = buckets[AgentStatus.NeedsYou]?.toList() ?: emptyList(),
+                working = buckets[AgentStatus.Working]?.toList() ?: emptyList(),
+                done = buckets[AgentStatus.Done]?.toList() ?: emptyList(),
+                idle = buckets[AgentStatus.Idle]?.toList() ?: emptyList(),
+                unknown = buckets[AgentStatus.Unknown]?.toList() ?: emptyList(),
+            )
+        }
+    }
+}

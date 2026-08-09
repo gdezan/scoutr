@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Cockpit</string>
+    <string name="connect_title">Connect to your agents</string>
+    <string name="connect_subtitle">Point Cockpit at your bridge on the tailnet.</string>
+    <string name="connect_host_label">Bridge address</string>
+    <string name="connect_host_hint">https://artemis.tail…ts.net</string>
+    <string name="connect_token_label">Pairing token</string>
+    <string name="connect_token_hint">cockpit_…</string>
+    <string name="connect_button">Connect</string>
+    <string name="connect_testing">Checking connection…</string>
+    <string name="connect_failed">Could not reach the bridge</string>
+    <string name="board_needs_you">Needs you</string>
+    <string name="board_working">Working</string>
+    <string name="board_done">Done</string>
+    <string name="board_idle">Idle</string>
+    <string name="board_unknown">Unknown</string>
+    <string name="board_empty">No agents on the herd yet</string>
+    <string name="board_disconnected">Disconnected</string>
+    <string name="board_reconnect">Reconnect</string>
+    <string name="chat_title">Session</string>
+    <string name="chat_input_hint">Steer the agent…</string>
+    <string name="chat_send">Send</string>
+    <string name="usage_title">Usage</string>
+</resources>
