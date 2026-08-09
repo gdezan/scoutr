@@ -6,12 +6,12 @@ import type { FeedEvent } from "../src/herdr/feed.js";
 
 /** Capture the requests an ntfy server would receive. */
 function captureServer() {
-  const requests: Array<{ path: string; payload: { title?: string; message?: string } }> = [];
+  const requests: Array<{ path: string; payload: { topic?: string; title?: string; message?: string } }> = [];
   const server = createServer((req: IncomingMessage, res) => {
     let body = "";
     req.on("data", (chunk) => body += chunk.toString());
     req.on("end", () => {
-      let payload: { title?: string; message?: string } = {};
+      let payload: { topic?: string; title?: string; message?: string } = {};
       try { payload = JSON.parse(body); } catch {}
       requests.push({ path: req.url ?? "", payload });
       res.writeHead(200, { "content-type": "application/json" });
@@ -37,7 +37,8 @@ test("publishes a blocked event with the right payload", async () => {
     const sent = await publisher.handleEvent(blockedEvent("w1:p1"));
     assert.equal(sent, true);
     assert.equal(requests.length, 1);
-    assert.equal(requests[0]!.path, "/ntfy/cockpit_test_topic");
+    assert.equal(requests[0]!.path, "/ntfy/");
+    assert.equal(requests[0]!.payload.topic, "cockpit_test_topic");
     assert.equal(requests[0]!.payload.title, "π needs you");
     assert.equal(requests[0]!.payload.message, "my pane");
   } finally {

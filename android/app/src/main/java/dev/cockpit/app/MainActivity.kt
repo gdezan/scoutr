@@ -1,8 +1,12 @@
 package dev.cockpit.app
 
 import android.os.Bundle
+import android.os.Build
+import android.Manifest
+import android.content.pm.PackageManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DonutLarge
@@ -49,8 +53,20 @@ private object Routes {
 }
 
 class MainActivity : ComponentActivity() {
+
+    // Android 13+ requires a runtime opt-in before notifications can show.
+    private val requestNotifications = registerForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) {}
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (
+            Build.VERSION.SDK_INT >= 33 &&
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            requestNotifications.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
         setContent {
             CockpitTheme {
                 CockpitAppNav()
@@ -120,7 +136,12 @@ private fun CockpitAppNav() {
             }
             composable(Routes.BOARD) {
                 val boardViewModel: BoardViewModel = viewModel(
-                    factory = BoardViewModel.factory(container.bridge, container.connectionStore),
+                    factory = BoardViewModel.factory(
+                        container.bridge,
+                        container.connectionStore,
+                        container.ntfy,
+                        container::showAgentNotification,
+                    ),
                 )
                 Scaffold(topBar = { AppTopBar("Board") }) { innerBoard ->
                     BoardScreen(

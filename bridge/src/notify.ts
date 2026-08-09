@@ -47,13 +47,15 @@ export class NtfyPublisher {
 
   async publish({ title, message }: { title: string; message: string }): Promise<void> {
     if (!this.config) return;
-    const url = `${this.config.baseUrl.replace(/\/+$/, "")}/${this.config.topic}`;
+    // ntfy only parses JSON bodies when POSTed to the root path, with the
+    // topic inside the body; POSTing to /<topic> stores the raw JSON as text.
+    const url = `${this.config.baseUrl.replace(/\/+$/, "")}/`;
     try {
       // JSON body keeps unicode titles (e.g. the π display name) intact.
       await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title, message, priority: 4 }),
+        body: JSON.stringify({ topic: this.config.topic, title, message, priority: 4 }),
       });
     } catch (error) {
       // Push is best-effort; never let a notification failure break the bridge.

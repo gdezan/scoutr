@@ -1,8 +1,16 @@
 package dev.cockpit.app
 
 import android.app.Application
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.content.Context
+import android.content.Intent
+import androidx.core.app.NotificationCompat
 import dev.cockpit.app.data.ConnectionStore
+import dev.cockpit.app.data.NtfyMessage
 import dev.cockpit.app.net.BridgeClient
+import dev.cockpit.app.net.NtfyClient
 import okhttp3.OkHttpClient
 import java.util.concurrent.TimeUnit
 
@@ -22,7 +30,9 @@ class CockpitApp : Application() {
 
 class AppContainer(application: Application) {
 
-    val connectionStore = ConnectionStore(application)
+    private val appContext: Context = application
+
+    val connectionStore = ConnectionStore(appContext)
 
     private val okHttp = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
@@ -35,4 +45,44 @@ class AppContainer(application: Application) {
         okHttp = okHttp,
         connectionStore = connectionStore,
     )
+
+    val ntfy = NtfyClient(okHttp)
+
+    init {
+        val manager = appContext.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        manager.createNotificationChannel(
+            NotificationChannel(
+                CHANNEL_AGENTS,
+                "Agents",
+                NotificationManager.IMPORTANCE_HIGH,
+            ).apply { description = "Agents that need your attention" },
+        )
+    }
+
+    /** Show a heads-up notification for a pushed agent event. */
+    fun showAgentNotification(message: NtfyMessage) {
+        val intent = Intent(appContext, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
+        val pending = PendingIntent.getActivity(
+            appContext,
+            0,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        val notification = NotificationCompat.Builder(appContext, CHANNEL_AGENTS)
+            .setSmallIcon(android.R.drawable.ic_popup_reminder)
+            .setContentTitle(message.title ?: "Agent needs you")
+            .setContentText(message.message ?: "An agent is waiting for input")
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setAutoCancel(true)
+            .setContentIntent(pending)
+            .build()
+        val manager = appContext.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        manager.notify(message.id.hashCode(), notification)
+    }
+
+    private companion object {
+        const val CHANNEL_AGENTS = "agents"
+    }
 }

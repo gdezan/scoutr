@@ -29,7 +29,12 @@ class ConnectViewModel(
                 // Probe with the form values before persisting anything.
                 val health = bridge.health(host = host, token = token)
                 if (health.ok && health.herdr?.connected == true) {
-                    connectionStore.save(host, token)
+                    connectionStore.save(
+                        host = host,
+                        token = token,
+                        ntfyUrl = health.ntfy?.url,
+                        ntfyTopic = health.ntfy?.topic,
+                    )
                     _state.value = ConnectState.Connected(health.herdr.version, health.herdr.protocol)
                 } else {
                     _state.value = ConnectState.Failed("Bridge reachable, but herdr is not connected")

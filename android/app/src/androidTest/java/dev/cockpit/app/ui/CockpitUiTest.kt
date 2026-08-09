@@ -24,21 +24,27 @@ class CockpitUiTest {
     @get:Rule
     val composeRule = createComposeRule()
 
-    /** BoardViewModel pinned to a fixed UI state; never touches the network. */
+    /**
+     * BoardViewModel pinned to a fixed UI state; never touches the network.
+     * The store is wiped first so a connection saved on the device (e.g. from an
+     * earlier live session) cannot trigger a real connect() from init.
+     */
     private fun fakeBoard(state: BoardUiState): BoardViewModel {
         val context = androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().targetContext
+        val connectionStore = ConnectionStore(context).also { it.clear() }
         return BoardViewModel(
-            bridge = BridgeClient(OkHttpClient(), ConnectionStore(context)),
-            connectionStore = ConnectionStore(context),
+            bridge = BridgeClient(OkHttpClient(), connectionStore),
+            connectionStore = connectionStore,
             initialState = state,
         )
     }
     @Test
     fun connectScreen_disablesButtonUntilFieldsFilled() {
         val context = androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().targetContext
+        val connectionStore = ConnectionStore(context).also { it.clear() }
         val vm = dev.cockpit.app.state.ConnectViewModel(
-            BridgeClient(OkHttpClient(), ConnectionStore(context)),
-            ConnectionStore(context),
+            BridgeClient(OkHttpClient(), connectionStore),
+            connectionStore,
         )
         composeRule.setContent {
             CockpitTheme {

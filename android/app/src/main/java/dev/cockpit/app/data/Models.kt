@@ -11,6 +11,13 @@ data class HealthResponse(
     val service: String? = null,
     val version: String? = null,
     val herdr: HerdrInfo? = null,
+    val ntfy: NtfyInfo? = null,
+)
+
+@Serializable
+data class NtfyInfo(
+    val url: String? = null,
+    val topic: String? = null,
 )
 
 @Serializable
@@ -41,6 +48,18 @@ data class AgentCard(
     /** Derived: blocked agents are the ones that need the user. */
     val blocked: Boolean get() = status == "blocked"
 }
+
+/** A message delivered by the self-hosted ntfy server (layer 5 push). */
+@Serializable
+data class NtfyMessage(
+    val id: String,
+    val time: Long = 0,
+    val event: String = "message",
+    val topic: String = "",
+    val title: String? = null,
+    val message: String? = null,
+    val priority: Int = 3,
+)
 
 // ── Bridge WS DTOs ────────────────────────────────────────────────────
 

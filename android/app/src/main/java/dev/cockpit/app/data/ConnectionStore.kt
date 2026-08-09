@@ -4,9 +4,8 @@ import android.content.Context
 import android.content.SharedPreferences
 
 /**
- * Persists the bridge host + pairing token.
- * The token is only ever stored on-device and sent as a Bearer header
- * (or WS query param) to the bridge.
+ * Persists the bridge host + pairing token, plus the ntfy push topic the
+ * bridge revealed during the health handshake (layer 5).
  */
 class ConnectionStore(context: Context) {
 
@@ -16,6 +15,8 @@ class ConnectionStore(context: Context) {
     data class Saved(
         val host: String,
         val token: String,
+        val ntfyUrl: String? = null,
+        val ntfyTopic: String? = null,
     )
 
     val saved: Saved?
@@ -23,13 +24,20 @@ class ConnectionStore(context: Context) {
             val host = prefs.getString(KEY_HOST, null) ?: return null
             val token = prefs.getString(KEY_TOKEN, null) ?: return null
             if (host.isBlank() || token.isBlank()) return null
-            return Saved(host.trim(), token.trim())
+            return Saved(
+                host = host.trim(),
+                token = token.trim(),
+                ntfyUrl = prefs.getString(KEY_NTFY_URL, null)?.takeIf { it.isNotBlank() },
+                ntfyTopic = prefs.getString(KEY_NTFY_TOPIC, null)?.takeIf { it.isNotBlank() },
+            )
         }
 
-    fun save(host: String, token: String) {
+    fun save(host: String, token: String, ntfyUrl: String? = null, ntfyTopic: String? = null) {
         prefs.edit()
             .putString(KEY_HOST, host.trim())
             .putString(KEY_TOKEN, token.trim())
+            .putString(KEY_NTFY_URL, ntfyUrl?.trim())
+            .putString(KEY_NTFY_TOPIC, ntfyTopic?.trim())
             .apply()
     }
 
@@ -40,5 +48,7 @@ class ConnectionStore(context: Context) {
     private companion object {
         const val KEY_HOST = "host"
         const val KEY_TOKEN = "token"
+        const val KEY_NTFY_URL = "ntfyUrl"
+        const val KEY_NTFY_TOPIC = "ntfyTopic"
     }
 }

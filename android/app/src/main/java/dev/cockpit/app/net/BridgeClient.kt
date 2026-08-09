@@ -7,9 +7,6 @@ import dev.cockpit.app.data.HealthResponse
 import dev.cockpit.app.data.SessionReadResponse
 import dev.cockpit.app.data.UsageResponse
 import dev.cockpit.app.data.WsFrame
-import kotlinx.coroutines.channels.awaitClose
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.serialization.json.Json
 import okhttp3.Call
@@ -116,47 +113,6 @@ class BridgeClient(
 
     suspend fun usage(): UsageResponse =
         call("/api/usage") { json.decodeFromString(UsageResponse.serializer(), it) }
-
-    /** WebSocket feed of bridge frames (herdr events + snapshots + command acks). */
-    fun feed(): Flow<WsFrame> = callbackFlow {
-        val saved = connectionStore.saved
-        if (saved == null) {
-            close(IOException("no connection configured"))
-            return@callbackFlow
-        }
-        var ws: WebSocket? = null
-        val base = saved.host.trimEnd('/')
-        val wsUrl = base.replaceFirst("https://", "wss://").replaceFirst("http://", "ws://") + "/ws?token=" +
-            java.net.URLEncoder.encode(saved.token, "UTF-8")
-
-        val listener = object : WebSocketListener() {
-            override fun onOpen(webSocket: WebSocket, response: Response) {
-                // Server immediately starts streaming; nothing to send.
-            }
-
-            override fun onMessage(webSocket: WebSocket, text: String) {
-                try {
-                    val frame = json.decodeFromString(WsFrame.serializer(), text)
-                    trySend(frame)
-                } catch (_: Exception) {
-                    // Skip malformed frames rather than killing the flow.
-                }
-            }
-
-            override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                close(t)
-            }
-
-            override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-                close()
-            }
-        }
-
-        ws = okHttp.newWebSocket(Request.Builder().url(wsUrl).build(), listener)
-        awaitClose {
-            ws?.close(1000, "client closing")
-        }
-    }
 
     /**
      * Opens a short-lived WS, sends one command, and waits for the first ack frame.
