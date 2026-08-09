@@ -122,6 +122,8 @@ data class ContentBlock(
     val thinking: String? = null,
     val id: String? = null,
     val name: String? = null,
+    /** Tool-call arguments as sent by the agent (e.g. {command: "..."} for bash). */
+    val arguments: JsonObject? = null,
 )
 
 @Serializable

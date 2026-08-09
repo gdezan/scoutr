@@ -50,7 +50,7 @@ class ChatViewModel(
     private val bridge: BridgeClient,
     val paneId: String,
     private val sessionPath: String?,
-    private val agentStatus: String = "working",
+    val agentStatus: String = "working",
 ) : ViewModel() {
 
     private val _ui = MutableStateFlow(ChatUiState())
