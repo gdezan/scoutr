@@ -14,6 +14,21 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
+/**
+ * Merge a poll result into the transcript: a null cursor replaces the list
+ * (full snapshot), an incremental poll appends only ids not already present —
+ * a bad cursor can never create duplicate LazyColumn keys (Compose crashes).
+ */
+fun mergeSessionEntries(
+    existing: List<SessionEntry>,
+    incoming: List<SessionEntry>,
+    incremental: Boolean,
+): List<SessionEntry> {
+    if (!incremental) return incoming
+    val known = existing.mapTo(mutableSetOf()) { it.entryId }
+    return existing + incoming.filter { it.entryId !in known }
+}
+
 data class ChatUiState(
     val entries: List<SessionEntry> = emptyList(),
     val exists: Boolean = true,
@@ -72,7 +87,7 @@ class ChatViewModel(
                 val response = bridge.rpcEntries(id, since = since)
                 _ui.update {
                     it.copy(
-                        entries = if (since != null) it.entries + response.entries else response.entries,
+                        entries = mergeSessionEntries(it.entries, response.entries, incremental = since != null),
                         exists = true,
                         loading = false,
                         uiRequest = info.uiRequests.firstOrNull(),
@@ -88,7 +103,7 @@ class ChatViewModel(
             val response = bridge.session(path, since = _ui.value.entries.lastOrNull()?.entryId)
             _ui.update {
                 it.copy(
-                    entries = if (response.since != null) it.entries + response.entries else response.entries,
+                    entries = mergeSessionEntries(it.entries, response.entries, incremental = response.since != null),
                     exists = response.exists,
                     loading = false,
                     error = null,

@@ -474,7 +474,7 @@ interface SessionReadResult {
   mtimeMs: number;
 }
 
-async function readSession(pathParam: string, since: string | null): Promise<SessionReadResult> {
+export async function readSession(pathParam: string, since: string | null): Promise<SessionReadResult> {
   // Only allow absolute paths under the user's pi agent directory (read-only data).
   const agentRoot = resolve(process.env.PI_CODING_AGENT_DIR?.trim() || `${process.env.HOME}/.pi/agent`);
   const target = resolve(pathParam);
@@ -486,13 +486,27 @@ async function readSession(pathParam: string, since: string | null): Promise<Ses
     return { path: target, name: basename(target), exists: false, since, entries: [], lastEntryId: null, mtimeMs: 0 };
   }
   const session = await readPiSessionFile(target);
-  const entries = since ? session.entries.filter((entry) => entry.entryId > since) : session.entries;
-  const lastEntry = session.entries[session.entries.length - 1];
+  let entries = session.entries;
+  let cursor: string | null = since;
+  if (since) {
+    // Compare by file position, not lexically: pi ids are random hex, so
+    // lexical order re-sends loaded entries and the app appends duplicate
+    // LazyColumn keys (Compose crashes on those).
+    const cursorIndex = session.entries.findIndex((entry) => entry.entryId === since);
+    if (cursorIndex === -1) {
+      // Cursor no longer in the file (rotated/compacted): full snapshot; the
+      // app replaces its list when since comes back null.
+      cursor = null;
+    } else {
+      entries = session.entries.slice(cursorIndex + 1);
+    }
+  }
+  const lastEntry = entries[entries.length - 1];
   return {
     path: target,
     name: basename(target),
     exists: true,
-    since,
+    since: cursor,
     entries,
     preview: lastEntry ? entryText(lastEntry, 120) : undefined,
     lastEntryId: session.lastEntryId,

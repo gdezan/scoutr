@@ -72,6 +72,26 @@ pi agents, as an alternative to Moshi's paid herdr integration.
   hand-rolled (a 60-line parser) because no library covers the cockpit-specific
   pairing payload.
 
+## Chat scroll crash — duplicate LazyColumn keys (fixed)
+
+- Symptom: scrolling to the end of a conversation crashed often with
+  `IllegalArgumentException: Key "…" was already used` (3 crashes on the phone
+  in 15 minutes of normal use).
+- Root cause: the bridge filtered incremental session reads with a **lexical**
+  `entryId > since` comparison, but pi message ids are random 8-hex strings
+  whose lexical order does not match file order. Every poll after the initial
+  load therefore re-sent a large subset of already-loaded entries, and the app
+  blindly appended them — producing duplicate LazyColumn keys that crash when
+  the duplicate region is composed (scrolling to the end).
+- Fix: the bridge resolves the cursor to a **file position** (entries after the
+  cursor index; unknown cursor returns a full snapshot with `since: null` so
+  the app replaces its list), and the app dedupes on append
+  (`mergeSessionEntries`) as a hard guarantee.
+- Evidence: the old API call returned ~1000 duplicate entries on the first
+  incremental poll; after the fix it returns 0. Stress scroll on emulator (30
+  swipes) and phone (20 swipes) with the poll appending: no crash either
+  device.
+
 ## Testing (self-served)
 
 - Bridge: `npm test` (26 live-socket/unit tests), `tsc --noEmit`.
