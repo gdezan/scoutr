@@ -62,16 +62,32 @@ export class HerdrEventFeed {
   private rebuilding: Promise<void> | null = null;
   private refreshTimer: ReturnType<typeof setInterval> | null = null;
   private lastSnapshot: SessionSnapshot | null = null;
+  private readonly handlers = new Set<(message: FeedMessage) => void>();
 
   constructor(
     socketPath: string,
-    private readonly emit: (message: FeedMessage) => void,
+    emit?: (message: FeedMessage) => void,
   ) {
     this.client = new HerdrClient({ socketPath });
+    if (emit) this.handlers.add(emit);
   }
 
   get snapshot(): SessionSnapshot | null {
     return this.lastSnapshot;
+  }
+
+  /** Register a message handler; returns an unsubscribe function. */
+  onMessage(handler: (message: FeedMessage) => void): () => void {
+    this.handlers.add(handler);
+    return () => this.handlers.delete(handler);
+  }
+
+  removeMessage(handler: (message: FeedMessage) => void): void {
+    this.handlers.delete(handler);
+  }
+
+  private emitAll(message: FeedMessage): void {
+    for (const handler of this.handlers) handler(message);
   }
 
   async start(): Promise<void> {
@@ -95,7 +111,7 @@ export class HerdrEventFeed {
   private async refreshSnapshot(resync: boolean): Promise<void> {
     const snapshot = await this.client.snapshot();
     this.lastSnapshot = snapshot;
-    this.emit({ type: "snapshot", snapshot, resync });
+    this.emitAll({ type: "snapshot", snapshot, resync });
   }
 
   private buildSubscription(): Promise<void> {
@@ -135,17 +151,17 @@ export class HerdrEventFeed {
         if (TOPOLOGY_EVENTS.has(dotType) || TOPOLOGY_EVENTS.has(kind)) {
           scheduleRebuild();
         }
-        this.emit({ kind, data });
+        this.emitAll({ kind, data });
       },
       onError: (error) => {
-        this.emit({ kind: "feed_error", data: { message: error.message } });
+        this.emitAll({ kind: "feed_error", data: { message: error.message } });
       },
       onClose: () => {
         // Socket died: reconnect after a short backoff unless stopped.
         if (this.stopped) return;
         setTimeout(() => {
           void this.buildSubscription().catch((error) => {
-            this.emit({ kind: "feed_error", data: { message: error.message } });
+            this.emitAll({ kind: "feed_error", data: { message: error.message } });
           });
         }, 1000);
       },

@@ -59,8 +59,35 @@ async function main(): Promise<void> {
         break;
       }
       case "serve": {
-        console.error("serve is wired in a later layer");
-        process.exitCode = 2;
+        const { createCockpitServer } = await import("./server.js");
+        const { loadOrCreateConfig } = await import("./config.js");
+        const { UsageService } = await import("./usage/providers.js");
+
+        const config = await loadOrCreateConfig();
+        const feed = new HerdrEventFeed(socketPath);
+        await feed.start();
+        console.error(`connected to herdr at ${socketPath}`);
+
+        const server = createCockpitServer({
+          herdr: new HerdrClient({ socketPath }),
+          feed,
+          usage: new UsageService(),
+          config,
+        });
+        console.error(`cockpit bridge listening on ${server.url}`);
+        console.error(`token: ${config.token}`);
+        console.error(
+          `front with: tailscale serve --bg 443 ${server.url} (then the app uses https://<host>/ws + token)`,
+        );
+
+        await new Promise<void>((resolve) => {
+          const shutdown = (): void => {
+            console.error("shutting down…");
+            void server.close().then(resolve);
+          };
+          process.on("SIGINT", shutdown);
+          process.on("SIGTERM", shutdown);
+        });
         break;
       }
       case "help":
