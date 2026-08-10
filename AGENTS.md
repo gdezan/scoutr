@@ -4,7 +4,7 @@
 
 ## Vision
 
-When a task involves an image — a screenshot, mockup, rendered UI, or diagram — actually look at it: delegate the description to a vision-capable pi running in a sibling herdr pane (this works when `HERDR_ENV=1`, i.e. you run inside a herdr pane). Do not guess what an image contains.
+When a task involves an image — a screenshot, mockup, rendered UI, or diagram — inspect it directly when the current model supports vision. Otherwise, delegate the description to a vision-capable pi in a sibling herdr pane (`HERDR_ENV=1`).
 
 1. Split a sibling pane without stealing focus, then parse the new pane id from `.result.pane.pane_id`:
 
