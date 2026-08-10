@@ -9,61 +9,82 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.SystemBarStyle
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.DonutLarge
+import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.GridView
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.compose.runtime.collectAsState
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
-import kotlinx.coroutines.launch
 import dev.cockpit.app.data.AgentCard
 import dev.cockpit.app.state.BoardViewModel
 import dev.cockpit.app.state.NewSessionViewModel
 import dev.cockpit.app.state.ChatViewModel
+import dev.cockpit.app.state.SessionHistoryViewModel
 import dev.cockpit.app.state.UsageViewModel
 import dev.cockpit.app.ui.screens.BoardScreen
 import dev.cockpit.app.ui.screens.NewSessionSheet
 import dev.cockpit.app.ui.screens.ChatScreen
 import dev.cockpit.app.ui.screens.ConnectScreen
+import dev.cockpit.app.ui.screens.HistoryScreen
 import dev.cockpit.app.ui.screens.UsageScreen
 import dev.cockpit.app.ui.theme.CockpitTheme
 
 private object Routes {
     const val CONNECT = "connect"
     const val BOARD = "board"
+    const val SESSIONS = "sessions"
     const val CHAT = "chat/{paneId}?sessionPath={sessionPath}&status={status}"
     const val USAGE = "usage"
 
     fun chat(paneId: String, sessionPath: String?, status: String): String =
         "chat/$paneId?sessionPath=${sessionPath?.let { java.net.URLEncoder.encode(it, "UTF-8") } ?: ""}&status=$status"
+}
+
+/** The three top-level destinations on the phone bar. */
+private enum class Destination(val route: String, val label: String, val icon: ImageVector) {
+    Board(Routes.BOARD, "Board", Icons.Default.GridView),
+    Sessions(Routes.SESSIONS, "Sessions", Icons.Default.History),
+    Usage(Routes.USAGE, "Usage", Icons.Default.BarChart),
 }
 
 class MainActivity : ComponentActivity() {
@@ -105,35 +126,33 @@ private fun CockpitAppNav() {
         mutableStateOf(if (container.connectionStore.saved != null) Routes.BOARD else Routes.CONNECT)
     }
 
-    val showBottomBar = currentRoute == Routes.BOARD || currentRoute == Routes.USAGE
+    // One activity-scoped board VM: the bottom-bar badge and the Board screen
+    // share the same live snapshot, so there is no duplicate polling.
+    val boardViewModel: BoardViewModel = viewModel(
+        factory = BoardViewModel.factory(
+            container.bridge,
+            container.connectionStore,
+            container.ntfy,
+            container::showAgentNotification,
+        ),
+        key = "activity_board",
+    )
+
+    val onTab = { route: String ->
+        navController.navigate(route) {
+            popUpTo(Routes.BOARD) { inclusive = false }
+            launchSingleTop = true
+        }
+    }
 
     Scaffold(
         bottomBar = {
-            if (showBottomBar) {
-                NavigationBar {
-                    NavigationBarItem(
-                        selected = currentRoute == Routes.BOARD,
-                        onClick = {
-                            navController.navigate(Routes.BOARD) {
-                                popUpTo(Routes.BOARD) { inclusive = false }
-                                launchSingleTop = true
-                            }
-                        },
-                        icon = { Icon(Icons.Default.GridView, contentDescription = null) },
-                        label = { Text("Board") },
-                    )
-                    NavigationBarItem(
-                        selected = currentRoute == Routes.USAGE,
-                        onClick = {
-                            navController.navigate(Routes.USAGE) {
-                                popUpTo(Routes.BOARD)
-                                launchSingleTop = true
-                            }
-                        },
-                        icon = { Icon(Icons.Default.DonutLarge, contentDescription = null) },
-                        label = { Text("Usage") },
-                    )
-                }
+            if (currentRoute in setOf(Routes.BOARD, Routes.SESSIONS, Routes.USAGE)) {
+                CockpitBottomBar(
+                    currentRoute = currentRoute,
+                    needsYouCount = rememberNeedsYouCount(boardViewModel),
+                    onSelect = onTab,
+                )
             }
         },
     ) { inner ->
@@ -153,14 +172,6 @@ private fun CockpitAppNav() {
                 )
             }
             composable(Routes.BOARD) {
-                val boardViewModel: BoardViewModel = viewModel(
-                    factory = BoardViewModel.factory(
-                        container.bridge,
-                        container.connectionStore,
-                        container.ntfy,
-                        container::showAgentNotification,
-                    ),
-                )
                 val newSessionViewModel: NewSessionViewModel = viewModel(
                     factory = NewSessionViewModel.factory(
                         container.bridge,
@@ -196,6 +207,24 @@ private fun CockpitAppNav() {
                             showNewSession = false
                             navController.navigate(Routes.chat(paneId, null, "working"))
                         },
+                    )
+                }
+            }
+            composable(Routes.SESSIONS) {
+                val historyViewModel: SessionHistoryViewModel = viewModel(
+                    factory = SessionHistoryViewModel.factory(
+                        container.bridge,
+                        container.connectionStore,
+                        container.sessionCatalogStore,
+                    ),
+                )
+                Scaffold(topBar = { AppTopBar("Sessions") }) { innerSessions ->
+                    HistoryScreen(
+                        onOpenSession = { resumed ->
+                            navController.navigate(Routes.chat(resumed.paneId, null, "working"))
+                        },
+                        viewModel = historyViewModel,
+                        modifier = Modifier.padding(innerSessions),
                     )
                 }
             }
@@ -237,6 +266,103 @@ private fun CockpitAppNav() {
                 }
             }
         }
+    }
+}
+
+/** Number of agents that currently need the user, for the Board tab badge. */
+@Composable
+private fun rememberNeedsYouCount(boardViewModel: BoardViewModel): Int =
+    boardViewModel.ui.collectAsState().value.board.needsYou.size
+
+/**
+ * Compact premium phone bar: three destinations, strong selected state,
+ * needs-you badge, and safe-area padding. Selection is interruption-safe
+ * (single-top, no queued back stacks).
+ */
+@Composable
+private fun CockpitBottomBar(
+    currentRoute: String?,
+    needsYouCount: Int,
+    onSelect: (String) -> Unit,
+) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.97f))
+            .navigationBarsPadding(),
+    ) {
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(1.dp)
+                .background(MaterialTheme.colorScheme.outlineVariant),
+        )
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Destination.entries.forEach { destination ->
+                val selected = currentRoute == destination.route
+                val badge = if (destination == Destination.Board && needsYouCount > 0) needsYouCount else 0
+                CockpitTab(
+                    destination = destination,
+                    selected = selected,
+                    badge = badge,
+                    onClick = { onSelect(destination.route) },
+                    modifier = Modifier.weight(1f),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun CockpitTab(
+    destination: Destination,
+    selected: Boolean,
+    badge: Int,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier
+            .clip(RoundedCornerShape(12.dp))
+            .clickable(onClick = onClick)
+            .padding(vertical = 6.dp, horizontal = 4.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Box(contentAlignment = Alignment.TopEnd) {
+            Icon(
+                imageVector = destination.icon,
+                contentDescription = null,
+                tint = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(22.dp),
+            )
+            if (badge > 0) {
+                Box(
+                    Modifier
+                        .padding(top = (-6).dp, end = (-6).dp)
+                        .size(16.dp)
+                        .background(MaterialTheme.colorScheme.error, RoundedCornerShape(50))
+                        .clickable(onClick = onClick),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = if (badge > 9) "9+" else badge.toString(),
+                        color = MaterialTheme.colorScheme.onError,
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+            }
+        }
+        Spacer(Modifier.height(2.dp))
+        Text(
+            text = destination.label,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+            color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 

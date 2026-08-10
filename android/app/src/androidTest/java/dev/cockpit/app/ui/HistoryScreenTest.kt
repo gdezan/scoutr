@@ -1,0 +1,175 @@
+package dev.cockpit.app.ui
+
+import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTextInput
+import androidx.test.platform.app.InstrumentationRegistry
+import dev.cockpit.app.data.ConnectionStore
+import dev.cockpit.app.data.SessionCatalogStore
+import dev.cockpit.app.net.BridgeClient
+import dev.cockpit.app.state.SessionHistoryViewModel
+import dev.cockpit.app.ui.screens.HistoryScreen
+import dev.cockpit.app.ui.theme.CockpitTheme
+import okhttp3.OkHttpClient
+import okhttp3.mockwebserver.Dispatcher
+import okhttp3.mockwebserver.MockResponse
+import okhttp3.mockwebserver.MockWebServer
+import okhttp3.mockwebserver.RecordedRequest
+import org.junit.After
+import org.junit.Before
+import org.junit.Rule
+import org.junit.Test
+import java.util.concurrent.TimeUnit
+
+/**
+ * Session history surface against a local mock bridge: catalog rows, search,
+ * pin/archive toggles, and destructive-action dialogs.
+ */
+class HistoryScreenTest {
+
+    @get:Rule
+    val compose = createComposeRule()
+
+    private lateinit var server: MockWebServer
+
+    @Before
+    fun setUp() {
+        server = MockWebServer()
+        server.start()
+    }
+
+    @After
+    fun tearDown() {
+        server.shutdown()
+    }
+
+    private val catalogBody = """
+        {"ok":true,"truncated":false,"sessions":[
+          {"path":"/root/sessions/abc.jsonl","sessionId":"abc","title":"Fix billing bug","cwd":"/repo/a","model":"openai-codex/gpt-5.4","updatedAt":${System.currentTimeMillis()}.0,"messageCount":12,"preview":"User asked to fix the billing math","active":true,"paneId":"pane1","workspaceId":"ws1","agentStatus":"blocked"},
+          {"path":"/root/sessions/def.jsonl","sessionId":"def","title":"Docs refresh","cwd":"/repo/b","model":"anthropic/claude-sonnet-4-6","updatedAt":${System.currentTimeMillis() - 3_600_000}.0,"messageCount":3,"preview":"Update the README","active":false}
+        ]}
+    """.trimIndent()
+
+    private fun stubCatalog(deleteOk: Boolean = true) {
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                val path = (request.path ?: "").substringBefore('?')
+                return when {
+                    path == "/api/session-catalog" ->
+                        MockResponse().setResponseCode(200).setBody(catalogBody)
+                    path == "/api/session-catalog/delete" ->
+                        MockResponse().setResponseCode(200).setBody("""{"ok":$deleteOk}""")
+                    path == "/api/session-catalog/rename" ->
+                        MockResponse().setResponseCode(200).setBody("""{"ok":true}""")
+                    path == "/api/session-catalog/close" || path.contains("/control") ->
+                        MockResponse().setResponseCode(200).setBody("""{"ok":true}""")
+                    else -> MockResponse().setResponseCode(404).setBody("""{"ok":false}""")
+                }
+            }
+        }
+    }
+
+    private fun viewModel(): SessionHistoryViewModel {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val connection = ConnectionStore(context)
+        connection.save(server.url("/").toString().trimEnd('/'), "test_token", null, null)
+        val bridge = BridgeClient(OkHttpClient.Builder().readTimeout(5, TimeUnit.SECONDS).build(), connection)
+        return SessionHistoryViewModel(bridge, connection, RecordingStore())
+    }
+
+    private fun setContent(vm: SessionHistoryViewModel) {
+        compose.setContent {
+            CockpitTheme {
+                HistoryScreen(
+                    onOpenSession = {},
+                    viewModel = vm,
+                )
+            }
+        }
+    }
+
+    @Test
+    fun rendersActiveRowsWithTitleModelAndCwd() {
+        stubCatalog()
+        setContent(viewModel())
+        compose.waitUntil(5_000) {
+            compose.onAllNodes(androidx.compose.ui.test.hasTestTag("history_row_abc")).fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithText("Fix billing bug").assertIsDisplayed()
+        compose.onNodeWithText("gpt-5.4").assertIsDisplayed()
+        compose.onNodeWithText("/repo/a").assertIsDisplayed()
+    }
+
+    @Test
+    fun searchFiltersThroughTheBridge() {
+        stubCatalog()
+        setContent(viewModel())
+        compose.onNodeWithText("Completed").performClick()
+        compose.waitUntil(5_000) {
+            compose.onAllNodes(androidx.compose.ui.test.hasTestTag("history_row_def")).fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithTag("history_search").performClick().performTextInput("docs")
+        compose.waitUntil(5_000) {
+            compose.onAllNodes(androidx.compose.ui.test.hasTestTag("history_row_def")).fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithText("Docs refresh").assertIsDisplayed()
+    }
+
+    @Test
+    fun deleteFlowShowsConfirmationAndConfirms() {
+        stubCatalog()
+        setContent(viewModel())
+        compose.waitUntil(5_000) {
+            compose.onAllNodes(androidx.compose.ui.test.hasTestTag("history_row_abc")).fetchSemanticsNodes().isNotEmpty()
+        }
+        // Switch to the Completed view where delete is enabled for the def row.
+        compose.onNodeWithText("Completed").performClick()
+        compose.waitUntil(5_000) {
+            compose.onAllNodes(androidx.compose.ui.test.hasTestTag("history_row_def")).fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithTag("history_row_menu_def").performClick()
+        compose.onNodeWithText("Delete").performClick()
+        compose.onNodeWithText("Delete session?").assertIsDisplayed()
+        compose.onNodeWithText("Delete").performClick()
+    }
+
+    @Test
+    fun closeConfirmationDistinguishesFromDelete() {
+        stubCatalog()
+        setContent(viewModel())
+        compose.waitUntil(5_000) {
+            compose.onAllNodes(androidx.compose.ui.test.hasTestTag("history_row_abc")).fetchSemanticsNodes().isNotEmpty()
+        }
+        // Active view: the abc row is active and offers Close.
+        compose.onNodeWithTag("history_row_menu_abc").performClick()
+        compose.onNodeWithText("Close").performClick()
+        compose.onNodeWithText("Close session?").assertIsDisplayed()
+    }
+
+    @Test
+    fun emptyStateShowsForArchivedView() {
+        stubCatalog()
+        setContent(viewModel())
+        compose.onNodeWithText("Archived").performClick()
+        compose.onNodeWithTag("history_empty").assertIsDisplayed()
+    }
+}
+
+/** In-memory catalog store for instrumentation tests. */
+private class RecordingStore : SessionCatalogStore {
+    private val pinned = mutableSetOf<String>()
+    private val archived = mutableSetOf<String>()
+
+    override fun pinnedPaths(): Set<String> = pinned.toSet()
+    override fun archivedPaths(): Set<String> = archived.toSet()
+    override fun setPinned(path: String, pinned: Boolean) {
+        if (pinned) this.pinned.add(path) else this.pinned.remove(path)
+    }
+
+    override fun setArchived(path: String, archived: Boolean) {
+        if (archived) this.archived.add(path) else this.archived.remove(path)
+    }
+}

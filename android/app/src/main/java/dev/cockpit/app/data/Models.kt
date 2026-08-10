@@ -305,6 +305,30 @@ data class CreatedSessionResponse(
 )
 
 @Serializable
+data class SessionCatalogResponse(
+    val ok: Boolean,
+    val sessions: List<SessionCatalogItem> = emptyList(),
+    val truncated: Boolean = false,
+    val error: String? = null,
+)
+
+@Serializable
+data class SessionCatalogItem(
+    val path: String,
+    val sessionId: String,
+    val title: String,
+    val cwd: String,
+    val model: String? = null,
+    val updatedAt: Double,
+    val messageCount: Int,
+    val preview: String = "",
+    val active: Boolean = false,
+    val paneId: String? = null,
+    val workspaceId: String? = null,
+    val agentStatus: String? = null,
+)
+
+@Serializable
 data class ControlResponse(
     val ok: Boolean,
     val error: String? = null,

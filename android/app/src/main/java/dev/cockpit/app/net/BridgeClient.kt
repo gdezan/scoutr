@@ -9,6 +9,7 @@ import dev.cockpit.app.data.DirListingResponse
 import dev.cockpit.app.data.HealthResponse
 import dev.cockpit.app.data.LiveOutputResponse
 import dev.cockpit.app.data.ModelsCatalogResponse
+import dev.cockpit.app.data.SessionCatalogResponse
 import dev.cockpit.app.data.SessionReadResponse
 import dev.cockpit.app.data.UsageResponse
 import dev.cockpit.app.data.WsFrame
@@ -125,6 +126,23 @@ class BridgeClient(
         call("/api/commands", query = if (cwd == null) emptyMap() else mapOf("cwd" to cwd)) {
             json.decodeFromString(CommandsCatalogResponse.serializer(), it)
         }
+    /** Bounded list of persisted pi sessions, joined with live pane state. */
+    suspend fun sessionCatalog(query: String? = null, limit: Int? = null): SessionCatalogResponse =
+        call("/api/session-catalog", query = buildMap {
+            if (query != null) put("q", query)
+            if (limit != null) put("limit", limit.toString())
+        }) { json.decodeFromString(SessionCatalogResponse.serializer(), it) }
+
+    /** Resume/fork/rename/delete a stored session. Resume returns pane+workspace ids. */
+    suspend fun sessionCatalogAction(
+        action: String,
+        path: String,
+        text: String? = null,
+    ): CreatedSessionResponse = post("/api/session-catalog/$action", buildJsonObject {
+        put("path", JsonPrimitive(path))
+        if (text != null) put("text", JsonPrimitive(text))
+    }) { json.decodeFromString(CreatedSessionResponse.serializer(), it) }
+
     /** Bounded ANSI-free terminal snapshot for a live agent pane. */
     suspend fun liveOutput(paneId: String, lines: Int = 80): LiveOutputResponse =
         call("/api/agents/$paneId/read", query = mapOf("lines" to lines.toString())) {

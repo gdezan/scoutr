@@ -1,0 +1,628 @@
+package dev.cockpit.app.ui.screens
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.filled.Archive
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.DriveFileRenameOutline
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.PushPin
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Unarchive
+import androidx.compose.material.icons.filled.WifiOff
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.lifecycle.viewmodel.compose.viewModel
+import kotlinx.coroutines.launch
+import dev.cockpit.app.CockpitApp
+import dev.cockpit.app.data.SessionCatalogItem
+import dev.cockpit.app.state.HistoryItem
+import dev.cockpit.app.state.HistoryUiState
+import dev.cockpit.app.state.HistoryView
+import dev.cockpit.app.state.ResumedSession
+import dev.cockpit.app.state.SessionHistoryViewModel
+
+/** The Sessions tab: catalog of stored and live pi sessions with lifecycle actions. */
+@Composable
+fun HistoryScreen(
+    onOpenSession: (ResumedSession) -> Unit,
+    viewModel: SessionHistoryViewModel = rememberHistoryViewModel(),
+    modifier: Modifier = Modifier,
+) {
+    val ui by viewModel.ui.collectAsState()
+    var view by rememberSaveable { mutableStateOf(HistoryView.Active) }
+    var query by rememberSaveable { mutableStateOf("") }
+    var pendingClose by remember { mutableStateOf<HistoryItem?>(null) }
+    var pendingDelete by remember { mutableStateOf<HistoryItem?>(null) }
+    var renaming by remember { mutableStateOf<HistoryItem?>(null) }
+    val scope = rememberCoroutineScope()
+
+    Column(modifier.fillMaxSize()) {
+        SearchField(
+            query = query,
+            onQuery = {
+                query = it
+                viewModel.setQuery(it)
+            },
+        )
+        ViewTabs(view = view, onSelect = { view = it })
+        if (!ui.connected && ui.error != null) {
+            OfflineBanner(onRetry = viewModel::retry)
+        }
+        if (ui.error != null && ui.connected) {
+            ErrorBanner(message = ui.error ?: "Something went wrong", onDismiss = { /* poll heals */ })
+        }
+        Box(Modifier.weight(1f)) {
+            if (ui.loading && ui.items.isEmpty()) {
+                HistorySkeleton()
+            } else {
+                HistoryList(
+                    ui = ui,
+                    view = view,
+                    onOpen = { item ->
+                        if (viewModel.ui.value.busyPath == null) {
+                            scope.launch { viewModel.resume(item)?.let(onOpenSession) }
+                        }
+                    },
+                    onFork = { item ->
+                        if (viewModel.ui.value.busyPath == null) {
+                            scope.launch { viewModel.fork(item)?.let(onOpenSession) }
+                        }
+                    },
+                    onRename = { renaming = it },
+                    onClose = { pendingClose = it },
+                    onDelete = { pendingDelete = it },
+                    onTogglePin = viewModel::togglePin,
+                    onToggleArchive = viewModel::toggleArchive,
+                )
+            }
+        }
+    }
+
+    pendingClose?.let { item ->
+        ConfirmDialog(
+            title = "Close session?",
+            text = "Closing “${item.session.title}” stops its live pane. The transcript is preserved and can be resumed later.",
+            confirmLabel = "Close",
+            onConfirm = {
+                pendingClose = null
+                if (viewModel.ui.value.busyPath == null) scope.launch { viewModel.close(item) }
+            },
+            onDismiss = { pendingClose = null },
+        )
+    }
+    pendingDelete?.let { item ->
+        ConfirmDialog(
+            title = "Delete session?",
+            text = "Deleting “${item.session.title}” removes its stored transcript from the host permanently. This cannot be undone.",
+            confirmLabel = "Delete",
+            destructive = true,
+            onConfirm = {
+                pendingDelete = null
+                if (viewModel.ui.value.busyPath == null) scope.launch { viewModel.delete(item) }
+            },
+            onDismiss = { pendingDelete = null },
+        )
+    }
+    renaming?.let { item ->
+        RenameDialog(
+            initial = item.session.title,
+            onConfirm = { name ->
+                renaming = null
+                if (viewModel.ui.value.busyPath == null) scope.launch { viewModel.rename(item, name) }
+            },
+            onDismiss = { renaming = null },
+        )
+    }
+}
+
+/** Runs [action] only while no other catalog mutation is in flight. */
+@Composable
+private fun SearchField(query: String, onQuery: (String) -> Unit) {
+    OutlinedTextField(
+        value = query,
+        onValueChange = onQuery,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp)
+            .testTag("history_search"),
+        placeholder = { Text("Search sessions") },
+        leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+        trailingIcon = {
+            if (query.isNotEmpty()) {
+                Text(
+                    "Clear",
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier
+                        .clickable { onQuery("") }
+                        .padding(6.dp),
+                )
+            }
+        },
+        singleLine = true,
+        shape = RoundedCornerShape(14.dp),
+    )
+}
+
+@Composable
+private fun ViewTabs(view: HistoryView, onSelect: (HistoryView) -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        HistoryView.entries.forEach { candidate ->
+            FilterChip(
+                selected = view == candidate,
+                onClick = { onSelect(candidate) },
+                label = { Text(candidate.label) },
+                modifier = Modifier.testTag("history_view_${candidate.name}"),
+            )
+        }
+    }
+}
+
+@Composable
+private fun HistoryList(
+    ui: HistoryUiState,
+    view: HistoryView,
+    onOpen: (HistoryItem) -> Unit,
+    onFork: (HistoryItem) -> Unit,
+    onRename: (HistoryItem) -> Unit,
+    onClose: (HistoryItem) -> Unit,
+    onDelete: (HistoryItem) -> Unit,
+    onTogglePin: (HistoryItem) -> Unit,
+    onToggleArchive: (HistoryItem) -> Unit,
+) {
+    val visible = when (view) {
+        HistoryView.Active -> ui.items.filter { it.session.active && !it.archived }
+        HistoryView.Completed -> ui.items.filter { !it.session.active && !it.archived }
+        HistoryView.Pinned -> ui.items.filter { it.pinned }
+        HistoryView.Archived -> ui.items.filter { it.archived }
+    }
+    val sorted = visible.sortedWith(
+        compareByDescending<HistoryItem> { it.pinned }
+            .thenByDescending { it.session.active }
+            .thenByDescending { it.session.updatedAt },
+    )
+
+    if (sorted.isEmpty()) {
+        Box(Modifier.fillMaxWidth().padding(vertical = 72.dp), contentAlignment = Alignment.Center) {
+            Text(
+                when (view) {
+                    HistoryView.Active -> "No active sessions"
+                    HistoryView.Completed -> "No completed sessions"
+                    HistoryView.Pinned -> "Nothing pinned yet"
+                    HistoryView.Archived -> "Nothing archived"
+                },
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.testTag("history_empty"),
+            )
+        }
+        return
+    }
+
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        if (ui.truncated) {
+            item {
+                Text(
+                    "Results are capped; refine the search to see more.",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                    modifier = Modifier.padding(vertical = 4.dp),
+                )
+            }
+        }
+        items(sorted, key = { it.session.path }) { item ->
+            HistoryRow(
+                item = item,
+                busy = ui.busyPath == item.session.path,
+                busyLabel = ui.busyLabel,
+                onOpen = { onOpen(item) },
+                onFork = { onFork(item) },
+                onRename = { onRename(item) },
+                onClose = { onClose(item) },
+                onDelete = { onDelete(item) },
+                onTogglePin = { onTogglePin(item) },
+                onToggleArchive = { onToggleArchive(item) },
+            )
+        }
+    }
+}
+
+@Composable
+private fun HistoryRow(
+    item: HistoryItem,
+    busy: Boolean,
+    busyLabel: String?,
+    onOpen: () -> Unit,
+    onFork: () -> Unit,
+    onRename: () -> Unit,
+    onClose: () -> Unit,
+    onDelete: () -> Unit,
+    onTogglePin: () -> Unit,
+    onToggleArchive: () -> Unit,
+) {
+    val session = item.session
+    var menuOpen by remember { mutableStateOf(false) }
+
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(16.dp))
+            .clickable(onClick = onOpen)
+            .testTag("history_row_${session.sessionId}"),
+    ) {
+        Column(Modifier.padding(start = 16.dp, top = 12.dp, bottom = 12.dp, end = 4.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    Modifier
+                        .width(8.dp)
+                        .height(8.dp)
+                        .background(
+                            when {
+                                item.pinned -> MaterialTheme.colorScheme.tertiary
+                                session.active -> MaterialTheme.colorScheme.primary
+                                else -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f)
+                            },
+                            RoundedCornerShape(50),
+                        ),
+                )
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    text = session.title,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text = menuOpenLabel(session, item),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (session.active) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                )
+                Box {
+                    Icon(
+                        Icons.Default.MoreVert,
+                        contentDescription = "Session actions",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier
+                            .clickable { menuOpen = true }
+                            .padding(10.dp)
+                            .testTag("history_row_menu_${session.sessionId}"),
+                    )
+                    DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                        DropdownMenuItem(
+                            text = { Text(if (session.active) "Open" else "Resume") },
+                            leadingIcon = { Icon(Icons.Default.PlayArrow, contentDescription = null) },
+                            onClick = { menuOpen = false; onOpen() },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Fork") },
+                            leadingIcon = { Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null) },
+                            onClick = { menuOpen = false; onFork() },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Rename") },
+                            leadingIcon = { Icon(Icons.Default.DriveFileRenameOutline, contentDescription = null) },
+                            onClick = { menuOpen = false; onRename() },
+                        )
+                        DropdownMenuItem(
+                            text = { Text(if (item.pinned) "Unpin" else "Pin") },
+                            leadingIcon = { Icon(Icons.Default.PushPin, contentDescription = null) },
+                            onClick = { menuOpen = false; onTogglePin() },
+                        )
+                        DropdownMenuItem(
+                            text = { Text(if (item.archived) "Unarchive" else "Archive") },
+                            leadingIcon = { Icon(if (item.archived) Icons.Default.Unarchive else Icons.Default.Archive, contentDescription = null) },
+                            onClick = { menuOpen = false; onToggleArchive() },
+                        )
+                        if (session.active && session.paneId != null) {
+                            DropdownMenuItem(
+                                text = { Text("Close") },
+                                leadingIcon = { Icon(Icons.Default.Close, contentDescription = null) },
+                                onClick = { menuOpen = false; onClose() },
+                            )
+                        }
+                        DropdownMenuItem(
+                            text = { Text("Delete") },
+                            leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null) },
+                            onClick = { menuOpen = false; onDelete() },
+                            enabled = !session.active,
+                        )
+                    }
+                }
+            }
+            Spacer(Modifier.height(4.dp))
+            if (session.preview.isNotBlank()) {
+                Text(
+                    text = session.preview,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Spacer(Modifier.height(4.dp))
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = session.cwd,
+                    style = MaterialTheme.typography.labelSmall,
+                    fontFamily = FontFamily.Monospace,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                if (session.model != null) {
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        text = shortModel(session.model),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                    )
+                }
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text = relativeTime(session.updatedAt),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                )
+            }
+            if (busy) {
+                Spacer(Modifier.height(8.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(Modifier.width(14.dp).height(14.dp), strokeWidth = 2.dp)
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        busyLabel ?: "Working…",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
+            }
+        }
+    }
+}
+
+private fun menuOpenLabel(session: SessionCatalogItem, item: HistoryItem): String = when {
+    item.pinned -> "Pinned"
+    session.active -> "Running"
+    else -> relativeTime(session.updatedAt)
+}
+
+/** Trim provider/model to a short readable key, e.g. "opencode-go/gpt-5.6" → "gpt-5.6". */
+internal fun shortModel(model: String): String {
+    val slash = model.indexOf('/')
+    return if (slash in 1 until model.length - 1) model.substring(slash + 1) else model
+}
+
+/** Compact relative time for epoch-millisecond stamps ("now", "5m", "3h", "2d", else date). */
+internal fun relativeTime(epochMs: Double): String {
+    if (epochMs <= 0) return ""
+    val minutes = ((System.currentTimeMillis() - epochMs.toLong()) / 60_000L).coerceAtLeast(0)
+    return when {
+        minutes < 1 -> "now"
+        minutes < 60 -> "${minutes}m"
+        minutes < 24 * 60 -> "${minutes / 60}h"
+        minutes < 7 * 24 * 60 -> "${minutes / (24 * 60)}d"
+        else -> {
+            val date = java.text.SimpleDateFormat("MMM d", java.util.Locale.US).format(java.util.Date(epochMs.toLong()))
+            date
+        }
+    }
+}
+
+@Composable
+private fun ConfirmDialog(
+    title: String,
+    text: String,
+    confirmLabel: String,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+    destructive: Boolean = false,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = { Text(text) },
+        confirmButton = {
+            TextButton(onClick = onConfirm) {
+                Text(confirmLabel, color = if (destructive) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        },
+    )
+}
+
+@Composable
+private fun RenameDialog(
+    initial: String,
+    onConfirm: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var name by rememberSaveable { mutableStateOf(initial) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Rename session") },
+        text = {
+            OutlinedTextField(
+                value = name,
+                onValueChange = { name = it },
+                singleLine = true,
+                label = { Text("Session name") },
+                modifier = Modifier.fillMaxWidth(),
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = { onConfirm(name.trim()) }, enabled = name.isNotBlank()) { Text("Rename") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        },
+    )
+}
+
+@Composable
+private fun OfflineBanner(onRetry: () -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp)
+            .background(MaterialTheme.colorScheme.errorContainer, RoundedCornerShape(12.dp))
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(Icons.Default.WifiOff, contentDescription = null, tint = MaterialTheme.colorScheme.onErrorContainer)
+        Spacer(Modifier.width(10.dp))
+        Text("Disconnected from the bridge", color = MaterialTheme.colorScheme.onErrorContainer, modifier = Modifier.weight(1f))
+        Text(
+            "Retry",
+            color = MaterialTheme.colorScheme.onErrorContainer,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier
+                .clickable(onClick = onRetry)
+                .padding(6.dp)
+                .testTag("history_retry"),
+        )
+    }
+}
+
+@Composable
+private fun ErrorBanner(message: String, onDismiss: () -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp)
+            .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(12.dp))
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(Icons.Default.Refresh, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        Spacer(Modifier.width(10.dp))
+        Text(message, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
+    }
+}
+
+/** Stable skeleton rows so the list does not flash spinners. */
+@Composable
+private fun HistorySkeleton() {
+    Column(
+        Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        repeat(6) { index ->
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .height(76.dp)
+                    .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(16.dp))
+                    .padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(
+                    Modifier
+                        .width(8.dp)
+                        .height(8.dp)
+                        .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(50)),
+                )
+                Spacer(Modifier.width(10.dp))
+                Column(Modifier.weight(1f)) {
+                    Box(
+                        Modifier
+                            .fillMaxWidth(0.55f)
+                            .height(14.dp)
+                            .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(4.dp)),
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Box(
+                        Modifier
+                            .fillMaxWidth(0.8f)
+                            .height(10.dp)
+                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f), RoundedCornerShape(4.dp)),
+                    )
+                }
+                Spacer(Modifier.width(10.dp))
+                Box(
+                    Modifier
+                        .width(40.dp)
+                        .height(16.dp)
+                        .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(50)),
+                )
+            }
+            if (index == 5) {
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .height(76.dp)
+                        .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(16.dp))
+                        .padding(16.dp),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun rememberHistoryViewModel(): SessionHistoryViewModel {
+    val app = LocalContext.current.applicationContext as CockpitApp
+    return viewModel(
+        factory = SessionHistoryViewModel.factory(
+            app.container.bridge,
+            app.container.connectionStore,
+            app.container.sessionCatalogStore,
+        ),
+    )
+}
