@@ -94,6 +94,7 @@ import dev.cockpit.app.data.SessionEntry
 import dev.cockpit.app.data.QuestionEntry
 import dev.cockpit.app.data.SlashCommandInfo
 import dev.cockpit.app.data.entryText
+import dev.cockpit.app.ui.components.AssistantMarkdown
 import dev.cockpit.app.ui.components.QuestionCard
 
 import dev.cockpit.app.ui.motion.CockpitMotion
@@ -680,10 +681,9 @@ private fun AssistantBubble(
                 "text" -> {
                     val text = block.text?.trim()
                     if (!text.isNullOrBlank()) {
-                        Text(
-                            text,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurface,
+                        AssistantMarkdown(
+                            content = text,
+                            modifier = Modifier.padding(bottom = 4.dp),
                         )
                     }
                 }
