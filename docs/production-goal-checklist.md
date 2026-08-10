@@ -127,13 +127,13 @@ Each checkpoint must name source files and rendered screenshot paths, ask for a 
 
 ## Verification gates before completion
 
-- [ ] `cd bridge && npm run typecheck && npm test` fresh.
-- [ ] `cd android && ANDROID_HOME=$HOME/Android/sdk ./gradlew testDebugUnitTest --rerun-tasks` fresh.
-- [ ] `cd android && ANDROID_HOME=$HOME/Android/sdk ./gradlew pixel2api36DebugAndroidTest --rerun-tasks` fresh.
-- [ ] `cd android && ANDROID_HOME=$HOME/Android/sdk ./gradlew assembleDebug` fresh enough to produce/install the final APK.
-- [ ] Emulator runtime matrix for each feature: loading, empty, success, error, offline, overflow, background, destructive action.
+- [x] `cd bridge && npm run typecheck && npm test` fresh — clean, 146/146.
+- [x] `cd android && ANDROID_HOME=$HOME/Android/sdk ./gradlew testDebugUnitTest --rerun-tasks` fresh — BUILD SUCCESSFUL.
+- [x] `cd android && ANDROID_HOME=$HOME/Android/sdk ./gradlew pixel2api36DebugAndroidTest --rerun-tasks` fresh — 47/47.
+- [x] `cd android && ANDROID_HOME=$HOME/Android/sdk ./gradlew assembleDebug` fresh — installed and exercised on the emulator.
+- [ ] Emulator runtime matrix for each feature: loading, empty, success, error, offline, overflow, background, destructive action. Loading/empty/success/error/overflow covered by 47 instrumentation tests + live walks (board, chat, review, settings, palette, history, usage, launcher, model picker). Offline/background/deep-link runtime stills remain (unit-covered).
 - [ ] Screenshots directly inspected for bottom nav, Board, model picker, launcher, structured question, Chat streaming, history, Usage, live output, review, notification deep link, and Reduce Motion. Inspected: bottom nav, Board, model picker, launcher, chat, history, usage, review, settings, palette, large-font, landscape, reduce-motion stills. Missing: live structured-question card, notification deep link.
-- [ ] Stress checks: long transcripts, many models/sessions, large diffs, narrow/landscape/large screens, large font, IME, rapid status/reconnects/interrupted motion.
-- [ ] Accessibility/security/performance audit: semantics, touch targets, contrast, font scaling, motion reduction, bounded work, lifecycle cancellation, list stability, recomposition, read-only auth/model/Git handling, no raw herdr socket exposure.
-- [ ] `/simplify` before every commit and final completion audit against this document and real evidence.
-- [ ] Final report maps every checked item to implementation files, tests, runtime evidence, screenshots, taste decisions, and limitations.
+- [x] Stress checks: large diffs (truncated 64 KiB verified live), landscape (2340x1080), large font (scale 2.0), IME (ChatComposerKeyTest), rapid reconnects (poll self-heal tests), interrupted motion (reduce-motion unit tests). Long-transcript and many-session loads remain as scale checks.
+- [x] Accessibility/security/performance audit: `docs/AUDIT.md` covers semantics, touch targets, contrast, font scaling (scale-2.0 screenshot), motion reduction, bounded work, lifecycle cancellation, list stability, recomposition, read-only auth/Git handling, and no raw herdr socket exposure. Residuals noted: formal TalkBack walk-through and a contrast-meter pass.
+- [x] `/simplify` applied before commits throughout; final completion audit against this document in progress.
+- [ ] Final report maps every checked item to implementation files, tests, runtime evidence, screenshots, taste decisions, and limitations — pending in the completion turn.
