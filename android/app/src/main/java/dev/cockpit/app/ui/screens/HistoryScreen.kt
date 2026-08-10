@@ -297,7 +297,7 @@ private fun HistoryRow(
             .fillMaxWidth()
             .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(16.dp))
             .clickable(onClick = onOpen)
-            .testTag("history_row_${session.sessionId}"),
+            .testTag("history_row_${session.id}"),
     ) {
         Column(Modifier.padding(start = 16.dp, top = 12.dp, bottom = 12.dp, end = 4.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -338,7 +338,7 @@ private fun HistoryRow(
                         modifier = Modifier
                             .clickable { menuOpen = true }
                             .padding(10.dp)
-                            .testTag("history_row_menu_${session.sessionId}"),
+                            .testTag("history_row_menu_${session.id}"),
                     )
                     DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                         DropdownMenuItem(

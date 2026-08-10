@@ -346,18 +346,18 @@ data class SessionCatalogResponse(
 
 @Serializable
 data class SessionCatalogItem(
+    val id: String,
     val path: String,
-    val sessionId: String,
-    val title: String,
     val cwd: String,
-    val model: String? = null,
-    val updatedAt: Double,
-    val messageCount: Int,
+    val title: String,
     val preview: String = "",
+    val createdAt: Double = 0.0,
+    val updatedAt: Double,
+    val model: String? = null,
     val active: Boolean = false,
     val paneId: String? = null,
     val workspaceId: String? = null,
-    val agentStatus: String? = null,
+    val status: String? = null,
 )
 
 @Serializable

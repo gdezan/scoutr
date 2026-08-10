@@ -48,8 +48,8 @@ class HistoryScreenTest {
 
     private val catalogBody = """
         {"ok":true,"truncated":false,"sessions":[
-          {"path":"/root/sessions/abc.jsonl","sessionId":"abc","title":"Fix billing bug","cwd":"/repo/a","model":"openai-codex/gpt-5.4","updatedAt":${System.currentTimeMillis()}.0,"messageCount":12,"preview":"User asked to fix the billing math","active":true,"paneId":"pane1","workspaceId":"ws1","agentStatus":"blocked"},
-          {"path":"/root/sessions/def.jsonl","sessionId":"def","title":"Docs refresh","cwd":"/repo/b","model":"anthropic/claude-sonnet-4-6","updatedAt":${System.currentTimeMillis() - 3_600_000}.0,"messageCount":3,"preview":"Update the README","active":false}
+          {"id":"abc","path":"/root/sessions/abc.jsonl","title":"Fix billing bug","cwd":"/repo/a","model":"openai-codex/gpt-5.4","updatedAt":${System.currentTimeMillis()}.0,"preview":"User asked to fix the billing math","active":true,"paneId":"pane1","workspaceId":"ws1","status":"blocked"},
+          {"id":"def","path":"/root/sessions/def.jsonl","title":"Docs refresh","cwd":"/repo/b","model":"anthropic/claude-sonnet-4-6","updatedAt":${System.currentTimeMillis() - 3_600_000}.0,"preview":"Update the README","active":false}
         ]}
     """.trimIndent()
 

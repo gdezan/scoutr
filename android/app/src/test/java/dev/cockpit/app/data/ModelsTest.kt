@@ -68,4 +68,37 @@ class ModelsTest {
         )
         assertEquals("[bash] hello world", entryText(content))
     }
+    @Test
+    fun `session catalog item decodes from the bridge shape`() {
+        // Regression: the DTO once expected `sessionId` while the bridge sends
+        // `id`, so every catalog response silently failed to decode and the
+        // Sessions screen stayed empty. Pin the real wire shape.
+        val json = """
+            {"id":"019f-abc","path":"/home/u/.pi/agent/sessions/--tmp--/x.jsonl",
+             "cwd":"/tmp","title":"Reply with a demo",
+             "preview":"Reply with a demo","createdAt":1786392951904,
+             "updatedAt":1786392956741.0754,"model":"opencode-go/deepseek-v4-flash",
+             "active":false,"paneId":null,"workspaceId":null,"status":"completed"}
+        """.trimIndent()
+        val item = Json.decodeFromString(SessionCatalogItem.serializer(), json)
+        assertEquals("019f-abc", item.id)
+        assertEquals("/tmp", item.cwd)
+        assertFalse(item.active)
+        assertEquals("completed", item.status)
+    }
+
+    @Test
+    fun `session catalog response decodes a full payload`() {
+        val json = """
+            {"ok":true,"truncated":false,"sessions":[
+              {"id":"a","path":"/p/a.jsonl","cwd":"/a","title":"t","preview":"",
+               "createdAt":1,"updatedAt":2.5,"model":null,"active":true,
+               "paneId":"w1:p1","workspaceId":"w1","status":"working"}
+            ]}
+        """.trimIndent()
+        val response = Json.decodeFromString(SessionCatalogResponse.serializer(), json)
+        assertEquals(1, response.sessions.size)
+        assertTrue(response.sessions[0].active)
+        assertEquals("w1:p1", response.sessions[0].paneId)
+    }
 }
