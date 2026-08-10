@@ -8,6 +8,7 @@ import { UsageService, type UsageSnapshot } from "./usage/providers.js";
 import { loadOrCreateConfig, type BridgeConfig } from "./config.js";
 import { NtfyPublisher } from "./notify.js";
 import { StatusTracker } from "./status.js";
+import { BoardDetailCache, cleanActivity } from "./board-detail.js";
 import { listDirs, DirListingError } from "./dirs.js";
 import { readModelsCatalog } from "./pi/models.js";
 import { createSession, controlSession, launchStoredSession, SessionsError } from "./sessions.js";
@@ -95,6 +96,8 @@ export function createCockpitServer(deps: ServerDeps, options: CreateServerOptio
 
   // Track status entry times so cards can show "time in state".
   const tracker = new StatusTracker();
+  // Bounded per-agent model/latest-activity detail, memoized by file mtime.
+  const boardDetail = new BoardDetailCache();
   feed.onMessage((message) => {
     if (!("kind" in message)) return;
     if (message.kind === "pane_agent_status_changed" || message.kind === "pane.agent_status_changed") {
@@ -105,7 +108,10 @@ export function createCockpitServer(deps: ServerDeps, options: CreateServerOptio
     } else if (message.kind === "pane_closed" || message.kind === "pane.exited") {
       const data = message.data;
       const paneId = typeof data.pane_id === "string" ? data.pane_id : "";
-      if (paneId) tracker.note(paneId, "closed");
+      if (paneId) {
+        tracker.note(paneId, "closed");
+        boardDetail.prune(new Set(snapshotPaths(feed.snapshot)));
+      }
     }
   });
 
@@ -256,7 +262,8 @@ export function createCockpitServer(deps: ServerDeps, options: CreateServerOptio
         sendJson(response, 503, { ok: false, error: "no herdr snapshot yet" });
         return;
       }
-      sendJson(response, 200, { ok: true, agents: deriveAgentCards(snapshot, (p) => tracker.since(p)) });
+      const cards = await deriveAgentCardsWithDetail(snapshot, (p) => tracker.since(p), boardDetail);
+      sendJson(response, 200, { ok: true, agents: cards });
       return;
     }
 
@@ -572,6 +579,12 @@ export interface AgentCard {
   terminalTitle?: string;
   blocked?: boolean;
   statusSinceMs?: number;
+  /** Active model from the session file (bounded tail read). */
+  model?: string | null;
+  /** Latest meaningful transcript line (bounded). */
+  latestActivity?: string;
+  /** Epoch ms of the latest activity record. */
+  latestActivityAtMs?: number | null;
 }
 
 export function deriveAgentCards(
@@ -597,6 +610,33 @@ export function deriveAgentCards(
     cards.push(card);
   }
   return cards;
+}
+
+/** Cards enriched with bounded model + latest activity from their session files. */
+async function deriveAgentCardsWithDetail(
+  snapshot: SessionSnapshot,
+  statusSince: (paneId: string) => number | undefined,
+  cache: BoardDetailCache,
+): Promise<AgentCard[]> {
+  const cards = deriveAgentCards(snapshot, statusSince);
+  await Promise.all(cards.map(async (card) => {
+    if (!card.sessionPath) return;
+    const detail = await cache.detailFor(card.sessionPath).catch(() => null);
+    if (!detail) return;
+    card.model = detail.model;
+    card.latestActivity = detail.latestActivity ? cleanActivity(detail.latestActivity) : undefined;
+    card.latestActivityAtMs = detail.latestActivityAtMs;
+  }));
+  return cards;
+}
+
+/** Session paths currently in the snapshot, for cache pruning. */
+function snapshotPaths(snapshot: SessionSnapshot | null): Set<string> {
+  const paths = new Set<string>();
+  for (const agent of snapshot?.agents ?? []) {
+    if (agent.agent_session?.kind === "path") paths.add(agent.agent_session.value);
+  }
+  return paths;
 }
 
 // ── Session transcript read (read-only) ───────────────────────────────

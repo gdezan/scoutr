@@ -13,13 +13,13 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.WifiOff
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -28,6 +28,8 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
@@ -40,6 +42,12 @@ import dev.cockpit.app.data.AgentStatus
 import dev.cockpit.app.CockpitApp
 import dev.cockpit.app.state.BoardViewModel
 
+/**
+ * Attention-first Board. Phase vocabulary is the section header plus a per-card
+ * pill; cards carry the active model and the latest meaningful transcript line
+ * so the user reads "what is it doing now" without opening the session.
+ * Needs-you agents sort first and read strongest (filled accent pill + border).
+ */
 @Composable
 fun BoardScreen(
     onOpenAgent: (AgentCard) -> Unit,
@@ -49,9 +57,7 @@ fun BoardScreen(
     val ui by viewModel.ui.collectAsState()
 
     if (ui.loading && ui.board.total == 0) {
-        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            CircularProgressIndicator()
-        }
+        BoardSkeleton(modifier)
         return
     }
 
@@ -95,7 +101,7 @@ fun BoardScreen(
 }
 
 /** Adds a section header + its agent cards to the LazyList. */
-private fun androidx.compose.foundation.lazy.LazyListScope.boardSection(
+private fun LazyListScope.boardSection(
     title: String,
     agents: List<AgentCard>,
     onOpenAgent: (AgentCard) -> Unit,
@@ -127,7 +133,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.boardSection(
         }
     }
     items(agents, key = { it.paneId }) { agent ->
-        AgentCardRow(agent, onClick = { onOpenAgent(agent) })
+        AgentCardRow(agent, onClick = { onOpenAgent(agent) }, modifier = Modifier.animateItem())
     }
 }
 
@@ -160,44 +166,78 @@ private fun DisconnectedBanner(onRetry: () -> Unit) {
 }
 
 @Composable
-private fun AgentCardRow(agent: AgentCard, onClick: () -> Unit) {
+private fun AgentCardRow(agent: AgentCard, onClick: () -> Unit, modifier: Modifier = Modifier) {
     val status = AgentStatus.fromWire(agent.status)
+    val isNeedsYou = status == AgentStatus.NeedsYou
+    val accent = statusColor(status)
+
     Card(
         onClick = onClick,
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         shape = RoundedCornerShape(16.dp),
-        modifier = Modifier.fillMaxWidth().testTag("agent_card_${agent.paneId}"),
+        border = androidx.compose.foundation.BorderStroke(
+            width = if (isNeedsYou) 1.dp else 0.dp,
+            color = if (isNeedsYou) accent else Color.Transparent,
+        ),
+        modifier = modifier
+            .fillMaxWidth()
+            .testTag("agent_card_${agent.paneId}"),
     ) {
         Row(
             Modifier.padding(16.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Box(
-                Modifier
-                    .width(6.dp)
-                    .height(6.dp)
-                    .background(statusColor(status), RoundedCornerShape(50)),
-            )
-            Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
-                Text(
-                    text = agent.title?.takeIf { it.isNotBlank() } ?: agent.agent,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Spacer(Modifier.height(3.dp))
-                Text(
-                    text = agent.cwd ?: agent.workspaceId,
-                    style = MaterialTheme.typography.bodySmall,
-                    fontFamily = FontFamily.Monospace,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        Modifier
+                            .width(8.dp)
+                            .height(8.dp)
+                            .background(accent, RoundedCornerShape(50)),
+                    )
+                    Spacer(Modifier.width(10.dp))
+                    Text(
+                        text = agent.title?.takeIf { it.isNotBlank() } ?: agent.agent,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+                agent.latestActivity?.takeIf { it.isNotBlank() }?.let { activity ->
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        text = activity,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                Spacer(Modifier.height(6.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = agent.cwd ?: agent.workspaceId,
+                        style = MaterialTheme.typography.labelSmall,
+                        fontFamily = FontFamily.Monospace,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                    agent.model?.let { model ->
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            text = shortModel(model),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f),
+                            fontFamily = FontFamily.Monospace,
+                        )
+                    }
+                }
             }
-            Spacer(Modifier.width(10.dp))
+            Spacer(Modifier.width(12.dp))
             StatusPill(status, agent.statusSinceMs)
         }
     }
@@ -257,6 +297,67 @@ internal fun timeInState(sinceMs: Double?): String? {
         minutes < 60 -> "${minutes}m"
         minutes < 24 * 60 -> "${minutes / 60}h"
         else -> "${minutes / (24 * 60)}d"
+    }
+}
+
+/** Stable skeleton rows (fixed geometry, no spinner flash) while first load runs. */
+@Composable
+private fun BoardSkeleton(modifier: Modifier = Modifier) {
+    Column(
+        modifier = modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 8.dp).testTag("board_skeleton"),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        repeat(5) { index ->
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .height(92.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(MaterialTheme.colorScheme.surface)
+                    .padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(
+                    Modifier
+                        .width(8.dp)
+                        .height(8.dp)
+                        .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(50)),
+                )
+                Spacer(Modifier.width(10.dp))
+                Column(Modifier.weight(1f)) {
+                    Box(
+                        Modifier
+                            .fillMaxWidth(0.5f)
+                            .height(14.dp)
+                            .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(4.dp)),
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Box(
+                        Modifier
+                            .fillMaxWidth(0.9f)
+                            .height(10.dp)
+                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f), RoundedCornerShape(4.dp)),
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Box(
+                        Modifier
+                            .fillMaxWidth(0.6f)
+                            .height(10.dp)
+                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f), RoundedCornerShape(4.dp)),
+                    )
+                }
+                Spacer(Modifier.width(10.dp))
+                Box(
+                    Modifier
+                        .width(52.dp)
+                        .height(20.dp)
+                        .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(50)),
+                )
+            }
+            if (index == 4) {
+                Box(Modifier.fillMaxWidth().height(4.dp))
+            }
+        }
     }
 }
 

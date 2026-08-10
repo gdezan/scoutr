@@ -92,6 +92,28 @@ describe("cockpit bridge HTTP/WS API", { skip }, () => {
     }
   });
 
+  test("agents enrich cards with bounded model and latest activity", async () => {
+    const { status, body } = await getJson("/api/agents");
+    assert.equal(status, 200);
+    const cards = (body as { agents: Array<{
+      paneId: string;
+      sessionPath?: string;
+      model?: string | null;
+      latestActivity?: string;
+      latestActivityAtMs?: number | null;
+    }> }).agents;
+    for (const card of cards) {
+      if (!card.sessionPath) continue;
+      // Fields are always present on cards with a session path (values may be null).
+      assert.ok("model" in card);
+      assert.ok("latestActivity" in card);
+      if (typeof card.latestActivity === "string") {
+        assert.ok(card.latestActivity.length <= 160);
+      }
+      assert.ok("latestActivityAtMs" in card);
+    }
+  });
+
   test("commands returns the slash-command catalog", async () => {
     const { status, body } = await getJson("/api/commands");
     assert.equal(status, 200);

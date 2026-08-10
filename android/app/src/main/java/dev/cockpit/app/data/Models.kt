@@ -46,6 +46,12 @@ data class AgentCard(
     val sessionPath: String? = null,
     /** Epoch ms when the agent entered its current status (bridge-stamped). */
     val statusSinceMs: Double? = null,
+    /** Active model from the session file (bounded tail read). */
+    val model: String? = null,
+    /** Latest meaningful transcript line (bounded). */
+    val latestActivity: String? = null,
+    /** Epoch ms of the latest activity record. */
+    val latestActivityAtMs: Double? = null,
 ) {
     /** Derived: blocked agents are the ones that need the user. */
     val blocked: Boolean get() = status == "blocked"
