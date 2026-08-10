@@ -114,6 +114,8 @@ usage + RPC + push verified by a vision model per AGENTS.md).
 
 - **Live terminal rendering** — herdr `terminal observe/control` is the v2
   path; explicitly not in v1.
+- **Setting a specific thinking level** headlessly — the chat controls only
+  cycle it (`shift+tab`); direct set needs the retired `pi --mode rpc` layer.
 - **Instant push to a killed app** — needs FCM (cloud) or a foreground service;
   deliberately not built.
 - **Multi-host pairing** — one bridge/host in v1.

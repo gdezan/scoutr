@@ -130,3 +130,41 @@ pi agents, as an alternative to Moshi's paid herdr integration.
   the request path instead.
 - Robolectric 4.14 caps at targetSdk 35, so JVM ViewModel tests pin
   `@Config(sdk = [35])` and idle the main looper for viewModelScope work.
+## Sessions v2 (layer 2) — Cursor-iOS design language
+
+Design north star is the Cursor iOS app (docs/cursor-ios-design-brief.md): a
+near-black canvas with off-white type and one electric-blue accent reserved for
+AI-owned states. Applied per the brief's patterns (source of truth:
+android/app/src/main/java/dev/cockpit/app/ui/theme/DESIGN.md, committed with
+layer 2):
+
+- **Dark-first, always**: `CockpitTheme` forces `darkTheme = true` (emulator
+  light mode was rendering light) and the window + system bars are dark in both
+  system modes (`windowLightStatusBar/NavigationBar` false + `enableEdgeToEdge`,
+  added in layer 3 after a device check).
+- **One accent color**: blue `#5B8CFF` only for AI-owned states (active run
+  pill, "needs you", composer send). User bubbles are neutral surfaces, not
+  primary (brief: "user vs AI" visual split).
+- **Mono only for code/data/paths**: tool output, model ids, workspace paths
+  (brief's type hierarchy).
+- **Chat opens at the last message** and follows while pinned; scrolling up
+  shows the scroll-to-end FAB (brief's "jump to latest" pattern). Auto-scroll
+  is guarded (`scrollToItem` + `scrollBy(Float.MAX_VALUE)`, which clamps; a
+  single `scrollToItem(index, Int.MAX_VALUE)` overflows).
+- **Tool calls are one muted chip**, collapsed, tap to expand command + output
+  inline; thinking blocks dimmed, hidden by the details toggle (brief: activity
+  details are opt-in).
+- **Motion 150-250ms** via `animateItem`/`AnimatedVisibility` (brief's
+  restraint).
+
+## Session controls — v1 limits
+
+- Abort (`escape`), Retry (re-send last user message via `agent.prompt`),
+  Compact and Fork (typed `/compact` `/fork` + Enter), Rename (workspace
+  label), Cycle thinking (`shift+tab`) are grounded in pi's documented TUI
+  commands (docs: keybindings.md — `escape` = app.interrupt, `shift+tab` =
+  app.thinking.cycle, `/compact`, `/fork`).
+- **Setting a specific thinking level** (e.g. "high") headlessly is a v1 limit:
+  only cycling via `shift+tab` works through a pane; a direct
+  `setThinkingLevel` would need pi's `--mode rpc` layer, which was retired.
+- Controls type into the live pane, so they act on pi's real TUI state.
