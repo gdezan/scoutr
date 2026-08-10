@@ -9,6 +9,8 @@ import dev.cockpit.app.data.DirListingResponse
 import dev.cockpit.app.data.HealthResponse
 import dev.cockpit.app.data.LiveOutputResponse
 import dev.cockpit.app.data.ModelsCatalogResponse
+import dev.cockpit.app.data.RepoDiffResponse
+import dev.cockpit.app.data.RepoOverviewResponse
 import dev.cockpit.app.data.SessionCatalogResponse
 import dev.cockpit.app.data.SessionReadResponse
 import dev.cockpit.app.data.UsageResponse
@@ -115,6 +117,18 @@ class BridgeClient(
     suspend fun dirs(path: String? = null): DirListingResponse =
         call("/api/dirs", query = if (path == null) emptyMap() else mapOf("path" to path)) {
             json.decodeFromString(DirListingResponse.serializer(), it)
+        }
+
+    /** Read-only git overview (branch, status, recent log) for an allowed repo. */
+    suspend fun repoOverview(path: String): RepoOverviewResponse =
+        call("/api/repo", query = mapOf("path" to path)) {
+            json.decodeFromString(RepoOverviewResponse.serializer(), it)
+        }
+
+    /** Bounded, read-only git diff against a ref (default HEAD). */
+    suspend fun repoDiff(path: String, base: String = "HEAD"): RepoDiffResponse =
+        call("/api/repo/diff", query = mapOf("path" to path, "base" to base)) {
+            json.decodeFromString(RepoDiffResponse.serializer(), it)
         }
 
     /** Full model catalog from pi's models-store.json. */

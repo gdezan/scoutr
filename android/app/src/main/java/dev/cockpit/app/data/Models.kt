@@ -360,3 +360,46 @@ data class ControlResponse(
     val ok: Boolean,
     val error: String? = null,
 )
+
+@Serializable
+data class RepoOverviewResponse(
+    val ok: Boolean = true,
+    val path: String = "",
+    val root: String = "",
+    val branch: String? = null,
+    val status: List<RepoStatusEntry> = emptyList(),
+    val statusTruncated: Boolean = false,
+    val log: List<RepoCommit> = emptyList(),
+    val logTruncated: Boolean = false,
+    val error: String? = null,
+)
+
+@Serializable
+data class RepoStatusEntry(
+    val code: String = "",
+    val path: String = "",
+)
+
+@Serializable
+data class RepoCommit(
+    val hash: String = "",
+    val subject: String = "",
+    val author: String = "",
+    val date: Long = 0,
+)
+
+@Serializable
+data class RepoDiffResponse(
+    val ok: Boolean = true,
+    val diff: String = "",
+    val truncated: Boolean = false,
+    val stat: List<RepoDiffFileStat> = emptyList(),
+    val error: String? = null,
+)
+
+@Serializable
+data class RepoDiffFileStat(
+    val path: String = "",
+    val additions: Int = 0,
+    val deletions: Int = 0,
+)

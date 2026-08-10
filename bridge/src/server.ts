@@ -11,6 +11,7 @@ import { NtfyPublisher } from "./notify.js";
 import { StatusTracker } from "./status.js";
 import { BoardDetailCache, cleanActivity } from "./board-detail.js";
 import { listDirs, DirListingError } from "./dirs.js";
+import { reviewOverview, reviewDiff, ReviewError } from "./review.js";
 import { readModelsCatalog } from "./pi/models.js";
 import { createSession, controlSession, launchStoredSession, SessionsError } from "./sessions.js";
 import { LiveOutputError, readLiveOutput } from "./live-output.js";
@@ -468,6 +469,25 @@ export function createCockpitServer(deps: ServerDeps, options: CreateServerOptio
         sendJson(response, 200, { ok: true, listing: listDirs(requested ?? process.env.HOME ?? "") });
       } catch (error) {
         const status = error instanceof DirListingError ? 400 : 500;
+        sendJson(response, status, {
+          ok: false,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+      return;
+    }
+
+    if (request.method === "GET" && (pathname === "/api/repo" || pathname === "/api/repo/diff")) {
+      const requestedPath = url.searchParams.get("path") ?? "";
+      try {
+        if (pathname === "/api/repo") {
+          sendJson(response, 200, { ok: true, ...(await reviewOverview(requestedPath)) });
+        } else {
+          const base = url.searchParams.get("base") ?? "HEAD";
+          sendJson(response, 200, { ok: true, ...(await reviewDiff(requestedPath, base)) });
+        }
+      } catch (error) {
+        const status = error instanceof ReviewError ? error.status : 500;
         sendJson(response, status, {
           ok: false,
           error: error instanceof Error ? error.message : String(error),

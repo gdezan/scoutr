@@ -26,6 +26,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.BarChart
+import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Search
@@ -65,6 +66,7 @@ import dev.cockpit.app.state.ChatViewModel
 import dev.cockpit.app.state.CommandPaletteViewModel
 import dev.cockpit.app.state.SessionHistoryViewModel
 import dev.cockpit.app.state.UsageViewModel
+import dev.cockpit.app.state.ReviewViewModel
 import dev.cockpit.app.ui.screens.BoardScreen
 import dev.cockpit.app.ui.screens.NewSessionSheet
 import dev.cockpit.app.ui.screens.ChatScreen
@@ -72,6 +74,7 @@ import dev.cockpit.app.ui.screens.CommandPalette
 import dev.cockpit.app.ui.screens.ConnectScreen
 import dev.cockpit.app.ui.screens.HistoryScreen
 import dev.cockpit.app.ui.screens.UsageScreen
+import dev.cockpit.app.ui.screens.ReviewScreen
 import dev.cockpit.app.ui.theme.CockpitTheme
 
 private object Routes {
@@ -80,6 +83,8 @@ private object Routes {
     const val SESSIONS = "sessions"
     const val CHAT = "chat/{paneId}?sessionPath={sessionPath}&status={status}"
     const val USAGE = "usage"
+
+    const val REVIEW = "review"
 
     fun chat(paneId: String, sessionPath: String?, status: String): String =
         "chat/$paneId?sessionPath=${sessionPath?.let { java.net.URLEncoder.encode(it, "UTF-8") } ?: ""}&status=$status"
@@ -90,6 +95,7 @@ private enum class Destination(val route: String, val label: String, val icon: I
     Board(Routes.BOARD, "Board", Icons.Default.GridView),
     Sessions(Routes.SESSIONS, "Sessions", Icons.Default.History),
     Usage(Routes.USAGE, "Usage", Icons.Default.BarChart),
+    Review(Routes.REVIEW, "Review", Icons.Default.Code),
 }
 
 class MainActivity : ComponentActivity() {
@@ -159,7 +165,7 @@ private fun CockpitAppNav() {
     Box {
         Scaffold(
         bottomBar = {
-            if (currentRoute in setOf(Routes.BOARD, Routes.SESSIONS, Routes.USAGE)) {
+            if (currentRoute in setOf(Routes.BOARD, Routes.SESSIONS, Routes.USAGE, Routes.REVIEW)) {
                 CockpitBottomBar(
                     currentRoute = currentRoute,
                     needsYouCount = rememberNeedsYouCount(boardViewModel),
@@ -275,6 +281,18 @@ private fun CockpitAppNav() {
                         viewModel = usageViewModel,
                         modifier = Modifier.padding(innerUsage),
                     )
+
+            composable(Routes.REVIEW) {
+                val reviewViewModel: ReviewViewModel = viewModel(
+                    factory = ReviewViewModel.factory(container.bridge, container.connectionStore),
+                )
+                Scaffold(topBar = { AppTopBar("Review", onSearch = openPalette) }) { innerReview ->
+                    ReviewScreen(
+                        viewModel = reviewViewModel,
+                        modifier = Modifier.padding(innerReview),
+                    )
+                }
+            }
                 }
             }
         }
