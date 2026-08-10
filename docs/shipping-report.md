@@ -3,9 +3,10 @@
 **Cockpit**: a self-hosted Android cockpit for your herdr panes and terminal
 agents. Built as a free alternative to Moshi's paid herdr integration.
 
-Status: **v0.1.0 shipped** — all six layers plus the RPC layer, verified live on
-this machine (artemis, herdr 0.8.0 / protocol 19). Zero cloud or subscription
-dependencies.
+Status: **v0.2.0 shipped** — all six layers plus the RPC round, QR pairing, and
+the sessions-v2 round (crash fix, chat UX, pane-native sessions + controls).
+Verified live on this machine (artemis, herdr 0.8.0 / protocol 19). Zero cloud
+or subscription dependencies.
 
 ## What shipped
 
@@ -18,18 +19,22 @@ dependencies.
 | 5 | ntfy push: bridge publishes blocked events; app polls + shows notifications | live push E2E, commits edc937a, 4dad68b |
 | 6 | Polish: status-since pills, header counts, dark-first fix, empty states | taste-reviewed board, commit ea30b0b |
 | 7 | RPC: app-owned `pi --mode rpc` sessions + programmatic ask_user_question answers; done push | commit c6f966d (this round) |
-| 8 | QR pairing: `cockpit-bridge pair` prints a scannable code; app Connect has **Scan QR code** (zxing) | this round, pending commit |
+| 8 | QR pairing: `cockpit-bridge pair` prints a scannable code; app Connect has **Scan QR code** (zxing) | commit ea85d6f |
+| 9 | Sessions v2 layer 0: chat duplicate-key scroll crash fix (bridge since-cursor by file position + app dedupe) | commit a90bd8e, GMD DuplicateKeyCrashTest |
+| 10 | Sessions v2 layer 2: Cursor-iOS design language chat (auto-scroll, scroll-end FAB, tool chips, thinking toggle) | commit aefb9e5, DESIGN.md |
+| 11 | Sessions v2 layer 3: pane-native sessions — folder+model create sheet, POST /api/sessions, session controls (abort/retry/compact/fork/rename/cycle thinking) | commit 9a38637 (this round) |
 
 ## Confirmed evidence
 
 **Gates (run fresh for this report)**
-- Bridge: `npx tsc --noEmit` clean; `npm test` **36/36** — herdr socket client
-  against the live socket, pi JSONL parser, usage adapters, RPC client against a
-  fake-pi subprocess, `/api/rpc` HTTP routes, ntfy publisher (blocked + done).
+- Bridge: `npx tsc --noEmit` clean; `npm test` **65/65** — herdr socket client
+  against the live socket, pi JSONL parser, usage adapters, ntfy publisher
+  (blocked + done), sessions orchestration + HTTP routes (fake herdr).
 - Android: `./gradlew assembleDebug` builds an installable APK (reinstalled on
-  the emulator); JVM unit tests **8/8** (models, board time-format, RPC DTO
-  decode); Compose UI tests **3/3** on Gradle Managed Device `pixel2api36`
-  (aosp-atd) — re-run with `--rerun-tasks` (cold device boot, ~1h40m).
+  the emulator and the physical S24 over wireless adb); JVM unit tests **29/29**
+  (models, pairing payload, board formats, chat merge, new-session VM via
+  Robolectric + MockWebServer); Compose UI tests **12/12** on Gradle Managed
+  Device `pixel2api36` (aosp-atd) — re-run with `--rerun-tasks` (warm run ~2m).
 - Services: `cockpit-bridge` and `ntfy` systemd user units active.
 
 **Tailnet (through `tailscale serve`)**
@@ -56,7 +61,20 @@ dependencies.
 5. Push (blocked) — a genuinely blocked pi (steered to ask_user_question)
    produced an ntfy message → app polled the topic → notification with the
    unicode "π needs you" title.
-6. Push (done) — publisher emits "π finished" on `agent_status done`; app-side
+6. Sessions v2 layer 3 (create flow) — the board **+** FAB opens the create
+   sheet: folder picker rooted at the bridge home (real host dirs, ~/Dev quick
+   pick), model catalog grouped by provider (GPT-5.3 Codex Spark, GPT-5.4,
+   GPT-5.4 mini, …). Selecting a folder + model and Create spawned a fresh
+   herdr workspace `w4W` with pane `w4W:p1`, launched `pi --model gpt-5.4`
+   (herdr detected agent pi / idle), and opened its chat; steering it produced
+   a live transcript (pi replied `CREATE_E2E_OK`). The header **⋮** menu shows
+   Abort / Retry / Compact / Fork / Rename… / Cycle thinking; Rename… opens a
+   dialog and renames the workspace through the bridge (`app-rename-2`
+   confirmed in the live snapshot). Screenshots 30–32.
+7. Dark theme on device — final APK on the physical Galaxy S24: near-black
+   status and navigation bars with white icons in both system modes
+   (`windowLightStatusBar/NavigationBar` false + `enableEdgeToEdge`).
+8. Push (done) — publisher emits "π finished" on `agent_status done`; app-side
    delivery verified by publishing the same payload → notification shade showed
    "Cockpit" + "π finished". Screenshot 12-done-push.png.
 7. QR pairing — `cockpit-bridge pair` prints a QR whose module matrix is bit-identical to the payload encoded by the reference encoder (verified by decoding the rendered code with zbarimg); the app's **Scan QR code** opens the zxing capture activity (verified on the emulator with the camera permission flow). The camera→decode step itself is a documented approximation: the headless emulator's virtual-scene camera cannot present a QR to the lens, so the scan was not completed end-to-end on-device; zxing's decode path and the payload round-trip are each verified independently.
@@ -133,4 +151,5 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 e4d972e bridge layer 1 · 3b0326e bridge layer 2 · 7baab7e vision workflow ·
 d9f76bd android 3/4 · aacdc31 E2E fixes + bottom nav · edc937a bridge ntfy ·
 4dad68b android push + resilience · ac91f84 product decisions · ea30b0b layer 6
-polish + shipping report · c6f966d RPC layer: app-owned pi sessions + done push
+polish + shipping report · c6f966d RPC layer: app-owned pi sessions + done push ·
+9a38637 sessions v2 layer 3: pane-native create flow + session controls
