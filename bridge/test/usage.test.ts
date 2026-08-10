@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { getCodexAuth, getApiKeyAuth } from "../src/usage/auth.js";
-import { parseXaiUsage } from "../src/usage/providers.js";
+import { parseXaiUsage, UsageService, type UsageProvider } from "../src/usage/providers.js";
 
 test("auth helpers extract codex and api-key credentials", () => {
   const store = {
@@ -39,4 +39,32 @@ test("parseXaiUsage falls back to products", () => {
 
 test("parseXaiUsage rejects unrecognized shapes", () => {
   assert.throws(() => parseXaiUsage({ nope: true }), /no recognized windows/);
+});
+
+
+test("failed refreshes keep successful data stale and remain retryable", async () => {
+  let calls = 0;
+  const provider: UsageProvider = {
+    id: "test",
+    label: "Test",
+    fetch: async () => {
+      calls += 1;
+      if (calls === 1) {
+        return { provider: "test", label: "Test", windows: [{ label: "day", usedPercent: 25 }], updatedAt: 123 };
+      }
+      throw new Error("provider offline");
+    },
+  };
+  const service = new UsageService({ cacheTtlMs: 1 });
+
+  await service.get(provider, {});
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  const failed = await service.get(provider, {});
+  const retried = await service.get(provider, {});
+
+  assert.equal(failed.updatedAt, 123);
+  assert.deepEqual(failed.windows, [{ label: "day", usedPercent: 25 }]);
+  assert.equal(failed.error, "provider offline");
+  assert.equal(retried.error, "provider offline");
+  assert.equal(calls, 3);
 });

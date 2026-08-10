@@ -301,15 +301,13 @@ export class UsageService {
       return snapshotValue;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      const failed: UsageSnapshot = {
+      return {
         provider: provider.id,
         label: provider.label,
         windows: cached?.snapshot.windows ?? [],
-        updatedAt: Date.now(),
+        updatedAt: cached?.snapshot.updatedAt ?? 0,
         error: message,
       };
-      this.cache.set(provider.id, { snapshot: failed, at: Date.now() });
-      return failed;
     }
   }
 }

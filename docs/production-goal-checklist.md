@@ -8,7 +8,7 @@ Updated: 2026-08-10. This is the live prompt-to-artifact map for the production-
 - Bridge baseline: `cd bridge && npm run typecheck && npm test` — 65/65 passing on 2026-08-10.
 - Android baseline: `cd android && ANDROID_HOME=$HOME/Android/sdk ./gradlew testDebugUnitTest --rerun-tasks` — passing on 2026-08-10; 29 tasks executed. `assembleDebug` succeeds.
 - Existing screenshots: `/tmp/cockpit-e2e/*.png`. Directly inspected `28-final-bottom.png`, `29-board-v2.png`, and `33-phone-final.png`.
-- Existing UI evidence is incomplete for this goal: there are no current screenshots for History, model search/filters, structured questions, Usage details, live output, review center, notification deep links, or Reduce Motion.
+- Existing UI evidence is incomplete for this goal: there are no current screenshots for History, structured questions, review center, notification deep links, or Reduce Motion. Current model-picker, launcher, Usage, conversation-configuration, optimistic-send, slash-command, and live-output screenshots are under `/tmp/cockpit-e2e/`.
 
 ## Taste-review checkpoints
 
@@ -19,7 +19,7 @@ Updated: 2026-08-10. This is the live prompt-to-artifact map for the production-
 - [ ] Chat/streaming. Conversation configuration was directly reviewed on emulator screenshots `/tmp/cockpit-e2e/46-config-chat-header-emulator.png` and `47-conversation-config-emulator.png`: the title keeps its own line, active model and thinking are visible as grouped chips, and an explicit setup sheet replaces cycle-thinking. Optimistic queued messages and slash commands remain.
 - [ ] Structured questions.
 - [ ] Session history.
-- [ ] Usage.
+- [x] Usage. Claude taste review chose quiet outlined provider cards, restrained warning color, and horizontal bars; final reviewer findings were applied for live clocks, cached-provider failures, bounded metadata, stable animation keys, locale-safe amounts, and complete accessibility descriptions. Directly inspected emulator screenshot: `/tmp/cockpit-e2e/45-usage-final.png`.
 - [x] Live output. Claude taste review (`taste-live`) read `LiveOutputPanel.kt`, `ChatScreen.kt`, `Theme.kt`, and `/tmp/cockpit-e2e/47-live-output-success.png`; it chose the strip plus reserved drawer over an inline card or modal sheet. Applied: the drawer now shrinks rather than covers the transcript, keeps scroll-to-end available, computes visible lines from height, labels stale/truncated states, previews the latest meaningful line, and exposes a 48dp accessible toggle. Helper pane `w4Q:p3N` was closed. Final inspected screenshot: `/tmp/cockpit-e2e/49-live-output-final.png`.
 - [ ] Review center.
 - [ ] First screenshot-based whole-app review.
@@ -109,17 +109,17 @@ Each future checkpoint must name source files and rendered screenshot paths, ask
 - [ ] Shared-axis navigation and predictive back.
 - [ ] Spring-based sheets and coordinated transitions.
 - [ ] Status-group/card placement and short real-event insertion motion.
-- [ ] Skeleton loading and interpolated usage values that continue from the previous value.
+- [x] Skeleton loading and interpolated usage values that continue from the previous value. `UsageScreen.kt` keeps stable provider/window keys, animates each horizontal bar from its prior value, and uses fixed skeleton geometry; emulator Compose tests cover loading, empty, error, cached-error, reset-clock, balance, and quota semantics.
 - [ ] Semantic haptics for send, selection, success, warning, and needs-you.
 - [ ] Reduce Motion swaps movement for immediate/cross-fade state changes.
 - [ ] Interruption-safe updates, no queued sequences, lifecycle cancellation.
-- Current evidence: chat has `animateItem` and one `AnimatedVisibility`; no app-wide motion policy, predictive back, haptics, Reduce Motion, or skeleton system.
+- Current evidence: Usage has keyed value interpolation and stable skeletons; chat has `animateItem` and one `AnimatedVisibility`. No app-wide motion policy, predictive back, haptics, or Reduce Motion support yet.
 - Required tests: motion-policy unit tests, semantics/UI tests, runtime normal/reduced-motion screenshots and rapid-update/background checks.
 
 ## Whole-app polish and adaptation
 
 - [ ] Bottom navigation: compact premium phone bar, strong icons/labels/selected state, needs-you badge, safe areas, fluid interruption-safe selection, rail/list-detail adaptation in landscape/large screens.
-- [ ] Usage dashboard: hierarchy, provider cards, horizontal progress bars with prior-value interpolation, reset-time and warning thresholds, empty/error states, per-session tokens/cost.
+- [ ] Usage dashboard: provider hierarchy, outlined cards, horizontal interpolated progress bars, live reset times, warning thresholds, cached/error/empty/loading states, TalkBack descriptions, and locale-safe balances are complete. Per-session token/cost attribution remains.
 - [ ] Board, Connect, Chat, launcher, history, review, dialogs, menus, composers, empty/loading/offline/error states share one deliberate component vocabulary.
 - [x] Conversation controls: the header keeps the session title legible on its own line, shows active status/model/thinking as grouped chips, and opens a focused setup sheet with exact thinking-level selection plus fuzzy model search. Bridge controls validate exact catalog models and cycle from the transcript-reported active thinking level; lifecycle actions remain in a separate labeled menu. Evidence: `ConversationConfigSheet.kt`, `ChatViewModel.kt`, `sessions.ts`, `ChatControlsTest.kt`, and emulator screenshots `/tmp/cockpit-e2e/46-config-chat-header-emulator.png` and `47-conversation-config-emulator.png`.
 - [x] Sent messages appear optimistically in the transcript at once, remain visibly queued until the session JSONL confirms them, reconcile by fresh entry ID plus exact text without duplicate rows, and retain an actionable `Not sent · Retry` state on delivery failure. Evidence: `PendingUserMessage` and `dropConfirmedMessages` in `ChatViewModel.kt`, delivery UI in `ChatScreen.kt`, `ChatPendingMessageTest.kt`, `ChatListTest.kt`, and directly inspected emulator screenshots `/tmp/cockpit-e2e/49-message-queued-emulator.png` and `50-message-failed-emulator.png`.
