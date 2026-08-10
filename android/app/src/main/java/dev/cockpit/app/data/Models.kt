@@ -67,6 +67,9 @@ data class NtfyMessage(
     val title: String? = null,
     val message: String? = null,
     val priority: Int = 3,
+
+    /** Bridge pane id, carried so a pushed event can deep-link to the session. */
+    val paneId: String? = null,
 )
 
 // ── Bridge WS DTOs ────────────────────────────────────────────────────

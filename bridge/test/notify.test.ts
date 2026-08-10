@@ -41,6 +41,8 @@ test("publishes a blocked event with the right payload", async () => {
     assert.equal(requests[0]!.payload.topic, "cockpit_test_topic");
     assert.equal(requests[0]!.payload.title, "π needs you");
     assert.equal(requests[0]!.payload.message, "my pane");
+    assert.equal(requests[0]!.payload.paneId, "w1:p1");
+    assert.equal(requests[0]!.payload.priority, 4);
   } finally {
     await new Promise((done) => server.close(done));
   }
@@ -89,6 +91,7 @@ test("publishes a done event with the finished headline", async () => {
     assert.equal(requests.length, 1);
     assert.equal(requests[0]!.payload.title, "π finished");
     assert.equal(requests[0]!.payload.message, "my pane");
+    assert.equal(requests[0]!.payload.paneId, "w1:p9");
     assert.equal(requests[0]!.payload.priority, 3);
   } finally {
     await new Promise((done) => server.close(done));

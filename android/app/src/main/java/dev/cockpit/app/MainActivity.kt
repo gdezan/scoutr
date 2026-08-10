@@ -2,6 +2,9 @@ package dev.cockpit.app
 
 import android.os.Bundle
 import android.os.Build
+
+import android.content.Intent
+import androidx.core.content.ContextCompat
 import android.Manifest
 import android.content.pm.PackageManager
 import androidx.activity.ComponentActivity
@@ -30,6 +33,7 @@ import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
@@ -79,6 +83,8 @@ import dev.cockpit.app.ui.screens.ConnectScreen
 import dev.cockpit.app.ui.screens.HistoryScreen
 import dev.cockpit.app.ui.screens.UsageScreen
 import dev.cockpit.app.ui.screens.ReviewScreen
+import dev.cockpit.app.service.parseCockpitUri
+import dev.cockpit.app.ui.screens.SettingsScreen
 
 import dev.cockpit.app.ui.motion.HapticEvent
 import dev.cockpit.app.ui.motion.OverlayPresence
@@ -95,6 +101,8 @@ private object Routes {
 
     const val REVIEW = "review"
 
+    const val SETTINGS = "settings"
+
     fun chat(paneId: String, sessionPath: String?, status: String): String =
         "chat/$paneId?sessionPath=${sessionPath?.let { java.net.URLEncoder.encode(it, "UTF-8") } ?: ""}&status=$status"
 }
@@ -109,6 +117,9 @@ private enum class Destination(val route: String, val label: String, val icon: I
 
 class MainActivity : ComponentActivity() {
 
+    /** Consumed by the NavHost: cockpit://chat/<paneId> links from notifications. */
+    private val deepLink = mutableStateOf<dev.cockpit.app.service.CockpitDeepLink?>(null)
+
     // Android 13+ requires a runtime opt-in before notifications can show.
     private val requestNotifications = registerForActivityResult(
         ActivityResultContracts.RequestPermission(),
@@ -116,6 +127,13 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        deepLink.value = parseCockpitUri(intent.dataString)
+        // Resume background monitoring when the app starts if the user opted in.
+        val monitor = dev.cockpit.app.state.MonitoringStore(this)
+        if (monitor.enabled) {
+            ContextCompat.startForegroundService(this, Intent(this, dev.cockpit.app.service.CockpitMonitorService::class.java))
+        }
         if (
             Build.VERSION.SDK_INT >= 33 &&
             checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
@@ -136,14 +154,22 @@ class MainActivity : ComponentActivity() {
             }
             val reduceMotion by motionStore.reduceMotion.collectAsState()
             CockpitTheme(reduceMotion = reduceMotion) {
-                CockpitAppNav()
+                CockpitAppNav(deepLink = deepLink)
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        deepLink.value = parseCockpitUri(intent.dataString)
     }
 }
 
 @Composable
-private fun CockpitAppNav() {
+private fun CockpitAppNav(
+    deepLink: androidx.compose.runtime.MutableState<dev.cockpit.app.service.CockpitDeepLink?>,
+) {
     val app = LocalContext.current.applicationContext as CockpitApp
     val navController = rememberNavController()
     val container = app.container
@@ -167,9 +193,22 @@ private fun CockpitAppNav() {
     )
 
     val onTab = { route: String ->
+
         navController.navigate(route) {
             popUpTo(Routes.BOARD) { inclusive = false }
             launchSingleTop = true
+        }
+    }
+
+    // A cockpit://chat/<paneId> deep link (notification tap) jumps straight to
+    // the session once the nav graph is ready.
+    val pendingDeepLink = deepLink.value
+    LaunchedEffect(pendingDeepLink) {
+        if (pendingDeepLink != null) {
+            if (container.connectionStore.saved != null) {
+                navController.navigate(Routes.chat(pendingDeepLink.paneId, null, pendingDeepLink.status ?: "working"))
+            }
+            deepLink.value = null
         }
     }
 
@@ -178,6 +217,8 @@ private fun CockpitAppNav() {
     )
     var paletteOpen by remember { mutableStateOf(false) }
     val openPalette = { paletteOpen = true }
+
+    val openSettings = { navController.navigate(Routes.SETTINGS) }
 
     Box {
         Scaffold(
@@ -215,7 +256,7 @@ private fun CockpitAppNav() {
                 )
                 var showNewSession by remember { mutableStateOf(false) }
                 Scaffold(
-                    topBar = { AppTopBar("Board", onSearch = openPalette) },
+                    topBar = { AppTopBar("Board", onSearch = openPalette, onSettings = openSettings) },
                     floatingActionButton = {
                         FloatingActionButton(
                             onClick = { showNewSession = true },
@@ -253,7 +294,7 @@ private fun CockpitAppNav() {
                         container.sessionCatalogStore,
                     ),
                 )
-                Scaffold(topBar = { AppTopBar("Sessions", onSearch = openPalette) }) { innerSessions ->
+                Scaffold(topBar = { AppTopBar("Sessions", onSearch = openPalette, onSettings = openSettings) }) { innerSessions ->
                     HistoryScreen(
                         onOpenSession = { resumed ->
                             navController.navigate(Routes.chat(resumed.paneId, null, "working"))
@@ -293,7 +334,7 @@ private fun CockpitAppNav() {
                 val usageViewModel: UsageViewModel = viewModel(
                     factory = UsageViewModel.factory(container.bridge),
                 )
-                Scaffold(topBar = { AppTopBar("Usage", onSearch = openPalette) }) { innerUsage ->
+                Scaffold(topBar = { AppTopBar("Usage", onSearch = openPalette, onSettings = openSettings) }) { innerUsage ->
                     UsageScreen(
                         viewModel = usageViewModel,
                         modifier = Modifier.padding(innerUsage),
@@ -304,15 +345,19 @@ private fun CockpitAppNav() {
                 val reviewViewModel: ReviewViewModel = viewModel(
                     factory = ReviewViewModel.factory(container.bridge, container.connectionStore),
                 )
-                Scaffold(topBar = { AppTopBar("Review", onSearch = openPalette) }) { innerReview ->
+                Scaffold(topBar = { AppTopBar("Review", onSearch = openPalette, onSettings = openSettings) }) { innerReview ->
                     ReviewScreen(
                         viewModel = reviewViewModel,
                         modifier = Modifier.padding(innerReview),
                     )
                 }
             }
+            composable(Routes.SETTINGS) {
+                SettingsScreen(onBack = { navController.popBackStack() })
+            }
         }
         }
+
 
         if (paletteOpen) {
             val haptic = rememberHaptic()
@@ -439,7 +484,11 @@ private fun CockpitTab(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun AppTopBar(title: String, onSearch: (() -> Unit)? = null) {
+private fun AppTopBar(
+    title: String,
+    onSearch: (() -> Unit)? = null,
+    onSettings: (() -> Unit)? = null,
+) {
     TopAppBar(
         title = { Text(title) },
         colors = TopAppBarDefaults.topAppBarColors(
@@ -449,6 +498,11 @@ private fun AppTopBar(title: String, onSearch: (() -> Unit)? = null) {
             if (onSearch != null) {
                 IconButton(onClick = onSearch) {
                     Icon(Icons.Default.Search, contentDescription = "Search agents and sessions")
+                }
+            }
+            if (onSettings != null) {
+                IconButton(onClick = onSettings) {
+                    Icon(Icons.Default.Settings, contentDescription = "Settings")
                 }
             }
         },
