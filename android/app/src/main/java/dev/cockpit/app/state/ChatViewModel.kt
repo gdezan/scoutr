@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import dev.cockpit.app.data.ModelInfo
+import dev.cockpit.app.data.QuestionEntry
 import dev.cockpit.app.data.ModelProvider
 import dev.cockpit.app.data.SessionEntry
 import dev.cockpit.app.data.SlashCommandInfo
@@ -42,6 +43,31 @@ data class PendingUserMessage(
     internal val baselineIds: Set<String> = emptySet(),
 )
 
+/**
+ * Merge question cards by stable id. Incremental polls only deliver new
+ * questions, but a cursor reset re-delivers everything; upserting by id keeps
+ * answered state transitions visible and never duplicates card keys.
+ */
+fun mergeQuestions(
+    existing: List<QuestionEntry>,
+    incoming: List<QuestionEntry>,
+): List<QuestionEntry> {
+    if (incoming.isEmpty()) return existing
+    val byId = existing.associateByTo(mutableMapOf()) { it.id }
+    for (question in incoming) byId[question.id] = question
+    return byId.values.sortedBy { it.timestamp }
+}
+
+
+/**
+ * Answer safety, mirroring the bridge: one line, no control characters,
+ * capped at pi's MAX_FIELD_LENGTH (4000).
+ */
+fun sanitizeAnswerText(text: String): String {
+    val singleLine = text.replace(Regex("[\\r\\n\\u2028\\u2029]+"), " ")
+    val clean = singleLine.replace(Regex("[\\u0000-\\u001f\\u007f]"), "").trim()
+    return if (clean.length > 4000) clean.take(4000) else clean
+}
 internal fun dropConfirmedMessages(
     pending: List<PendingUserMessage>,
     incoming: List<SessionEntry>,
@@ -59,6 +85,11 @@ internal fun dropConfirmedMessages(
 data class ChatUiState(
     val entries: List<SessionEntry> = emptyList(),
     val pendingMessages: List<PendingUserMessage> = emptyList(),
+    /** Structured ask_user_question cards derived from session events. */
+    val questions: List<QuestionEntry> = emptyList(),
+    /** Question id currently sending an answer. */
+    val answeringQuestionId: String? = null,
+    val questionError: String? = null,
     val exists: Boolean = true,
     val loading: Boolean = true,
     val sending: Boolean = false,
@@ -269,6 +300,7 @@ class ChatViewModel(
             _ui.update {
                 it.copy(
                     entries = mergeSessionEntries(it.entries, response.entries, incremental = response.since != null),
+                    questions = mergeQuestions(it.questions, response.questions),
                     pendingMessages = dropConfirmedMessages(it.pendingMessages, response.entries),
                     exists = response.exists,
                     loading = false,
@@ -361,6 +393,38 @@ class ChatViewModel(
         )
         _ui.update { it.copy(pendingMessages = it.pendingMessages + message, sending = true, error = null) }
         deliver(message.localId)
+    }
+
+    /**
+     * Answer a structured question card. The composed text is sanitized here
+     * (single line, no control chars, capped) and again on the bridge before
+     * it is typed into pi's questionnaire.
+     */
+    fun answerQuestion(questionId: String, text: String) {
+        val safe = sanitizeAnswerText(text)
+        if (safe.isEmpty()) return
+        if (_ui.value.questions.none { it.id == questionId }) return
+        if (_ui.value.answeringQuestionId != null) return
+        _ui.update { it.copy(answeringQuestionId = questionId, questionError = null) }
+        viewModelScope.launch {
+            try {
+                bridge.answerQuestion(paneId, safe)
+                _ui.update { it.copy(answeringQuestionId = null) }
+                repeat(3) {
+                    refresh()
+                    val now = _ui.value.questions.firstOrNull { it.id == questionId }
+                    if (now?.answered == true || now == null) return@launch
+                    delay(750)
+                }
+            } catch (error: Exception) {
+                _ui.update {
+                    it.copy(
+                        answeringQuestionId = null,
+                        questionError = error.message ?: "Answer failed to send",
+                    )
+                }
+            }
+        }
     }
 
     fun retryPendingMessage(localId: String) {

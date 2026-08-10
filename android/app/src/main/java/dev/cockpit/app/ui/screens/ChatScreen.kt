@@ -75,8 +75,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.cockpit.app.data.ContentBlock
 import dev.cockpit.app.data.SessionEntry
+import dev.cockpit.app.data.QuestionEntry
 import dev.cockpit.app.data.SlashCommandInfo
 import dev.cockpit.app.data.entryText
+import dev.cockpit.app.ui.components.QuestionCard
 import dev.cockpit.app.state.ChatUiState
 import dev.cockpit.app.state.ChatViewModel
 import dev.cockpit.app.state.MessageDeliveryState
@@ -149,10 +151,13 @@ fun ChatScreen(
                 else -> {
                     ChatList(
                         entries = ui.entries,
+                        questions = ui.questions,
+                        answeringQuestionId = ui.answeringQuestionId,
                         pendingMessages = ui.pendingMessages,
                         detailsVisible = detailsVisible,
                         liveOutputExpanded = ui.liveOutputExpanded,
                         onRetryPending = viewModel::retryPendingMessage,
+                        onAnswerQuestion = viewModel::answerQuestion,
                         modifier = Modifier.fillMaxSize(),
                     )
                 }
@@ -398,8 +403,11 @@ fun ChatList(
     entries: List<SessionEntry>,
     detailsVisible: Boolean,
     pendingMessages: List<PendingUserMessage> = emptyList(),
+    questions: List<QuestionEntry> = emptyList(),
+    answeringQuestionId: String? = null,
     liveOutputExpanded: Boolean = false,
     onRetryPending: (String) -> Unit = {},
+    onAnswerQuestion: (String, String) -> Unit = { _, _ -> },
     modifier: Modifier = Modifier,
 ) {
     val listState = rememberLazyListState()
@@ -443,6 +451,14 @@ fun ChatList(
                 MessageRow(
                     entry = entry,
                     detailsVisible = detailsVisible,
+                    modifier = Modifier.animateItem(),
+                )
+            }
+            items(questions, key = { it.id }) { question ->
+                QuestionCard(
+                    question = question,
+                    sending = answeringQuestionId == question.id,
+                    onAnswer = { answer -> onAnswerQuestion(question.id, answer) },
                     modifier = Modifier.animateItem(),
                 )
             }

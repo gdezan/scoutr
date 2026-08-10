@@ -45,6 +45,8 @@ export interface PiMessageEntry {
   toolCallId?: string;
   toolName?: string;
   isError?: boolean;
+  /** Structured tool-result details (e.g. ask_user_question answers). */
+  details?: unknown;
   stopReason?: string;
   model?: string;
   usage?: {
@@ -145,6 +147,7 @@ function parseMessageRecord(record: Record<string, unknown>): PiMessageEntry | n
   if (typeof msg.toolCallId === "string") entry.toolCallId = msg.toolCallId;
   if (typeof msg.toolName === "string") entry.toolName = msg.toolName;
   if (typeof msg.isError === "boolean") entry.isError = msg.isError;
+  if (msg.details && typeof msg.details === "object") entry.details = msg.details;
   if (typeof msg.stopReason === "string") entry.stopReason = msg.stopReason;
   if (typeof msg.model === "string") entry.model = msg.model;
   if (msg.usage && typeof msg.usage === "object") {

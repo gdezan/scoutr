@@ -4,6 +4,7 @@ import { HerdrClient } from "./herdr/client.js";
 import { HerdrEventFeed, type FeedMessage } from "./herdr/feed.js";
 import type { SessionSnapshot } from "./herdr/types.js";
 import { readPiSessionFile, entryText, inspectSessionFile, type PiMessageEntry } from "./pi/session.js";
+import { extractQuestions, sanitizeAnswerText, type QuestionEntry } from "./questions.js";
 import { UsageService, type UsageSnapshot } from "./usage/providers.js";
 import { loadOrCreateConfig, type BridgeConfig } from "./config.js";
 import { NtfyPublisher } from "./notify.js";
@@ -519,10 +520,12 @@ async function handleCommand(command: CommandMessage, ws: WebSocket, deps: Serve
     case "answer_question": {
       const { paneId, text } = command;
       if (!paneId || !text) throw new Error("answer_question requires paneId and text");
+      const safe = sanitizeAnswerText(text);
+      if (!safe) throw new Error("answer_question text is empty after sanitization");
       // Type the answer, then Enter to submit it in pi's questionnaire UI.
-      await deps.herdr.paneSendText(paneId, text);
+      await deps.herdr.paneSendText(paneId, safe);
       await deps.herdr.paneSendKeys(paneId, ["Enter"]);
-      ws.send(JSON.stringify({ type: "answered", paneId, text }));
+      ws.send(JSON.stringify({ type: "answered", paneId, text: safe }));
       return;
     }
     case "slash_command": {
@@ -647,6 +650,8 @@ interface SessionReadResult {
   exists: boolean;
   since: string | null;
   entries: PiMessageEntry[];
+  /** Structured ask_user_question cards, derived from the same entries. */
+  questions: QuestionEntry[];
   model: string | null;
   thinkingLevel: string | null;
   preview?: string;
@@ -664,7 +669,7 @@ export async function readSession(pathParam: string, since: string | null): Prom
   }
   const info = await inspectSessionFile(target);
   if (!info.exists) {
-    return { path: target, name: basename(target), exists: false, since, entries: [], model: null, thinkingLevel: null, lastEntryId: null, mtimeMs: 0 };
+    return { path: target, name: basename(target), exists: false, since, entries: [], questions: [], model: null, thinkingLevel: null, lastEntryId: null, mtimeMs: 0 };
   }
   const session = await readPiSessionFile(target);
   let entries = session.entries;
@@ -689,6 +694,7 @@ export async function readSession(pathParam: string, since: string | null): Prom
     exists: true,
     since: cursor,
     entries,
+    questions: extractQuestions(entries),
     model: session.model,
     thinkingLevel: session.thinkingLevel,
     preview: lastEntry ? entryText(lastEntry, 120) : undefined,

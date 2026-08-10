@@ -103,10 +103,31 @@ data class SessionReadResponse(
     val model: String? = null,
     val thinkingLevel: String? = null,
     val entries: List<SessionEntry> = emptyList(),
+    val questions: List<QuestionEntry> = emptyList(),
     val preview: String? = null,
     val lastEntryId: String? = null,
     // JS Date.now() returns a float; keep Double so fractional millis parse.
     val mtimeMs: Double = 0.0,
+)
+
+/** Structured ask_user_question card derived by the bridge from session events. */
+@Serializable
+data class QuestionEntry(
+    val id: String,
+    val question: String = "",
+    val header: String = "",
+    val options: List<QuestionOption> = emptyList(),
+    val multiSelect: Boolean = false,
+    val answered: Boolean = false,
+    val answerText: String? = null,
+    val selected: List<String> = emptyList(),
+    val timestamp: String = "",
+)
+
+@Serializable
+data class QuestionOption(
+    val label: String = "",
+    val description: String = "",
 )
 
 @Serializable
