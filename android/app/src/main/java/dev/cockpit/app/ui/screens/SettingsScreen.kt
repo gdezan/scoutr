@@ -109,7 +109,7 @@ fun SettingsScreen(
                 modifier = Modifier.testTag("settings_monitoring_switch"),
             )
         }
-        HorizontalDivider(Modifier.padding(vertical = 16.dp))
+        HorizontalDivider(Modifier.padding(horizontal = 4.dp, vertical = 16.dp))
         Text(
             "Monitoring only works while a connection is saved. Notifications deep-link to the exact session and support an inline Reply that steers the agent.",
             style = MaterialTheme.typography.bodySmall,

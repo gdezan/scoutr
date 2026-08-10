@@ -98,13 +98,13 @@ class ReviewViewModel(
         }
     }
 
-    fun loadDiff(ref: String) {
+    fun loadDiff(ref: String, kind: String = "working") {
         val path = _ui.value.repoPath ?: return
         if (_ui.value.diffLoading) return
         viewModelScope.launch {
             _ui.update { it.copy(diffLoading = true, diffRef = ref, error = null) }
             try {
-                val diff = bridge.repoDiff(path, ref)
+                val diff = bridge.repoDiff(path, ref, kind)
                 _ui.update { it.copy(diff = diff, diffLoading = false) }
             } catch (error: Exception) {
                 _ui.update {

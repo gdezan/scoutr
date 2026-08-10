@@ -351,13 +351,13 @@ private fun ChatHeader(
             HeaderStatusChip(status)
             HeaderConfigurationChip(
                 label = "Thinking",
-                value = thinkingLevel ?: "—",
+                value = thinkingLevel ?: "…",
                 onClick = onOpenConfiguration,
                 testTag = "chat_thinking_config",
             )
             HeaderConfigurationChip(
                 label = "Model",
-                value = model?.substringAfterLast('/') ?: "—",
+                value = model?.substringAfterLast('/') ?: "…",
                 onClick = onOpenConfiguration,
                 testTag = "chat_model_config",
             )

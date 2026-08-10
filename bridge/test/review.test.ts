@@ -75,6 +75,16 @@ test("diff accepts a hash ref", async () => {
   assert.ok(result.diff.includes("+world"));
 });
 
+test("commit kind diffs the commit against its parent", async () => {
+  const overview = await reviewOverview(repoRoot);
+  const headHash = overview.log[0]!.hash;
+  const result = await reviewDiff(repoRoot, headHash, "commit");
+  // The second commit added b.txt and +world to a.txt; the working-tree
+  // noise (c.txt / d.txt from other tests) must not leak into a commit diff.
+  assert.ok(result.diff.includes("+new file"), "commit diff should contain +new file");
+  assert.ok(!result.diff.includes("+draft"), "working-tree changes must not leak in");
+});
+
 test("rejects paths outside the allow-list", async () => {
   await assert.rejects(() => reviewOverview(outsideRoot), (error: unknown) => {
     assert.ok(error instanceof ReviewError);

@@ -125,9 +125,9 @@ class BridgeClient(
             json.decodeFromString(RepoOverviewResponse.serializer(), it)
         }
 
-    /** Bounded, read-only git diff against a ref (default HEAD). */
-    suspend fun repoDiff(path: String, base: String = "HEAD"): RepoDiffResponse =
-        call("/api/repo/diff", query = mapOf("path" to path, "base" to base)) {
+    /** Bounded, read-only git diff. kind "commit" diffs ref^..ref; "working" (default) diffs the working tree against ref. */
+    suspend fun repoDiff(path: String, base: String = "HEAD", kind: String = "working"): RepoDiffResponse =
+        call("/api/repo/diff", query = mapOf("path" to path, "base" to base, "kind" to kind)) {
             json.decodeFromString(RepoDiffResponse.serializer(), it)
         }
 

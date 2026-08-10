@@ -61,6 +61,8 @@ fun CommandPalette(
     viewModel: CommandPaletteViewModel,
     onOpenAgent: (paneId: String, sessionPath: String?) -> Unit,
     onOpenSession: (paneId: String, sessionPath: String?) -> Unit,
+
+    onDismiss: () -> Unit = viewModel::close,
     modifier: Modifier = Modifier,
 ) {
     val ui by viewModel.ui.collectAsState()
@@ -69,7 +71,7 @@ fun CommandPalette(
     LaunchedEffect(Unit) { focusRequester.requestFocus() }
 
     Dialog(
-        onDismissRequest = { viewModel.close() },
+        onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false),
     ) {
         Column(

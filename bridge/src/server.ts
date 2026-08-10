@@ -484,7 +484,8 @@ export function createCockpitServer(deps: ServerDeps, options: CreateServerOptio
           sendJson(response, 200, { ok: true, ...(await reviewOverview(requestedPath)) });
         } else {
           const base = url.searchParams.get("base") ?? "HEAD";
-          sendJson(response, 200, { ok: true, ...(await reviewDiff(requestedPath, base)) });
+          const kind = url.searchParams.get("kind") === "commit" ? "commit" : "working";
+          sendJson(response, 200, { ok: true, ...(await reviewDiff(requestedPath, base, kind)) });
         }
       } catch (error) {
         const status = error instanceof ReviewError ? error.status : 500;

@@ -243,7 +243,7 @@ private fun ReviewMode(
                         subtitle = "${shortHash(commit.hash)} · ${commit.author} · ${commitDate(commit.date)}",
                         selected = ui.diffRef == commit.hash,
                         loading = ui.diffLoading && ui.diffRef == commit.hash,
-                        onClick = { viewModel.loadDiff(commit.hash); onDiffChanged(true) },
+                        onClick = { viewModel.loadDiff(commit.hash, "commit"); onDiffChanged(true) },
                     )
                 }
                 if (overview.logTruncated) {
@@ -429,7 +429,9 @@ private fun DiffLine(line: String) {
         else -> MaterialTheme.colorScheme.onSurface to Color.Transparent
     }
     Row(
-        Modifier.fillMaxWidth().background(background).padding(horizontal = 16.dp, vertical = 1.dp),
+        // Wrap content (not the viewport) so long lines extend past the right
+        // edge and the parent's horizontalScroll can pan to them.
+        Modifier.background(background).padding(horizontal = 16.dp, vertical = 1.dp),
     ) {
         Text(
             line,
@@ -437,6 +439,7 @@ private fun DiffLine(line: String) {
             fontFamily = FontFamily.Monospace,
             color = color,
             maxLines = 1,
+            softWrap = false,
         )
     }
 }

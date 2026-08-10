@@ -114,7 +114,7 @@ function runGit(path: string, args: string[], maxBytes: number): Promise<string>
       ["-C", path, ...args],
       {
         encoding: "utf8",
-        maxBuffer: maxBytes + 1024,
+        maxBuffer: Math.max(maxBytes + 1024, 2 * 1024 * 1024),
         timeout: REVIEW_COMMAND_TIMEOUT_MS,
         env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
       },
@@ -236,15 +236,22 @@ function parseDiffStat(output: string): ReviewDiffFileStat[] {
   return stats;
 }
 
-export async function reviewDiff(requestedPath: string, ref: string): Promise<ReviewDiffResult> {
+export async function reviewDiff(
+  requestedPath: string,
+  ref: string,
+  kind: "working" | "commit" = "working",
+): Promise<ReviewDiffResult> {
   const path = resolveAllowedRepoPath(requestedPath);
   if (!(await isRepo(path))) throw new ReviewError("not a git repository", 404);
   const safeRef = validateRef(ref);
+  // "commit" diffs the commit against its parent (ref^..ref); "working"
+  // diffs the working tree against the ref. Both stay read-only.
+  const range = kind === "commit" ? [`${safeRef}^`, safeRef] : [safeRef];
 
-  const statOut = await runGit(path, ["diff", "--no-color", "--stat", safeRef], REVIEW_DIFF_MAX_BYTES);
+  const statOut = await runGit(path, ["diff", "--no-color", "--stat", ...range], REVIEW_DIFF_MAX_BYTES);
   const diffOut = await runGit(
     path,
-    ["diff", "--no-color", "--unified=6", safeRef],
+    ["diff", "--no-color", "--unified=6", ...range],
     REVIEW_DIFF_MAX_BYTES * 2,
   );
 

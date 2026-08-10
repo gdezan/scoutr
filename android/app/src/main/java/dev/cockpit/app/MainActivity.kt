@@ -360,6 +360,8 @@ private fun CockpitAppNav(
 
 
         if (paletteOpen) {
+
+            // The palette's own back-dismiss closes the ViewModel; mirror it so
             val haptic = rememberHaptic()
             LaunchedEffect(Unit) {
                 haptic(HapticEvent.Select)
@@ -367,6 +369,11 @@ private fun CockpitAppNav(
             }
             OverlayPresence(reduceMotion = useReduceMotion()) {
                 CommandPalette(
+
+                    onDismiss = {
+                        paletteViewModel.close()
+                        paletteOpen = false
+                    },
                     viewModel = paletteViewModel,
                     onOpenAgent = { paneId, sessionPath ->
                         navController.navigate(Routes.chat(paneId, sessionPath, "working"))
