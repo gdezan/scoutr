@@ -146,6 +146,21 @@ test("rejects non-git directories", async () => {
   });
 });
 
+test("binary and rename changes pass through the diff without errors", async () => {
+  // Binary: a committed then modified binary shows "Binary files differ".
+  await writeFile(join(repoRoot, "blob.bin"), Buffer.from([0, 1, 2, 3, 255]));
+  execFileSync("git", ["add", "blob.bin"], { cwd: repoRoot });
+  execFileSync("git", ["commit", "-q", "-m", "add binary"], { cwd: repoRoot });
+  await writeFile(join(repoRoot, "blob.bin"), Buffer.from([9, 9, 9]));
+  const binary = await reviewDiff(repoRoot, "HEAD");
+  assert.ok(binary.diff.includes("Binary files"), "binary diff should pass through");
+  // Rename: porcelain status should surface the R code.
+  execFileSync("git", ["mv", "blob.bin", "renamed.bin"], { cwd: repoRoot });
+  const overview = await reviewOverview(repoRoot);
+  const rename = overview.status.find((e) => e.code.startsWith("R"));
+  assert.ok(rename, "rename should appear in status");
+});
+
 test("caps bound status entries, log size, and diff bytes", async () => {
   assert.ok(REVIEW_STATUS_MAX_ENTRIES >= 1);
   assert.ok(REVIEW_LOG_MAX >= 1);

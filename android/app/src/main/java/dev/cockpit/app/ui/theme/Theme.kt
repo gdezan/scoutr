@@ -45,6 +45,10 @@ private val DarkColors = darkColorScheme(
     onSurface = Color(0xFFECEDF0),
     surfaceVariant = Color(0xFF1B1D21),
     onSurfaceVariant = Color(0xFFA8AEB9),
+    // Selected chips/filters reuse the primary container pair so "selected"
+    // never leaks a second accent hue (the M3 lavender default).
+    secondaryContainer = Color(0xFF1B2B54),
+    onSecondaryContainer = Color(0xFFD8E4FF),
     outline = Color(0xFF363B43),
     outlineVariant = Color(0xFF26292E),
     error = Color(0xFFE5484D),

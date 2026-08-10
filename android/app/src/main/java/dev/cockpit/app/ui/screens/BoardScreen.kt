@@ -76,22 +76,15 @@ fun BoardScreen(
     LazyColumn(
         modifier = modifier.fillMaxSize().padding(horizontal = 16.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
+        // Clear the board's FAB so it never covers the last card, even at
+        // large font scales.
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 96.dp),
     ) {
         item { Spacer(Modifier.height(8.dp)) }
         if (!ui.connected) {
-            item { DisconnectedBanner(onRetry = { viewModel.connect("", "") }) }
+            item { DisconnectedBanner(error = ui.error, onRetry = { viewModel.connect("", "") }) }
         }
-        if (ui.error != null) {
-            item {
-                Box(
-                    Modifier.fillMaxWidth()
-                        .background(MaterialTheme.colorScheme.errorContainer, RoundedCornerShape(12.dp))
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
-                ) {
-                    Text(ui.error ?: "", color = MaterialTheme.colorScheme.onErrorContainer)
-                }
-            }
-        }
+
         if (ui.board.total == 0) {
             item {
                 Box(
@@ -159,7 +152,7 @@ private fun LazyListScope.boardSection(
 }
 
 @Composable
-private fun DisconnectedBanner(onRetry: () -> Unit) {
+private fun DisconnectedBanner(error: String?, onRetry: () -> Unit) {
     Row(
         Modifier
             .fillMaxWidth()
@@ -182,6 +175,14 @@ private fun DisconnectedBanner(onRetry: () -> Unit) {
                 .testTag("board_reconnect")
                 .clickable(onClick = onRetry)
                 .padding(6.dp),
+        )
+    }
+    error?.let { detail ->
+        Text(
+            detail,
+            color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.85f),
+            style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.padding(start = 32.dp, end = 12.dp, bottom = 6.dp),
         )
     }
 }

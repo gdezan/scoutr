@@ -207,7 +207,7 @@ private fun PaletteRow(
                 strokeWidth = 2.dp,
             )
         } else if (running) {
-            TextButton(onClick = onAbort) { Text("Abort") }
+            TextButton(onClick = onAbort) { Text("Abort", color = MaterialTheme.colorScheme.error) }
             TextButton(onClick = onClose) { Text("Close") }
         } else {
             TextButton(onClick = onResume) { Text("Resume") }

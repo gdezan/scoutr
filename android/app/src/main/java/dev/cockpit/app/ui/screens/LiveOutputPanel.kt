@@ -3,6 +3,8 @@ package dev.cockpit.app.ui.screens
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -27,6 +29,9 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import dev.cockpit.app.ui.motion.LocalReduceMotion
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -116,6 +121,18 @@ private fun ColumnScope.LiveOutputBody(lines: List<String>) {
             ((maxHeight - 16.dp).toPx() / 16.sp.toPx()).toInt().coerceAtLeast(1)
         }
         val visibleLines = lines.takeLast(maxLines)
+        // Short, non-replaying pulse when the newest line changes: new output
+        // arrives already composed, so a quick fade-up marks the change without
+        // faking typing. Skipped under reduce motion.
+        val reduceMotion = LocalReduceMotion.current
+        val pulse = remember { Animatable(1f) }
+        LaunchedEffect(visibleLines.lastOrNull()) {
+            if (!reduceMotion) {
+                pulse.snapTo(0f)
+                pulse.animateTo(1f, animationSpec = tween(180, easing = FastOutSlowInEasing))
+            }
+        }
+        val rise = with(density) { 4.dp.toPx() }
         Box(
             Modifier.fillMaxSize().padding(horizontal = 14.dp, vertical = 8.dp),
             contentAlignment = Alignment.BottomStart,
@@ -129,6 +146,10 @@ private fun ColumnScope.LiveOutputBody(lines: List<String>) {
                 maxLines = maxLines,
                 softWrap = false,
                 overflow = TextOverflow.Clip,
+                modifier = Modifier.graphicsLayer {
+                    alpha = pulse.value
+                    translationY = (1f - pulse.value) * rise
+                },
             )
         }
     }

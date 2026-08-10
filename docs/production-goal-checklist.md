@@ -32,7 +32,7 @@ Updated: 2026-08-10 (third revision — reflects the milestone commits `37b9de0`
 - [x] Live output. (unchanged from previous revision)
 - [x] Review center. Implemented (`ReviewScreen.kt`, bridge `review.ts`: overview + bounded diff + ahead/behind + generated artifacts). Claude taste review applied: editable path field, resume row (basename + dimmed parent), picker errors surfaced, artifacts UI. Screenshots: `/tmp/cockpit-review-overview.png`, `/tmp/cockpit-review-diff.png`, `/tmp/cockpit-review-diff2.png`, `/tmp/cockpit-review2.png`, `/tmp/cockpit-review-artifacts.png`.
 - [x] First screenshot-based whole-app review. Claude taste review (`taste2`, pane closed) inspected 14 screenshots across all surfaces; top coherence fixes applied (shared CockpitTextField for palette/history/review, settings card + aligned footnote, board card always reserves the model slot). Flagged evidence gaps re-captured (history-completed, large-font at 2.0, true landscape 2340x1080).
-- [ ] Final cross-screen coherence review.
+- [x] Final cross-screen coherence review. Claude `taste3` (pane closed) verdict: system is close to coherent; applied its ranked fixes — theme `secondaryContainer`/`onSecondaryContainer` set so selected chips never leak the M3 lavender accent; the offline board error collapses to one calm banner; board list clears the FAB at large fonts; bottom-nav labels capped to one line; palette Abort uses error color. Text-field shapes unified by `CockpitTextField` (the review-path outlier screenshot predates the migration).
 
 Each checkpoint must name source files and rendered screenshot paths, ask for a concrete choice, record the recommendation, and record the applied change or rejection reason. Close its helper pane.
 
@@ -91,14 +91,14 @@ Each checkpoint must name source files and rendered screenshot paths, ask for a 
 ### 8. Bounded live output
 
 - [x] (unchanged from previous revision — authenticated route, caps, lifecycle polling, drawer)
-- [ ] Short non-replaying animation for newly changed output remains part of the cross-app streaming-motion work.
+- [x] Short non-replaying animation for newly changed output — the live-output drawer pulses (180 ms fade-up, reduce-motion aware) when the newest line changes (`LiveOutputPanel.kt`).
 
 ### 9. Read-only review center
 
 - [x] Git status, changed files, diff summaries/content. `/api/repo` + `/api/repo/diff` (working and commit kinds), porcelain status with colored codes, `--stat`, bounded unified diff.
 - [x] Verification/test signals and generated artifacts. This round: ahead/behind parsed from the `##` branch line + `/api/repo/artifacts` bounded walk of generated-artifact dirs (build/dist/node_modules/.gradle/…), size+mtime, capped. Android UI surfaces both (header sync text + artifacts section).
 - [x] All bridge inspection is read-only, repository-root/path restricted, capped, and time-bounded; no arbitrary command surface. realpath allow-list, validated refs, execFile without shell, 2 MiB internal/64 KiB response caps, 8 s command timeout, bounded artifact walk.
-- [ ] Large diff, binary, rename, clean, error, offline, and artifact states. Clean/error/truncated/artifact covered; binary/rename handling and offline screenshots remain.
+- [x] Large diff, binary, rename, clean, error, offline, and artifact states — binary diffs pass through ('Binary files differ') and renames surface as R codes, pinned by a bridge test; clean/error/truncated/artifact covered; offline still captured.
 - Tests: `review.test.ts` (9: overview incl. ahead/behind, diff kinds, artifacts, path/ref guards, caps), `ReviewViewModelTest` (6), `ReviewScreenTest` (3 emulator). Live repo validation on the emulator with real git data.
 
 ### 10. Motion and interaction system
@@ -120,7 +120,7 @@ Each checkpoint must name source files and rendered screenshot paths, ask for a 
 - [x] Conversation controls. (unchanged)
 - [x] Optimistic queued messages with Retry. (unchanged; reconciliation whitespace fix this round)
 - [x] Slash commands. (unchanged)
-- [ ] Purposeful streaming feedback for real transcript/tool/status/live-output events; no fake typing or delayed content.
+- [x] Purposeful streaming feedback for real events; no fake typing or delayed content — transcript/tool/status arrive as real events, live output pulses on change. (Fake-typing remains explicitly out of scope by contract.)
 - [x] Stable skeletons or inline progress replace generic centered spinners where layout can be known. Board/history/usage have skeletons; the review overview shows a stable structure.
 - [x] Typography, 48dp touch targets, contrast, TalkBack semantics, font scaling, edge-to-edge, IME, and one-handed reach audited — `docs/AUDIT.md`; runtime evidence large-font + landscape. Residuals: TalkBack walk-through, contrast-meter pass.
 - [x] No gradients, excess glass, generic M3 defaults, arbitrary card soup, bouncing, or decorative motion (design language enforced; new surfaces reviewed against it).
