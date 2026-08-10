@@ -23,6 +23,7 @@ or subscription dependencies.
 | 9 | Sessions v2 layer 0: chat duplicate-key scroll crash fix (bridge since-cursor by file position + app dedupe) | commit a90bd8e, GMD DuplicateKeyCrashTest |
 | 10 | Sessions v2 layer 2: Cursor-iOS design language chat (auto-scroll, scroll-end FAB, tool chips, thinking toggle) | commit aefb9e5, DESIGN.md |
 | 11 | Sessions v2 layer 3: pane-native sessions — folder+model create sheet, POST /api/sessions, session controls (abort/retry/compact/fork/rename/cycle thinking) | commit 9a38637 (this round) |
+| 12 | Chat status refreshes live from the board (blocked ↔ done flips composer placeholder + header in an open chat); BridgeClient decode-failure guard (malformed bridge response can no longer hang a caller) | commit f111140, ChatStatusTest |
 
 ## Confirmed evidence
 
