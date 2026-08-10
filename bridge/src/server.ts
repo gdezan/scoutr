@@ -12,6 +12,7 @@ import { listDirs, DirListingError } from "./dirs.js";
 import { readModelsCatalog } from "./pi/models.js";
 import { createSession, controlSession, SessionsError } from "./sessions.js";
 import { LiveOutputError, readLiveOutput } from "./live-output.js";
+import { readCommandsCatalog, validateSlashCommand } from "./pi/commands.js";
 import { basename, resolve } from "node:path";
 import { existsSync } from "node:fs";
 
@@ -42,6 +43,7 @@ export interface JsonBody {
 export type CommandMessage =
   | { type: "steer"; target: string; text: string }
   | { type: "answer_question"; paneId: string; text: string }
+  | { type: "slash_command"; paneId: string; text: string }
   | { type: "send_text"; paneId: string; text: string }
   | { type: "ping" }
   | { type: "subscribe"; filter?: string[] };
@@ -302,6 +304,16 @@ export function createCockpitServer(deps: ServerDeps, options: CreateServerOptio
       return;
     }
 
+    if (request.method === "GET" && pathname === "/api/commands") {
+      const cwd = url.searchParams.get("cwd") ?? undefined;
+      if (cwd && (cwd.length > 4096 || /[\u0000-\u001f\u007f]/.test(cwd))) {
+        sendJson(response, 400, { ok: false, error: "invalid cwd" });
+        return;
+      }
+      sendJson(response, 200, { ok: true, catalog: readCommandsCatalog(cwd) });
+      return;
+    }
+
     if (request.method === "POST" && pathname === "/api/sessions") {
       const body = (request as IncomingMessage & { body?: JsonBody }).body ?? {};
       try {
@@ -404,6 +416,15 @@ async function handleCommand(command: CommandMessage, ws: WebSocket, deps: Serve
       await deps.herdr.paneSendText(paneId, text);
       await deps.herdr.paneSendKeys(paneId, ["Enter"]);
       ws.send(JSON.stringify({ type: "answered", paneId, text }));
+      return;
+    }
+    case "slash_command": {
+      const { paneId, text } = command;
+      if (!paneId) throw new Error("slash_command requires paneId");
+      const slashCommand = validateSlashCommand(text);
+      await deps.herdr.paneSendText(paneId, slashCommand);
+      await deps.herdr.paneSendKeys(paneId, ["Enter"]);
+      ws.send(JSON.stringify({ type: "command_sent", paneId, text: slashCommand }));
       return;
     }
     case "send_text": {

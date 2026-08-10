@@ -2,6 +2,7 @@ import { homedir } from "node:os";
 import { after, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { createCockpitServer, type CockpitServer } from "../src/server.js";
+import WebSocket from "ws";
 
 const PORT = 8792;
 const TOKEN = "test_token_for_sessions_0003";
@@ -44,7 +45,7 @@ function fakeDeps() {
       return { panes: [{ pane_id: "p1", workspace_id: "ws1", agent: "pi" }], workspaces: [], tabs: [], agents: [] };
     },
   };
-  const feed = { onMessage: () => {}, stop: async () => {}, start: async () => {} };
+  const feed = { onMessage: () => {}, removeMessage: () => {}, stop: async () => {}, start: async () => {} };
   const usage = { all: async () => ({}) };
   return {
     deps: {
@@ -73,6 +74,19 @@ async function post(path: string, body: unknown, token = TOKEN): Promise<{ statu
   return rawPost(path, JSON.stringify(body), token);
 }
 
+async function wsCommand(command: unknown): Promise<any> {
+  const ws = new WebSocket(`ws://127.0.0.1:${PORT}/ws?token=${TOKEN}`);
+  return new Promise((resolve, reject) => {
+    ws.on("open", () => ws.send(JSON.stringify(command)));
+    ws.on("message", (data) => {
+      const frame = JSON.parse(data.toString());
+      ws.close();
+      resolve(frame);
+    });
+    ws.on("error", reject);
+  });
+}
+
 function lastLaunch(calls: { method: string; params: unknown }[]): string {
   const send = calls.filter((call) => call.method === "pane.send_input").at(-1) as { params: { text: string } };
   return send.params.text;
@@ -90,6 +104,27 @@ describe("POST /api/sessions and /api/sessions/:paneId/control", () => {
 
   after(async () => {
     await server.close();
+  });
+
+  it("delivers one slash command as exact pane text plus Enter", async () => {
+    calls.length = 0;
+
+    const frame = await wsCommand({ type: "slash_command", paneId: "p1", text: "/skill:research compare APIs" });
+
+    assert.equal(frame.type, "command_sent");
+    assert.deepEqual(calls, [
+      { method: "pane.send_text", params: { pane_id: "p1", text: "/skill:research compare APIs" } },
+      { method: "pane.send_keys", params: { pane_id: "p1", keys: ["Enter"] } },
+    ]);
+  });
+
+  it("rejects slash commands containing terminal control input", async () => {
+    calls.length = 0;
+
+    const frame = await wsCommand({ type: "slash_command", paneId: "p1", text: "/compact\n/quit" });
+
+    assert.equal(frame.type, "error");
+    assert.deepEqual(calls, []);
   });
 
   it("creates a session and returns the pane and workspace", async () => {
