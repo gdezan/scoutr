@@ -1,10 +1,17 @@
-import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from "node:fs";
-import { basename, dirname, isAbsolute, join, resolve } from "node:path";
+import { readFileSync } from "node:fs";
+import { join, resolve } from "node:path";
+import {
+  DefaultResourceLoader,
+  ProjectTrustStore,
+  SettingsManager,
+  type Extension,
+  type RegisteredCommand,
+} from "@earendil-works/pi-coding-agent";
 
 export interface PiCommandInfo {
   name: string;
   description: string;
-  source: "builtin" | "skill";
+  source: "builtin" | "extension" | "prompt" | "skill";
   argumentHint?: string;
 }
 
@@ -38,176 +45,105 @@ const BUILTIN_COMMANDS: PiCommandInfo[] = [
 ];
 
 interface PiSettings {
-  enableSkillCommands?: boolean;
-  packages?: unknown;
+  defaultProjectTrust?: "ask" | "always" | "never";
 }
 
-interface SkillInfo {
-  name: string;
-  description: string;
+const COMMAND_CATALOG_TTL_MS = 30_000;
+const commandCatalogCache = new Map<string, { expiresAt: number; catalog: Promise<CommandsCatalog> }>();
+
+/** Read Pi's command catalog for a working directory. */
+export async function readCommandsCatalog(
+  cwd?: string,
+  piAgentDir = process.env.PI_CODING_AGENT_DIR ?? "~/.pi/agent",
+): Promise<CommandsCatalog> {
+  const agentDir = resolve(expandHome(piAgentDir));
+  const resolvedCwd = resolve(cwd ?? process.cwd());
+  const globalSettings = readJson(join(agentDir, "settings.json")) as PiSettings | null;
+  const projectTrusted = cwd
+    ? (new ProjectTrustStore(agentDir).get(resolvedCwd) ?? globalSettings?.defaultProjectTrust === "always")
+    : false;
+  const cacheKey = `${agentDir}\u0000${resolvedCwd}\u0000${projectTrusted}`;
+  const cached = commandCatalogCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) return cached.catalog;
+
+  const catalog = loadCommandsCatalog(resolvedCwd, agentDir, projectTrusted);
+  commandCatalogCache.set(cacheKey, { expiresAt: Date.now() + COMMAND_CATALOG_TTL_MS, catalog });
+  try {
+    return await catalog;
+  } catch (error) {
+    commandCatalogCache.delete(cacheKey);
+    throw error;
+  }
 }
 
-/** Read the commands pi exposes without starting another pi process. */
-export function readCommandsCatalog(cwd?: string, piAgentDir = process.env.PI_CODING_AGENT_DIR ?? "~/.pi/agent"): CommandsCatalog {
-  const agentDir = expandHome(piAgentDir);
-  const settings = readJson(join(agentDir, "settings.json")) as PiSettings | null;
-  if (settings?.enableSkillCommands === false) return { commands: [...BUILTIN_COMMANDS] };
+async function loadCommandsCatalog(
+  resolvedCwd: string,
+  agentDir: string,
+  projectTrusted: boolean,
+): Promise<CommandsCatalog> {
+  const settingsManager = SettingsManager.create(resolvedCwd, agentDir, { projectTrusted });
+  const resourceLoader = new DefaultResourceLoader({
+    cwd: resolvedCwd,
+    agentDir,
+    settingsManager,
+    noThemes: true,
+    noContextFiles: true,
+  });
+  await resourceLoader.reload();
 
-  const roots = [join(agentDir, "skills")];
-  if (cwd) roots.push(join(cwd, ".pi", "skills"));
-  if (Array.isArray(settings?.packages)) {
-    for (const spec of settings.packages) {
-      if (typeof spec !== "string") continue;
-      const packageRoot = resolvePackageRoot(spec, agentDir);
-      if (!packageRoot) continue;
-      const manifest = readJson(join(packageRoot, "package.json")) as { pi?: { skills?: unknown } } | null;
-      const skillPaths = manifest?.pi?.skills;
-      if (!Array.isArray(skillPaths)) continue;
-      for (const path of skillPaths) {
-        if (typeof path === "string") roots.push(resolve(packageRoot, path));
-      }
-    }
-  }
-
-  const skills = new Map<string, SkillInfo>();
-  for (const root of roots) {
-    for (const file of findSkillFiles(root)) {
-      const skill = readSkill(file);
-      if (skill && !skills.has(skill.name)) skills.set(skill.name, skill);
-    }
-  }
-  const skillCommands = [...skills.values()]
-    .sort((a, b) => a.name.localeCompare(b.name))
-    .map((skill): PiCommandInfo => ({
+  const promptCommands: PiCommandInfo[] = resourceLoader.getPrompts().prompts.map((prompt) => ({
+    name: prompt.name,
+    description: prompt.description,
+    source: "prompt",
+    ...(prompt.argumentHint ? { argumentHint: prompt.argumentHint } : {}),
+  }));
+  const builtinNames = new Set(BUILTIN_COMMANDS.map((command) => command.name));
+  const extensionCommands = resolveExtensionCommands(resourceLoader.getExtensions().extensions)
+    .filter((command) => !builtinNames.has(command.command.name))
+    .map(({ command, invocationName }): PiCommandInfo => ({
+      name: invocationName,
+      description: command.description ?? "Extension command",
+      source: "extension",
+    }));
+  const skillCommands: PiCommandInfo[] = settingsManager.getEnableSkillCommands()
+    ? resourceLoader.getSkills().skills.map((skill) => ({
       name: `skill:${skill.name}`,
       description: skill.description,
       source: "skill",
       argumentHint: "<request>",
-    }));
-  return { commands: [...BUILTIN_COMMANDS, ...skillCommands] };
+    }))
+    : [];
+
+  return { commands: [...BUILTIN_COMMANDS, ...promptCommands, ...extensionCommands, ...skillCommands] };
 }
 
 export function validateSlashCommand(text: unknown): string {
   if (typeof text !== "string") throw new Error("slash command text must be a string");
   if (text.length === 0 || text.length > 10_000) throw new Error("slash command text must be 1 to 10000 characters");
-  if (!text.startsWith("/") || !/^\/[a-z0-9][a-z0-9:-]*(?:[ \t][^\r\n\u0000-\u001f\u007f]*)?$/i.test(text)) {
+  if (!text.startsWith("/") || !/^\/[^\s\u0000-\u001f\u007f]+(?:[ \t][^\r\n\u0000-\u001f\u007f]*)?$/.test(text)) {
     throw new Error("invalid slash command text");
   }
   return text;
 }
 
-function findSkillFiles(root: string): string[] {
-  const files: string[] = [];
-  const seen = new Set<string>();
+function resolveExtensionCommands(extensions: Extension[]): Array<{ command: RegisteredCommand; invocationName: string }> {
+  const commands = extensions.flatMap((extension) => [...extension.commands.values()]);
+  const counts = new Map<string, number>();
+  for (const command of commands) counts.set(command.name, (counts.get(command.name) ?? 0) + 1);
 
-  function walk(path: string, includeRootFiles: boolean): void {
-    if (files.length >= 500 || !existsSync(path)) return;
-    let stats;
-    try {
-      stats = statSync(path);
-    } catch {
-      return;
-    }
-    if (stats.isFile()) {
-      if (path.endsWith(".md")) files.push(path);
-      return;
-    }
-    if (!stats.isDirectory()) return;
-
-    let real: string;
-    try {
-      real = realpathSync(path);
-    } catch {
-      return;
-    }
-    if (seen.has(real)) return;
-    seen.add(real);
-
-    let entries;
-    try {
-      entries = readdirSync(path, { withFileTypes: true });
-    } catch {
-      return;
-    }
-    const rootSkill = entries.find((entry) => entry.name === "SKILL.md");
-    if (rootSkill) {
-      files.push(join(path, rootSkill.name));
-      return;
-    }
-    for (const entry of entries) {
-      if (entry.name.startsWith(".") || entry.name === "node_modules") continue;
-      const child = join(path, entry.name);
-      if (entry.isDirectory() || entry.isSymbolicLink()) walk(child, false);
-      else if (includeRootFiles && entry.isFile() && entry.name.endsWith(".md")) files.push(child);
-      if (files.length >= 500) return;
-    }
-  }
-
-  walk(root, true);
-  return files;
+  const seen = new Map<string, number>();
+  const takenNames = new Set<string>();
+  return commands.map((command) => {
+    const occurrence = (seen.get(command.name) ?? 0) + 1;
+    seen.set(command.name, occurrence);
+    let invocationName = counts.get(command.name)! > 1 ? `${command.name}:${occurrence}` : command.name;
+    let suffix = occurrence;
+    while (takenNames.has(invocationName)) invocationName = `${command.name}:${++suffix}`;
+    takenNames.add(invocationName);
+    return { command, invocationName };
+  });
 }
 
-function readSkill(path: string): SkillInfo | null {
-  let text: string;
-  try {
-    text = readFileSync(path, "utf8");
-  } catch {
-    return null;
-  }
-  const lines = text.split(/\r?\n/);
-  if (lines[0]?.trim() !== "---") return null;
-  const end = lines.slice(1).findIndex((line) => line.trim() === "---");
-  if (end < 0) return null;
-  const frontmatter = lines.slice(1, end + 1);
-  const name = readFrontmatterValue(frontmatter, "name") || basename(dirname(path));
-  const description = readFrontmatterValue(frontmatter, "description").replace(/\s+/g, " ").trim();
-  if (!/^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/.test(name) || !description) return null;
-  return { name, description: description.slice(0, 1024) };
-}
-
-function readFrontmatterValue(lines: string[], key: string): string {
-  const index = lines.findIndex((line) => line.startsWith(`${key}:`));
-  if (index < 0) return "";
-  const raw = lines[index]!.slice(key.length + 1).trim();
-  if (raw.startsWith(">") || raw.startsWith("|")) {
-    const parts: string[] = [];
-    for (let line = index + 1; line < lines.length; line++) {
-      const value = lines[line]!;
-      if (value && !/^\s/.test(value)) break;
-      parts.push(value.trim());
-    }
-    return parts.join(" ").trim();
-  }
-  if (raw.startsWith('"') && raw.endsWith('"')) {
-    try {
-      return JSON.parse(raw) as string;
-    } catch {
-      return raw.slice(1, -1);
-    }
-  }
-  if (raw.startsWith("'") && raw.endsWith("'")) return raw.slice(1, -1).replace(/''/g, "'");
-  return raw;
-}
-
-function resolvePackageRoot(spec: string, agentDir: string): string | null {
-  if (spec.startsWith("npm:")) {
-    const name = npmPackageName(spec.slice(4));
-    return name ? join(agentDir, "npm", "node_modules", ...name.split("/")) : null;
-  }
-  if (spec.startsWith("git:")) {
-    const match = spec.match(/github\.com[:/]([^/]+)\/([^/#]+?)(?:\.git)?(?:[#/].*)?$/);
-    return match ? join(agentDir, "git", "github.com", match[1]!, match[2]!) : null;
-  }
-  return isAbsolute(spec) ? spec : resolve(agentDir, spec);
-}
-
-function npmPackageName(spec: string): string {
-  if (spec.startsWith("@")) {
-    const version = spec.indexOf("@", 1);
-    return version < 0 ? spec : spec.slice(0, version);
-  }
-  return spec.split("@", 1)[0] ?? "";
-}
 
 function readJson(path: string): unknown | null {
   try {

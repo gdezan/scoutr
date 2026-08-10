@@ -30,6 +30,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
@@ -60,6 +61,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
@@ -69,11 +75,15 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.cockpit.app.data.ContentBlock
 import dev.cockpit.app.data.SessionEntry
+import dev.cockpit.app.data.SlashCommandInfo
 import dev.cockpit.app.data.entryText
 import dev.cockpit.app.state.ChatUiState
 import dev.cockpit.app.state.ChatViewModel
 import dev.cockpit.app.state.MessageDeliveryState
 import dev.cockpit.app.state.PendingUserMessage
+import dev.cockpit.app.state.fillSlashCommand
+import dev.cockpit.app.state.matchSlashCommands
+import dev.cockpit.app.state.slashCommandQuery
 import androidx.lifecycle.compose.LifecycleStartEffect
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonPrimitive
@@ -166,6 +176,10 @@ fun ChatScreen(
                 onValueChange = { input = it },
                 placeholder = if (viewModel.waitingForAnswer) "Answer the question…" else "Steer the agent…",
                 enabled = !ui.sending,
+                commands = ui.commands,
+                commandsLoading = ui.commandsLoading,
+                commandsError = ui.commandsError,
+                onRetryCommands = viewModel::retryCommands,
                 onSend = {
                     if (input.isNotBlank()) {
                         viewModel.send(input)
@@ -699,42 +713,93 @@ private fun ToolChipContainer(
 }
 
 @Composable
-private fun ChatComposer(
+internal fun ChatComposer(
     value: String,
     onValueChange: (String) -> Unit,
     placeholder: String,
     enabled: Boolean,
+    commands: List<SlashCommandInfo> = emptyList(),
+    commandsLoading: Boolean = false,
+    commandsError: String? = null,
+    onRetryCommands: () -> Unit = {},
     onSend: () -> Unit,
 ) {
-    OutlinedTextField(
-        value = value,
-        onValueChange = onValueChange,
-        placeholder = { Text(placeholder) },
-        enabled = enabled,
-        singleLine = true,
-        shape = RoundedCornerShape(22.dp),
-        colors = OutlinedTextFieldDefaults.colors(
-            focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f),
-            unfocusedBorderColor = MaterialTheme.colorScheme.outline,
-            focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-            cursorColor = MaterialTheme.colorScheme.primary,
-        ),
-        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-        keyboardActions = KeyboardActions(onSend = { onSend() }),
-        trailingIcon = {
-            IconButton(onClick = onSend, enabled = enabled) {
-                Icon(
-                    Icons.AutoMirrored.Filled.Send,
-                    contentDescription = "Send",
-                    tint = if (value.isBlank()) MaterialTheme.colorScheme.onSurfaceVariant
-                    else MaterialTheme.colorScheme.primary,
-                )
-            }
-        },
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 6.dp)
-            .testTag("chat_input"),
-    )
+    val query = slashCommandQuery(value)
+    val matches = remember(commands, query) { query?.let { matchSlashCommands(commands, it) }.orEmpty() }
+    val exactMatch = query?.let { typed -> matches.firstOrNull { it.name.equals(typed, ignoreCase = true) } }
+    val acceptingCompletion = query != null && matches.isNotEmpty() && exactMatch == null
+    var selectedIndex by remember { mutableStateOf(0) }
+    LaunchedEffect(value, commands) { selectedIndex = 0 }
+
+    fun select(command: SlashCommandInfo) {
+        onValueChange(fillSlashCommand(command))
+    }
+
+    fun submit() {
+        if (acceptingCompletion) select(matches[selectedIndex.coerceIn(matches.indices)])
+        else onSend()
+    }
+
+    Column {
+        if (query != null) {
+            SlashCommandMenu(
+                commands = matches,
+                query = query,
+                loading = commandsLoading,
+                error = commandsError,
+                selectedIndex = selectedIndex,
+                onSelect = ::select,
+                onRetry = onRetryCommands,
+            )
+        }
+        OutlinedTextField(
+            value = value,
+            onValueChange = onValueChange,
+            placeholder = { Text(placeholder) },
+            enabled = enabled,
+            singleLine = true,
+            shape = RoundedCornerShape(22.dp),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f),
+                unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+                focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                cursorColor = MaterialTheme.colorScheme.primary,
+            ),
+            keyboardOptions = KeyboardOptions(imeAction = if (acceptingCompletion) ImeAction.Next else ImeAction.Send),
+            keyboardActions = KeyboardActions(onNext = { submit() }, onSend = { submit() }),
+            trailingIcon = {
+                IconButton(onClick = { submit() }, enabled = enabled && value.isNotBlank()) {
+                    Icon(
+                        imageVector = if (acceptingCompletion) Icons.AutoMirrored.Filled.KeyboardArrowRight else Icons.AutoMirrored.Filled.Send,
+                        contentDescription = if (acceptingCompletion) "Complete command" else "Send",
+                        tint = if (value.isBlank()) MaterialTheme.colorScheme.onSurfaceVariant
+                        else MaterialTheme.colorScheme.primary,
+                    )
+                }
+            },
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 6.dp)
+                .onPreviewKeyEvent { event ->
+                    if (event.type != KeyEventType.KeyDown || query == null || matches.isEmpty()) return@onPreviewKeyEvent false
+                    when (event.key) {
+                        Key.DirectionDown -> {
+                            selectedIndex = (selectedIndex + 1).coerceAtMost(matches.lastIndex)
+                            true
+                        }
+                        Key.DirectionUp -> {
+                            selectedIndex = (selectedIndex - 1).coerceAtLeast(0)
+                            true
+                        }
+                        Key.Enter, Key.NumPadEnter -> {
+                            submit()
+                            true
+                        }
+                        else -> false
+                    }
+                }
+                .testTag("chat_input"),
+        )
+    }
 }

@@ -74,6 +74,7 @@ data class WsFrame(
     val target: String? = null,
     val paneId: String? = null,
     val text: String? = null,
+    val error: String? = null,
 )
 
 /** A herdr feed message forwarded by the bridge (event or snapshot). */
@@ -273,6 +274,26 @@ data class ModelInfo(
     val reasoning: Boolean = false,
     val thinkingLevels: List<String> = emptyList(),
     val contextWindow: Long? = null,
+)
+
+@Serializable
+data class CommandsCatalogResponse(
+    val ok: Boolean,
+    val catalog: CommandsCatalog? = null,
+    val error: String? = null,
+)
+
+@Serializable
+data class CommandsCatalog(
+    val commands: List<SlashCommandInfo>,
+)
+
+@Serializable
+data class SlashCommandInfo(
+    val name: String,
+    val description: String,
+    val source: String,
+    val argumentHint: String? = null,
 )
 
 @Serializable

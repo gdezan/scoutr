@@ -5,6 +5,7 @@ import dev.cockpit.app.data.ContentBlock
 import dev.cockpit.app.data.SessionEntry
 import dev.cockpit.app.net.BridgeClient
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
 import okhttp3.OkHttpClient
 import okhttp3.WebSocket
@@ -30,8 +31,12 @@ import java.util.concurrent.TimeUnit
 class ChatPendingMessageTest {
     private lateinit var server: MockWebServer
     private val commands = CopyOnWriteArrayList<String>()
+    private val commandCatalogCwds = CopyOnWriteArrayList<String>()
     @Volatile private var confirmMessage = false
     @Volatile private var failWebSocket = false
+    @Volatile private var agentStatus = "working"
+    @Volatile private var agentCwd: String? = "/repo"
+    @Volatile private var agentPresent = true
 
     @Before
     fun setUp() {
@@ -42,7 +47,25 @@ class ChatPendingMessageTest {
                 val path = request.requestUrl?.encodedPath.orEmpty()
                 return when (path) {
                     "/api/models" -> json("""{"ok":true,"catalog":{"providers":[]}}""")
-                    "/api/agents" -> json("""{"ok":true,"agents":[{"paneId":"w1:p1","workspaceId":"w1","tabId":"t1","agent":"pi","status":"working","sessionPath":"/tmp/session.jsonl"}]}""")
+                    "/api/commands" -> {
+                        val cwd = request.requestUrl?.queryParameter("cwd") ?: "<global>"
+                        commandCatalogCwds += cwd
+                        if (cwd == "/slow") Thread.sleep(200)
+                        val name = when (cwd) {
+                            "/slow" -> "slow-command"
+                            "/fast" -> "fast-command"
+                            else -> "compact"
+                        }
+                        json("""{"ok":true,"catalog":{"commands":[{"name":"$name","description":"Command","source":"builtin","argumentHint":null}]}}""")
+                    }
+                    "/api/agents" -> {
+                        if (!agentPresent) {
+                            json("""{"ok":true,"agents":[]}""")
+                        } else {
+                            val cwd = agentCwd?.let { "\"$it\"" } ?: "null"
+                            json("""{"ok":true,"agents":[{"paneId":"w1:p1","workspaceId":"w1","tabId":"t1","agent":"pi","status":"$agentStatus","cwd":$cwd,"sessionPath":"/tmp/session.jsonl"}]}""")
+                        }
+                    }
                     "/api/sessions" -> {
                         val entries = if (confirmMessage) {
                             """[{"entryId":"server-1","role":"user","content":[{"type":"text","text":"Fix it"}]}]"""
@@ -104,6 +127,63 @@ class ChatPendingMessageTest {
     }
 
     @Test
+    fun blockedSessionRoutesSlashCommandsBeforeQuestionAnswers() = runBlocking {
+        agentStatus = "blocked"
+        val viewModel = viewModel()
+        waitUntil("cwd") { viewModel.ui.value.cwd == "/repo" }
+        waitUntil("catalog") { viewModel.ui.value.commands.isNotEmpty() && commandCatalogCwds.contains("/repo") }
+
+        viewModel.send("/compact")
+
+        waitUntil("slash command") { commands.isNotEmpty() }
+        assertTrue(commands.single().contains("\"type\":\"slash_command\""))
+        assertTrue(commands.single().contains("\"text\":\"/compact\""))
+        assertTrue(viewModel.ui.value.pendingMessages.isEmpty())
+
+        commands.clear()
+        viewModel.send("Proceed")
+        waitUntil("question answer") { commands.isNotEmpty() }
+        assertTrue(commands.single().contains("\"type\":\"answer_question\""))
+        assertTrue(commands.single().contains("\"text\":\"Proceed\""))
+    }
+
+    @Test
+    fun staleCommandResponseCannotReplaceANewerCatalog() = runBlocking {
+        val viewModel = viewModel()
+        waitUntil("initial catalog") { viewModel.ui.value.commands.isNotEmpty() }
+
+        val slow = async { viewModel.refreshCommands("/slow") }
+        delay(25)
+        val fast = async { viewModel.refreshCommands("/fast") }
+        slow.await()
+        fast.await()
+
+        assertEquals(listOf("fast-command"), viewModel.ui.value.commands.map { it.name })
+    }
+
+    @Test
+    fun clearsProjectCommandsWhenAgentLosesItsCwd() = runBlocking {
+        val viewModel = viewModel()
+        waitUntil("project catalog") { viewModel.ui.value.cwd == "/repo" && commandCatalogCwds.contains("/repo") }
+
+        agentCwd = null
+        viewModel.refresh()
+
+        waitUntil("global catalog") { viewModel.ui.value.cwd == null && commandCatalogCwds.lastOrNull() == "<global>" }
+    }
+
+    @Test
+    fun clearsProjectCommandsWhenAgentDisappears() = runBlocking {
+        val viewModel = viewModel()
+        waitUntil("project catalog") { viewModel.ui.value.cwd == "/repo" && commandCatalogCwds.contains("/repo") }
+
+        agentPresent = false
+        viewModel.refresh()
+
+        waitUntil("global catalog") { viewModel.ui.value.cwd == null && commandCatalogCwds.lastOrNull() == "<global>" }
+    }
+
+    @Test
     fun duplicateTextDropsOneMessagePerEntry() {
         val pending = listOf(
             PendingUserMessage("local-1", "same", MessageDeliveryState.QUEUED),
@@ -144,13 +224,13 @@ class ChatPendingMessageTest {
         return ChatViewModel(BridgeClient(client, store), "w1:p1", "/tmp/session.jsonl", "working")
     }
 
-    private suspend fun waitUntil(condition: () -> Boolean) {
+    private suspend fun waitUntil(description: String = "condition", condition: () -> Boolean) {
         repeat(200) {
             org.robolectric.shadows.ShadowLooper.idleMainLooper()
             if (condition()) return
             delay(25)
         }
-        error("condition did not become true")
+        error("$description did not become true")
     }
 
     private fun json(body: String): MockResponse = MockResponse()

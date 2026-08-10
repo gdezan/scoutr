@@ -75,6 +75,18 @@ describe("cockpit bridge HTTP/WS API", { skip }, () => {
     }
   });
 
+  test("commands returns the slash-command catalog", async () => {
+    const { status, body } = await getJson("/api/commands");
+    assert.equal(status, 200);
+    const commands = (body as { catalog: { commands: { name: string }[] } }).catalog.commands;
+    assert.ok(commands.some((command) => command.name === "compact"));
+  });
+
+  test("commands rejects a cwd that is not attached to an active agent", async () => {
+    const { status } = await getJson("/api/commands?cwd=%2Fetc");
+    assert.equal(status, 403);
+  });
+
 
   test("live output returns a bounded plain-text agent snapshot", async (context) => {
     const snapshotResponse = await getJson("/api/snapshot");

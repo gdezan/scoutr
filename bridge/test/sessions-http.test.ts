@@ -113,8 +113,10 @@ describe("POST /api/sessions and /api/sessions/:paneId/control", () => {
 
     assert.equal(frame.type, "command_sent");
     assert.deepEqual(calls, [
-      { method: "pane.send_text", params: { pane_id: "p1", text: "/skill:research compare APIs" } },
-      { method: "pane.send_keys", params: { pane_id: "p1", keys: ["Enter"] } },
+      {
+        method: "pane.send_input",
+        params: { pane_id: "p1", text: "/skill:research compare APIs", keys: ["Enter"] },
+      },
     ]);
   });
 

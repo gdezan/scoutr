@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import dev.cockpit.app.data.ModelInfo
 import dev.cockpit.app.data.ModelProvider
 import dev.cockpit.app.data.SessionEntry
+import dev.cockpit.app.data.SlashCommandInfo
 import dev.cockpit.app.data.entryText
 import dev.cockpit.app.net.BridgeClient
 import kotlinx.coroutines.Job
@@ -70,6 +71,10 @@ data class ChatUiState(
     val modelProviders: List<ModelProvider> = emptyList(),
     val configurationLoading: Boolean = false,
     val configurationError: String? = null,
+    val cwd: String? = null,
+    val commands: List<SlashCommandInfo> = emptyList(),
+    val commandsLoading: Boolean = true,
+    val commandsError: String? = null,
     val liveOutputExpanded: Boolean = false,
     val liveOutputLoading: Boolean = false,
     val liveOutputText: String = "",
@@ -142,6 +147,9 @@ class ChatViewModel(
     private var resolvedPath: String? = sessionPath
 
     private var nextMessageId = 0L
+    private var commandRequestGeneration = 0L
+    private var commandCatalogCwd: String? = null
+    private var lastCommandRefreshAt = 0L
 
     /** True when the agent is blocked on a question the user should answer. */
     val waitingForAnswer: Boolean get() = _ui.value.agentStatus == "blocked"
@@ -215,9 +223,44 @@ class ChatViewModel(
         }
     }
 
+    suspend fun refreshCommands(cwd: String? = _ui.value.cwd) {
+        val requestGeneration = ++commandRequestGeneration
+        val cwdChanged = cwd != commandCatalogCwd
+        lastCommandRefreshAt = System.currentTimeMillis()
+        _ui.update {
+            it.copy(
+                commands = if (cwdChanged) emptyList() else it.commands,
+                commandsLoading = true,
+                commandsError = null,
+            )
+        }
+        try {
+            val response = bridge.commands(cwd)
+            if (commandRequestGeneration != requestGeneration) return
+            val catalog = response.catalog
+            if (catalog == null) {
+                _ui.update { it.copy(commandsLoading = false, commandsError = response.error ?: "Commands unavailable") }
+                return
+            }
+            commandCatalogCwd = cwd
+            _ui.update { it.copy(commands = catalog.commands, commandsLoading = false, commandsError = null) }
+        } catch (error: Exception) {
+            if (commandRequestGeneration == requestGeneration) {
+                _ui.update { it.copy(commandsLoading = false, commandsError = error.message ?: "Commands unavailable") }
+            }
+        }
+    }
+
+    fun retryCommands() {
+        viewModelScope.launch { refreshCommands() }
+    }
+
     suspend fun refresh() {
         try {
             val path = syncStatusAndPath()
+            if (_ui.value.commandsLoading || System.currentTimeMillis() - lastCommandRefreshAt >= COMMAND_REFRESH_MS) {
+                refreshCommands(_ui.value.cwd)
+            }
             if (path == null) {
                 _ui.update { it.copy(loading = false, exists = false, error = "No session transcript on this agent yet") }
                 return
@@ -246,14 +289,21 @@ class ChatViewModel(
             val card = agents.agents.firstOrNull { it.paneId == paneId }
             if (card != null) {
                 resolvedPath = card.sessionPath?.takeIf { it.isNotBlank() } ?: resolvedPath
+                val cwd = card.cwd?.takeIf(String::isNotBlank)
+                val cwdChanged = cwd != _ui.value.cwd
                 _ui.update {
                     it.copy(
                         agentStatus = card.status,
+                        cwd = cwd,
                         sessionTitle = card.title?.takeIf(String::isNotBlank)
-                            ?: card.cwd?.substringAfterLast('/')?.takeIf(String::isNotBlank)
+                            ?: cwd?.substringAfterLast('/')?.takeIf(String::isNotBlank)
                             ?: it.sessionTitle,
                     )
                 }
+                if (cwdChanged) refreshCommands(cwd)
+            } else if (_ui.value.cwd != null) {
+                _ui.update { it.copy(cwd = null) }
+                refreshCommands(null)
             }
         } catch (_: Exception) {
             // bridge unreachable; keep the current state
@@ -298,6 +348,10 @@ class ChatViewModel(
     /** Send now and keep a local transcript row until the session file confirms it. */
     fun send(text: String) {
         if (text.isBlank()) return
+        if (text.startsWith('/')) {
+            runSlashCommand(text)
+            return
+        }
         val message = PendingUserMessage(
             localId = "local-${nextMessageId++}",
             text = text,
@@ -320,6 +374,20 @@ class ChatViewModel(
             )
         }
         deliver(localId)
+    }
+
+    private fun runSlashCommand(text: String) {
+        viewModelScope.launch {
+            _ui.update { it.copy(sending = true, error = null) }
+            try {
+                bridge.runSlashCommand(paneId, text)
+                _ui.update { it.copy(sending = false) }
+                delay(500)
+                refresh()
+            } catch (error: Exception) {
+                _ui.update { it.copy(sending = false, error = error.message ?: "Command failed") }
+            }
+        }
     }
 
     private fun deliver(localId: String) {
@@ -357,6 +425,7 @@ class ChatViewModel(
     companion object {
         private const val LIVE_OUTPUT_LINES = 80
         private const val LIVE_OUTPUT_POLL_MS = 1_500L
+        private const val COMMAND_REFRESH_MS = 30_000L
         fun factory(
             bridge: BridgeClient,
             paneId: String,

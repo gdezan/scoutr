@@ -14,7 +14,7 @@ import { createSession, controlSession, SessionsError } from "./sessions.js";
 import { LiveOutputError, readLiveOutput } from "./live-output.js";
 import { readCommandsCatalog, validateSlashCommand } from "./pi/commands.js";
 import { basename, resolve } from "node:path";
-import { existsSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 
 /**
  * Cockpit bridge HTTP + WebSocket API.
@@ -310,7 +310,18 @@ export function createCockpitServer(deps: ServerDeps, options: CreateServerOptio
         sendJson(response, 400, { ok: false, error: "invalid cwd" });
         return;
       }
-      sendJson(response, 200, { ok: true, catalog: readCommandsCatalog(cwd) });
+      if (cwd) {
+        const snapshot = routeDeps.feed.snapshot as SessionSnapshot | null;
+        const requestedCwd = canonicalPath(cwd);
+        const belongsToActiveAgent = snapshot && deriveAgentCards(snapshot).some((agent) => (
+          agent.cwd !== undefined && canonicalPath(agent.cwd) === requestedCwd
+        ));
+        if (!belongsToActiveAgent) {
+          sendJson(response, 403, { ok: false, error: "cwd is not attached to an active agent" });
+          return;
+        }
+      }
+      sendJson(response, 200, { ok: true, catalog: await readCommandsCatalog(cwd) });
       return;
     }
 
@@ -422,8 +433,7 @@ async function handleCommand(command: CommandMessage, ws: WebSocket, deps: Serve
       const { paneId, text } = command;
       if (!paneId) throw new Error("slash_command requires paneId");
       const slashCommand = validateSlashCommand(text);
-      await deps.herdr.paneSendText(paneId, slashCommand);
-      await deps.herdr.paneSendKeys(paneId, ["Enter"]);
+      await deps.herdr.paneSendInput(paneId, slashCommand, ["Enter"]);
       ws.send(JSON.stringify({ type: "command_sent", paneId, text: slashCommand }));
       return;
     }
@@ -555,4 +565,12 @@ export async function readSession(pathParam: string, since: string | null): Prom
     lastEntryId: session.lastEntryId,
     mtimeMs: info.mtimeMs,
   };
+}
+
+function canonicalPath(path: string): string {
+  try {
+    return realpathSync(path);
+  } catch {
+    return resolve(path);
+  }
 }

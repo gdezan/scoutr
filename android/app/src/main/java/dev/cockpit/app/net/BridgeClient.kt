@@ -2,6 +2,7 @@ package dev.cockpit.app.net
 
 import dev.cockpit.app.data.AgentsResponse
 import dev.cockpit.app.data.ConnectionStore
+import dev.cockpit.app.data.CommandsCatalogResponse
 import dev.cockpit.app.data.ControlResponse
 import dev.cockpit.app.data.CreatedSessionResponse
 import dev.cockpit.app.data.DirListingResponse
@@ -119,7 +120,11 @@ class BridgeClient(
     suspend fun models(): ModelsCatalogResponse =
         call("/api/models") { json.decodeFromString(ModelsCatalogResponse.serializer(), it) }
 
-
+    /** Built-in pi commands and installed skill commands for autocomplete. */
+    suspend fun commands(cwd: String? = null): CommandsCatalogResponse =
+        call("/api/commands", query = if (cwd == null) emptyMap() else mapOf("cwd" to cwd)) {
+            json.decodeFromString(CommandsCatalogResponse.serializer(), it)
+        }
     /** Bounded ANSI-free terminal snapshot for a live agent pane. */
     suspend fun liveOutput(paneId: String, lines: Int = 80): LiveOutputResponse =
         call("/api/agents/$paneId/read", query = mapOf("lines" to lines.toString())) {
@@ -243,8 +248,10 @@ class BridgeClient(
             override fun onMessage(webSocket: WebSocket, text: String) {
                 try {
                     val frame = json.decodeFromString(WsFrame.serializer(), text)
+                    if (frame.type == "feed") return
                     if (settled.compareAndSet(false, true)) {
-                        continuation.resume(frame)
+                        if (frame.type == "error") continuation.resumeWithException(IOException(frame.error ?: "Bridge command failed"))
+                        else continuation.resume(frame)
                         webSocket.close(1000, null)
                     }
                 } catch (_: Exception) {
@@ -266,6 +273,9 @@ class BridgeClient(
 
     suspend fun steer(target: String, text: String): WsFrame =
         sendCommand(mapOf("type" to "steer", "target" to target, "text" to text))
+
+    suspend fun runSlashCommand(paneId: String, text: String): WsFrame =
+        sendCommand(mapOf("type" to "slash_command", "paneId" to paneId, "text" to text))
 
     suspend fun answerQuestion(paneId: String, text: String): WsFrame =
         sendCommand(mapOf("type" to "answer_question", "paneId" to paneId, "text" to text))
