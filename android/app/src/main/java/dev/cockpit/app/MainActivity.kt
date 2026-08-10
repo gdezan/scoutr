@@ -28,16 +28,19 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -59,11 +62,13 @@ import dev.cockpit.app.data.AgentCard
 import dev.cockpit.app.state.BoardViewModel
 import dev.cockpit.app.state.NewSessionViewModel
 import dev.cockpit.app.state.ChatViewModel
+import dev.cockpit.app.state.CommandPaletteViewModel
 import dev.cockpit.app.state.SessionHistoryViewModel
 import dev.cockpit.app.state.UsageViewModel
 import dev.cockpit.app.ui.screens.BoardScreen
 import dev.cockpit.app.ui.screens.NewSessionSheet
 import dev.cockpit.app.ui.screens.ChatScreen
+import dev.cockpit.app.ui.screens.CommandPalette
 import dev.cockpit.app.ui.screens.ConnectScreen
 import dev.cockpit.app.ui.screens.HistoryScreen
 import dev.cockpit.app.ui.screens.UsageScreen
@@ -145,7 +150,14 @@ private fun CockpitAppNav() {
         }
     }
 
-    Scaffold(
+    val paletteViewModel: CommandPaletteViewModel = viewModel(
+        factory = CommandPaletteViewModel.factory(container.bridge, container.connectionStore),
+    )
+    var paletteOpen by remember { mutableStateOf(false) }
+    val openPalette = { paletteOpen = true }
+
+    Box {
+        Scaffold(
         bottomBar = {
             if (currentRoute in setOf(Routes.BOARD, Routes.SESSIONS, Routes.USAGE)) {
                 CockpitBottomBar(
@@ -180,7 +192,7 @@ private fun CockpitAppNav() {
                 )
                 var showNewSession by remember { mutableStateOf(false) }
                 Scaffold(
-                    topBar = { AppTopBar("Board") },
+                    topBar = { AppTopBar("Board", onSearch = openPalette) },
                     floatingActionButton = {
                         FloatingActionButton(
                             onClick = { showNewSession = true },
@@ -218,7 +230,7 @@ private fun CockpitAppNav() {
                         container.sessionCatalogStore,
                     ),
                 )
-                Scaffold(topBar = { AppTopBar("Sessions") }) { innerSessions ->
+                Scaffold(topBar = { AppTopBar("Sessions", onSearch = openPalette) }) { innerSessions ->
                     HistoryScreen(
                         onOpenSession = { resumed ->
                             navController.navigate(Routes.chat(resumed.paneId, null, "working"))
@@ -258,13 +270,27 @@ private fun CockpitAppNav() {
                 val usageViewModel: UsageViewModel = viewModel(
                     factory = UsageViewModel.factory(container.bridge),
                 )
-                Scaffold(topBar = { AppTopBar("Usage") }) { innerUsage ->
+                Scaffold(topBar = { AppTopBar("Usage", onSearch = openPalette) }) { innerUsage ->
                     UsageScreen(
                         viewModel = usageViewModel,
                         modifier = Modifier.padding(innerUsage),
                     )
                 }
             }
+        }
+        }
+
+        if (paletteOpen) {
+            LaunchedEffect(Unit) { paletteViewModel.open() }
+            CommandPalette(
+                viewModel = paletteViewModel,
+                onOpenAgent = { paneId, sessionPath ->
+                    navController.navigate(Routes.chat(paneId, sessionPath, "working"))
+                },
+                onOpenSession = { paneId, sessionPath ->
+                    navController.navigate(Routes.chat(paneId, sessionPath, "working"))
+                },
+            )
         }
     }
 }
@@ -368,11 +394,18 @@ private fun CockpitTab(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun AppTopBar(title: String) {
+private fun AppTopBar(title: String, onSearch: (() -> Unit)? = null) {
     TopAppBar(
         title = { Text(title) },
         colors = TopAppBarDefaults.topAppBarColors(
             containerColor = MaterialTheme.colorScheme.background,
         ),
+        actions = {
+            if (onSearch != null) {
+                IconButton(onClick = onSearch) {
+                    Icon(Icons.Default.Search, contentDescription = "Search agents and sessions")
+                }
+            }
+        },
     )
 }
