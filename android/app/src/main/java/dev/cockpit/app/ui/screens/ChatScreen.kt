@@ -910,24 +910,29 @@ internal fun ChatComposer(
                 onGo = {},
                 onSearch = {},
             ),
+            // The M3 trailing slot stacks sibling icons on top of each other, so the
+            // two actions must live in an explicit Row to guarantee side-by-side
+            // placement (S24 feedback: attach and send buttons overlapped).
             trailingIcon = {
-                IconButton(onClick = onPickAttachment, enabled = enabled) {
-                    Icon(
-                        Icons.Default.Image,
-                        contentDescription = "Attach image",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                IconButton(
-                    onClick = { submit() },
-                    enabled = enabled && (value.isNotBlank() || attachment != null),
-                ) {
-                    Icon(
-                        imageVector = if (acceptingCompletion) Icons.AutoMirrored.Filled.KeyboardArrowRight else Icons.AutoMirrored.Filled.Send,
-                        contentDescription = if (acceptingCompletion) "Complete command" else "Send",
-                        tint = if (value.isBlank()) MaterialTheme.colorScheme.onSurfaceVariant
-                        else MaterialTheme.colorScheme.primary,
-                    )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = onPickAttachment, enabled = enabled) {
+                        Icon(
+                            Icons.Default.Image,
+                            contentDescription = "Attach image",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    IconButton(
+                        onClick = { submit() },
+                        enabled = enabled && (value.isNotBlank() || attachment != null),
+                    ) {
+                        Icon(
+                            imageVector = if (acceptingCompletion) Icons.AutoMirrored.Filled.KeyboardArrowRight else Icons.AutoMirrored.Filled.Send,
+                            contentDescription = if (acceptingCompletion) "Complete command" else "Send",
+                            tint = if (value.isBlank()) MaterialTheme.colorScheme.onSurfaceVariant
+                            else MaterialTheme.colorScheme.primary,
+                        )
+                    }
                 }
             },
             modifier = Modifier

@@ -11,6 +11,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.pressKey
+import org.junit.Assert.assertTrue
 import dev.cockpit.app.data.SlashCommandInfo
 import dev.cockpit.app.ui.screens.ChatComposer
 import dev.cockpit.app.ui.theme.CockpitTheme
@@ -108,5 +109,30 @@ class ChatComposerKeyTest {
             assertEquals("/compact", input.value)
             assertEquals(0, sends)
         }
+    }
+    @Test
+    fun attachAndSendIconsNeverOverlap() {
+        compose.setContent {
+            CockpitTheme {
+                ChatComposer(
+                    value = "hello",
+                    onValueChange = {},
+                    placeholder = "Steer the agent…",
+                    enabled = true,
+                    onSend = {},
+                )
+            }
+        }
+
+        val attach = compose.onNodeWithContentDescription("Attach image")
+            .fetchSemanticsNode().boundsInRoot
+        val send = compose.onNodeWithContentDescription("Send")
+            .fetchSemanticsNode().boundsInRoot
+
+        // The two actions must sit side by side, never stacked on top of each other
+        // (S24 feedback: the send icon overlapped the attach icon).
+        assertTrue("attach right edge (${attach.right}) must not pass send left edge (${send.left})", attach.right <= send.left + 1f)
+        assertTrue("attach must be to the left of send", attach.left < send.left)
+        assertTrue("icons must share the same vertical band", attach.top < send.bottom && send.top < attach.bottom)
     }
 }
