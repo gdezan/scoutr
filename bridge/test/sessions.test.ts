@@ -1,9 +1,12 @@
 import { homedir } from "node:os";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   createSession,
   controlSession,
+  launchStoredSession,
   SessionsError,
   buildLaunchCommand,
   shellQuote,
@@ -189,6 +192,49 @@ describe("createSession", () => {
   });
 });
 
+describe("launchStoredSession", () => {
+  it("opens or forks an allowed session with one quoted pi command", async () => {
+    const root = await mkdtemp(join(homedir(), ".cockpit-stored-session-"));
+    const path = join(root, "saved.jsonl");
+    await writeFile(path, `${JSON.stringify({
+      type: "session",
+      version: 3,
+      id: "saved-session",
+      timestamp: "2026-01-01T00:00:00.000Z",
+      cwd,
+    })}\n`);
+    try {
+      for (const mode of ["resume", "fork"] as const) {
+        const herdr = fakeHerdr();
+        const created = await launchStoredSession(herdr, { path, mode, sessionRoot: root });
+        assert.deepEqual(created, { workspaceId: "ws1", paneId: "p1" });
+        assert.equal(herdr.calls[0].method, "workspace.create");
+        assert.deepEqual(herdr.calls[1].params, {
+          pane_id: "p1",
+          text: `pi --${mode === "resume" ? "session" : "fork"} ${shellQuote(path)}`,
+          keys: ["Enter"],
+        });
+      }
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects a session outside the configured store before any Herdr call", async () => {
+    const root = await mkdtemp(join(homedir(), ".cockpit-stored-session-"));
+    const herdr = fakeHerdr();
+    try {
+      await assert.rejects(
+        launchStoredSession(herdr, { path: "/etc/passwd", mode: "resume", sessionRoot: root }),
+        /outside the session store/,
+      );
+      assert.equal(herdr.calls.length, 0);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("controlSession", () => {
   it("abort sends escape", async () => {
     const herdr = fakeHerdr();
@@ -221,11 +267,12 @@ describe("controlSession", () => {
     assert.equal(herdr.calls[0].params.text, "/fork");
   });
 
-  it("rename resolves the pane workspace and renames it", async () => {
+  it("rename persists the pi name and updates the workspace label", async () => {
     const herdr = fakeHerdr();
     await controlSession(herdr, { paneId: "p1", action: "rename", text: "new name" });
-    assert.deepEqual(herdr.calls.map((call) => call.method), ["session.snapshot", "workspace.rename"]);
-    assert.deepEqual(herdr.calls[1].params, { workspace_id: "ws1", label: "new name" });
+    assert.deepEqual(herdr.calls.map((call) => call.method), ["session.snapshot", "pane.send_input", "workspace.rename"]);
+    assert.deepEqual(herdr.calls[1].params, { pane_id: "p1", text: "/name new name", keys: ["Enter"] });
+    assert.deepEqual(herdr.calls[2].params, { workspace_id: "ws1", label: "new name" });
   });
 
   it("close resolves the pane workspace and closes it", async () => {

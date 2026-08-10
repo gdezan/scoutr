@@ -1,5 +1,6 @@
 import { basename, isAbsolute, relative, resolve } from "node:path";
-import { open, readdir, realpath, stat } from "node:fs/promises";
+import { appendFile, open, readdir, realpath, stat, unlink } from "node:fs/promises";
+import { randomBytes } from "node:crypto";
 
 const MAX_CANDIDATES = 2_000;
 const MAX_SCANNED_FILES = 500;
@@ -68,8 +69,43 @@ export class SessionCatalogError extends Error {
 }
 
 export function sessionCatalogRoot(): string {
+  const sessionRoot = process.env.PI_CODING_AGENT_SESSION_DIR?.trim();
+  if (sessionRoot) return resolve(sessionRoot);
   const agentRoot = process.env.PI_CODING_AGENT_DIR?.trim() || `${process.env.HOME ?? ""}/.pi/agent`;
   return resolve(agentRoot, "sessions");
+}
+
+export async function resolveCatalogSessionPath(path: string, requestedRoot?: string): Promise<string> {
+  const root = await realpath(resolve(requestedRoot ?? sessionCatalogRoot())).catch(() => {
+    throw new SessionCatalogError("session store is unavailable", 404);
+  });
+  const target = await realpath(resolve(path)).catch(() => {
+    throw new SessionCatalogError("session not found", 404);
+  });
+  if (!isInside(root, target) || !target.endsWith(".jsonl")) {
+    throw new SessionCatalogError("session path is outside the session store", 403);
+  }
+  return target;
+}
+
+export async function renameStoredSession(path: string, name: string, root?: string): Promise<void> {
+  const cleanName = name.trim();
+  if (!cleanName || cleanName.length > MAX_TITLE_LENGTH || /[\u0000-\u001f\u007f]/.test(cleanName)) {
+    throw new SessionCatalogError(`name must be 1 to ${MAX_TITLE_LENGTH} printable characters`);
+  }
+  const target = await resolveCatalogSessionPath(path, root);
+  const record = {
+    type: "session_info",
+    id: randomBytes(4).toString("hex"),
+    parentId: null,
+    timestamp: new Date().toISOString(),
+    name: cleanName,
+  };
+  await appendFile(target, `${JSON.stringify(record)}\n`, "utf8");
+}
+
+export async function deleteStoredSession(path: string, root?: string): Promise<void> {
+  await unlink(await resolveCatalogSessionPath(path, root));
 }
 
 /** List bounded pi session metadata and join it with Herdr's live pane state. */
@@ -83,10 +119,9 @@ export async function listSessionCatalog(options: ListSessionCatalogOptions = {}
     throw new SessionCatalogError("invalid query");
   }
 
-  const requestedRoot = resolve(options.root ?? sessionCatalogRoot());
   let root: string;
   try {
-    root = await realpath(requestedRoot);
+    root = await realpath(resolve(options.root ?? sessionCatalogRoot()));
   } catch {
     return { sessions: [], truncated: false };
   }

@@ -10,11 +10,17 @@ import { NtfyPublisher } from "./notify.js";
 import { StatusTracker } from "./status.js";
 import { listDirs, DirListingError } from "./dirs.js";
 import { readModelsCatalog } from "./pi/models.js";
-import { createSession, controlSession, SessionsError } from "./sessions.js";
+import { createSession, controlSession, launchStoredSession, SessionsError } from "./sessions.js";
 import { LiveOutputError, readLiveOutput } from "./live-output.js";
 import { readCommandsCatalog, validateSlashCommand } from "./pi/commands.js";
-import { basename, resolve } from "node:path";
-import { listSessionCatalog, SessionCatalogError } from "./session-catalog.js";
+import { basename, isAbsolute, relative, resolve } from "node:path";
+import {
+  deleteStoredSession,
+  listSessionCatalog,
+  renameStoredSession,
+  resolveCatalogSessionPath,
+  SessionCatalogError,
+} from "./session-catalog.js";
 import { existsSync, realpathSync } from "node:fs";
 
 /**
@@ -39,6 +45,7 @@ export interface JsonBody {
   initialPrompt?: string;
   action?: string;
   text?: string;
+  path?: string;
 }
 
 export type CommandMessage =
@@ -325,6 +332,49 @@ export function createCockpitServer(deps: ServerDeps, options: CreateServerOptio
       return;
     }
 
+    const storedAction = pathname.match(/^\/api\/session-catalog\/(resume|fork|rename|delete)$/)?.[1];
+    if (request.method === "POST" && storedAction) {
+      const body = (request as IncomingMessage & { body?: JsonBody }).body ?? {};
+      if (typeof body.path !== "string" || !body.path) {
+        sendJson(response, 400, { ok: false, error: "path is required" });
+        return;
+      }
+      try {
+        const target = await resolveCatalogSessionPath(body.path, routeDeps.sessionCatalogRoot);
+        const snapshot = routeDeps.feed.snapshot as SessionSnapshot | null;
+        const active = snapshot
+          ? deriveAgentCards(snapshot).find((card) => card.sessionPath && canonicalPath(card.sessionPath) === target)
+          : undefined;
+
+        if (storedAction === "resume" && active) {
+          sendJson(response, 200, { ok: true, workspaceId: active.workspaceId, paneId: active.paneId });
+        } else if (storedAction === "resume" || storedAction === "fork") {
+          const created = await launchStoredSession(routeDeps.herdr, {
+            path: target,
+            mode: storedAction,
+            sessionRoot: routeDeps.sessionCatalogRoot,
+          });
+          sendJson(response, 201, { ok: true, ...created });
+        } else if (storedAction === "rename") {
+          if (typeof body.text !== "string") throw new SessionCatalogError("name is required");
+          if (active) {
+            await controlSession(routeDeps.herdr, { paneId: active.paneId, action: "rename", text: body.text });
+          } else {
+            await renameStoredSession(target, body.text, routeDeps.sessionCatalogRoot);
+          }
+          sendJson(response, 200, { ok: true });
+        } else {
+          if (active) throw new SessionCatalogError("close the active session before deleting it", 409);
+          await deleteStoredSession(target, routeDeps.sessionCatalogRoot);
+          sendJson(response, 200, { ok: true });
+        }
+      } catch (error) {
+        const status = error instanceof SessionCatalogError || error instanceof SessionsError ? error.status : 502;
+        sendJson(response, status, { ok: false, error: error instanceof Error ? error.message : String(error) });
+      }
+      return;
+    }
+
     if (request.method === "GET" && pathname === "/api/usage") {
       const snapshots = await routeDeps.usage.all();
       sendJson(response, 200, { ok: true, usage: snapshots });
@@ -566,9 +616,10 @@ interface SessionReadResult {
 
 export async function readSession(pathParam: string, since: string | null): Promise<SessionReadResult> {
   // Only allow absolute paths under the user's pi agent directory (read-only data).
-  const agentRoot = resolve(process.env.PI_CODING_AGENT_DIR?.trim() || `${process.env.HOME}/.pi/agent`);
-  const target = resolve(pathParam);
-  if (!target.startsWith(agentRoot)) {
+  const agentRoot = canonicalPath(resolve(process.env.PI_CODING_AGENT_DIR?.trim() || `${process.env.HOME}/.pi/agent`));
+  const target = canonicalPath(resolve(pathParam));
+  const pathFromRoot = relative(agentRoot, target);
+  if (!pathFromRoot || pathFromRoot.startsWith("..") || isAbsolute(pathFromRoot)) {
     throw new Error("session path must live under the pi agent directory");
   }
   const info = await inspectSessionFile(target);

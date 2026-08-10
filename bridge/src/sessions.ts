@@ -2,6 +2,8 @@ import type { HerdrClient } from "./herdr/client.js";
 import { resolveAllowedDir } from "./dirs.js";
 import { readModelsCatalog, type ModelsCatalog } from "./pi/models.js";
 import { readPiSessionFile, type PiSession } from "./pi/session.js";
+import { resolveCatalogSessionPath } from "./session-catalog.js";
+import { basename } from "node:path";
 
 /** pi's documented `--thinking` levels (README: Model Options). */
 export const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
@@ -18,6 +20,14 @@ export interface CreateSessionParams {
 export interface CreatedSession {
   workspaceId: string;
   paneId: string;
+}
+
+export type StoredSessionMode = "resume" | "fork";
+
+export interface LaunchStoredSessionParams {
+  path: string;
+  mode: StoredSessionMode;
+  sessionRoot?: string;
 }
 
 export type ControlAction =
@@ -140,8 +150,47 @@ export async function createSession(
     throw new SessionsError(error instanceof Error ? error.message : String(error));
   }
 
-  const name = params.name?.trim() || cwd.split("/").filter(Boolean).pop() || "session";
-  const ws = await herdr.workspaceCreate({ cwd, label: name, focus: false });
+  const name = params.name?.trim() || basename(cwd) || "session";
+  const command = buildLaunchCommand({
+    model: params.model,
+    thinkingLevel: params.thinkingLevel,
+    name: params.name?.trim() || undefined,
+  });
+  return launchWorkspace(herdr, cwd, name, command, async (paneId) => {
+    if (params.initialPrompt) await herdr.agentPrompt(paneId, params.initialPrompt);
+  });
+}
+
+/** Open an existing pi session in a new Herdr workspace. */
+export async function launchStoredSession(
+  herdr: HerdrClient,
+  params: LaunchStoredSessionParams,
+): Promise<CreatedSession> {
+  const path = await resolveCatalogSessionPath(params.path, params.sessionRoot);
+  const session = await readPiSessionFile(path);
+  if (!session.cwd) throw new SessionsError("session working directory is unavailable", 409);
+  let cwd: string;
+  try {
+    cwd = resolveAllowedDir(session.cwd);
+  } catch (error) {
+    throw new SessionsError(error instanceof Error ? error.message : String(error));
+  }
+  return launchWorkspace(
+    herdr,
+    cwd,
+    basename(cwd) || "session",
+    `pi --${params.mode === "fork" ? "fork" : "session"} ${shellQuote(path)}`,
+  );
+}
+
+async function launchWorkspace(
+  herdr: HerdrClient,
+  cwd: string,
+  label: string,
+  command: string,
+  afterStart?: (paneId: string) => Promise<void>,
+): Promise<CreatedSession> {
+  const ws = await herdr.workspaceCreate({ cwd, label, focus: false });
   const workspaceId = ws.workspace?.workspace_id ?? "";
   const paneId = ws.root_pane?.pane_id ?? "";
   if (!workspaceId) throw new SessionsError("herdr did not return a workspace id", 502);
@@ -151,14 +200,9 @@ export async function createSession(
   }
 
   try {
-    const command = buildLaunchCommand({
-      model: params.model,
-      thinkingLevel: params.thinkingLevel,
-      name: params.name?.trim() || undefined,
-    });
     await herdr.paneSendInput(paneId, command, ["Enter"]);
     await waitForAgent(herdr, paneId);
-    if (params.initialPrompt) await herdr.agentPrompt(paneId, params.initialPrompt);
+    await afterStart?.(paneId);
     return { workspaceId, paneId };
   } catch (error) {
     await closeWorkspaceQuietly(herdr, workspaceId);
@@ -217,10 +261,16 @@ export async function controlSession(
       await herdr.paneSendInput(paneId, "/fork", ["Enter"]);
       return;
     case "rename": {
-      if (!text) throw new SessionsError("rename needs a label");
+      const name = text?.trim() ?? "";
+      if (!name) throw new SessionsError("rename needs a label");
+      if (name.length > MAX_NAME_LENGTH) {
+        throw new SessionsError(`name is too long (max ${MAX_NAME_LENGTH} characters)`);
+      }
+      assertNoControlChars("name", name);
       const workspaceId = await findPaneWorkspace(herdr, paneId);
       if (!workspaceId) throw new SessionsError("pane not found in the snapshot", 404);
-      await herdr.workspaceRename(workspaceId, text);
+      await herdr.paneSendInput(paneId, `/name ${name}`, ["Enter"]);
+      await herdr.workspaceRename(workspaceId, name);
       return;
     }
     case "close": {

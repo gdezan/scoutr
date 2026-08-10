@@ -1,4 +1,6 @@
 import { homedir } from "node:os";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { createCockpitServer, type CockpitServer } from "../src/server.js";
@@ -8,7 +10,7 @@ const PORT = 8792;
 const TOKEN = "test_token_for_sessions_0003";
 const cwd = homedir();
 
-function fakeDeps() {
+function fakeDeps(sessionCatalogRoot?: string) {
   const calls: { method: string; params: unknown }[] = [];
   const herdr = {
     calls,
@@ -53,6 +55,7 @@ function fakeDeps() {
       feed: feed as never,
       usage: usage as never,
       config: { token: TOKEN, port: PORT },
+      sessionCatalogRoot,
     },
     calls,
   };
@@ -95,15 +98,29 @@ function lastLaunch(calls: { method: string; params: unknown }[]): string {
 describe("POST /api/sessions and /api/sessions/:paneId/control", () => {
   let server: CockpitServer;
   let calls: { method: string; params: unknown }[];
+  let sessionRoot: string;
+  let sessionPath: string;
 
-  before(() => {
-    const fake = fakeDeps();
+  before(async () => {
+    sessionRoot = await mkdtemp(join(homedir(), ".cockpit-session-http-"));
+    const project = join(sessionRoot, "project");
+    await mkdir(project);
+    sessionPath = join(project, "saved.jsonl");
+    await writeFile(sessionPath, `${JSON.stringify({
+      type: "session",
+      version: 3,
+      id: "saved",
+      timestamp: "2026-01-01T00:00:00.000Z",
+      cwd,
+    })}\n`);
+    const fake = fakeDeps(sessionRoot);
     calls = fake.calls;
     server = createCockpitServer(fake.deps, { listen: true });
   });
 
   after(async () => {
     await server.close();
+    await rm(sessionRoot, { recursive: true, force: true });
   });
 
   it("delivers one slash command as exact pane text plus Enter", async () => {
@@ -140,6 +157,15 @@ describe("POST /api/sessions and /api/sessions/:paneId/control", () => {
     assert.equal(data.ok, true);
     assert.equal(data.paneId, "p1");
     assert.equal(lastLaunch(calls), "pi --model 'openai-codex/gpt-5.4' --name 'demo'");
+  });
+
+  it("resumes a stored session through a quoted headless launch", async () => {
+    calls.length = 0;
+    const { status, data } = await post("/api/session-catalog/resume", { path: sessionPath });
+
+    assert.equal(status, 201);
+    assert.equal(data.paneId, "p1");
+    assert.equal(lastLaunch(calls), `pi --session '${sessionPath}'`);
   });
 
   it("delivers thinking through launch and the exact prompt through agent.prompt", async () => {

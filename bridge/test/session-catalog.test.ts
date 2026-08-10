@@ -3,7 +3,12 @@ import { mkdtemp, mkdir, symlink, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
-import { listSessionCatalog, SessionCatalogError } from "../src/session-catalog.js";
+import {
+  deleteStoredSession,
+  listSessionCatalog,
+  renameStoredSession,
+  SessionCatalogError,
+} from "../src/session-catalog.js";
 
 async function writeSession(
   root: string,
@@ -116,6 +121,25 @@ describe("session catalog", () => {
 
     const result = await listSessionCatalog({ root });
     assert.deepEqual(result.sessions, []);
+  });
+
+  it("renames and deletes a stored session", async () => {
+    const root = await mkdtemp(join(tmpdir(), "cockpit-catalog-"));
+    const path = await writeSession(
+      root,
+      "project",
+      "saved.jsonl",
+      [sessionLine("saved", "/work/saved", "2026-01-01T00:00:00.000Z")],
+      "2026-01-01T00:00:00.000Z",
+    );
+
+    await renameStoredSession(path, "Release follow-up", root);
+    const renamed = await listSessionCatalog({ root });
+    assert.equal(renamed.sessions[0]?.title, "Release follow-up");
+
+    await deleteStoredSession(path, root);
+    const deleted = await listSessionCatalog({ root });
+    assert.deepEqual(deleted.sessions, []);
   });
 
   it("rejects invalid limits and queries", async () => {

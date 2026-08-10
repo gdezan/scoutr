@@ -84,6 +84,10 @@ test("readSession rejects paths outside the agent root", async () => {
   process.env.PI_CODING_AGENT_DIR = agentDir;
   try {
     await assert.rejects(() => readSession("/etc/passwd", null), /must live under the pi agent directory/);
+    await assert.rejects(
+      () => readSession(`${agentDir}-evil/session.jsonl`, null),
+      /must live under the pi agent directory/,
+    );
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
