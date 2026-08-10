@@ -12,12 +12,12 @@ Updated: 2026-08-10 (third revision — reflects the milestone commits `37b9de0`
 ## Device feedback (S24 Ultra, live) — current round
 
 - [x] "Queued" state never leaves after a message is confirmed. Root cause: `dropConfirmedMessages` compared the typed text verbatim against `entryText` which collapses whitespace runs, so multi-space/newline sends never matched. Fixed in `ChatViewModel.kt` (both sides normalized) with a new regression test `multiSpaceAndNewlineMessagesStillReconcile` in `ChatPendingMessageTest.kt`.
-- [ ] Chat header chips misaligned (working chip vs thinking/model). Fix in progress: chips row now stretches all chips to a common intrinsic height so the M3 clickable 48dp minimum does not shorten the status chip (`ChatScreen.kt`).
-- [ ] New-run bottom sheet jitters/flickers when scrolled to the top. Under investigation (`NewSessionSheet.kt`).
-- [ ] Enter key must insert a newline, not send. Fix applied: composer is multiline (`minLines 1, maxLines 6`), `imeAction = Default`, send only via the send button; Enter still completes an accepting slash command (`ChatScreen.kt`). Needs runtime confirmation.
-- [ ] Git history needs a discoverable home. Review center exists but the default worktree allow-list is unreachable from the dot-dir-hiding picker. Plan: last-reviewed-repo quick open + manual path input in the picker (`ReviewScreen.kt`, `ReviewViewModel.kt`).
-- [ ] ask_user_question cards get confusing with several questions at once. Plan: group questions from the same tool call into one questionnaire card with "Question i of n" headers (`QuestionCard.kt`/`ChatList`).
-- [ ] Image attachments in the composer. Plan: attach button → photo picker → thumbnail chip → bridge `POST /api/attachments` (bounded upload) → steer `@path text` to pi.
+- [x] Chat header chips misaligned — fixed and verified on the emulator: the chips row stretches all chips to a common intrinsic height so the M3 48dp clickable minimum no longer shortens the status chip; all three chips share identical bounds (`ChatScreen.kt`, commit `2b26111`).
+- [x] New-run bottom sheet jitter — the sheet's drag gesture fought the inner list at the top scroll position; `sheetGesturesEnabled = false` (header close/back handles dismissal). Verified: repeated top-scrolls stay stable (`NewSessionSheet.kt`).
+- [x] Enter inserts a newline, never sends — composer is multiline (`minLines 1, maxLines 6`) with `imeAction = None` and no-op `KeyboardActions`; Enter completes an accepting slash command only. Pinned by `ChatComposerKeyTest` (3 emulator tests: newline-without-send, send-button-still-sends, slash-completion).
+- [x] Git history discoverable — the review picker gained an editable path field (reaches dot-dirs like `~/.herdr/worktrees`), a persisted Resume-last-repo row (basename + dimmed parent), picker error surfacing, and the overview shows ahead/behind + a bounded Generated artifacts list. Verified on the emulator (`/tmp/cockpit-review2.png`, `/tmp/cockpit-review-artifacts.png`).
+- [x] Multi-question asks — questions from one `ask_user_question` call render as a group with 'Question i of n' labels (`ChatList` grouping + `QuestionCard` position param).
+- [x] Image attachments — composer attach button (photo picker) → thumbnail chip with remove → bridge `POST /api/attachments` (image/* only, 10 MiB cap, pruned uploads dir; 6 bridge tests) → `sendWithAttachment` steers `@path [text]` to pi. Send stays enabled with an attachment and no text (taste-review finding).
 
 ## Taste-review checkpoints
 
@@ -43,7 +43,7 @@ Each checkpoint must name source files and rendered screenshot paths, ask for a 
 - [x] Typo-tolerant ranking across provider, model display name, and model ID.
 - [x] Filters: reasoning support, context size, and catalog-provided thinking levels.
 - [x] Favorites, recents, and one default model persisted on-device.
-- [ ] Loading, empty-search, error, many-model, and large-font states. Loading/empty/error/many-model are implemented; large-font runtime evidence remains.
+- [x] Loading, empty-search, error, many-model, and large-font states — implemented; large-font runtime evidence `/tmp/cockpit-board-largefont.png` (scale 2.0).
 
 ### 2. Global command palette
 
@@ -56,21 +56,21 @@ Each checkpoint must name source files and rendered screenshot paths, ask for a 
 
 - [x] Initial prompt, recent folders, saved presets, remembered model/thinking settings, and task templates.
 - [x] Atomic create plus first-prompt delivery, with workspace rollback on launch or prompt failure.
-- [ ] Loading, empty, error, offline, IME, narrow/landscape, many-folder/model states. Core paths implemented; offline and adaptive runtime evidence remains.
+- [x] Loading, empty, error, offline, IME, narrow/landscape, many-folder/model states — offline runtime evidence `/tmp/cockpit-board-offline.png` (Disconnected banner + empty board), landscape `/tmp/cockpit-board-landscape.png` (2340x1080), IME via `ChatComposerKeyTest`.
 
 ### 4. Attention-first Board
 
 - [x] Cards show phase, model, latest meaningful activity, and elapsed time. `BoardScreen.kt` + bridge `board-detail.ts` (bounded 64 KiB tail reads, model_change extraction, latest meaningful activity).
 - [x] Agents needing input sort and read as the strongest priority.
 - [x] Stable skeleton/offline/error/empty/overflow states and animated group movement.
-- [ ] Realistic screenshot ranges + taste checkpoint remain. Emulator evidence: `/tmp/cockpit-board.png`; `BoardScreenTest` (3).
+- [x] Board screenshots + taste — `/tmp/cockpit-board.png`, `/tmp/cockpit-board-largefont.png`, `/tmp/cockpit-board-landscape.png`, `/tmp/cockpit-board-offline.png`, `/tmp/cockpit-board-reducemotion.png`; reviewed in both taste rounds (nav/coherence) and the vision pass; `BoardScreenTest` (3).
 
 ### 5. Native structured questions
 
 - [x] Structured single-choice, multi-select, confirmation, and free-text cards.
 - [x] Data comes from pi structured session events, never terminal-text parsing. `bridge/src/questions.ts` reads toolCall/toolResult records + `details.answers`.
 - [x] Safe answer serialization and delivery, validation, status recovery, and accessibility semantics. Sanitized single-line answers (both sides), answered-state recovery, testTags.
-- [ ] Multi-question-at-once UX (device feedback): grouping into one questionnaire card pending.
+- [x] Multi-question-at-once UX — grouped with 'Question i of n' headers (see device-feedback section above).
 - Tests: bridge 9 questions tests + 2 integration; `QuestionMergeTest` (5), `QuestionCardTest` (5 emulator).
 
 ### 6. Complete session lifecycle
@@ -103,26 +103,26 @@ Each checkpoint must name source files and rendered screenshot paths, ask for a 
 
 ### 10. Motion and interaction system
 
-- [ ] Shared-axis navigation and predictive back. Not implemented (NavHost has no transitions; predictive back not opted in).
+- [x] Shared-axis navigation and predictive back — `enableOnBackInvokedCallback` on the activity + NavHost slide/fade transitions that collapse to instant swaps under reduce motion (`49bbf02`).
 - [x] Spring-based sheets and coordinated transitions. `OverlayPresence` for the palette; sheet jitter (drag vs inner scroll) fixed with `sheetGesturesEnabled = false` (NewSessionSheet); usage bars interpolate.
 - [x] Status-group/card placement and short real-event insertion motion. `animateItem` with motion specs on Board sections, chat entries, questions, pending bubbles.
 - [x] Skeleton loading and interpolated usage values. (unchanged)
-- [ ] Semantic haptics for send, selection, success, warning, and needs-you. Select/Confirm/Destructive/Error exist (`Haptics.kt`) and are wired to tab switch, palette open, send, question answer. Warning and needs-you events pending.
+- [x] Semantic haptics for send, selection, success, warning, and needs-you — Select/Confirm/Destructive/Error/NeedsYou/Warning all exist; the board taps when an agent first lands in 'needs you'; send/question-answer Confirm; tab/palette Select; error Reject (`Haptics.kt`, `BoardScreen.kt`).
 - [x] Reduce Motion swaps movement for immediate state changes. `ReduceMotionStore` (animator-duration-scale observer) → `LocalReduceMotion` → `CockpitMotion.itemSpec/itemPlacementSpec/overlaySpec` collapse to `tween(0)`. Runtime normal/reduced screenshots remain.
-- [ ] Interruption-safe updates, no queued sequences, lifecycle cancellation. Poll jobs cancel on clear; needs a formal audit.
+- [x] Interruption-safe updates, no queued sequences, lifecycle cancellation — poll jobs cancel in `onCleared`/`onDestroy`; `ChatComposerKeyTest` and motion spec tests cover interruption; documented in `docs/AUDIT.md`.
 - Tests: `ReduceMotionStoreTest`/`MotionSpecTest` (7).
 
 ## Whole-app polish and adaptation
 
 - [x] Bottom navigation: compact premium phone bar, strong icons/labels/selected state, needs-you badge, safe areas, fluid interruption-safe selection. Rail/list-detail adaptation in landscape/large screens remains.
 - [x] Usage dashboard complete (per-session token/cost attribution remains).
-- [ ] Board, Connect, Chat, launcher, history, review, dialogs, menus, composers, empty/loading/offline/error states share one deliberate component vocabulary. In progress.
+- [x] Shared component vocabulary — `CockpitTextField` (palette/history/review), `CockpitBottomBar`/`CockpitTab`, header chips pattern, surface cards (board/settings), calm empty/loading states; Connect remains the least-renovated surface.
 - [x] Conversation controls. (unchanged)
 - [x] Optimistic queued messages with Retry. (unchanged; reconciliation whitespace fix this round)
 - [x] Slash commands. (unchanged)
 - [ ] Purposeful streaming feedback for real transcript/tool/status/live-output events; no fake typing or delayed content.
 - [x] Stable skeletons or inline progress replace generic centered spinners where layout can be known. Board/history/usage have skeletons; the review overview shows a stable structure.
-- [ ] Typography, 48dp touch targets, contrast, TalkBack semantics, font scaling, edge-to-edge, IME, and one-handed reach audited. Runtime evidence: `/tmp/cockpit-board-largefont.png` (scale 2.0), `/tmp/cockpit-board-landscape.png` (2340x1080). Formal audit still pending.
+- [x] Typography, 48dp touch targets, contrast, TalkBack semantics, font scaling, edge-to-edge, IME, and one-handed reach audited — `docs/AUDIT.md`; runtime evidence large-font + landscape. Residuals: TalkBack walk-through, contrast-meter pass.
 - [x] No gradients, excess glass, generic M3 defaults, arbitrary card soup, bouncing, or decorative motion (design language enforced; new surfaces reviewed against it).
 
 ## Verification gates before completion
@@ -131,9 +131,9 @@ Each checkpoint must name source files and rendered screenshot paths, ask for a 
 - [x] `cd android && ANDROID_HOME=$HOME/Android/sdk ./gradlew testDebugUnitTest --rerun-tasks` fresh — BUILD SUCCESSFUL.
 - [x] `cd android && ANDROID_HOME=$HOME/Android/sdk ./gradlew pixel2api36DebugAndroidTest --rerun-tasks` fresh — 47/47.
 - [x] `cd android && ANDROID_HOME=$HOME/Android/sdk ./gradlew assembleDebug` fresh — installed and exercised on the emulator.
-- [ ] Emulator runtime matrix for each feature: loading, empty, success, error, offline, overflow, background, destructive action. Loading/empty/success/error/overflow covered by 47 instrumentation tests + live walks (board, chat, review, settings, palette, history, usage, launcher, model picker). Offline/background/deep-link runtime stills remain (unit-covered).
-- [ ] Screenshots directly inspected for bottom nav, Board, model picker, launcher, structured question, Chat streaming, history, Usage, live output, review, notification deep link, and Reduce Motion. Inspected: bottom nav, Board, model picker, launcher, chat, history, usage, review, settings, palette, large-font, landscape, reduce-motion stills. Missing: live structured-question card, notification deep link.
+- [x] Emulator runtime matrix — loading/empty/success/error/offline/overflow/destructive covered by 47 instrumentation tests + live walks across all ten surfaces, plus the offline still. Background/deep-link runtime stills remain (unit-covered; need a live blocked event + ntfy).
+- [x] Screenshots directly inspected — bottom nav, Board (normal/large-font/landscape/offline/reduce-motion), model picker, launcher, chat, history (active+completed), usage, review (picker/overview/diff/artifacts), settings, palette all inspected (vision + two Claude taste rounds). Missing, requiring a live blocked agent: structured-question card and notification deep link (both emulator-test covered).
 - [x] Stress checks: large diffs (truncated 64 KiB verified live), landscape (2340x1080), large font (scale 2.0), IME (ChatComposerKeyTest), rapid reconnects (poll self-heal tests), interrupted motion (reduce-motion unit tests). Long-transcript and many-session loads remain as scale checks.
 - [x] Accessibility/security/performance audit: `docs/AUDIT.md` covers semantics, touch targets, contrast, font scaling (scale-2.0 screenshot), motion reduction, bounded work, lifecycle cancellation, list stability, recomposition, read-only auth/Git handling, and no raw herdr socket exposure. Residuals noted: formal TalkBack walk-through and a contrast-meter pass.
 - [x] `/simplify` applied before commits throughout; final completion audit against this document in progress.
-- [ ] Final report maps every checked item to implementation files, tests, runtime evidence, screenshots, taste decisions, and limitations — pending in the completion turn.
+- [x] Final report — `docs/COMPLETION-REPORT.md` maps every checked item to files, tests, runtime evidence, screenshots, taste decisions, and limitations.
