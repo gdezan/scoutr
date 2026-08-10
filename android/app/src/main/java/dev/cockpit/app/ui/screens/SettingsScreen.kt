@@ -8,8 +8,11 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -67,10 +70,16 @@ fun SettingsScreen(
         }
         Spacer(Modifier.height(20.dp))
 
+        Card(
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            shape = RoundedCornerShape(14.dp),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
         Row(
             Modifier
                 .fillMaxWidth()
-                .testTag("settings_monitoring_row"),
+                .testTag("settings_monitoring_row")
+                .padding(14.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(
@@ -109,11 +118,13 @@ fun SettingsScreen(
                 modifier = Modifier.testTag("settings_monitoring_switch"),
             )
         }
+        }
         HorizontalDivider(Modifier.padding(horizontal = 4.dp, vertical = 16.dp))
         Text(
             "Monitoring only works while a connection is saved. Notifications deep-link to the exact session and support an inline Reply that steers the agent.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+            modifier = Modifier.padding(horizontal = 2.dp),
         )
     }
 }

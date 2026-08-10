@@ -238,15 +238,13 @@ private fun AgentCardRow(agent: AgentCard, onClick: () -> Unit, modifier: Modifi
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f),
                     )
-                    agent.model?.let { model ->
-                        Spacer(Modifier.width(8.dp))
-                        Text(
-                            text = shortModel(model),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f),
-                            fontFamily = FontFamily.Monospace,
-                        )
-                    }
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        text = agent.model?.let { shortModel(it) } ?: "—",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f),
+                        fontFamily = FontFamily.Monospace,
+                    )
                 }
             }
             Spacer(Modifier.width(12.dp))

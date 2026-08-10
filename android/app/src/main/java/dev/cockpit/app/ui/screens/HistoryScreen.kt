@@ -57,6 +57,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.launch
 import dev.cockpit.app.CockpitApp
+import dev.cockpit.app.ui.components.CockpitTextField
 import dev.cockpit.app.data.SessionCatalogItem
 import dev.cockpit.app.state.HistoryItem
 import dev.cockpit.app.state.HistoryUiState
@@ -161,15 +162,15 @@ fun HistoryScreen(
 /** Runs [action] only while no other catalog mutation is in flight. */
 @Composable
 private fun SearchField(query: String, onQuery: (String) -> Unit) {
-    OutlinedTextField(
+    CockpitTextField(
         value = query,
         onValueChange = onQuery,
+        placeholder = "Search sessions",
+        leadingIcon = Icons.Default.Search,
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 8.dp)
             .testTag("history_search"),
-        placeholder = { Text("Search sessions") },
-        leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
         trailingIcon = {
             if (query.isNotEmpty()) {
                 Text(
@@ -181,8 +182,6 @@ private fun SearchField(query: String, onQuery: (String) -> Unit) {
                 )
             }
         },
-        singleLine = true,
-        shape = RoundedCornerShape(14.dp),
     )
 }
 

@@ -52,6 +52,7 @@ import androidx.compose.ui.unit.dp
 import dev.cockpit.app.CockpitApp
 import dev.cockpit.app.state.ReviewViewModel
 
+import dev.cockpit.app.ui.components.CockpitTextField
 import dev.cockpit.app.ui.theme.DiffPalette
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -141,11 +142,10 @@ private fun PickerMode(
             ) {
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Up")
             }
-            OutlinedTextField(
+            CockpitTextField(
                 value = pathText,
                 onValueChange = { pathText = it },
-                singleLine = true,
-                textStyle = MaterialTheme.typography.labelMedium.copy(fontFamily = FontFamily.Monospace),
+                placeholder = "Repository path",
                 modifier = Modifier
                     .weight(1f)
                     .testTag("review_path"),

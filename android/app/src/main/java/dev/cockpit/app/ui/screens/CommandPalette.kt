@@ -47,6 +47,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import dev.cockpit.app.CockpitApp
+import dev.cockpit.app.ui.components.CockpitTextField
 import dev.cockpit.app.state.CommandPaletteViewModel
 import dev.cockpit.app.state.PaletteResult
 import dev.cockpit.app.state.PaletteResultKind
@@ -93,19 +94,20 @@ fun CommandPalette(
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Spacer(Modifier.width(8.dp))
-                OutlinedTextField(
+                CockpitTextField(
                     value = ui.query,
                     onValueChange = viewModel::setQuery,
-                    placeholder = { Text("Search agents and sessions…") },
-                    singleLine = true,
+                    placeholder = "Search agents and sessions…",
+                    leadingIcon = Icons.Default.Search,
+                    trailingIcon = {
+                        IconButton(
+                            onClick = { if (ui.query.isNotBlank()) viewModel.clearQuery() else viewModel.close() },
+                        ) {
+                            Icon(Icons.Default.Close, contentDescription = "Clear search")
+                        }
+                    },
                     modifier = Modifier.weight(1f).testTag("palette_search"),
                 )
-                if (ui.query.isNotBlank()) {
-                    TextButton(onClick = viewModel::clearQuery) { Text("Clear") }
-                }
-                IconButton(onClick = { viewModel.close() }) {
-                    Icon(Icons.Default.Close, contentDescription = "Close palette")
-                }
             }
             HorizontalDivider()
             if (ui.error != null) {
