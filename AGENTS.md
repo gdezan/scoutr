@@ -2,6 +2,40 @@
 
 - Work directly on `main` and commit changes there unless the user explicitly specifies another branch or workflow.
 
+## Architecture map (Cockpit)
+
+Cockpit is a self-hosted mobile cockpit for herdr panes and pi agents: a Node/TS bridge daemon owns the herdr Unix socket and exposes a private HTTP/WS API; the Android app (Kotlin + Jetpack Compose Material 3, package `dev.cockpit.app`) talks only to that API.
+
+- `bridge/` — Node/TS daemon. Entry: `src/cli.ts serve` (server.ts only exports `createCockpitServer`). Per-feature modules: `herdr/` (socket client + feed), `sessions.ts`, `session-catalog.ts`, `questions.ts`, `pi/commands.ts`, `live-output.ts`, `review.ts`, `attachments.ts`, `notify.ts`, `board-detail.ts`, `usage/`. Tests live in `bridge/test/` and run with `npm run typecheck && npm test` (`node --import tsx --test`).
+- `android/` — Compose app, manual DI via `CockpitApp.AppContainer` (no Hilt/Room). Source dirs under `app/src/main/java/dev/cockpit/app/`: `data/` (DTOs + SharedPreferences stores), `net/` (BridgeClient, NtfyClient — BridgeClient is `final`), `state/` (ViewModels), `service/` (monitor service, deep links, reply receiver), `ui/components/`, `ui/screens/`, `ui/theme/` (Theme.kt + DiffPalette.kt), `ui/motion/` (motion vocabulary + haptics).
+- Design contract: always-dark Material 3, one accent `#5B8CFF` reserved for AI-owned states, calm surface cards, mono only for paths/commands/tool output, state is the color. See `ui/theme/Theme.kt` and `docs/DESIGN.md`.
+- Long-running goal contract: `docs/production-goal-checklist.md` (live item map) with `docs/COMPLETION-REPORT.md` and `docs/AUDIT.md`.
+- Verification recipes and traps: `docs/dev-workflow.md`; the `skills/cockpit-verification/SKILL.md` skill bundles the same loop (install to `~/.pi/agent/skills/` to make it loadable from any repo).
+
+## Verification workflow
+
+Run these before committing UI/bridge work, and treat them as the acceptance gates:
+
+```bash
+cd bridge && npm run typecheck && npm test                       # ~147 tests
+cd android && ANDROID_HOME=$HOME/Android/sdk ./gradlew testDebugUnitTest --rerun-tasks
+cd android && ANDROID_HOME=$HOME/Android/sdk ./gradlew pixel2api36DebugAndroidTest   # Gradle Managed Device, ~2 min
+cd android && ANDROID_HOME=$HOME/Android/sdk ./gradlew assembleDebug
+```
+
+For runtime/UI evidence, install the APK on the running emulator (`adb install -r .../app-debug.apk`), drive it with `adb shell input tap/text/keyevent`, capture with `adb exec-out screencap -p`, and inspect screenshots with the vision-pane workflow below. The full emulator recipe (scratch bridge, adb prefs injection, uiautomator bounds, taste reviews) is in `docs/dev-workflow.md`.
+
+## Gotchas (read before touching)
+
+- `BridgeClient` is `final` and cannot be stubbed. Emulator tests use a real BridgeClient + a fresh **unsaved** ConnectionStore so ViewModels never start polling.
+- `MockWebServer.url()` does a reverse-DNS lookup — never call it on the main thread (build ViewModels before `setContent` in tests).
+- `pkill -f` matches your own command line if it contains the pattern — use `pkill -f 'cli[.]ts'` style brackets.
+- Robolectric shares SharedPreferences across tests — save/clear connections explicitly (savedConnection helper pattern).
+- readSeek tools demand fresh anchors after every edit to the same file; re-grep/re-digest first, or use the plain `edit` tool for small changes.
+- Bridge envs: `XDG_CONFIG_HOME` picks the config dir; `COCKPIT_REPO_ROOTS` allow-lists review repos; config tokens must be ≥16 chars.
+- ntfy drops custom JSON publish fields — deep links must travel in ntfy's documented `click` field (see `notify.ts`).
+- Composer keyboard contract: Enter inserts a newline and must never send; keep multiline + `ImeAction.None` + no-op `KeyboardActions` (pinned by `ChatComposerKeyTest`).
+
 ## Vision
 
 When a task involves an image — a screenshot, mockup, rendered UI, or diagram — inspect it directly when the current model supports vision. Otherwise, delegate the description to a vision-capable pi in a sibling herdr pane (`HERDR_ENV=1`).
