@@ -70,6 +70,8 @@ data class NtfyMessage(
 
     /** Bridge pane id, carried so a pushed event can deep-link to the session. */
     val paneId: String? = null,
+    /** ntfy 'click' URL (survives ntfy storage, unlike custom fields): cockpit://chat/<paneId>. */
+    val click: String? = null,
 )
 
 // ── Bridge WS DTOs ────────────────────────────────────────────────────

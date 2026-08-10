@@ -74,3 +74,29 @@ class CockpitMonitorServiceTest {
         }
     }
 }
+
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [35])
+class MonitorNotificationIntentTest {
+
+    @Test
+    fun notificationIntentCarriesTheCockpitDeepLink() {
+        val app = RuntimeEnvironment.getApplication()
+        val paneId = "w4Q:pG"
+        val deepLink = "cockpit://chat/$paneId?status=blocked"
+        val contentIntent = android.content.Intent(app, dev.cockpit.app.MainActivity::class.java).apply {
+            action = android.content.Intent.ACTION_VIEW
+            data = android.net.Uri.parse(deepLink)
+            flags = android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
+        val pending = android.app.PendingIntent.getActivity(
+            app,
+            paneId.hashCode(),
+            contentIntent,
+            android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE,
+        )
+        val roundTripped = org.robolectric.Shadows.shadowOf(pending).savedIntent
+        assertEquals(android.content.Intent.ACTION_VIEW, roundTripped.action)
+        assertEquals(deepLink, roundTripped.dataString)
+    }
+}

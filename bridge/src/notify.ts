@@ -41,11 +41,21 @@ export class NtfyPublisher {
     const title = typeof data.title === "string" && data.title ? data.title :
       (typeof data.message === "string" && data.message ? data.message : paneId);
     const headline = status === "blocked" ? `${displayAgent} needs you` : `${displayAgent} finished`;
-    await this.publish({ title: headline, message: title, priority: status === "blocked" ? 4 : 3, paneId });
+    // ntfy drops unknown JSON fields, so the deep link travels in its
+    // documented `click` field; paneId is kept for callers that read the
+    // publish payload directly (tests).
+    const click = `cockpit://chat/${paneId}?status=${status === "blocked" ? "blocked" : "working"}`;
+    await this.publish({ title: headline, message: title, priority: status === "blocked" ? 4 : 3, paneId, click });
     return true;
   }
 
-  async publish({ title, message, priority = 3, paneId }: { title: string; message: string; priority?: number; paneId?: string }): Promise<void> {
+  async publish({
+    title,
+    message,
+    priority = 3,
+    paneId,
+    click,
+  }: { title: string; message: string; priority?: number; paneId?: string; click?: string }): Promise<void> {
     if (!this.config) return;
     // ntfy only parses JSON bodies when POSTed to the root path, with the
     // topic inside the body; POSTing to /<topic> stores the raw JSON as text.
@@ -55,7 +65,7 @@ export class NtfyPublisher {
       await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ topic: this.config.topic, title, message, priority, paneId }),
+        body: JSON.stringify({ topic: this.config.topic, title, message, priority, paneId, click }),
       });
     } catch (error) {
       // Push is best-effort; never let a notification failure break the bridge.

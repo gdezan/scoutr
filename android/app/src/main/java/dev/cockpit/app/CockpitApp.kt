@@ -66,6 +66,8 @@ class AppContainer(application: Application) {
     /** Show a heads-up notification for a pushed agent event. */
     fun showAgentNotification(message: NtfyMessage) {
         val intent = Intent(appContext, MainActivity::class.java).apply {
+            action = Intent.ACTION_VIEW
+            message.click?.let { data = android.net.Uri.parse(it) }
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
         }
         val pending = PendingIntent.getActivity(

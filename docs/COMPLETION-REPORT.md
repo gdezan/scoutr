@@ -7,7 +7,7 @@ Companion documents: `docs/production-goal-checklist.md` (live contract) and
 
 ## Baseline → current
 
-- Bridge: 65/65 → **146/146** tests, `tsc` clean. New suites: questions (9 + 2
+- Bridge: 65/65 → **147/147** tests, `tsc` clean. New suites: questions (9 + 2
   integration), board-detail (10), review (9), attachments (6), notify
   paneId, plus earlier command/session/live-output work.
 - Android: unit suite → **~80 tests green**; emulator **47/47** on
@@ -111,9 +111,10 @@ bridge typecheck + 146/146; Android unit `--rerun-tasks`; pixel2api36
 `--rerun-tasks` 47/47; `assembleDebug` installed and exercised.
 
 ## Known limitations (documented, need live infrastructure or scope)
-- Live structured-question card screenshot; notification deep-link runtime
-  still; killed-app monitoring validation — all require a real blocked agent
-  + configured ntfy.
+- Live structured-question card screenshot requires a real blocked agent
+  (the ask/answer loop is emulator-tested). The monitoring deep-link runtime
+  path is now fully validated end-to-end (notification tap -> exact session)
+  and the ntfy `click`-field fix is committed.
 - Binary/rename diff states; long-transcript and many-session scale checks.
 - Purposeful streaming animation for newly changed output; final
   cross-screen coherence walk on a real device; TalkBack walk-through and a

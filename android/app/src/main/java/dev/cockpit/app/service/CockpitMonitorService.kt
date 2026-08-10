@@ -109,10 +109,15 @@ class CockpitMonitorService : Service() {
 
     /** Heads-up event notification: deep link to the session + inline reply. */
     private fun showEventNotification(message: NtfyMessage) {
-        val paneId = message.paneId ?: return
-        val status = if (message.title?.contains("needs you") == true) "blocked" else "working"
-        val deepLink = cockpitChatUri(paneId, status)
+        // ntfy drops custom JSON fields, so the deep link arrives in its
+        // documented 'click' URL; paneId (when present) drives the reply action.
+        val deepLink = message.click
+            ?: message.paneId?.let { cockpitChatUri(it, statusFor(message)) }
+            ?: return
+        val paneId = message.paneId ?: parseCockpitUri(deepLink)?.paneId
+        val status = statusFor(message)
         val contentIntent = Intent(this, MainActivity::class.java).apply {
+            action = Intent.ACTION_VIEW
             data = android.net.Uri.parse(deepLink)
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
         }
@@ -131,7 +136,7 @@ class CockpitMonitorService : Service() {
             // Inline reply only makes sense when the agent is waiting on input;
             // a finished agent has nothing to steer into.
             .apply {
-                if (status == "blocked") {
+                if (status == "blocked" && paneId != null) {
                     addAction(NotificationReplyReceiver.replyAction(this@CockpitMonitorService, paneId))
                 }
             }
@@ -139,6 +144,9 @@ class CockpitMonitorService : Service() {
         val manager = getSystemService(NotificationManager::class.java)
         manager.notify(message.id.hashCode(), notification)
     }
+
+    private fun statusFor(message: NtfyMessage): String =
+        if (message.title?.contains("needs you") == true) "blocked" else "working"
 
     private fun createChannels() {
         val manager = getSystemService(NotificationManager::class.java)
