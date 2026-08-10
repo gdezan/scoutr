@@ -221,6 +221,12 @@ private fun CockpitAppNav(
     val paletteViewModel: CommandPaletteViewModel = viewModel(
         factory = CommandPaletteViewModel.factory(container.bridge, container.connectionStore),
     )
+    // Hoisted to the activity so session rows can steer it (fix 5: review the
+    // workspace the agent runs in from the Sessions list). Demand-driven, no
+    // polling, so keeping it alive across tabs is harmless.
+    val reviewViewModel: ReviewViewModel = viewModel(
+        factory = ReviewViewModel.factory(container.bridge, container.connectionStore),
+    )
     var paletteOpen by remember { mutableStateOf(false) }
     val openPalette = { paletteOpen = true }
 
@@ -335,6 +341,10 @@ private fun CockpitAppNav(
                         onOpenSession = { resumed ->
                             navController.navigate(Routes.chat(resumed.paneId, null, "working"))
                         },
+                        onReview = { item ->
+                            reviewViewModel.selectRepo(item.session.cwd)
+                            onTab(Routes.REVIEW)
+                        },
                         viewModel = historyViewModel,
                         modifier = Modifier.padding(innerSessions),
                     )
@@ -378,9 +388,7 @@ private fun CockpitAppNav(
                 }
             }
             composable(Routes.REVIEW) {
-                val reviewViewModel: ReviewViewModel = viewModel(
-                    factory = ReviewViewModel.factory(container.bridge, container.connectionStore),
-                )
+                // Shared with the Sessions swipe action; see the hoisted instance above.
                 Scaffold(topBar = { AppTopBar("Review", onSearch = openPalette, onSettings = openSettings) }) { innerReview ->
                     ReviewScreen(
                         viewModel = reviewViewModel,

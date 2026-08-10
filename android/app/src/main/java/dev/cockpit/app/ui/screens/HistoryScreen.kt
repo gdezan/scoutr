@@ -37,6 +37,7 @@ import androidx.compose.material.icons.filled.Unarchive
 import androidx.compose.material.icons.filled.WifiOff
 import androidx.compose.material.icons.outlined.Archive
 import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.Code
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.DriveFileRenameOutline
 import androidx.compose.material.icons.outlined.PushPin
@@ -89,6 +90,7 @@ import dev.cockpit.app.state.SessionHistoryViewModel
 fun HistoryScreen(
     onOpenSession: (ResumedSession) -> Unit,
     viewModel: SessionHistoryViewModel = rememberHistoryViewModel(),
+    onReview: (HistoryItem) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val ui by viewModel.ui.collectAsState()
@@ -136,6 +138,7 @@ fun HistoryScreen(
                     onDelete = { pendingDelete = it },
                     onTogglePin = viewModel::togglePin,
                     onToggleArchive = viewModel::toggleArchive,
+                    onReview = onReview,
                 )
             }
         }
@@ -234,6 +237,7 @@ private fun HistoryList(
     onDelete: (HistoryItem) -> Unit,
     onTogglePin: (HistoryItem) -> Unit,
     onToggleArchive: (HistoryItem) -> Unit,
+    onReview: (HistoryItem) -> Unit,
 ) {
     val visible = when (view) {
         HistoryView.Active -> ui.items.filter { it.session.active && !it.archived }
@@ -290,6 +294,7 @@ private fun HistoryList(
                 onDelete = { onDelete(item) },
                 onTogglePin = { onTogglePin(item) },
                 onToggleArchive = { onToggleArchive(item) },
+                onReview = { onReview(item) },
             )
         }
     }
@@ -320,6 +325,7 @@ private fun HistoryRow(
     onDelete: () -> Unit,
     onTogglePin: () -> Unit,
     onToggleArchive: () -> Unit,
+    onReview: () -> Unit,
 ) {
     val session = item.session
     var menuOpen by remember { mutableStateOf(false) }
@@ -335,6 +341,10 @@ private fun HistoryRow(
     // than the pencil and the cross, which made the bar look like four unrelated
     // buttons rather than one quiet strip.
     val actions = buildList {
+        // Code (<>) is the Review tab's own nav glyph: same destination, same
+        // mark. RateReview's speech-bubble-and-pencil both misread as "comment"
+        // and collided with the Rename pencil sitting right next to it.
+        add(RowAction("review", "Review", Icons.Outlined.Code, scheme.onSurfaceVariant, onReview))
         add(RowAction("rename", "Rename", Icons.Outlined.DriveFileRenameOutline, scheme.onSurfaceVariant, onRename))
         add(RowAction("pin", if (item.pinned) "Unpin" else "Pin", Icons.Outlined.PushPin, scheme.onSurfaceVariant, onTogglePin))
         add(RowAction(

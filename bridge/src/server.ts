@@ -12,7 +12,7 @@ import { StatusTracker } from "./status.js";
 import { BoardDetailCache, cleanActivity } from "./board-detail.js";
 import { listDirs, DirListingError } from "./dirs.js";
 import { defaultConfigPath } from "./config.js";
-import { reviewOverview, reviewDiff, reviewArtifacts, ReviewError } from "./review.js";
+import { reviewOverview, reviewDiff, reviewArtifacts, gitRepoRoot, ReviewError } from "./review.js";
 
 import { readAttachmentBody, storeAttachment, uploadsDir, AttachmentError } from "./attachments.js";
 import { readModelsCatalog } from "./pi/models.js";
@@ -485,15 +485,19 @@ export function createCockpitServer(deps: ServerDeps, options: CreateServerOptio
       (pathname === "/api/repo" || pathname === "/api/repo/diff" || pathname === "/api/repo/artifacts")
     ) {
       const requestedPath = url.searchParams.get("path") ?? "";
+      // Live agent workspaces are implicitly allowed: an agent already runs
+      // there with full shell access, so read-only git review adds no
+      // privilege. COCKPIT_REPO_ROOTS still works and is joined in.
+      const extraRoots = await sessionWorkspaceRoots(routeDeps.feed.snapshot as SessionSnapshot | null);
       try {
         if (pathname === "/api/repo") {
-          sendJson(response, 200, { ok: true, ...(await reviewOverview(requestedPath)) });
+          sendJson(response, 200, { ok: true, ...(await reviewOverview(requestedPath, extraRoots)) });
         } else if (pathname === "/api/repo/artifacts") {
-          sendJson(response, 200, { ok: true, ...reviewArtifacts(requestedPath) });
+          sendJson(response, 200, { ok: true, ...reviewArtifacts(requestedPath, extraRoots) });
         } else {
           const base = url.searchParams.get("base") ?? "HEAD";
           const kind = url.searchParams.get("kind") === "commit" ? "commit" : "working";
-          sendJson(response, 200, { ok: true, ...(await reviewDiff(requestedPath, base, kind)) });
+          sendJson(response, 200, { ok: true, ...(await reviewDiff(requestedPath, base, kind, extraRoots)) });
         }
       } catch (error) {
         const status = error instanceof ReviewError ? error.status : 500;
@@ -748,6 +752,37 @@ export async function readSession(pathParam: string, since: string | null): Prom
     lastEntryId: session.lastEntryId,
     mtimeMs: info.mtimeMs,
   };
+}
+
+/**
+ * Distinct realpaths of every agent workspace currently tracked by the
+ * bridge. These are the implicit review roots for fix 5: the user already
+ * authorizes an agent to run in each, so read-only git review of the same
+ * repo adds no privilege, and it removes the 403 that blocked reviewing
+ * real repos without COCKPIT_REPO_ROOTS.
+ *
+ * Least-privilege narrowing: each session cwd is resolved to its git
+ * repository root (git rev-parse --show-toplevel); non-repo cwds — e.g.
+ * $HOME, scratch dirs — contribute nothing, so a cwd=/home/gdezan agent
+ * never makes the whole home directory reviewable.
+ */
+async function sessionWorkspaceRoots(snapshot: SessionSnapshot | null): Promise<string[]> {
+  if (!snapshot) return [];
+  const seen = new Set<string>();
+  const roots: string[] = [];
+  for (const agent of snapshot.agents) {
+    for (const cwd of [agent.cwd, agent.foreground_cwd]) {
+      if (!cwd) continue;
+      const repoRoot = await gitRepoRoot(cwd);
+      if (!repoRoot) continue;
+      const canonical = canonicalPath(repoRoot);
+      if (!seen.has(canonical)) {
+        seen.add(canonical);
+        roots.push(canonical);
+      }
+    }
+  }
+  return roots;
 }
 
 function canonicalPath(path: string): string {

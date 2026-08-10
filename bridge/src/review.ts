@@ -88,14 +88,26 @@ export interface ReviewDiffResult {
 
 const REF_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._/-]{0,200}$/;
 
-function allowedRoots(): string[] {
+/**
+ * Allowed review roots: COCKPIT_REPO_ROOTS when set, else the default
+ * worktree root, plus per-request extras. Extras are the live agent
+ * workspaces (session cwds) — paths the user has already authorized an
+ * agent to run in, so read-only git review of them adds no privilege.
+ */
+function allowedRoots(extraRoots: string[] = []): string[] {
   const configured = process.env.COCKPIT_REPO_ROOTS?.trim();
-  if (!configured) return [resolve(homedir(), ".herdr", "worktrees")];
-  return configured.split(",").map((root) => resolve(root.trim())).filter(Boolean);
+  const base = configured
+    ? configured.split(",").map((root) => resolve(root.trim())).filter(Boolean)
+    : [resolve(homedir(), ".herdr", "worktrees")];
+  return [...base, ...extraRoots.map((root) => resolve(root.trim())).filter(Boolean)];
 }
 
-/** Resolve a requested path and require it to live under an allowed root. */
-export function resolveAllowedRepoPath(requested: string): string {
+/**
+ * Resolve a requested path and require it to live under an allowed root.
+ * @param extraRoots per-request roots beyond COCKPIT_REPO_ROOTS (e.g. live
+ *   agent workspaces); still realpath-checked like the configured roots.
+ */
+export function resolveAllowedRepoPath(requested: string, extraRoots: string[] = []): string {
   if (!requested || requested.length > 4096) throw new ReviewError("invalid repo path", 400);
   if (!isAbsolute(requested)) throw new ReviewError("repo path must be absolute", 400);
   let target: string;
@@ -104,7 +116,7 @@ export function resolveAllowedRepoPath(requested: string): string {
   } catch {
     throw new ReviewError("no such directory", 404);
   }
-  const roots = allowedRoots();
+  const roots = allowedRoots(extraRoots);
   if (roots.length === 0) throw new ReviewError("no allowed repo roots configured", 500);
   const allowed = roots.some((root) => {
     let resolvedRoot: string;
@@ -115,7 +127,12 @@ export function resolveAllowedRepoPath(requested: string): string {
     }
     return target === resolvedRoot || target.startsWith(resolvedRoot + sep);
   });
-  if (!allowed) throw new ReviewError("path outside allowed repo roots", 403);
+  if (!allowed) {
+    throw new ReviewError(
+      "path outside allowed repo roots — review a running agent's workspace, or add the path to COCKPIT_REPO_ROOTS",
+      403,
+    );
+  }
   return target;
 }
 
@@ -155,6 +172,23 @@ function isRepo(path: string): Promise<boolean> {
   return runGit(path, ["rev-parse", "--is-inside-work-tree"], 1024)
     .then((out) => out.trim() === "true")
     .catch(() => false);
+}
+
+/**
+ * The git repository root containing `path`, or null when `path` is not
+ * inside a repository. Used to derive least-privilege review roots from
+ * live agent workspaces: a session cwd grants review access only to the
+ * repo it lives in, never the whole cwd subtree.
+ */
+export async function gitRepoRoot(path: string): Promise<string | null> {
+  try {
+    const out = await runGit(path, ["rev-parse", "--show-toplevel"], 4096);
+    const root = out.trim();
+    if (!root) return null;
+    return realpathSync(root);
+  } catch {
+    return null;
+  }
 }
 
 /** Branch name or null when detached. */
@@ -220,8 +254,8 @@ function parseLog(output: string): ReviewCommit[] {
   return commits;
 }
 
-export async function reviewOverview(requestedPath: string): Promise<ReviewOverview> {
-  const path = resolveAllowedRepoPath(requestedPath);
+export async function reviewOverview(requestedPath: string, extraRoots: string[] = []): Promise<ReviewOverview> {
+  const path = resolveAllowedRepoPath(requestedPath, extraRoots);
   if (!(await isRepo(path))) throw new ReviewError("not a git repository", 404);
 
   const [branch, statusOut, logOut] = await Promise.all([
@@ -283,8 +317,9 @@ export async function reviewDiff(
   requestedPath: string,
   ref: string,
   kind: "working" | "commit" = "working",
+  extraRoots: string[] = [],
 ): Promise<ReviewDiffResult> {
-  const path = resolveAllowedRepoPath(requestedPath);
+  const path = resolveAllowedRepoPath(requestedPath, extraRoots);
   if (!(await isRepo(path))) throw new ReviewError("not a git repository", 404);
   const safeRef = validateRef(ref);
   // "commit" diffs the commit against its parent (ref^..ref); "working"
@@ -341,8 +376,8 @@ const ARTIFACTS_MAX_DEPTH = 8;
  * Bounded walk that collects generated-artifact files (size + mtime) without
  * ever following symlinks or escaping the repository root.
  */
-export function reviewArtifacts(requestedPath: string): ReviewArtifactsResult {
-  const path = resolveAllowedRepoPath(requestedPath);
+export function reviewArtifacts(requestedPath: string, extraRoots: string[] = []): ReviewArtifactsResult {
+  const path = resolveAllowedRepoPath(requestedPath, extraRoots);
   const artifacts: ReviewArtifact[] = [];
   const queue: Array<{ dir: string; depth: number; inArtifact: boolean }> = [
     { dir: path, depth: 0, inArtifact: false },

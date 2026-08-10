@@ -163,6 +163,8 @@ class HistoryScreenTest {
         // The action bar is covered by the card until the row is swiped open.
         compose.onNodeWithTag("history_row_abc").performTouchInput { swipeLeft() }
         compose.waitForIdle()
+        // Review (fix 5) is the first revealed action and leads to the session workspace.
+        compose.onNodeWithTag("history_row_action_review_abc").assertIsDisplayed()
         compose.onNodeWithTag("history_row_action_rename_abc").performClick()
         compose.onNodeWithText("Rename session").assertIsDisplayed()
     }

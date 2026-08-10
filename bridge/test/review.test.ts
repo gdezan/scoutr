@@ -12,11 +12,14 @@ import {
   REVIEW_DIFF_MAX_BYTES,
   REVIEW_LOG_MAX,
   reviewArtifacts,
+  gitRepoRoot,
 } from "../src/review.js";
 
 let repoRoot: string;
 let plainRoot: string;
 let outsideRoot: string;
+let workspaceRoot: string;
+let sessionRepo: string;
 const originalRoots = process.env.COCKPIT_REPO_ROOTS;
 
 test.before(async () => {
@@ -35,6 +38,19 @@ test.before(async () => {
   await writeFile(join(repoRoot, "b.txt"), "new file\n");
   execFileSync("git", ["add", "."], { cwd: repoRoot });
   execFileSync("git", ["commit", "-q", "-m", "add world and b"], { cwd: repoRoot });
+
+  // A session workspace that lives OUTSIDE COCKPIT_REPO_ROOTS, with the
+  // session repo as a subdirectory — the fix-5 shape: the bridge must allow
+  // it because an agent is running there, not because it was configured.
+  workspaceRoot = await mkdtemp(join(tmpdir(), "cockpit-review-workspace-"));
+  sessionRepo = join(workspaceRoot, "repo");
+  await mkdir(sessionRepo, { recursive: true });
+  execFileSync("git", ["init", "-q", "-b", "main", sessionRepo]);
+  execFileSync("git", ["config", "user.email", "test@cockpit.dev"], { cwd: sessionRepo });
+  execFileSync("git", ["config", "user.name", "Cockpit Test"], { cwd: sessionRepo });
+  await writeFile(join(sessionRepo, "x.txt"), "workspace file\n");
+  execFileSync("git", ["add", "."], { cwd: sessionRepo });
+  execFileSync("git", ["commit", "-q", "-m", "workspace initial"], { cwd: sessionRepo });
 });
 
 test.after(() => {
@@ -118,6 +134,42 @@ test("rejects paths outside the allow-list", async () => {
   });
 });
 
+test("allows a live session workspace passed as an extra root", async () => {
+  // Same repo that the allow-list rejects, allowed once the bridge passes the
+  // agent's workspace cwd as an extra root.
+  await assert.rejects(() => reviewOverview(sessionRepo), (error: unknown) => {
+    assert.ok(error instanceof ReviewError);
+    assert.equal(error.status, 403);
+    return true;
+  });
+  const overview = await reviewOverview(sessionRepo, [workspaceRoot]);
+  assert.equal(overview.branch, "main");
+  assert.equal(overview.log.length, 1);
+});
+
+test("extra roots allow subdirectories of the workspace", async () => {
+  // The session repo sits under the workspace root; the realpath check must
+  // admit descendants of an extra root just like configured roots.
+  const nested = join(sessionRepo, "sub");
+  await mkdir(nested, { recursive: true });
+  await writeFile(join(nested, "y.txt"), "nested\n");
+  execFileSync("git", ["add", "."], { cwd: sessionRepo });
+  execFileSync("git", ["commit", "-q", "-m", "nested file"], { cwd: sessionRepo });
+  await writeFile(join(nested, "y.txt"), "nested\nedited\n");
+  const diff = await reviewDiff(nested, "HEAD", "working", [workspaceRoot]);
+  assert.match(diff.diff, /y\.txt/);
+  assert.match(diff.diff, /nested/);
+});
+
+test("403 message names the escape hatch", async () => {
+  await assert.rejects(() => reviewOverview(outsideRoot), (error: unknown) => {
+    assert.ok(error instanceof ReviewError);
+    assert.equal(error.status, 403);
+    assert.match(error.message, /COCKPIT_REPO_ROOTS/);
+    return true;
+  });
+});
+
 test("rejects absolute path escapes and garbage refs", async () => {
   await assert.rejects(() => reviewOverview("/etc/passwd"), (error: unknown) => {
     assert.ok(error instanceof ReviewError);
@@ -144,6 +196,19 @@ test("rejects non-git directories", async () => {
     assert.equal(error.status, 404);
     return true;
   });
+});
+
+test("gitRepoRoot resolves a repo subdirectory up to its repo root", async () => {
+  const nested = join(sessionRepo, "src", "deep");
+  await mkdir(nested, { recursive: true });
+  assert.equal(await gitRepoRoot(nested), sessionRepo);
+  assert.equal(await gitRepoRoot(sessionRepo), sessionRepo);
+});
+
+test("gitRepoRoot returns null for a non-repo directory", async () => {
+  // A cwd like $HOME or a scratch dir is not inside any repository, so it
+  // contributes no implicit review root (fix 5 least-privilege narrowing).
+  assert.equal(await gitRepoRoot(workspaceRoot), null);
 });
 
 test("binary and rename changes pass through the diff without errors", async () => {

@@ -17,6 +17,7 @@ import dev.cockpit.app.data.SessionCatalogResponse
 import dev.cockpit.app.data.SessionReadResponse
 import dev.cockpit.app.data.UsageResponse
 import dev.cockpit.app.data.WsFrame
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
@@ -51,6 +52,22 @@ class BridgeClient(
     private val connectionStore: ConnectionStore,
 ) {
     private val json = Json { ignoreUnknownKeys = true }
+
+    /** Bridge failure body: {"ok":false,"error":"..."} (error optional). */
+    @Serializable
+    private data class BridgeErrorBody(val ok: Boolean = false, val error: String? = null)
+
+    /**
+     * Human-readable failure message for a non-2xx bridge response. Prefers
+     * the bridge's own `error` reason (e.g. the review 403 explanation) over
+     * OkHttp's generic status line, so the app can surface *why*.
+     */
+    private fun bridgeFailure(response: Response, body: String?): String {
+        val reason = body
+            ?.let { runCatching { json.decodeFromString(BridgeErrorBody.serializer(), it).error }.getOrNull() }
+            ?.takeIf { it.isNotBlank() }
+        return reason?.let { "bridge ${response.code}: $it" } ?: "bridge ${response.code}: ${response.message}"
+    }
 
     val connectedHost: String? get() = connectionStore.saved?.host
 
@@ -107,7 +124,7 @@ class BridgeClient(
                             if (it.isSuccessful) {
                                 resumeDecoded(continuation, it.body?.string(), decode)
                             } else {
-                                continuation.resumeWithException(IOException("bridge ${it.code}: ${it.message}"))
+                                continuation.resumeWithException(IOException(bridgeFailure(it, it.body?.string())))
                             }
                         }
                     }
@@ -167,7 +184,7 @@ class BridgeClient(
                                 val body = it.body?.string().orEmpty()
                                 continuation.resume(json.decodeFromString(AttachmentResponse.serializer(), body))
                             } else {
-                                continuation.resumeWithException(IOException("bridge ${it.code}: ${it.message}"))
+                                continuation.resumeWithException(IOException(bridgeFailure(it, it.body?.string())))
                             }
                         }
                     }
@@ -269,7 +286,7 @@ class BridgeClient(
                             if (it.isSuccessful) {
                                 resumeDecoded(continuation, it.body?.string(), decode)
                             } else {
-                                continuation.resumeWithException(IOException("bridge ${it.code}: ${it.message}"))
+                                continuation.resumeWithException(IOException(bridgeFailure(it, it.body?.string())))
                             }
                         }
                     }
