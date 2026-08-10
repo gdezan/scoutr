@@ -60,15 +60,17 @@ describe("readModelsCatalog", () => {
     assert.equal(catalog.providers[1]!.models.length, 1);
   });
 
-  it("maps thinkingLevelMap keys as thinking levels", () => {
-    const [codex] = readModelsCatalog(dir).providers;
-    assert.deepEqual(codex!.models[0]!.thinkingLevels, ["xhigh", "minimal"]);
+  it("matches pi's supported thinking-level order and exclusions", () => {
+    const [codex, deepseek] = readModelsCatalog(dir).providers;
+    assert.deepEqual(codex!.models[0]!.thinkingLevels, ["off", "minimal", "low", "medium", "high", "xhigh"]);
+    assert.deepEqual(codex!.models[1]!.thinkingLevels, ["off", "minimal", "low", "medium", "high"]);
+    assert.deepEqual(deepseek!.models[0]!.thinkingLevels, ["off", "minimal", "low", "medium", "high"]);
   });
 
   it("defaults missing fields gracefully", () => {
     const [codex, deepseek] = readModelsCatalog(dir).providers;
     assert.equal(codex!.models[1]!.contextWindow, null);
-    assert.equal(codex!.models[1]!.thinkingLevels.length, 0);
+    assert.deepEqual(codex!.models[1]!.thinkingLevels, ["off", "minimal", "low", "medium", "high"]);
     assert.equal(deepseek!.models[0]!.contextWindow, 1000000);
   });
 

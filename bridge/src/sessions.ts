@@ -1,5 +1,7 @@
 import type { HerdrClient } from "./herdr/client.js";
 import { resolveAllowedDir } from "./dirs.js";
+import { readModelsCatalog, type ModelsCatalog } from "./pi/models.js";
+import { readPiSessionFile, type PiSession } from "./pi/session.js";
 
 /** pi's documented `--thinking` levels (README: Model Options). */
 export const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
@@ -24,13 +26,19 @@ export type ControlAction =
   | "compact"
   | "fork"
   | "rename"
-  | "cycle_thinking";
+  | "set_model"
+  | "set_thinking";
 
 export interface ControlParams {
   paneId: string;
   action: ControlAction;
   /** Retry: last user message. Rename: the new workspace label. */
   text?: string;
+}
+
+export interface SessionControlDeps {
+  readCatalog?: () => ModelsCatalog;
+  readSession?: (path: string) => Promise<Pick<PiSession, "model" | "thinkingLevel">>;
 }
 
 export class SessionsError extends Error {
@@ -182,14 +190,14 @@ async function closeWorkspaceQuietly(herdr: HerdrClient, workspaceId: string): P
 }
 
 /**
- * One pane-native control action, grounded in pi's documented TUI commands:
- * abort = app.interrupt (escape), retry = agent.prompt with the last user
- * message, compact/fork = typed slash commands, rename = workspace label,
- * cycle_thinking = app.thinking.cycle (shift+tab).
+ * One pane-native control action. Model changes use pi's exact `/model
+ * provider/id` form. Thinking changes translate an explicit target into the
+ * shortest deterministic sequence of pi's documented Shift+Tab action.
  */
 export async function controlSession(
   herdr: HerdrClient,
   params: ControlParams,
+  deps: SessionControlDeps = {},
 ): Promise<void> {
   const { paneId, action, text } = params;
   switch (action) {
@@ -202,12 +210,10 @@ export async function controlSession(
       return;
     }
     case "compact":
-      await herdr.paneSendText(paneId, "/compact");
-      await herdr.paneSendKeys(paneId, ["Enter"]);
+      await herdr.paneSendInput(paneId, "/compact", ["Enter"]);
       return;
     case "fork":
-      await herdr.paneSendText(paneId, "/fork");
-      await herdr.paneSendKeys(paneId, ["Enter"]);
+      await herdr.paneSendInput(paneId, "/fork", ["Enter"]);
       return;
     case "rename": {
       if (!text) throw new SessionsError("rename needs a label");
@@ -216,9 +222,26 @@ export async function controlSession(
       await herdr.workspaceRename(workspaceId, text);
       return;
     }
-    case "cycle_thinking":
-      await herdr.paneSendKeys(paneId, ["shift+tab"]);
+    case "set_model": {
+      const model = requireCatalogModel(deps.readCatalog?.() ?? readModelsCatalog(), text);
+      await herdr.paneSendInput(paneId, `/model ${model.provider}/${model.id}`, ["Enter"]);
       return;
+    }
+    case "set_thinking": {
+      if (!text || !(THINKING_LEVELS as readonly string[]).includes(text)) {
+        throw new SessionsError(`unknown thinking level: ${String(text)}`);
+      }
+      const path = await findPaneSessionPath(herdr, paneId);
+      if (!path) throw new SessionsError("active pi session path is unavailable", 409);
+      const session = await (deps.readSession?.(path) ?? readPiSessionFile(path));
+      if (!session.model || !session.thinkingLevel) {
+        throw new SessionsError("active model or thinking level is unavailable", 409);
+      }
+      const model = requireCatalogModel(deps.readCatalog?.() ?? readModelsCatalog(), session.model);
+      const keys = thinkingLevelKeys(session.thinkingLevel, text, model.thinkingLevels);
+      if (keys.length > 0) await herdr.paneSendKeys(paneId, keys);
+      return;
+    }
     default:
       throw new SessionsError(`unknown control action: ${String(action)}`);
   }
@@ -231,6 +254,38 @@ async function findPaneWorkspace(herdr: HerdrClient, paneId: string): Promise<st
     for (const pane of snapshot.panes) {
       if (pane.pane_id === paneId) return pane.workspace_id;
     }
+  } catch {
+    // fall through
+  }
+  return "";
+}
+
+/** Keys needed to cycle from the active thinking level to an explicit target. */
+export function thinkingLevelKeys(current: string, target: string, available: string[]): string[] {
+  const currentIndex = available.indexOf(current);
+  const targetIndex = available.indexOf(target);
+  if (targetIndex === -1) throw new SessionsError(`${target} is not supported by the active model`);
+  if (currentIndex === -1) throw new SessionsError(`active thinking level is unknown: ${current}`, 409);
+  const count = (targetIndex - currentIndex + available.length) % available.length;
+  return Array.from({ length: count }, () => "shift+tab");
+}
+
+function requireCatalogModel(catalog: ModelsCatalog, key: string | undefined) {
+  if (!key || key.length > MAX_MODEL_LENGTH || CONTROL_CHAR.test(key)) throw new SessionsError("valid model is required");
+  const model = catalog.providers
+    .flatMap((provider) => provider.models)
+    .find((candidate) => `${candidate.provider}/${candidate.id}` === key);
+  if (!model) throw new SessionsError(`model is not available: ${key}`);
+  return model;
+}
+
+async function findPaneSessionPath(herdr: HerdrClient, paneId: string): Promise<string> {
+  try {
+    const snapshot = await herdr.snapshot();
+    const pane = snapshot.panes.find((candidate) => candidate.pane_id === paneId);
+    if (pane?.agent_session?.kind === "path") return pane.agent_session.value;
+    const agent = snapshot.agents.find((candidate) => candidate.pane_id === paneId);
+    if (agent?.agent_session?.kind === "path") return agent.agent_session.value;
   } catch {
     // fall through
   }

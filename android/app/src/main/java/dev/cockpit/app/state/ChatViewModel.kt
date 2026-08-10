@@ -3,6 +3,8 @@ package dev.cockpit.app.state
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import dev.cockpit.app.data.ModelInfo
+import dev.cockpit.app.data.ModelProvider
 import dev.cockpit.app.data.SessionEntry
 import dev.cockpit.app.data.entryText
 import dev.cockpit.app.net.BridgeClient
@@ -38,6 +40,12 @@ data class ChatUiState(
     val error: String? = null,
     /** Agent status from the last /api/agents poll ("working", "blocked", …). */
     val agentStatus: String = "working",
+    val sessionTitle: String = "Session",
+    val model: String? = null,
+    val thinkingLevel: String? = null,
+    val modelProviders: List<ModelProvider> = emptyList(),
+    val configurationLoading: Boolean = false,
+    val configurationError: String? = null,
     val liveOutputExpanded: Boolean = false,
     val liveOutputLoading: Boolean = false,
     val liveOutputText: String = "",
@@ -48,6 +56,12 @@ data class ChatUiState(
     val lastUserMessage: String?
         get() = entries.asReversed().firstOrNull { it.role == "user" }
             ?.let { entryText(it.content) }
+
+    val activeModel: ModelInfo?
+        get() = modelProviders.flatMap { it.models }.firstOrNull { "${it.provider}/${it.id}" == model }
+
+    val availableThinkingLevels: List<String>
+        get() = activeModel?.thinkingLevels ?: emptyList()
 
     val liveOutputSummary: String
         get() = meaningfulLiveOutputLines(liveOutputText)
@@ -106,6 +120,7 @@ class ChatViewModel(
     val waitingForAnswer: Boolean get() = _ui.value.agentStatus == "blocked"
 
     init {
+        viewModelScope.launch { refreshConfiguration() }
         viewModelScope.launch { refresh() }
         pollJob = viewModelScope.launch {
             while (isActive) {
@@ -158,6 +173,21 @@ class ChatViewModel(
         }
     }
 
+    suspend fun refreshConfiguration() {
+        _ui.update { it.copy(configurationLoading = it.modelProviders.isEmpty(), configurationError = null) }
+        try {
+            val response = bridge.models()
+            val catalog = response.catalog
+            if (catalog == null) {
+                _ui.update { it.copy(configurationLoading = false, configurationError = response.error ?: "Model catalog unavailable") }
+                return
+            }
+            _ui.update { it.copy(modelProviders = catalog.providers, configurationLoading = false, configurationError = null) }
+        } catch (error: Exception) {
+            _ui.update { it.copy(configurationLoading = false, configurationError = error.message ?: "Model catalog unavailable") }
+        }
+    }
+
     suspend fun refresh() {
         try {
             val path = syncStatusAndPath()
@@ -171,6 +201,8 @@ class ChatViewModel(
                     entries = mergeSessionEntries(it.entries, response.entries, incremental = response.since != null),
                     exists = response.exists,
                     loading = false,
+                    model = response.model ?: it.model,
+                    thinkingLevel = response.thinkingLevel ?: it.thinkingLevel,
                     error = null,
                 )
             }
@@ -186,7 +218,14 @@ class ChatViewModel(
             val card = agents.agents.firstOrNull { it.paneId == paneId }
             if (card != null) {
                 resolvedPath = card.sessionPath?.takeIf { it.isNotBlank() } ?: resolvedPath
-                _ui.update { it.copy(agentStatus = card.status) }
+                _ui.update {
+                    it.copy(
+                        agentStatus = card.status,
+                        sessionTitle = card.title?.takeIf(String::isNotBlank)
+                            ?: card.cwd?.substringAfterLast('/')?.takeIf(String::isNotBlank)
+                            ?: it.sessionTitle,
+                    )
+                }
             }
         } catch (_: Exception) {
             // bridge unreachable; keep the current state
@@ -194,17 +233,36 @@ class ChatViewModel(
         return resolvedPath
     }
 
-    /** One pane control action (abort/retry/compact/fork/rename/cycle_thinking). */
+    /** Run a lifecycle action or select an explicit model/thinking level. */
     fun control(action: String, text: String? = null) {
         viewModelScope.launch {
-            _ui.update { it.copy(sending = true, error = null) }
+            val configurationAction = action == "set_model" || action == "set_thinking"
+            _ui.update {
+                it.copy(
+                    sending = !configurationAction,
+                    configurationLoading = configurationAction,
+                    configurationError = null,
+                    error = null,
+                )
+            }
             try {
                 bridge.controlSession(paneId, action, text)
-                _ui.update { it.copy(sending = false) }
-                delay(1500)
+                _ui.update {
+                    it.copy(
+                        sending = false,
+                        configurationLoading = false,
+                        model = if (action == "set_model") text else it.model,
+                        thinkingLevel = if (action == "set_thinking") text else it.thinkingLevel,
+                    )
+                }
+                delay(700)
                 refresh()
             } catch (e: Exception) {
-                _ui.update { it.copy(sending = false, error = e.message ?: "control failed") }
+                val message = e.message ?: "control failed"
+                _ui.update {
+                    if (configurationAction) it.copy(configurationLoading = false, configurationError = message)
+                    else it.copy(sending = false, error = message)
+                }
             }
         }
     }

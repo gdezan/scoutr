@@ -19,6 +19,12 @@ test("parses a version-3 pi session file", () => {
   assert.equal(session.entries.length, 3);
 });
 
+test("tracks the active model and thinking level", () => {
+  const session = parsePiSession(`${SAMPLE}\n{"type":"model_change","provider":"openai-codex","modelId":"gpt-5.4"}\n{"type":"thinking_level_change","thinkingLevel":"xhigh"}`);
+  assert.equal(session.model, "openai-codex/gpt-5.4");
+  assert.equal(session.thinkingLevel, "xhigh");
+});
+
 test("extracts user text and assistant blocks", () => {
   const session = parsePiSession(SAMPLE);
   const [user, assistant, toolResult] = session.entries;

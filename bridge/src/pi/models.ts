@@ -27,6 +27,22 @@ export function modelsStorePath(piAgentDir = process.env.PI_CODING_AGENT_DIR ?? 
   return join(dir, "models-store.json");
 }
 
+const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
+
+/** Mirror pi-ai's getSupportedThinkingLevels so the mobile controls match the active TUI. */
+export function supportedThinkingLevels(model: { reasoning?: unknown; thinkingLevelMap?: unknown }): string[] {
+  if (model.reasoning !== true) return ["off"];
+  const map = model.thinkingLevelMap && typeof model.thinkingLevelMap === "object"
+    ? model.thinkingLevelMap as Record<string, unknown>
+    : undefined;
+  return THINKING_LEVELS.filter((level) => {
+    const mapped = map?.[level];
+    if (mapped === null) return false;
+    if (level === "xhigh" || level === "max") return mapped !== undefined;
+    return true;
+  });
+}
+
 /** Best-effort display name for a model id when `name` is missing. */
 function displayName(model: { name?: string; id: string }): string {
   return model.name ?? model.id;
@@ -47,9 +63,7 @@ export function readModelsCatalog(piAgentDir?: string): ModelsCatalog {
       name: provider,
       models: models.map((m) => {
         const model = m as Record<string, unknown>;
-        const thinkingLevels = model.thinkingLevelMap
-          ? Object.keys(model.thinkingLevelMap as Record<string, unknown>)
-          : [];
+        const thinkingLevels = supportedThinkingLevels(model);
         const contextWindow = typeof model.contextWindow === "number" ? model.contextWindow : null;
         return {
           id: String(model.id ?? ""),

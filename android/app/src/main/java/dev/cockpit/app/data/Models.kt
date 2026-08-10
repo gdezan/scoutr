@@ -93,6 +93,8 @@ data class SessionReadResponse(
     val name: String = "",
     val exists: Boolean = false,
     val since: String? = null,
+    val model: String? = null,
+    val thinkingLevel: String? = null,
     val entries: List<SessionEntry> = emptyList(),
     val preview: String? = null,
     val lastEntryId: String? = null,

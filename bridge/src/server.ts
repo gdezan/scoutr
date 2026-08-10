@@ -487,6 +487,8 @@ interface SessionReadResult {
   exists: boolean;
   since: string | null;
   entries: PiMessageEntry[];
+  model: string | null;
+  thinkingLevel: string | null;
   preview?: string;
   lastEntryId: string | null;
   mtimeMs: number;
@@ -501,7 +503,7 @@ export async function readSession(pathParam: string, since: string | null): Prom
   }
   const info = await inspectSessionFile(target);
   if (!info.exists) {
-    return { path: target, name: basename(target), exists: false, since, entries: [], lastEntryId: null, mtimeMs: 0 };
+    return { path: target, name: basename(target), exists: false, since, entries: [], model: null, thinkingLevel: null, lastEntryId: null, mtimeMs: 0 };
   }
   const session = await readPiSessionFile(target);
   let entries = session.entries;
@@ -526,6 +528,8 @@ export async function readSession(pathParam: string, since: string | null): Prom
     exists: true,
     since: cursor,
     entries,
+    model: session.model,
+    thinkingLevel: session.thinkingLevel,
     preview: lastEntry ? entryText(lastEntry, 120) : undefined,
     lastEntryId: session.lastEntryId,
     mtimeMs: info.mtimeMs,

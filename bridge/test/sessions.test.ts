@@ -8,6 +8,7 @@ import {
   buildLaunchCommand,
   shellQuote,
   THINKING_LEVELS,
+  thinkingLevelKeys,
 } from "../src/sessions.js";
 
 function fakeHerdr(overrides: Record<string, unknown> = {}) {
@@ -206,12 +207,11 @@ describe("controlSession", () => {
     await assert.rejects(controlSession(herdr, { paneId: "p1", action: "retry" }), SessionsError);
   });
 
-  it("compact types /compact + Enter", async () => {
+  it("compact submits /compact atomically", async () => {
     const herdr = fakeHerdr();
     await controlSession(herdr, { paneId: "p1", action: "compact" });
     assert.deepEqual(herdr.calls, [
-      { method: "pane.send_text", params: { pane_id: "p1", text: "/compact" } },
-      { method: "pane.send_keys", params: { pane_id: "p1", keys: ["Enter"] } },
+      { method: "pane.send_input", params: { pane_id: "p1", text: "/compact", keys: ["Enter"] } },
     ]);
   });
 
@@ -237,10 +237,42 @@ describe("controlSession", () => {
     });
   });
 
-  it("cycle_thinking sends shift+tab", async () => {
+  it("sets a catalog model with pi's exact /model command", async () => {
     const herdr = fakeHerdr();
-    await controlSession(herdr, { paneId: "p1", action: "cycle_thinking" });
-    assert.deepEqual(herdr.calls, [{ method: "pane.send_keys", params: { pane_id: "p1", keys: ["shift+tab"] } }]);
+    const readCatalog = () => ({ providers: [{ name: "openai-codex", models: [{
+      id: "gpt-5.4", name: "GPT-5.4", provider: "openai-codex", reasoning: true,
+      thinkingLevels: ["off", "minimal", "low", "medium", "high", "xhigh"], contextWindow: 128000,
+    }] }] });
+    await controlSession(herdr, { paneId: "p1", action: "set_model", text: "openai-codex/gpt-5.4" }, { readCatalog });
+    assert.deepEqual(herdr.calls, [{
+      method: "pane.send_input",
+      params: { pane_id: "p1", text: "/model openai-codex/gpt-5.4", keys: ["Enter"] },
+    }]);
+  });
+
+  it("sets thinking by cycling from the session's active level", async () => {
+    const snapshot = {
+      panes: [{ pane_id: "p1", workspace_id: "ws1", agent_session: { kind: "path", value: "/tmp/session.jsonl" } }],
+      workspaces: [], tabs: [], agents: [],
+    };
+    const herdr = fakeHerdr({ snapshot });
+    const readCatalog = () => ({ providers: [{ name: "openai-codex", models: [{
+      id: "gpt-5.4", name: "GPT-5.4", provider: "openai-codex", reasoning: true,
+      thinkingLevels: ["off", "minimal", "low", "medium", "high", "xhigh"], contextWindow: 128000,
+    }] }] });
+    await controlSession(herdr, { paneId: "p1", action: "set_thinking", text: "xhigh" }, {
+      readCatalog,
+      readSession: async () => ({ model: "openai-codex/gpt-5.4", thinkingLevel: "medium" }),
+    });
+    assert.deepEqual(herdr.calls.map((call) => call.method), ["session.snapshot", "pane.send_keys"]);
+    assert.deepEqual(herdr.calls[1].params.keys, ["shift+tab", "shift+tab"]);
+  });
+
+  it("calculates deterministic thinking cycles and rejects unsupported targets", () => {
+    const levels = ["off", "minimal", "low", "medium", "high"];
+    assert.deepEqual(thinkingLevelKeys("high", "minimal", levels), ["shift+tab", "shift+tab"]);
+    assert.deepEqual(thinkingLevelKeys("low", "low", levels), []);
+    assert.throws(() => thinkingLevelKeys("low", "max", levels), /not supported/);
   });
 
   it("rejects an unknown action", async () => {

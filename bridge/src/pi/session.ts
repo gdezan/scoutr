@@ -63,6 +63,9 @@ export interface PiSession {
   cwd: string;
   timestamp: string;
   entries: PiMessageEntry[];
+  /** Active provider-qualified model, updated by every model_change record. */
+  model: string | null;
+  thinkingLevel: string | null;
   /** Last entry id — usable as an incremental cursor. */
   lastEntryId: string | null;
 }
@@ -74,6 +77,8 @@ export function parsePiSession(text: string): PiSession {
     cwd: "",
     timestamp: "",
     entries: [],
+    model: null,
+    thinkingLevel: null,
     lastEntryId: null,
   };
 
@@ -103,7 +108,17 @@ export function parsePiSession(text: string): PiSession {
       }
       continue;
     }
-    // model_change, thinking_level_change, custom: ignored for the chat view.
+    if (type === "model_change") {
+      const provider = typeof record.provider === "string" ? record.provider : "";
+      const modelId = typeof record.modelId === "string" ? record.modelId : "";
+      session.model = provider && modelId ? `${provider}/${modelId}` : null;
+      continue;
+    }
+    if (type === "thinking_level_change") {
+      session.thinkingLevel = typeof record.thinkingLevel === "string" ? record.thinkingLevel : null;
+      continue;
+    }
+    // Custom records are handled by feature-specific parsers, not the chat transcript.
   }
 
   return session;

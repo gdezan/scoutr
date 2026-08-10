@@ -5,6 +5,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasTestTag
 import dev.cockpit.app.data.ConnectionStore
@@ -22,6 +23,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.CopyOnWriteArrayList
 
 class ChatControlsTest {
 
@@ -30,23 +32,31 @@ class ChatControlsTest {
 
     private lateinit var server: MockWebServer
     private val liveOutputRequests = AtomicInteger()
+    private val controlBodies = CopyOnWriteArrayList<String>()
 
     @Before
     fun setUp() {
         server = MockWebServer()
         liveOutputRequests.set(0)
+        controlBodies.clear()
         server.start()
         server.dispatcher = object : okhttp3.mockwebserver.Dispatcher() {
             override fun dispatch(request: okhttp3.mockwebserver.RecordedRequest): MockResponse {
                 val path = (request.path ?: "").substringBefore('?')
                 val body = when {
                     path == "/api/sessions" ->
-                        """{"ok":true,"entries":[],"since":null,"lastEntryId":null,"preview":"","exists":false,"mtimeMs":0}"""
+                        """{"ok":true,"entries":[],"since":null,"lastEntryId":null,"preview":"","exists":true,"mtimeMs":0,"model":"openai-codex/gpt-5.4","thinkingLevel":"high"}"""
+                    path == "/api/models" ->
+                        """{"ok":true,"catalog":{"providers":[{"name":"openai-codex","models":[{"id":"gpt-5.4","name":"GPT-5.4","provider":"openai-codex","reasoning":true,"thinkingLevels":["off","low","high"],"contextWindow":200000},{"id":"gpt-5.3","name":"GPT-5.3","provider":"openai-codex","reasoning":true,"thinkingLevels":["off","low","high"],"contextWindow":128000}]}]}}"""
                     path == "/api/agents" ->
-                        """{"ok":true,"agents":[{"paneId":"w1:p1","workspaceId":"w1","tabId":"t1","agent":"pi","status":"working"}]}"""
+                        """{"ok":true,"agents":[{"paneId":"w1:p1","workspaceId":"w1","tabId":"t1","agent":"pi","status":"working","sessionPath":"/tmp/session.jsonl"}]}"""
                     path == "/api/agents/w1:p1/read" -> {
                         liveOutputRequests.incrementAndGet()
                         """{"ok":true,"output":{"paneId":"w1:p1","text":"build running\n42 tests passed","revision":2,"truncated":false,"lineLimit":80}}"""
+                    }
+                    path == "/api/sessions/w1:p1/control" -> {
+                        controlBodies += request.body.readUtf8()
+                        """{"ok":true}"""
                     }
                     else -> """{"ok":false,"error":"unexpected $path"}"""
                 }
@@ -61,7 +71,7 @@ class ChatControlsTest {
     }
 
     @Test
-    fun controlsMenuShowsSixActionsAndOpensRenameDialog() {
+    fun controlsMenuShowsLifecycleActionsAndOpensRenameDialog() {
         val store = ConnectionStore(InstrumentationRegistry.getInstrumentation().targetContext)
         store.save(server.url("/").toString().trimEnd('/'), "t", null, null)
         val bridge = BridgeClient(OkHttpClient.Builder().readTimeout(5, TimeUnit.SECONDS).build(), store)
@@ -77,17 +87,37 @@ class ChatControlsTest {
         compose.onNodeWithTag("chat_controls").assertIsDisplayed().performClick()
 
         compose.waitUntil(timeoutMillis = 5_000) {
-            compose.onAllNodes(androidx.compose.ui.test.hasText("Abort")).fetchSemanticsNodes().isNotEmpty()
+            compose.onAllNodes(androidx.compose.ui.test.hasText("Abort response")).fetchSemanticsNodes().isNotEmpty()
         }
-        listOf("Abort", "Retry", "Compact", "Fork", "Rename…", "Cycle thinking").forEach { label ->
+        listOf("Abort response", "Retry last message", "Compact context", "Fork session", "Rename session…").forEach { label ->
             compose.onNodeWithText(label).assertIsDisplayed()
         }
 
-        compose.onNodeWithText("Rename…").performClick()
+        compose.onNodeWithText("Rename session…").performClick()
         compose.waitUntil(timeoutMillis = 5_000) {
             compose.onAllNodes(androidx.compose.ui.test.hasText("Rename session")).fetchSemanticsNodes().isNotEmpty()
         }
         compose.onNodeWithText("Rename session").assertIsDisplayed()
+    }
+
+    @Test
+    fun configurationSheetShowsAndSelectsExactThinkingAndModel() {
+        val store = ConnectionStore(InstrumentationRegistry.getInstrumentation().targetContext)
+        store.save(server.url("/").toString().trimEnd('/'), "t", null, null)
+        val bridge = BridgeClient(OkHttpClient.Builder().readTimeout(5, TimeUnit.SECONDS).build(), store)
+        val vm = ChatViewModel(bridge, "w1:p1", null, "working")
+
+        compose.setContent { ChatScreen(viewModel = vm, onBack = {}) }
+        compose.waitUntil(timeoutMillis = 10_000) { vm.ui.value.modelProviders.isNotEmpty() && vm.ui.value.model != null }
+
+        compose.onNodeWithTag("chat_thinking_config").assertIsDisplayed().performClick()
+        compose.onNodeWithTag("conversation_config_sheet").assertIsDisplayed()
+        compose.onNodeWithTag("thinking_level_high").assertIsDisplayed()
+        compose.onNodeWithTag("thinking_level_low").performClick()
+        compose.waitUntil(timeoutMillis = 5_000) { controlBodies.any { "set_thinking" in it && "low" in it } }
+
+        compose.onNodeWithTag("conversation_model_gpt-5.3").performScrollTo().performClick()
+        compose.waitUntil(timeoutMillis = 5_000) { controlBodies.any { "set_model" in it && "openai-codex/gpt-5.3" in it } }
     }
     @Test
     fun liveOutputPollsOnlyWhileExpanded() {

@@ -16,7 +16,7 @@ Updated: 2026-08-10. This is the live prompt-to-artifact map for the production-
 - [ ] First working bottom navigation.
 - [ ] Board redesign.
 - [x] Model picker/session launcher. Direct visual review of `/tmp/cockpit-e2e/53-launcher-final.png`, `48-model-picker-live.png`, and `49-model-search-live.png`: retained the prompt-first launcher, focused full-screen pickers, sticky primary action, compact metadata rows, and restrained single-accent styling. The prior Claude helper timed out, so per the taste-review fallback this model made and applied the call directly.
-- [ ] Chat/streaming.
+- [ ] Chat/streaming. Conversation configuration was directly reviewed on emulator screenshots `/tmp/cockpit-e2e/46-config-chat-header-emulator.png` and `47-conversation-config-emulator.png`: the title keeps its own line, active model and thinking are visible as grouped chips, and an explicit setup sheet replaces cycle-thinking. Optimistic queued messages and slash commands remain.
 - [ ] Structured questions.
 - [ ] Session history.
 - [ ] Usage.
@@ -121,7 +121,7 @@ Each future checkpoint must name source files and rendered screenshot paths, ask
 - [ ] Bottom navigation: compact premium phone bar, strong icons/labels/selected state, needs-you badge, safe areas, fluid interruption-safe selection, rail/list-detail adaptation in landscape/large screens.
 - [ ] Usage dashboard: hierarchy, provider cards, horizontal progress bars with prior-value interpolation, reset-time and warning thresholds, empty/error states, per-session tokens/cost.
 - [ ] Board, Connect, Chat, launcher, history, review, dialogs, menus, composers, empty/loading/offline/error states share one deliberate component vocabulary.
-- [ ] Conversation controls: keep the session title legible beside model metadata; show the current thinking level; replace the broken cycle-thinking action and flat hidden overflow with explicit, reliable, intentionally grouped controls.
+- [x] Conversation controls: the header keeps the session title legible on its own line, shows active status/model/thinking as grouped chips, and opens a focused setup sheet with exact thinking-level selection plus fuzzy model search. Bridge controls validate exact catalog models and cycle from the transcript-reported active thinking level; lifecycle actions remain in a separate labeled menu. Evidence: `ConversationConfigSheet.kt`, `ChatViewModel.kt`, `sessions.ts`, `ChatControlsTest.kt`, and emulator screenshots `/tmp/cockpit-e2e/46-config-chat-header-emulator.png` and `47-conversation-config-emulator.png`.
 - [ ] Sent messages appear optimistically in the transcript at once, show a queued state until bridge/session confirmation, reconcile without duplicate entries, and retain a visible failed-delivery state.
 - [ ] Slash commands are functional and discoverable: typing `/` opens autocomplete for built-in pi commands and installed skills; filtering, keyboard/touch selection, exact safe delivery, loading/empty/error/no-match, and long-list states are covered.
 - [ ] Purposeful streaming feedback for real transcript/tool/status/live-output events; no fake typing or delayed content.

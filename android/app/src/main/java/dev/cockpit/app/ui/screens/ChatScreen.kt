@@ -7,6 +7,7 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.scrollBy
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -21,6 +22,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -43,6 +45,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -62,6 +65,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.cockpit.app.data.ContentBlock
 import dev.cockpit.app.data.SessionEntry
@@ -83,6 +87,7 @@ fun ChatScreen(
     var input by remember { mutableStateOf("") }
     var detailsVisible by rememberSaveable { mutableStateOf(false) }
     var renameOpen by remember { mutableStateOf(false) }
+    var configurationOpen by rememberSaveable { mutableStateOf(false) }
 
     LifecycleStartEffect(ui.liveOutputExpanded) {
         if (ui.liveOutputExpanded) viewModel.startLiveOutputPolling()
@@ -92,10 +97,13 @@ fun ChatScreen(
     Column(modifier.fillMaxSize()) {
         ChatHeader(
             paneId = viewModel.paneId,
-            model = ui.entries.lastOrNull()?.model,
+            sessionTitle = ui.sessionTitle,
+            model = ui.model,
+            thinkingLevel = ui.thinkingLevel,
             status = if (viewModel.waitingForAnswer) "needs you" else ui.agentStatus,
             detailsVisible = detailsVisible,
             onToggleDetails = { detailsVisible = !detailsVisible },
+            onOpenConfiguration = { configurationOpen = true },
             onBack = onBack,
             onControl = { action ->
                 when (action) {
@@ -190,84 +198,152 @@ fun ChatScreen(
             },
         )
     }
+
+    if (configurationOpen) {
+        ConversationConfigSheet(
+            ui = ui,
+            onSelectModel = { viewModel.control("set_model", it) },
+            onSelectThinking = { viewModel.control("set_thinking", it) },
+            onDismiss = { configurationOpen = false },
+        )
+    }
 }
 
 @Composable
 private fun ChatHeader(
     paneId: String,
+    sessionTitle: String,
     model: String?,
+    thinkingLevel: String?,
     status: String,
     detailsVisible: Boolean,
     onToggleDetails: () -> Unit,
+    onOpenConfiguration: () -> Unit,
     onBack: () -> Unit,
     onControl: (String) -> Unit,
 ) {
-    Row(
-        Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 2.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        IconButton(onClick = onBack) {
-            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-        }
-        Column(Modifier.weight(1f)) {
-            Text("Session", style = MaterialTheme.typography.titleMedium)
-            Text(
-                paneId,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-            )
-        }
-        if (!model.isNullOrBlank() || status.isNotBlank()) {
-            Text(
-                listOfNotNull(model, status).joinToString(" · "),
-                style = MaterialTheme.typography.labelSmall,
-                fontFamily = FontFamily.Monospace,
-                color = if (status == "needs you") MaterialTheme.colorScheme.primary
-                else MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = 8.dp),
-            )
-        }
-        IconButton(onClick = onToggleDetails) {
-            Icon(
-                if (detailsVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
-                modifier = Modifier.size(20.dp),
-                contentDescription = if (detailsVisible) "Hide thinking and tool details"
-                else "Show thinking and tool details",
-                tint = if (detailsVisible) MaterialTheme.colorScheme.primary
-                else MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        var menuOpen by remember { mutableStateOf(false) }
-        Box {
-            IconButton(
-                onClick = { menuOpen = true },
-                modifier = Modifier.testTag("chat_controls"),
-            ) {
-                Icon(Icons.Default.MoreVert, contentDescription = "Session controls")
+    Column(Modifier.fillMaxWidth()) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            IconButton(onClick = onBack) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
             }
-            DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                val items = listOf(
-                    "abort" to "Abort",
-                    "retry" to "Retry",
-                    "compact" to "Compact",
-                    "fork" to "Fork",
-                    "rename" to "Rename…",
-                    "cycle_thinking" to "Cycle thinking",
+            Column(Modifier.weight(1f)) {
+                Text(
+                    sessionTitle,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
-                items.forEach { (action, label) ->
-                    DropdownMenuItem(
-                        text = { Text(label) },
-                        onClick = {
-                            menuOpen = false
-                            onControl(action)
-                        },
+                Text(
+                    paneId,
+                    style = MaterialTheme.typography.bodySmall,
+                    fontFamily = FontFamily.Monospace,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                )
+            }
+            IconButton(onClick = onToggleDetails) {
+                Icon(
+                    if (detailsVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                    modifier = Modifier.size(20.dp),
+                    contentDescription = if (detailsVisible) "Hide thinking and tool details"
+                    else "Show thinking and tool details",
+                    tint = if (detailsVisible) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            var menuOpen by remember { mutableStateOf(false) }
+            Box {
+                IconButton(
+                    onClick = { menuOpen = true },
+                    modifier = Modifier.testTag("chat_controls"),
+                ) {
+                    Icon(Icons.Default.MoreVert, contentDescription = "Session actions")
+                }
+                DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                    val items = listOf(
+                        "abort" to "Abort response",
+                        "retry" to "Retry last message",
+                        "compact" to "Compact context",
+                        "fork" to "Fork session",
+                        "rename" to "Rename session…",
                     )
+                    items.forEach { (action, label) ->
+                        DropdownMenuItem(
+                            text = { Text(label) },
+                            onClick = {
+                                menuOpen = false
+                                onControl(action)
+                            },
+                        )
+                    }
                 }
             }
         }
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
+                .padding(start = 16.dp, end = 16.dp, bottom = 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            HeaderStatusChip(status)
+            HeaderConfigurationChip(
+                label = "Thinking",
+                value = thinkingLevel ?: "—",
+                onClick = onOpenConfiguration,
+                testTag = "chat_thinking_config",
+            )
+            HeaderConfigurationChip(
+                label = "Model",
+                value = model?.substringAfterLast('/') ?: "—",
+                onClick = onOpenConfiguration,
+                testTag = "chat_model_config",
+            )
+        }
+        HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f))
     }
-    HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f))
+}
+
+@Composable
+private fun HeaderStatusChip(status: String) {
+    Surface(
+        shape = RoundedCornerShape(50),
+        color = if (status == "needs you") MaterialTheme.colorScheme.primaryContainer
+        else MaterialTheme.colorScheme.surfaceContainerHighest,
+    ) {
+        Text(
+            status,
+            style = MaterialTheme.typography.labelMedium,
+            color = if (status == "needs you") MaterialTheme.colorScheme.onPrimaryContainer
+            else MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
+        )
+    }
+}
+
+@Composable
+private fun HeaderConfigurationChip(
+    label: String,
+    value: String,
+    onClick: () -> Unit,
+    testTag: String,
+) {
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(50),
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        modifier = Modifier.testTag(testTag),
+    ) {
+        Row(Modifier.padding(horizontal = 12.dp, vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("$label  ", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(value, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
+        }
+    }
 }
 
 /**
