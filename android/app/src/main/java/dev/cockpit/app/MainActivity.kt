@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -442,7 +443,7 @@ private fun rememberNeedsYouCount(boardViewModel: BoardViewModel): Int =
  * (single-top, no queued back stacks).
  */
 @Composable
-private fun CockpitBottomBar(
+fun CockpitBottomBar(
     currentRoute: String?,
     needsYouCount: Int,
     onSelect: (String) -> Unit,
@@ -507,8 +508,11 @@ private fun CockpitTab(
             )
             if (badge > 0) {
                 Box(
+                    // Offset (not padding) so the badge can straddle the icon's
+                    // corner: Compose padding rejects negative values and would
+                    // crash the app at startup whenever the badge renders.
                     Modifier
-                        .padding(top = (-6).dp, end = (-6).dp)
+                        .offset(x = 6.dp, y = (-6).dp)
                         .size(16.dp)
                         .background(MaterialTheme.colorScheme.error, RoundedCornerShape(50)),
                     contentAlignment = Alignment.Center,

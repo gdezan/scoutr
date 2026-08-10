@@ -1,5 +1,6 @@
 package dev.cockpit.app.ui
 
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -14,6 +15,7 @@ import dev.cockpit.app.state.BoardUiState
 import dev.cockpit.app.state.BoardViewModel
 import dev.cockpit.app.ui.screens.ConnectScreen
 import dev.cockpit.app.ui.screens.BoardScreen
+import dev.cockpit.app.CockpitBottomBar
 import dev.cockpit.app.ui.theme.CockpitTheme
 import okhttp3.OkHttpClient
 import org.junit.Rule
@@ -116,6 +118,20 @@ class CockpitUiTest {
         composeRule.onNodeWithText("Working").assertExists()
         composeRule.onNodeWithText("hestia").assertExists()
         composeRule.onNodeWithText("agents-mobile").assertExists()
+    }
+
+    @Test
+    fun bottomBar_badgeWithNeedsYouCountRendersWithoutCrashing() {
+        // Regression: the needs-you badge used Modifier.padding with negative
+        // values, which Compose rejects at composition — any session needing
+        // the user crashed the app on startup. The badge must render.
+        composeRule.setContent {
+            CockpitTheme {
+                CockpitBottomBar(currentRoute = "board", needsYouCount = 3, onSelect = {})
+            }
+        }
+        composeRule.onNodeWithText("3").assertIsDisplayed()
+        composeRule.onNodeWithText("9+").assertDoesNotExist()
     }
 
     @Test
