@@ -3,7 +3,8 @@ import { resolveAllowedDir } from "./dirs.js";
 import { readModelsCatalog, type ModelsCatalog } from "./pi/models.js";
 import { readPiSessionFile, type PiSession } from "./pi/session.js";
 import { resolveCatalogSessionPath } from "./session-catalog.js";
-import { basename } from "node:path";
+import { realpathSync, statSync } from "node:fs";
+import { basename, dirname, resolve } from "node:path";
 
 /** pi's documented `--thinking` levels (README: Model Options). */
 export const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
@@ -169,18 +170,42 @@ export async function launchStoredSession(
   const path = await resolveCatalogSessionPath(params.path, params.sessionRoot);
   const session = await readPiSessionFile(path);
   if (!session.cwd) throw new SessionsError("session working directory is unavailable", 409);
-  let cwd: string;
-  try {
-    cwd = resolveAllowedDir(session.cwd);
-  } catch (error) {
-    throw new SessionsError(error instanceof Error ? error.message : String(error));
-  }
+  const cwd = resolveSessionWorkspace(session.cwd, path, params.sessionRoot);
   return launchWorkspace(
     herdr,
     cwd,
     basename(cwd) || "session",
     `pi --${params.mode === "fork" ? "fork" : "session"} ${shellQuote(path)}`,
   );
+}
+
+/**
+ * Working directory for a stored-session launch. The cwd recorded in the
+ * session file is trusted (the user already ran an agent there — the same
+ * least-privilege reasoning as the review allow-list in review.ts), so a
+ * session run outside $HOME can still be resumed. When that directory no
+ * longer exists, fall back to the session store root, then to the session
+ * file's own directory, so the transcript still opens.
+ */
+function resolveSessionWorkspace(
+  recorded: string,
+  sessionPath: string,
+  sessionRoot?: string,
+): string {
+  try {
+    const target = realpathSync(resolve(recorded));
+    if (statSync(target).isDirectory()) return target;
+  } catch {
+    // recorded cwd is gone or unresolvable — fall back below
+  }
+  if (sessionRoot?.trim()) {
+    try {
+      return realpathSync(resolve(sessionRoot.trim()));
+    } catch {
+      // keep the session-directory fallback
+    }
+  }
+  return dirname(sessionPath);
 }
 
 async function launchWorkspace(

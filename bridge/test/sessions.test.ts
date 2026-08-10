@@ -1,4 +1,4 @@
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, it } from "node:test";
@@ -229,6 +229,49 @@ describe("launchStoredSession", () => {
         /outside the session store/,
       );
       assert.equal(herdr.calls.length, 0);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("resumes a session whose recorded cwd is outside the home directory", async () => {
+    // Fix 7 (user decision): the cwd recorded in the session file is trusted,
+    // so a session run in e.g. /tmp can be resumed from the app.
+    const root = await mkdtemp(join(homedir(), ".cockpit-stored-session-"));
+    const outsideCwd = await mkdtemp(join(tmpdir(), "cockpit-resume-cwd-"));
+    const path = join(root, "outside-cwd.jsonl");
+    await writeFile(path, `${JSON.stringify({
+      type: "session",
+      version: 3,
+      id: "outside-cwd-session",
+      timestamp: "2026-01-01T00:00:00.000Z",
+      cwd: outsideCwd,
+    })}\n`);
+    try {
+      const herdr = fakeHerdr();
+      const created = await launchStoredSession(herdr, { path, mode: "resume", sessionRoot: root });
+      assert.deepEqual(created, { workspaceId: "ws1", paneId: "p1" });
+      assert.equal((herdr.calls[0].params as { cwd: string }).cwd, outsideCwd);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+      await rm(outsideCwd, { recursive: true, force: true });
+    }
+  });
+
+  it("falls back to the session store when the recorded cwd is gone", async () => {
+    const root = await mkdtemp(join(homedir(), ".cockpit-stored-session-"));
+    const path = join(root, "gone-cwd.jsonl");
+    await writeFile(path, `${JSON.stringify({
+      type: "session",
+      version: 3,
+      id: "gone-cwd-session",
+      timestamp: "2026-01-01T00:00:00.000Z",
+      cwd: join(tmpdir(), "cockpit-never-existed-", "nested"),
+    })}\n`);
+    try {
+      const herdr = fakeHerdr();
+      await launchStoredSession(herdr, { path, mode: "resume", sessionRoot: root });
+      assert.equal((herdr.calls[0].params as { cwd: string }).cwd, root);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
