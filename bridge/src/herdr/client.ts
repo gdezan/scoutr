@@ -279,4 +279,16 @@ export class HerdrClient {
   async paneSendInput(pane_id: string, text: string, keys: string[] = []): Promise<unknown> {
     return this.request("pane.send_input", { pane_id, text, keys });
   }
+
+  /** Create a workspace. herdr pre-creates one root pane in it. */
+  async workspaceCreate(params: { cwd?: string | null; label?: string | null; focus?: boolean }): Promise<{
+    workspace: { workspace_id?: string };
+    root_pane?: { pane_id?: string };
+  }> {
+    return this.request("workspace.create", params);
+  }
+
+  async workspaceRename(workspace_id: string, label: string): Promise<unknown> {
+    return this.request("workspace.rename", { workspace_id, label });
+  }
 }

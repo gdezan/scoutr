@@ -6,10 +6,13 @@ import android.Manifest
 import android.content.pm.PackageManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
+import androidx.activity.SystemBarStyle
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.DonutLarge
 import androidx.compose.material.icons.filled.GridView
@@ -26,7 +29,9 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -41,9 +46,11 @@ import androidx.navigation.compose.rememberNavController
 import kotlinx.coroutines.launch
 import dev.cockpit.app.data.AgentCard
 import dev.cockpit.app.state.BoardViewModel
+import dev.cockpit.app.state.NewSessionViewModel
 import dev.cockpit.app.state.ChatViewModel
 import dev.cockpit.app.state.UsageViewModel
 import dev.cockpit.app.ui.screens.BoardScreen
+import dev.cockpit.app.ui.screens.NewSessionSheet
 import dev.cockpit.app.ui.screens.ChatScreen
 import dev.cockpit.app.ui.screens.ConnectScreen
 import dev.cockpit.app.ui.screens.UsageScreen
@@ -74,6 +81,10 @@ class MainActivity : ComponentActivity() {
         ) {
             requestNotifications.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
+        enableEdgeToEdge(
+            statusBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
+            navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
+        )
         setContent {
             CockpitTheme {
                 CockpitAppNav()
@@ -151,10 +162,21 @@ private fun CockpitAppNav() {
                     ),
                 )
                 val scope = rememberCoroutineScope()
+                val newSessionViewModel: NewSessionViewModel = viewModel(
+                    factory = NewSessionViewModel.factory(container.bridge),
+                )
+                var showNewSession by remember { mutableStateOf(false) }
                 Scaffold(
                     topBar = { AppTopBar("Board") },
-                    // The new-session create flow (folder + model picker) lands
-                    // in the sessions layer; the FAB is hidden until then.
+                    floatingActionButton = {
+                        FloatingActionButton(
+                            onClick = { showNewSession = true },
+                            containerColor = MaterialTheme.colorScheme.primary,
+                            contentColor = MaterialTheme.colorScheme.onPrimary,
+                        ) {
+                            Icon(Icons.Default.Add, contentDescription = "New session")
+                        }
+                    },
                 ) { innerBoard ->
                     BoardScreen(
                         onOpenAgent = { agent ->
@@ -162,6 +184,16 @@ private fun CockpitAppNav() {
                         },
                         viewModel = boardViewModel,
                         modifier = Modifier.padding(innerBoard),
+                    )
+                }
+                if (showNewSession) {
+                    NewSessionSheet(
+                        viewModel = newSessionViewModel,
+                        onDismiss = { showNewSession = false },
+                        onCreated = { paneId ->
+                            showNewSession = false
+                            navController.navigate(Routes.chat(paneId, null, "working"))
+                        },
                     )
                 }
             }

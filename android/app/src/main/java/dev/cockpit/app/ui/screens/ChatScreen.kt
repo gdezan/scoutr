@@ -29,13 +29,20 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -78,6 +85,7 @@ fun ChatScreen(
     val ui by viewModel.ui.collectAsState()
     var input by remember { mutableStateOf("") }
     var detailsVisible by rememberSaveable { mutableStateOf(false) }
+    var renameOpen by remember { mutableStateOf(false) }
 
     Column(modifier.fillMaxSize()) {
         ChatHeader(
@@ -87,6 +95,13 @@ fun ChatScreen(
             detailsVisible = detailsVisible,
             onToggleDetails = { detailsVisible = !detailsVisible },
             onBack = onBack,
+            onControl = { action ->
+                when (action) {
+                    "rename" -> renameOpen = true
+                    "retry" -> viewModel.control("retry", ui.lastUserMessage)
+                    else -> viewModel.control(action)
+                }
+            },
         )
 
         when {
@@ -137,6 +152,33 @@ fun ChatScreen(
             },
         )
     }
+
+    if (renameOpen) {
+        var label by remember { mutableStateOf("") }
+        AlertDialog(
+            onDismissRequest = { renameOpen = false },
+            title = { Text("Rename session") },
+            text = {
+                OutlinedTextField(
+                    value = label,
+                    onValueChange = { label = it },
+                    label = { Text("New name") },
+                    singleLine = true,
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        if (label.isNotBlank()) viewModel.control("rename", label.trim())
+                        renameOpen = false
+                    },
+                ) { Text("Rename") }
+            },
+            dismissButton = {
+                TextButton(onClick = { renameOpen = false }) { Text("Cancel") }
+            },
+        )
+    }
 }
 
 @Composable
@@ -147,6 +189,7 @@ private fun ChatHeader(
     detailsVisible: Boolean,
     onToggleDetails: () -> Unit,
     onBack: () -> Unit,
+    onControl: (String) -> Unit,
 ) {
     Row(
         Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 2.dp),
@@ -183,6 +226,34 @@ private fun ChatHeader(
                 tint = if (detailsVisible) MaterialTheme.colorScheme.primary
                 else MaterialTheme.colorScheme.onSurfaceVariant,
             )
+        }
+        var menuOpen by remember { mutableStateOf(false) }
+        Box {
+            IconButton(
+                onClick = { menuOpen = true },
+                modifier = Modifier.testTag("chat_controls"),
+            ) {
+                Icon(Icons.Default.MoreVert, contentDescription = "Session controls")
+            }
+            DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                val items = listOf(
+                    "abort" to "Abort",
+                    "retry" to "Retry",
+                    "compact" to "Compact",
+                    "fork" to "Fork",
+                    "rename" to "Rename…",
+                    "cycle_thinking" to "Cycle thinking",
+                )
+                items.forEach { (action, label) ->
+                    DropdownMenuItem(
+                        text = { Text(label) },
+                        onClick = {
+                            menuOpen = false
+                            onControl(action)
+                        },
+                    )
+                }
+            }
         }
     }
     HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f))

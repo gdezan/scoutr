@@ -245,15 +245,19 @@ cleartext).
 automatically).
 - **Board** — live agent cards grouped Needs you / Working / Done / Idle with
   counts, status dots, and time-in-state pills. 3s polling; self-heals when the
-  bridge restarts. The **+** button starts a new app-owned pi session.
-- **Chat (pane)** — tap an agent card: transcript from the pi session JSONL,
-  input steers the live pane (`agent.prompt`); when the agent is blocked on
-  `ask_user_question` the input becomes "Answer the question…" and your answer
-  is typed into the questionnaire.
-- **Chat (RPC)** — the **+** FAB spawns a bridge-owned `pi --mode rpc` session.
-  When the agent asks a question, a "Waiting for your answer" banner shows the
-  question + options; answering delivers it programmatically via
-  `extension_ui_response` (no terminal involved).
+  bridge restarts. The **+** button opens the new-session sheet.
+- **New session** — the **+** FAB opens a sheet with a folder picker (browser
+  rooted at the host home, with ~ and ~/Dev quick picks) and the full model
+  catalog from `models-store.json` (grouped by provider). Create spawns a fresh
+  herdr workspace with one pane running `pi --model <model>`, then opens its
+  chat.
+- **Chat** — tap an agent card (or create a session): transcript from the pi
+  session JSONL, input steers the live pane (`agent.prompt`); when the agent is
+  blocked on `ask_user_question` the input becomes "Answer the question…" and
+  your answer is typed into the questionnaire. The **⋮** menu in the header
+  offers Abort / Retry / Compact / Fork / Rename… / Cycle thinking, grounded in
+  pi's TUI commands (escape, `/compact`, `/fork`, `shift+tab`, workspace
+  label).
 - **Usage** — Codex 5h/7d rate windows and DeepSeek balance from
   `~/.pi/agent/auth.json` (read-only).
 - **Push** — blocked → "π needs you" (high priority), done → "π finished",

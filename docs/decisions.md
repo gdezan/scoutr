@@ -110,3 +110,23 @@ pi agents, as an alternative to Moshi's paid herdr integration.
   app; the server listens on 127.0.0.1:8382, fronted by tailscale serve (no auth).
 - Never expose the herdr socket raw; never modify herdr-agent-state.ts /
   moshi-hooks.ts; never write auth.json.
+
+## Sessions v2 (layer 3) — pane-native create flow
+
+- **App-owned sessions are real herdr panes** in a new workspace (workspace.create
+  pre-creates a root pane; `pi --model <model>` is typed into it). The bridge
+  `pi --mode rpc` layer was removed with no shims.
+- **Home is discovered from the bridge, never derived on-device.** The first
+  `/api/dirs` call (no path) returns the host home; `System.getProperty("user.name")`
+  on Android is unreliable (emulator reports "root"), so `~/...` paths must come
+  from the listing response.
+- **Controls map to pi's documented TUI**: abort = `escape`, retry =
+  `agent.prompt` with the last user message, compact/fork = typed slash
+  commands, rename = workspace label, cycle thinking = `shift+tab`.
+- **The create sheet must scroll** — folder list + model catalog + name +
+  create exceed one screen; the content column uses `verticalScroll`.
+- **MockWebServer dispatchers must be path-aware** — the sheet fires dirs and
+  models concurrently, and enqueue-order races swap responses; key the stub on
+  the request path instead.
+- Robolectric 4.14 caps at targetSdk 35, so JVM ViewModel tests pin
+  `@Config(sdk = [35])` and idle the main looper for viewModelScope work.

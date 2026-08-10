@@ -2,10 +2,20 @@ package dev.cockpit.app.net
 
 import dev.cockpit.app.data.AgentsResponse
 import dev.cockpit.app.data.ConnectionStore
+import dev.cockpit.app.data.ControlResponse
+import dev.cockpit.app.data.CreatedSessionResponse
+import dev.cockpit.app.data.DirListingResponse
 import dev.cockpit.app.data.HealthResponse
+import dev.cockpit.app.data.ModelsCatalogResponse
 import dev.cockpit.app.data.SessionReadResponse
 import dev.cockpit.app.data.UsageResponse
 import dev.cockpit.app.data.WsFrame
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody.Companion.toRequestBody
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.serialization.json.Json
 import okhttp3.Call
@@ -62,6 +72,65 @@ class BridgeClient(
             .get()
             .build()
     }
+
+    /** POST JSON to the bridge and decode the response as [T]. */
+    suspend fun <T> post(
+        path: String,
+        body: JsonObject,
+        decode: (String) -> T,
+    ): T =
+        suspendCancellableCoroutine { continuation ->
+            val url = (baseUrl() + path).toHttpUrl()
+            val request = Request.Builder()
+                .url(url)
+                .header("Authorization", "Bearer ${token()}")
+                .post(body.toString().toRequestBody("application/json".toMediaType()))
+                .build()
+            val call = okHttp.newCall(request)
+            continuation.invokeOnCancellation { call.cancel() }
+            call.enqueue(object : Callback {
+                override fun onFailure(call: Call, e: IOException) {
+                    if (!continuation.isCancelled) continuation.resumeWithException(e)
+                }
+
+                override fun onResponse(call: Call, response: Response) {
+                    response.use {
+                        if (!continuation.isCancelled) {
+                            if (it.isSuccessful) {
+                                continuation.resume(decode(it.body?.string() ?: "{}"))
+                            } else {
+                                continuation.resumeWithException(IOException("bridge ${it.code}: ${it.message}"))
+                            }
+                        }
+                    }
+                }
+            })
+        }
+
+    /** List subdirectories for the folder picker (rooted at home by the bridge). */
+    suspend fun dirs(path: String? = null): DirListingResponse =
+        call("/api/dirs", query = if (path == null) emptyMap() else mapOf("path" to path)) {
+            json.decodeFromString(DirListingResponse.serializer(), it)
+        }
+
+    /** Full model catalog from pi's models-store.json. */
+    suspend fun models(): ModelsCatalogResponse =
+        call("/api/models") { json.decodeFromString(ModelsCatalogResponse.serializer(), it) }
+
+    /** Create a pane-native pi session (new herdr workspace + pane + pi launch). */
+    suspend fun createSession(cwd: String, model: String, name: String? = null): CreatedSessionResponse =
+        post("/api/sessions", buildJsonObject {
+            put("cwd", JsonPrimitive(cwd))
+            put("model", JsonPrimitive(model))
+            if (name != null) put("name", JsonPrimitive(name))
+        }) { json.decodeFromString(CreatedSessionResponse.serializer(), it) }
+
+    /** One pane control action: abort/retry/compact/fork/rename/cycle_thinking. */
+    suspend fun controlSession(paneId: String, action: String, text: String? = null): ControlResponse =
+        post("/api/sessions/${paneId}/control", buildJsonObject {
+            put("action", JsonPrimitive(action))
+            if (text != null) put("text", JsonPrimitive(text))
+        }) { json.decodeFromString(ControlResponse.serializer(), it) }
 
     /** Calls the bridge and decodes the response body as [T]. */
     suspend fun <T> call(

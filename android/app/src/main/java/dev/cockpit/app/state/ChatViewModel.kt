@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import dev.cockpit.app.data.SessionEntry
+import dev.cockpit.app.data.entryText
 import dev.cockpit.app.net.BridgeClient
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -35,7 +36,11 @@ data class ChatUiState(
     val loading: Boolean = true,
     val sending: Boolean = false,
     val error: String? = null,
-)
+) {
+    val lastUserMessage: String?
+        get() = entries.asReversed().firstOrNull { it.role == "user" }
+            ?.let { entryText(it.content) }
+}
 
 /**
  * Transcript + steering for one agent session.
@@ -58,6 +63,9 @@ class ChatViewModel(
 
     private var pollJob: Job? = null
 
+    /** Resolved transcript path; a fresh session's card may not report it yet. */
+    private var resolvedPath: String? = sessionPath
+
     /** True when the agent is blocked on a question the user should answer. */
     val waitingForAnswer: Boolean get() = agentStatus == "blocked"
 
@@ -73,8 +81,9 @@ class ChatViewModel(
 
     suspend fun refresh() {
         try {
-            val path = sessionPath ?: run {
-                _ui.update { it.copy(loading = false, exists = false, error = "No session transcript on this agent") }
+            val path = resolvedPath ?: resolveSessionPath()
+            if (path == null) {
+                _ui.update { it.copy(loading = false, exists = false, error = "No session transcript on this agent yet") }
                 return
             }
             val response = bridge.session(path, since = _ui.value.entries.lastOrNull()?.entryId)
@@ -88,6 +97,37 @@ class ChatViewModel(
             }
         } catch (e: Exception) {
             _ui.update { it.copy(loading = false, error = e.message ?: "session read failed") }
+        }
+    }
+
+    /** Poll the board until this pane reports a session path (fresh sessions). */
+    private suspend fun resolveSessionPath(): String? {
+        try {
+            val agents = bridge.agents()
+            val card = agents.agents.firstOrNull { it.paneId == paneId }
+            val path = card?.sessionPath
+            if (!path.isNullOrBlank()) {
+                resolvedPath = path
+                return path
+            }
+        } catch (_: Exception) {
+            // bridge unreachable; keep the current state
+        }
+        return null
+    }
+
+    /** One pane control action (abort/retry/compact/fork/rename/cycle_thinking). */
+    fun control(action: String, text: String? = null) {
+        viewModelScope.launch {
+            _ui.update { it.copy(sending = true, error = null) }
+            try {
+                bridge.controlSession(paneId, action, text)
+                _ui.update { it.copy(sending = false) }
+                delay(1500)
+                refresh()
+            } catch (e: Exception) {
+                _ui.update { it.copy(sending = false, error = e.message ?: "control failed") }
+            }
         }
     }
 

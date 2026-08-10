@@ -213,3 +213,60 @@ data class BoardState(
         }
     }
 }
+
+// ── Sessions v2 (layer 3): folder + model pickers, pane-native creation ──
+
+@Serializable
+data class DirListingResponse(
+    val ok: Boolean,
+    val listing: DirListing? = null,
+    val error: String? = null,
+)
+
+@Serializable
+data class DirListing(
+    val path: String,
+    val dirs: List<String>,
+)
+
+@Serializable
+data class ModelsCatalogResponse(
+    val ok: Boolean,
+    val catalog: ModelsCatalog? = null,
+    val error: String? = null,
+)
+
+@Serializable
+data class ModelsCatalog(
+    val providers: List<ModelProvider>,
+)
+
+@Serializable
+data class ModelProvider(
+    val name: String,
+    val models: List<ModelInfo>,
+)
+
+@Serializable
+data class ModelInfo(
+    val id: String,
+    val name: String = "",
+    val provider: String = "",
+    val reasoning: Boolean = false,
+    val thinkingLevels: List<String> = emptyList(),
+    val contextWindow: Long = 0,
+)
+
+@Serializable
+data class CreatedSessionResponse(
+    val ok: Boolean,
+    val workspaceId: String? = null,
+    val paneId: String? = null,
+    val error: String? = null,
+)
+
+@Serializable
+data class ControlResponse(
+    val ok: Boolean,
+    val error: String? = null,
+)

@@ -10,6 +10,7 @@ import { NtfyPublisher } from "./notify.js";
 import { StatusTracker } from "./status.js";
 import { listDirs, DirListingError } from "./dirs.js";
 import { readModelsCatalog } from "./pi/models.js";
+import { createSession, controlSession, SessionsError } from "./sessions.js";
 import { basename, resolve } from "node:path";
 import { existsSync } from "node:fs";
 
@@ -26,6 +27,14 @@ import { existsSync } from "node:fs";
  * Deliberate steering (agent.prompt / send_input) is only possible from an
  * authenticated client, i.e. the user acting through the app.
  */
+
+export interface JsonBody {
+  cwd?: string;
+  model?: string;
+  name?: string;
+  action?: string;
+  text?: string;
+}
 
 export type CommandMessage =
   | { type: "steer"; target: string; text: string }
@@ -101,6 +110,17 @@ export function createCockpitServer(deps: ServerDeps, options: CreateServerOptio
       if (!isAuthorized(request, token)) {
         sendJson(response, 401, { ok: false, error: "unauthorized" });
         return;
+      }
+      if (request.method === "POST") {
+        const chunks: Buffer[] = [];
+        let size = 0;
+        for await (const chunk of request) {
+          size += chunk.length;
+          if (size > 1_000_000) throw new Error("body too large");
+          chunks.push(chunk);
+        }
+        const raw = Buffer.concat(chunks).toString("utf8");
+        (request as IncomingMessage & { body?: JsonBody }).body = raw ? JSON.parse(raw) : {};
       }
       await route(request, response, url, deps);
     } catch (error) {
@@ -237,6 +257,39 @@ export function createCockpitServer(deps: ServerDeps, options: CreateServerOptio
         sendJson(response, 404, {
           ok: false,
           error: "models-store.json not readable: " + (error instanceof Error ? error.message : String(error)),
+        });
+      }
+      return;
+    }
+
+    if (request.method === "POST" && pathname === "/api/sessions") {
+      const body = (request as IncomingMessage & { body?: JsonBody }).body ?? {};
+      try {
+        if (!body.cwd || !body.model) throw new SessionsError("cwd and model are required");
+        const created = await createSession(routeDeps.herdr, { cwd: body.cwd, model: body.model, name: body.name });
+        sendJson(response, 200, { ok: true, ...created });
+      } catch (error) {
+        const status = error instanceof SessionsError ? error.status : 502;
+        sendJson(response, status, {
+          ok: false,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+      return;
+    }
+
+    const controlMatch = pathname.match(/^\/api\/sessions\/([^/]+)\/control$/);
+    if (request.method === "POST" && controlMatch) {
+      const paneId = decodeURIComponent(controlMatch[1] ?? "");
+      const body = (request as IncomingMessage & { body?: JsonBody }).body ?? {};
+      try {
+        await controlSession(routeDeps.herdr, { paneId, action: body.action as never, text: body.text });
+        sendJson(response, 200, { ok: true });
+      } catch (error) {
+        const status = error instanceof SessionsError ? error.status : 502;
+        sendJson(response, status, {
+          ok: false,
+          error: error instanceof Error ? error.message : String(error),
         });
       }
       return;
