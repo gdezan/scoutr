@@ -89,7 +89,7 @@ class ChatControlsTest {
         compose.waitUntil(timeoutMillis = 5_000) {
             compose.onAllNodes(androidx.compose.ui.test.hasText("Abort response")).fetchSemanticsNodes().isNotEmpty()
         }
-        listOf("Abort response", "Retry last message", "Compact context", "Fork session", "Rename session…").forEach { label ->
+        listOf("Abort response", "Retry last message", "Compact context", "Fork session", "Rename session…", "Close session…").forEach { label ->
             compose.onNodeWithText(label).assertIsDisplayed()
         }
 
@@ -98,6 +98,30 @@ class ChatControlsTest {
             compose.onAllNodes(androidx.compose.ui.test.hasText("Rename session")).fetchSemanticsNodes().isNotEmpty()
         }
         compose.onNodeWithText("Rename session").assertIsDisplayed()
+    }
+
+    @Test
+    fun closeSessionRequiresConfirmationBeforeStoppingTheWorkspace() {
+        val store = ConnectionStore(InstrumentationRegistry.getInstrumentation().targetContext)
+        store.save(server.url("/").toString().trimEnd('/'), "t", null, null)
+        val bridge = BridgeClient(OkHttpClient.Builder().readTimeout(5, TimeUnit.SECONDS).build(), store)
+        val vm = ChatViewModel(bridge, "w1:p1", null, "working")
+        val backCalls = AtomicInteger()
+
+        compose.setContent { ChatScreen(viewModel = vm, onBack = { backCalls.incrementAndGet() }) }
+        compose.waitUntil(timeoutMillis = 10_000) {
+            compose.onAllNodes(hasTestTag("chat_controls")).fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithTag("chat_controls").performClick()
+        compose.onNodeWithText("Close session…").performClick()
+
+        compose.onNodeWithTag("close_session_dialog").assertIsDisplayed()
+        compose.onNodeWithText("This stops the running agent and closes its workspace. The transcript stays on disk so you can resume it later.").assertIsDisplayed()
+        compose.runOnIdle { assertEquals(false, controlBodies.any { "close" in it }) }
+        compose.onNodeWithText("Close session").performClick()
+
+        compose.waitUntil(timeoutMillis = 5_000) { controlBodies.any { "close" in it } }
+        compose.runOnIdle { assertEquals(1, backCalls.get()) }
     }
 
     @Test

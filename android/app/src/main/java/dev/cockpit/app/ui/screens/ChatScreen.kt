@@ -99,6 +99,7 @@ fun ChatScreen(
     var input by remember { mutableStateOf("") }
     var detailsVisible by rememberSaveable { mutableStateOf(false) }
     var renameOpen by remember { mutableStateOf(false) }
+    var closeOpen by rememberSaveable { mutableStateOf(false) }
     var configurationOpen by rememberSaveable { mutableStateOf(false) }
 
     LifecycleStartEffect(ui.liveOutputExpanded) {
@@ -120,6 +121,7 @@ fun ChatScreen(
             onControl = { action ->
                 when (action) {
                     "rename" -> renameOpen = true
+                    "close" -> closeOpen = true
                     "retry" -> viewModel.control("retry", ui.lastUserMessage)
                     else -> viewModel.control(action)
                 }
@@ -217,6 +219,26 @@ fun ChatScreen(
         )
     }
 
+    if (closeOpen) {
+        AlertDialog(
+            onDismissRequest = { closeOpen = false },
+            title = { Text("Close this session?") },
+            text = { Text("This stops the running agent and closes its workspace. The transcript stays on disk so you can resume it later.") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        closeOpen = false
+                        viewModel.control("close", onSuccess = onBack)
+                    },
+                ) { Text("Close session", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = {
+                TextButton(onClick = { closeOpen = false }) { Text("Keep running") }
+            },
+            modifier = Modifier.testTag("close_session_dialog"),
+        )
+    }
+
     if (configurationOpen) {
         ConversationConfigSheet(
             ui = ui,
@@ -289,6 +311,7 @@ private fun ChatHeader(
                         "compact" to "Compact context",
                         "fork" to "Fork session",
                         "rename" to "Rename session…",
+                        "close" to "Close session…",
                     )
                     items.forEach { (action, label) ->
                         DropdownMenuItem(

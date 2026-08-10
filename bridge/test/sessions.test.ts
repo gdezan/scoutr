@@ -228,6 +228,13 @@ describe("controlSession", () => {
     assert.deepEqual(herdr.calls[1].params, { workspace_id: "ws1", label: "new name" });
   });
 
+  it("close resolves the pane workspace and closes it", async () => {
+    const herdr = fakeHerdr();
+    await controlSession(herdr, { paneId: "p1", action: "close" });
+    assert.deepEqual(herdr.calls.map((call) => call.method), ["session.snapshot", "workspace.close"]);
+    assert.deepEqual(herdr.calls[1].params, { workspace_id: "ws1" });
+  });
+
   it("rename of an unknown pane fails with 404", async () => {
     const herdr = fakeHerdr({ snapshot: { panes: [], workspaces: [], tabs: [], agents: [] } });
     await assert.rejects(controlSession(herdr, { paneId: "nope", action: "rename", text: "n" }), (error: unknown) => {

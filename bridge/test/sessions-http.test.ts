@@ -217,6 +217,14 @@ describe("POST /api/sessions and /api/sessions/:paneId/control", () => {
     assert.deepEqual(last.params, { workspace_id: "ws1", label: "newname" });
   });
 
+  it("control: close resolves and closes the workspace", async () => {
+    const { status } = await post("/api/sessions/p1/control", { action: "close" });
+    assert.equal(status, 200);
+    const last = calls.at(-1) as { method: string; params: { workspace_id: string } };
+    assert.equal(last.method, "workspace.close");
+    assert.deepEqual(last.params, { workspace_id: "ws1" });
+  });
+
   it("control: unknown action returns 400", async () => {
     const { status } = await post("/api/sessions/p1/control", { action: "explode" });
     assert.equal(status, 400);

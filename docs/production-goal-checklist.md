@@ -76,7 +76,7 @@ Each future checkpoint must name source files and rendered screenshot paths, ask
 - [ ] Active, completed, pinned, and archived views.
 - [ ] Resume, rename, close, and delete actions.
 - [ ] Destructive confirmations distinguish close/archive/delete and state consequences.
-- Current evidence: chat controls cover abort/retry/compact/fork/rename/cycle thinking. There is no session-history/catalog screen, pin/archive state, close, or delete.
+- Current evidence: chat controls cover abort/retry/compact/fork/rename/model/thinking plus confirmed close. Close resolves the pane workspace through Herdr, stops it, preserves the pi transcript, and returns to the board only after success. There is no session-history/catalog screen, pin/archive state, resume, or delete yet. Evidence: `sessions.ts`, `ChatScreen.kt`, bridge tests, `ChatControlsTest.kt`, and `/tmp/cockpit-e2e/47-close-confirmation.png`.
 - Required tests: catalog classification/persistence, path restriction, lifecycle actions, confirmations, active/many/empty/offline screenshots, taste review.
 
 ### 7. Opt-in background monitoring

@@ -26,6 +26,7 @@ export type ControlAction =
   | "compact"
   | "fork"
   | "rename"
+  | "close"
   | "set_model"
   | "set_thinking";
 
@@ -220,6 +221,12 @@ export async function controlSession(
       const workspaceId = await findPaneWorkspace(herdr, paneId);
       if (!workspaceId) throw new SessionsError("pane not found in the snapshot", 404);
       await herdr.workspaceRename(workspaceId, text);
+      return;
+    }
+    case "close": {
+      const workspaceId = await findPaneWorkspace(herdr, paneId);
+      if (!workspaceId) throw new SessionsError("pane not found in the snapshot", 404);
+      await herdr.workspaceClose(workspaceId);
       return;
     }
     case "set_model": {

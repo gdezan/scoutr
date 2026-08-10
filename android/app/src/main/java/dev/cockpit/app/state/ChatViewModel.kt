@@ -312,7 +312,7 @@ class ChatViewModel(
     }
 
     /** Run a lifecycle action or select an explicit model/thinking level. */
-    fun control(action: String, text: String? = null) {
+    fun control(action: String, text: String? = null, onSuccess: () -> Unit = {}) {
         viewModelScope.launch {
             val configurationAction = action == "set_model" || action == "set_thinking"
             _ui.update {
@@ -333,6 +333,7 @@ class ChatViewModel(
                         thinkingLevel = if (action == "set_thinking") text else it.thinkingLevel,
                     )
                 }
+                onSuccess()
                 delay(700)
                 refresh()
             } catch (e: Exception) {
