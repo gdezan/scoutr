@@ -32,8 +32,32 @@ fun mergeSessionEntries(
     return existing + incoming.filter { it.entryId !in known }
 }
 
+enum class MessageDeliveryState { QUEUED, FAILED }
+
+data class PendingUserMessage(
+    val localId: String,
+    val text: String,
+    val state: MessageDeliveryState,
+    internal val baselineIds: Set<String> = emptySet(),
+)
+
+internal fun dropConfirmedMessages(
+    pending: List<PendingUserMessage>,
+    incoming: List<SessionEntry>,
+): List<PendingUserMessage> {
+    val freshUsers = incoming.filter { it.role == "user" }.toMutableList()
+    return pending.filter { message ->
+        val match = freshUsers.indexOfFirst { entry ->
+            entry.entryId !in message.baselineIds && entryText(entry.content) == message.text
+        }
+        if (match >= 0) freshUsers.removeAt(match)
+        match < 0
+    }
+}
+
 data class ChatUiState(
     val entries: List<SessionEntry> = emptyList(),
+    val pendingMessages: List<PendingUserMessage> = emptyList(),
     val exists: Boolean = true,
     val loading: Boolean = true,
     val sending: Boolean = false,
@@ -54,8 +78,9 @@ data class ChatUiState(
     val liveOutputError: String? = null,
 ) {
     val lastUserMessage: String?
-        get() = entries.asReversed().firstOrNull { it.role == "user" }
-            ?.let { entryText(it.content) }
+        get() = pendingMessages.lastOrNull()?.text
+            ?: entries.asReversed().firstOrNull { it.role == "user" }
+                ?.let { entryText(it.content) }
 
     val activeModel: ModelInfo?
         get() = modelProviders.flatMap { it.models }.firstOrNull { "${it.provider}/${it.id}" == model }
@@ -115,6 +140,8 @@ class ChatViewModel(
 
     /** Resolved transcript path; a fresh session's card may not report it yet. */
     private var resolvedPath: String? = sessionPath
+
+    private var nextMessageId = 0L
 
     /** True when the agent is blocked on a question the user should answer. */
     val waitingForAnswer: Boolean get() = _ui.value.agentStatus == "blocked"
@@ -199,6 +226,7 @@ class ChatViewModel(
             _ui.update {
                 it.copy(
                     entries = mergeSessionEntries(it.entries, response.entries, incremental = response.since != null),
+                    pendingMessages = dropConfirmedMessages(it.pendingMessages, response.entries),
                     exists = response.exists,
                     loading = false,
                     model = response.model ?: it.model,
@@ -267,25 +295,55 @@ class ChatViewModel(
         }
     }
 
-    /**
-     * Send the input: if the agent is blocked (e.g. pi's ask_user_question),
-     * type the answer into its pane; otherwise steer it with a prompt.
-     */
+    /** Send now and keep a local transcript row until the session file confirms it. */
     fun send(text: String) {
         if (text.isBlank()) return
+        val message = PendingUserMessage(
+            localId = "local-${nextMessageId++}",
+            text = text,
+            state = MessageDeliveryState.QUEUED,
+            baselineIds = _ui.value.entries.mapTo(mutableSetOf()) { it.entryId },
+        )
+        _ui.update { it.copy(pendingMessages = it.pendingMessages + message, sending = true, error = null) }
+        deliver(message.localId)
+    }
+
+    fun retryPendingMessage(localId: String) {
+        val message = _ui.value.pendingMessages.firstOrNull { it.localId == localId } ?: return
+        if (message.state != MessageDeliveryState.FAILED) return
+        _ui.update { state ->
+            state.copy(
+                pendingMessages = state.pendingMessages.map {
+                    if (it.localId == localId) it.copy(state = MessageDeliveryState.QUEUED) else it
+                },
+                sending = true,
+            )
+        }
+        deliver(localId)
+    }
+
+    private fun deliver(localId: String) {
         viewModelScope.launch {
-            _ui.update { it.copy(sending = true, error = null) }
+            val message = _ui.value.pendingMessages.firstOrNull { it.localId == localId } ?: return@launch
             try {
-                if (waitingForAnswer) {
-                    bridge.answerQuestion(paneId, text)
-                } else {
-                    bridge.steer(paneId, text)
+                if (waitingForAnswer) bridge.answerQuestion(paneId, message.text)
+                else bridge.steer(paneId, message.text)
+
+                _ui.update { state -> state.copy(sending = false) }
+                repeat(3) {
+                    refresh()
+                    if (_ui.value.pendingMessages.none { it.localId == localId }) return@launch
+                    delay(750)
                 }
-                _ui.update { it.copy(sending = false) }
-                delay(1500) // let the agent react before re-syncing the transcript
-                refresh()
-            } catch (e: Exception) {
-                _ui.update { it.copy(sending = false, error = e.message ?: "send failed") }
+            } catch (_: Exception) {
+                _ui.update { state ->
+                    state.copy(
+                        pendingMessages = state.pendingMessages.map {
+                            if (it.localId == localId) it.copy(state = MessageDeliveryState.FAILED) else it
+                        },
+                        sending = false,
+                    )
+                }
             }
         }
     }

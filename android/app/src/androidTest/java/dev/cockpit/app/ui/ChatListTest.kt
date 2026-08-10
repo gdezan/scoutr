@@ -13,9 +13,12 @@ import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.unit.dp
 import dev.cockpit.app.data.ContentBlock
 import dev.cockpit.app.data.SessionEntry
+import dev.cockpit.app.state.MessageDeliveryState
+import dev.cockpit.app.state.PendingUserMessage
 import dev.cockpit.app.ui.screens.ChatList
 import dev.cockpit.app.ui.theme.CockpitTheme
 import org.junit.Rule
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -84,6 +87,32 @@ class ChatListTest {
         )
         composeRule.waitForIdle()
         composeRule.onNodeWithText("new tail").assertIsDisplayed()
+    }
+
+    @Test
+    fun pendingMessageShowsDeliveryStateAndRetriesFailure() {
+        var pending by mutableStateOf(
+            listOf(PendingUserMessage("local-1", "Do it now", MessageDeliveryState.QUEUED)),
+        )
+        var retried = false
+        composeRule.setContent {
+            CockpitTheme {
+                ChatList(
+                    entries = emptyList(),
+                    pendingMessages = pending,
+                    detailsVisible = false,
+                    onRetryPending = { retried = true },
+                )
+            }
+        }
+
+        composeRule.onNodeWithText("Do it now").assertIsDisplayed()
+        composeRule.onNodeWithTag("pending_message_queued").assertIsDisplayed()
+
+        pending = listOf(PendingUserMessage("local-1", "Do it now", MessageDeliveryState.FAILED))
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("pending_message_failed").assertIsDisplayed().performClick()
+        assertTrue(retried)
     }
 
     private fun tallList(n: Int = 40): List<SessionEntry> = entries(n)

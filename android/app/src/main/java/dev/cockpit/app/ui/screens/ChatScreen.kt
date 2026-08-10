@@ -72,6 +72,8 @@ import dev.cockpit.app.data.SessionEntry
 import dev.cockpit.app.data.entryText
 import dev.cockpit.app.state.ChatUiState
 import dev.cockpit.app.state.ChatViewModel
+import dev.cockpit.app.state.MessageDeliveryState
+import dev.cockpit.app.state.PendingUserMessage
 import androidx.lifecycle.compose.LifecycleStartEffect
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonPrimitive
@@ -116,13 +118,13 @@ fun ChatScreen(
 
         Box(Modifier.weight(1f).fillMaxWidth()) {
             when {
-                ui.loading && ui.entries.isEmpty() -> {
+                ui.loading && ui.entries.isEmpty() && ui.pendingMessages.isEmpty() -> {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         CircularProgressIndicator()
                     }
                 }
 
-                !ui.exists -> {
+                !ui.exists && ui.pendingMessages.isEmpty() -> {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         Text(
                             "No session transcript for this agent yet.\nUse the input below to steer it.",
@@ -135,8 +137,10 @@ fun ChatScreen(
                 else -> {
                     ChatList(
                         entries = ui.entries,
+                        pendingMessages = ui.pendingMessages,
                         detailsVisible = detailsVisible,
                         liveOutputExpanded = ui.liveOutputExpanded,
+                        onRetryPending = viewModel::retryPendingMessage,
                         modifier = Modifier.fillMaxSize(),
                     )
                 }
@@ -356,7 +360,9 @@ private fun HeaderConfigurationChip(
 fun ChatList(
     entries: List<SessionEntry>,
     detailsVisible: Boolean,
+    pendingMessages: List<PendingUserMessage> = emptyList(),
     liveOutputExpanded: Boolean = false,
+    onRetryPending: (String) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val listState = rememberLazyListState()
@@ -375,15 +381,15 @@ fun ChatList(
 
     // Follow: initial open + every append while at the bottom. Bounded index
     // and a guard mean this can never throw on a race with the 2.5s poll.
-    LaunchedEffect(entries.size, entries.lastOrNull()?.entryId, liveOutputExpanded) {
-        if (followNew && entries.isNotEmpty()) {
+    val lastItemKey = pendingMessages.lastOrNull()?.localId ?: entries.lastOrNull()?.entryId
+    LaunchedEffect(entries.size, pendingMessages.size, lastItemKey, liveOutputExpanded) {
+        val lastIndex = entries.size + pendingMessages.size - 1
+        if (followNew && lastIndex >= 0) {
             try {
-                // Put the last item in view, then push to its true bottom so
-                // even a card taller than the viewport clears the composer.
-                listState.scrollToItem(entries.lastIndex)
+                listState.scrollToItem(lastIndex)
                 listState.scrollBy(Float.MAX_VALUE)
             } catch (_: Exception) {
-                // Concurrent append raced the scroll; the next poll retries.
+                // Concurrent append raced the scroll; the next state change retries.
             }
         }
     }
@@ -400,6 +406,13 @@ fun ChatList(
                 MessageRow(
                     entry = entry,
                     detailsVisible = detailsVisible,
+                    modifier = Modifier.animateItem(),
+                )
+            }
+            items(pendingMessages, key = { it.localId }) { message ->
+                PendingUserBubble(
+                    message = message,
+                    onRetry = { onRetryPending(message.localId) },
                     modifier = Modifier.animateItem(),
                 )
             }
@@ -423,7 +436,7 @@ fun ChatList(
                     followNew = true
                     scope.launch {
                         try {
-                            listState.scrollToItem((entries.size - 1).coerceAtLeast(0))
+                            listState.scrollToItem((entries.size + pendingMessages.size - 1).coerceAtLeast(0))
                             listState.scrollBy(Float.MAX_VALUE)
                         } catch (_: Exception) {
                             // List changed between the tap and the scroll; retry next frame.
@@ -474,6 +487,47 @@ private fun UserBubble(entry: SessionEntry, modifier: Modifier = Modifier) {
                 .testTag("user_bubble"),
         ) {
             Text(text, color = MaterialTheme.colorScheme.onSurface)
+        }
+    }
+}
+
+@Composable
+private fun PendingUserBubble(
+    message: PendingUserMessage,
+    onRetry: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Row(modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+        Column(horizontalAlignment = Alignment.End) {
+            Box(
+                Modifier
+                    .padding(end = 4.dp)
+                    .widthIn(max = 288.dp)
+                    .background(
+                        MaterialTheme.colorScheme.surfaceContainerHighest,
+                        RoundedCornerShape(18.dp),
+                    )
+                    .padding(horizontal = 14.dp, vertical = 10.dp)
+                    .testTag("pending_user_bubble"),
+            ) {
+                Text(message.text, color = MaterialTheme.colorScheme.onSurface)
+            }
+            when (message.state) {
+                MessageDeliveryState.QUEUED -> Row(
+                    modifier = Modifier.padding(end = 8.dp, top = 2.dp).testTag("pending_message_queued"),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    CircularProgressIndicator(Modifier.size(12.dp), strokeWidth = 1.5.dp)
+                    Text("Queued", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                MessageDeliveryState.FAILED -> TextButton(
+                    onClick = onRetry,
+                    modifier = Modifier.testTag("pending_message_failed"),
+                ) {
+                    Text("Not sent · Retry", color = MaterialTheme.colorScheme.error)
+                }
+            }
         }
     }
 }

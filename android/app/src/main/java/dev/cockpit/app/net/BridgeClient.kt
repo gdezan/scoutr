@@ -28,6 +28,7 @@ import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import java.io.IOException
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
@@ -232,6 +233,7 @@ class BridgeClient(
         val payload = json.encodeToString(kotlinx.serialization.json.buildJsonObject {
             for ((k, v) in command) put(k, kotlinx.serialization.json.JsonPrimitive(v))
         })
+        val settled = AtomicBoolean(false)
 
         val listener = object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
@@ -241,20 +243,25 @@ class BridgeClient(
             override fun onMessage(webSocket: WebSocket, text: String) {
                 try {
                     val frame = json.decodeFromString(WsFrame.serializer(), text)
-                    webSocket.close(1000, null)
-                    if (!continuation.isCancelled) continuation.resume(frame)
+                    if (settled.compareAndSet(false, true)) {
+                        continuation.resume(frame)
+                        webSocket.close(1000, null)
+                    }
                 } catch (_: Exception) {
-                    // ignore malformed frames; keep waiting for the ack
+                    // Ignore malformed frames and keep waiting for the ack.
                 }
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                if (!continuation.isCancelled) continuation.resumeWithException(t)
+                if (settled.compareAndSet(false, true)) continuation.resumeWithException(t)
             }
         }
 
         val ws = okHttp.newWebSocket(Request.Builder().url(wsUrl).build(), listener)
-        continuation.invokeOnCancellation { ws.cancel() }
+        continuation.invokeOnCancellation {
+            settled.set(true)
+            ws.cancel()
+        }
     }
 
     suspend fun steer(target: String, text: String): WsFrame =
