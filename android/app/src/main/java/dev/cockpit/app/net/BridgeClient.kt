@@ -6,6 +6,7 @@ import dev.cockpit.app.data.ControlResponse
 import dev.cockpit.app.data.CreatedSessionResponse
 import dev.cockpit.app.data.DirListingResponse
 import dev.cockpit.app.data.HealthResponse
+import dev.cockpit.app.data.LiveOutputResponse
 import dev.cockpit.app.data.ModelsCatalogResponse
 import dev.cockpit.app.data.SessionReadResponse
 import dev.cockpit.app.data.UsageResponse
@@ -116,6 +117,13 @@ class BridgeClient(
     /** Full model catalog from pi's models-store.json. */
     suspend fun models(): ModelsCatalogResponse =
         call("/api/models") { json.decodeFromString(ModelsCatalogResponse.serializer(), it) }
+
+
+    /** Bounded ANSI-free terminal snapshot for a live agent pane. */
+    suspend fun liveOutput(paneId: String, lines: Int = 80): LiveOutputResponse =
+        call("/api/agents/$paneId/read", query = mapOf("lines" to lines.toString())) {
+            json.decodeFromString(LiveOutputResponse.serializer(), it)
+        }
 
     /** Create a pane-native pi session and deliver its optional first prompt in one bridge call. */
     suspend fun createSession(

@@ -220,6 +220,19 @@ export async function herdrSubscribe(
 }
 
 /** Typed wrapper over the one-shot RPC surface. */
+export interface AgentReadResponse {
+  type: "pane_read";
+  read: {
+    pane_id: string;
+    workspace_id: string;
+    tab_id: string;
+    source: string;
+    format: string;
+    text: string;
+    revision: number;
+    truncated: boolean;
+  };
+}
 export class HerdrClient {
   private readonly socketPath: string;
   private readonly timeoutMs: number;
@@ -233,8 +246,8 @@ export class HerdrClient {
     return this.socketPath;
   }
 
-  async request<T>(method: string, params: unknown = {}): Promise<T> {
-    return (await herdrRequest(this.socketPath, method, params, this.timeoutMs)) as T;
+  async request<T>(method: string, params: unknown = {}, timeoutMs = this.timeoutMs): Promise<T> {
+    return (await herdrRequest(this.socketPath, method, params, timeoutMs)) as T;
   }
 
   async ping(): Promise<HerdrPong> {
@@ -255,17 +268,22 @@ export class HerdrClient {
     return this.request("agent.prompt", { target, text });
   }
 
-  /** Read recent pane/agent output. source: "recent" | "visible" | "scrollback". */
+  /** Verify and return a live agent target. */
+  async agentGet(target: string, timeoutMs = this.timeoutMs): Promise<unknown> {
+    return this.request("agent.get", { target }, timeoutMs);
+  }
+
+  /** Read a bounded terminal snapshot for an agent pane. */
   async agentRead(
     target: string,
     source: string,
-    options: { lines?: number; format?: string; stripAnsi?: boolean } = {},
-  ): Promise<unknown> {
+    options: { lines?: number; format?: string; stripAnsi?: boolean; requestTimeoutMs?: number } = {},
+  ): Promise<AgentReadResponse> {
     const params: Record<string, unknown> = { target, source };
     if (options.lines !== undefined) params.lines = options.lines;
     if (options.format) params.format = options.format;
     if (options.stripAnsi !== undefined) params.strip_ansi = options.stripAnsi;
-    return this.request("agent.read", params);
+    return this.request<AgentReadResponse>("agent.read", params, options.requestTimeoutMs);
   }
 
   async paneSendText(pane_id: string, text: string): Promise<unknown> {

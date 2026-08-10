@@ -8,6 +8,7 @@ import WebSocket from "ws";
 import { HerdrClient, defaultSocketPath } from "../src/herdr/client.js";
 import { HerdrEventFeed } from "../src/herdr/feed.js";
 import { createCockpitServer, type CockpitServer } from "../src/server.js";
+import { LIVE_OUTPUT_MAX_BYTES } from "../src/live-output.js";
 import { UsageService } from "../src/usage/providers.js";
 
 const socketPath = process.env.HERDR_SOCKET_PATH ?? defaultSocketPath();
@@ -72,6 +73,23 @@ describe("cockpit bridge HTTP/WS API", { skip }, () => {
       assert.ok(card.paneId.startsWith("w"));
       assert.ok(["working", "blocked", "idle", "done", "unknown"].includes(card.status));
     }
+  });
+
+
+  test("live output returns a bounded plain-text agent snapshot", async (context) => {
+    const snapshotResponse = await getJson("/api/snapshot");
+    const agents = (snapshotResponse.body as { snapshot: { agents: { pane_id: string }[] } }).snapshot.agents;
+    if (agents.length === 0) {
+      context.skip("no live agents");
+      return;
+    }
+    const paneId = encodeURIComponent(agents[0]!.pane_id);
+    const { status, body } = await getJson(`/api/agents/${paneId}/read?lines=20`);
+    assert.equal(status, 200);
+    const output = (body as { output: { text: string; lineLimit: number } }).output;
+    assert.equal(output.lineLimit, 20);
+    assert.ok(Buffer.byteLength(output.text) <= LIVE_OUTPUT_MAX_BYTES);
+    assert.equal(output.text.includes("\u001b"), false);
   });
 
   test("sessions requires an allowed path", async () => {

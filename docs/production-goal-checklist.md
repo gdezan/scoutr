@@ -20,7 +20,7 @@ Updated: 2026-08-10. This is the live prompt-to-artifact map for the production-
 - [ ] Structured questions.
 - [ ] Session history.
 - [ ] Usage.
-- [ ] Live output.
+- [x] Live output. Claude taste review (`taste-live`) read `LiveOutputPanel.kt`, `ChatScreen.kt`, `Theme.kt`, and `/tmp/cockpit-e2e/47-live-output-success.png`; it chose the strip plus reserved drawer over an inline card or modal sheet. Applied: the drawer now shrinks rather than covers the transcript, keeps scroll-to-end available, computes visible lines from height, labels stale/truncated states, previews the latest meaningful line, and exposes a 48dp accessible toggle. Helper pane `w4Q:p3N` was closed. Final inspected screenshot: `/tmp/cockpit-e2e/49-live-output-final.png`.
 - [ ] Review center.
 - [ ] First screenshot-based whole-app review.
 - [ ] Final cross-screen coherence review.
@@ -90,11 +90,11 @@ Each future checkpoint must name source files and rendered screenshot paths, ask
 
 ### 8. Bounded live output
 
-- [ ] Bridge route uses existing `HerdrClient.agentRead` with fixed allowed source/format, line and byte caps, ANSI stripping, timeout, and authenticated pane targeting.
-- [ ] Android panel polls only while visible/resumed, pauses in background, caps retained lines/payload, and preserves scroll.
-- [ ] Loading/empty/error/offline/rapid-output states; new additions animate without replaying old output.
-- Current evidence: `agent.read` wrapper exists in `bridge/src/herdr/client.ts` but has no route or Android UI.
-- Required tests: bridge limits/timeouts/ANSI tests, ViewModel lifecycle tests, Compose panel tests, live output screenshot, taste review.
+- [x] Authenticated bridge route uses `HerdrClient.agentRead` with fixed `visible`/text/ANSI-stripped settings, 1–120 line validation, a 48 KiB cap, 3-second timeout, and current-agent pane targeting.
+- [x] Android retains only the capped response, polls every 1.5 seconds only while the drawer is expanded and the lifecycle is started, cancels on collapse/background, and reserves layout space so transcript scroll state and controls remain reachable.
+- [ ] Loading, empty, error, offline, truncated, and success states are implemented and covered; short non-replaying animation for newly changed output remains part of the cross-app streaming-motion work.
+- Current evidence: `bridge/src/live-output.ts`, authenticated `GET /api/agents/:paneId/read`, `BridgeClient.liveOutput`, `ChatViewModel` lifecycle polling, and `LiveOutputPanel.kt`. A real working pi pane was read successfully after switching from history-only `recent_unwrapped` to `visible`.
+- Tests/evidence: `bridge/test/live-output.test.ts`, Herdr socket-cancellation and server route coverage, `ChatLiveOutputViewModelTest.kt`, `LiveOutputPanelTest.kt`, and `ChatControlsTest.kt`; bridge 82/82 tests, Android unit/build gates, and targeted emulator Compose tests passed. The deployed bridge revalidated the agent with `agent.get` and returned 2,481 bounded bytes from real pane `w4Q:pG`. Inspected screenshots: `/tmp/cockpit-e2e/47-live-output-success.png`, `48-live-output-taste-applied.png`, and `49-live-output-final.png`.
 
 ### 9. Read-only review center
 
@@ -119,8 +119,11 @@ Each future checkpoint must name source files and rendered screenshot paths, ask
 ## Whole-app polish and adaptation
 
 - [ ] Bottom navigation: compact premium phone bar, strong icons/labels/selected state, needs-you badge, safe areas, fluid interruption-safe selection, rail/list-detail adaptation in landscape/large screens.
-- [ ] Usage dashboard: hierarchy, provider cards, prior-value ring interpolation, reset-time and warning thresholds, empty/error states, per-session tokens/cost.
+- [ ] Usage dashboard: hierarchy, provider cards, horizontal progress bars with prior-value interpolation, reset-time and warning thresholds, empty/error states, per-session tokens/cost.
 - [ ] Board, Connect, Chat, launcher, history, review, dialogs, menus, composers, empty/loading/offline/error states share one deliberate component vocabulary.
+- [ ] Conversation controls: keep the session title legible beside model metadata; show the current thinking level; replace the broken cycle-thinking action and flat hidden overflow with explicit, reliable, intentionally grouped controls.
+- [ ] Sent messages appear optimistically in the transcript at once, show a queued state until bridge/session confirmation, reconcile without duplicate entries, and retain a visible failed-delivery state.
+- [ ] Slash commands are functional and discoverable: typing `/` opens autocomplete for built-in pi commands and installed skills; filtering, keyboard/touch selection, exact safe delivery, loading/empty/error/no-match, and long-list states are covered.
 - [ ] Purposeful streaming feedback for real transcript/tool/status/live-output events; no fake typing or delayed content.
 - [ ] Stable skeletons or inline progress replace generic centered spinners where layout can be known.
 - [ ] Typography, 48dp Android touch targets, contrast, TalkBack semantics, font scaling, edge-to-edge, IME, and one-handed reach audited.

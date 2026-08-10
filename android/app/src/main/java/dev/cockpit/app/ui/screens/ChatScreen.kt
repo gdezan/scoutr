@@ -26,12 +26,10 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Visibility
-import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FloatingActionButton
@@ -44,10 +42,8 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -72,6 +68,7 @@ import dev.cockpit.app.data.SessionEntry
 import dev.cockpit.app.data.entryText
 import dev.cockpit.app.state.ChatUiState
 import dev.cockpit.app.state.ChatViewModel
+import androidx.lifecycle.compose.LifecycleStartEffect
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonPrimitive
 
@@ -86,6 +83,11 @@ fun ChatScreen(
     var input by remember { mutableStateOf("") }
     var detailsVisible by rememberSaveable { mutableStateOf(false) }
     var renameOpen by remember { mutableStateOf(false) }
+
+    LifecycleStartEffect(ui.liveOutputExpanded) {
+        if (ui.liveOutputExpanded) viewModel.startLiveOutputPolling()
+        onStopOrDispose { viewModel.stopLiveOutputPolling() }
+    }
 
     Column(modifier.fillMaxSize()) {
         ChatHeader(
@@ -104,53 +106,62 @@ fun ChatScreen(
             },
         )
 
-        when {
-            ui.loading && ui.entries.isEmpty() -> {
-                Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator()
+        Box(Modifier.weight(1f).fillMaxWidth()) {
+            when {
+                ui.loading && ui.entries.isEmpty() -> {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator()
+                    }
                 }
-            }
 
-            !ui.exists -> {
-                Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                    Text(
-                        "No session transcript for this agent yet.\nUse the input below to steer it.",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        style = MaterialTheme.typography.bodyMedium,
+                !ui.exists -> {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text(
+                            "No session transcript for this agent yet.\nUse the input below to steer it.",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                    }
+                }
+
+                else -> {
+                    ChatList(
+                        entries = ui.entries,
+                        detailsVisible = detailsVisible,
+                        liveOutputExpanded = ui.liveOutputExpanded,
+                        modifier = Modifier.fillMaxSize(),
                     )
                 }
             }
+        }
 
-            else -> {
-                ChatList(
-                    entries = ui.entries,
-                    detailsVisible = detailsVisible,
-                    modifier = Modifier.weight(1f).fillMaxWidth(),
+        Column(Modifier.fillMaxWidth().imePadding()) {
+            if (ui.error != null) {
+                Text(
+                    ui.error ?: "",
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(horizontal = 16.dp),
                 )
             }
-        }
-
-        if (ui.error != null) {
-            Text(
-                ui.error ?: "",
-                color = MaterialTheme.colorScheme.error,
-                style = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.padding(horizontal = 16.dp),
+            LiveOutputDrawer(ui)
+            LiveOutputStrip(
+                ui = ui,
+                onToggle = { viewModel.setLiveOutputExpanded(!ui.liveOutputExpanded) },
+            )
+            ChatComposer(
+                value = input,
+                onValueChange = { input = it },
+                placeholder = if (viewModel.waitingForAnswer) "Answer the question…" else "Steer the agent…",
+                enabled = !ui.sending,
+                onSend = {
+                    if (input.isNotBlank()) {
+                        viewModel.send(input)
+                        input = ""
+                    }
+                },
             )
         }
-
-        ChatComposer(
-            value = input,
-            onValueChange = { input = it },
-            placeholder = if (viewModel.waitingForAnswer) "Answer the question…" else "Steer the agent…",
-            enabled = !ui.sending,
-            onSend = {
-                if (input.isNotBlank()) {
-                    viewModel.send(input)
-                    input = ""
-                }
-            },
-        )
     }
 
     if (renameOpen) {
@@ -269,6 +280,7 @@ private fun ChatHeader(
 fun ChatList(
     entries: List<SessionEntry>,
     detailsVisible: Boolean,
+    liveOutputExpanded: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     val listState = rememberLazyListState()
@@ -287,7 +299,7 @@ fun ChatList(
 
     // Follow: initial open + every append while at the bottom. Bounded index
     // and a guard mean this can never throw on a race with the 2.5s poll.
-    LaunchedEffect(entries.size, entries.lastOrNull()?.entryId) {
+    LaunchedEffect(entries.size, entries.lastOrNull()?.entryId, liveOutputExpanded) {
         if (followNew && entries.isNotEmpty()) {
             try {
                 // Put the last item in view, then push to its true bottom so
@@ -304,7 +316,7 @@ fun ChatList(
     Box(modifier) {
         LazyColumn(
             state = listState,
-            contentPadding = PaddingValues(start = 14.dp, end = 14.dp, top = 10.dp, bottom = 30.dp),
+            contentPadding = PaddingValues(start = 14.dp, end = 14.dp, top = 10.dp, bottom = 14.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
             modifier = Modifier.fillMaxSize().testTag("chat_list"),
         ) {
@@ -328,7 +340,7 @@ fun ChatList(
             visible = notAtBottom,
             enter = fadeIn() + slideInVertically { it / 2 },
             exit = fadeOut() + slideOutVertically { it / 2 },
-            modifier = Modifier.align(Alignment.BottomEnd).padding(end = 16.dp, bottom = 4.dp),
+            modifier = Modifier.align(Alignment.BottomEnd).padding(end = 16.dp, bottom = 10.dp),
         ) {
             FloatingActionButton(
                 onClick = {
@@ -344,7 +356,7 @@ fun ChatList(
                 },
                 containerColor = MaterialTheme.colorScheme.surfaceVariant,
                 contentColor = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(40.dp).testTag("scroll_to_end_fab"),
+                modifier = Modifier.size(48.dp).testTag("scroll_to_end_fab"),
             ) {
                 Icon(
                     Icons.Default.KeyboardArrowDown,
@@ -583,7 +595,7 @@ private fun ChatComposer(
         trailingIcon = {
             IconButton(onClick = onSend, enabled = enabled) {
                 Icon(
-                    Icons.Default.Send,
+                    Icons.AutoMirrored.Filled.Send,
                     contentDescription = "Send",
                     tint = if (value.isBlank()) MaterialTheme.colorScheme.onSurfaceVariant
                     else MaterialTheme.colorScheme.primary,
@@ -593,7 +605,6 @@ private fun ChatComposer(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 12.dp, vertical = 6.dp)
-            .imePadding()
             .testTag("chat_input"),
     )
 }

@@ -38,10 +38,43 @@ data class ChatUiState(
     val error: String? = null,
     /** Agent status from the last /api/agents poll ("working", "blocked", …). */
     val agentStatus: String = "working",
+    val liveOutputExpanded: Boolean = false,
+    val liveOutputLoading: Boolean = false,
+    val liveOutputText: String = "",
+    val liveOutputRevision: Long = 0,
+    val liveOutputTruncated: Boolean = false,
+    val liveOutputError: String? = null,
 ) {
     val lastUserMessage: String?
         get() = entries.asReversed().firstOrNull { it.role == "user" }
             ?.let { entryText(it.content) }
+
+    val liveOutputSummary: String
+        get() = meaningfulLiveOutputLines(liveOutputText)
+            .lastOrNull()
+            ?.trim()
+            ?: when (agentStatus) {
+                "working" -> "Agent working"
+                "blocked" -> "Agent needs you"
+                "done" -> "Agent finished"
+                "idle" -> "Agent idle"
+                else -> "Live output"
+            }
+}
+
+internal fun meaningfulLiveOutputLines(text: String): List<String> = text
+    .lineSequence()
+    .map(String::trimEnd)
+    .filterNot { isLiveOutputChromeLine(it.trim()) }
+    .toList()
+
+internal fun isLiveOutputChromeLine(line: String): Boolean {
+    if (line.isBlank() || line.none(Char::isLetterOrDigit)) return true
+    if (line.startsWith("Elapsed ", ignoreCase = true)) return true
+    if (line.startsWith("Took ", ignoreCase = true) && line.drop(5).firstOrNull()?.isDigit() == true) return true
+    if (line.endsWith("Working...", ignoreCase = true)) return true
+    if (line.contains("cache R/W", ignoreCase = true)) return true
+    return line.count { it == '│' } >= 2 && line.contains('/')
 }
 
 /**
@@ -64,6 +97,7 @@ class ChatViewModel(
     val ui: StateFlow<ChatUiState> = _ui.asStateFlow()
 
     private var pollJob: Job? = null
+    private var liveOutputJob: Job? = null
 
     /** Resolved transcript path; a fresh session's card may not report it yet. */
     private var resolvedPath: String? = sessionPath
@@ -78,6 +112,49 @@ class ChatViewModel(
                 delay(2500)
                 refresh()
             }
+        }
+    }
+
+    fun setLiveOutputExpanded(expanded: Boolean) {
+        _ui.update { it.copy(liveOutputExpanded = expanded) }
+        if (!expanded) stopLiveOutputPolling()
+    }
+
+    fun startLiveOutputPolling() {
+        if (!_ui.value.liveOutputExpanded || liveOutputJob?.isActive == true) return
+        liveOutputJob = viewModelScope.launch {
+            while (isActive) {
+                refreshLiveOutput()
+                delay(LIVE_OUTPUT_POLL_MS)
+            }
+        }
+    }
+
+    fun stopLiveOutputPolling() {
+        liveOutputJob?.cancel()
+        liveOutputJob = null
+    }
+
+    suspend fun refreshLiveOutput() {
+        _ui.update { it.copy(liveOutputLoading = it.liveOutputText.isEmpty()) }
+        try {
+            val response = bridge.liveOutput(paneId, LIVE_OUTPUT_LINES)
+            val output = response.output
+            if (output == null) {
+                _ui.update { it.copy(liveOutputLoading = false, liveOutputError = response.error ?: "Live output unavailable") }
+                return
+            }
+            _ui.update {
+                it.copy(
+                    liveOutputLoading = false,
+                    liveOutputText = output.text,
+                    liveOutputRevision = output.revision,
+                    liveOutputTruncated = output.truncated,
+                    liveOutputError = null,
+                )
+            }
+        } catch (error: Exception) {
+            _ui.update { it.copy(liveOutputLoading = false, liveOutputError = error.message ?: "Live output unavailable") }
         }
     }
 
@@ -157,10 +234,13 @@ class ChatViewModel(
 
     override fun onCleared() {
         pollJob?.cancel()
+        liveOutputJob?.cancel()
         super.onCleared()
     }
 
     companion object {
+        private const val LIVE_OUTPUT_LINES = 80
+        private const val LIVE_OUTPUT_POLL_MS = 1_500L
         fun factory(
             bridge: BridgeClient,
             paneId: String,

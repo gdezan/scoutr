@@ -1,6 +1,10 @@
 import { test, describe, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
+import { mkdtemp, rm } from "node:fs/promises";
+import { createServer } from "node:net";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { HerdrClient, defaultSocketPath, HerdrError } from "../src/herdr/client.js";
 import { HerdrEventFeed } from "../src/herdr/feed.js";
 import type { SessionSnapshot } from "../src/herdr/types.js";
@@ -18,6 +22,30 @@ function liveSocketPath(): string | null {
 const socketPath = liveSocketPath();
 const client = socketPath ? new HerdrClient({ socketPath }) : null;
 const skip = socketPath === null;
+
+test("a per-call timeout closes a stalled Herdr socket", { timeout: 1_000 }, async () => {
+  const directory = await mkdtemp(join(tmpdir(), "cockpit-herdr-timeout-"));
+  const path = join(directory, "herdr.sock");
+  let markDisconnected: () => void = () => undefined;
+  const disconnected = new Promise<void>((resolve) => { markDisconnected = resolve; });
+  const server = createServer((socket) => {
+    socket.on("close", markDisconnected);
+    socket.resume();
+  });
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(path, resolve);
+  });
+
+  try {
+    const stalled = new HerdrClient({ socketPath: path });
+    await assert.rejects(stalled.request("stall.forever", {}, 30), /timed out after 30ms/);
+    await disconnected;
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await rm(directory, { recursive: true, force: true });
+  }
+});
 
 describe("herdr client (live socket)", { skip }, () => {
   test("ping returns server version and protocol", async () => {

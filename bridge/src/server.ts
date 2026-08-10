@@ -11,6 +11,7 @@ import { StatusTracker } from "./status.js";
 import { listDirs, DirListingError } from "./dirs.js";
 import { readModelsCatalog } from "./pi/models.js";
 import { createSession, controlSession, SessionsError } from "./sessions.js";
+import { LiveOutputError, readLiveOutput } from "./live-output.js";
 import { basename, resolve } from "node:path";
 import { existsSync } from "node:fs";
 
@@ -245,6 +246,29 @@ export function createCockpitServer(deps: ServerDeps, options: CreateServerOptio
         return;
       }
       sendJson(response, 200, { ok: true, agents: deriveAgentCards(snapshot, (p) => tracker.since(p)) });
+      return;
+    }
+
+    const liveOutputMatch = pathname.match(/^\/api\/agents\/([^/]+)\/read$/);
+    if (request.method === "GET" && liveOutputMatch) {
+      let paneId: string;
+      try {
+        paneId = decodeURIComponent(liveOutputMatch[1] ?? "");
+      } catch {
+        sendJson(response, 400, { ok: false, error: "invalid pane id" });
+        return;
+      }
+      try {
+        const output = await readLiveOutput(
+          routeDeps.herdr,
+          paneId,
+          url.searchParams.get("lines"),
+        );
+        sendJson(response, 200, { ok: true, output });
+      } catch (error) {
+        const status = error instanceof LiveOutputError ? error.status : 502;
+        sendJson(response, status, { ok: false, error: error instanceof Error ? error.message : String(error) });
+      }
       return;
     }
 
