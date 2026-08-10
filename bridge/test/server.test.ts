@@ -1,7 +1,7 @@
 import { test, describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import WebSocket from "ws";
@@ -28,6 +28,7 @@ describe("cockpit bridge HTTP/WS API", { skip }, () => {
   let herdr: HerdrClient;
   let feed: HerdrEventFeed;
   let server: CockpitServer;
+  let sessionRoot: string;
 
   before(async () => {
     herdr = new HerdrClient({ socketPath });
@@ -40,7 +41,23 @@ describe("cockpit bridge HTTP/WS API", { skip }, () => {
       usage["authPath"],
       JSON.stringify({ "openai-codex": { type: "oauth", access: "x", accountId: "y" } }),
     );
-    server = createCockpitServer({ herdr, feed, usage, config: { token: TOKEN, port: PORT } });
+    sessionRoot = await mkdtemp(join(tmpdir(), "cockpit-server-catalog-"));
+    const projectDir = join(sessionRoot, "project");
+    await mkdir(projectDir);
+    await writeFile(
+      join(projectDir, "session.jsonl"),
+      [
+        JSON.stringify({ type: "session", version: 3, id: "catalog-session", timestamp: "2026-01-01T00:00:00.000Z", cwd: "/work/catalog" }),
+        JSON.stringify({ type: "message", message: { role: "user", content: [{ type: "text", text: "Catalog route prompt" }] } }),
+      ].join("\n"),
+    );
+    server = createCockpitServer({
+      herdr,
+      feed,
+      usage,
+      config: { token: TOKEN, port: PORT },
+      sessionCatalogRoot: sessionRoot,
+    });
   });
 
   after(async () => {
@@ -107,6 +124,19 @@ describe("cockpit bridge HTTP/WS API", { skip }, () => {
   test("sessions requires an allowed path", async () => {
     const { status } = await getJson("/api/sessions?path=/etc/passwd");
     assert.equal(status, 500); // path guard rejects
+  });
+
+  test("session catalog lists persisted sessions and validates limits", async () => {
+    const { status, body } = await getJson("/api/session-catalog?q=route");
+    assert.equal(status, 200);
+    const catalog = body as { ok: boolean; sessions: { id: string; status: string }[] };
+    assert.equal(catalog.ok, true);
+    assert.equal(catalog.sessions.length, 1);
+    assert.equal(catalog.sessions[0]?.id, "catalog-session");
+    assert.equal(catalog.sessions[0]?.status, "completed");
+
+    const invalid = await getJson("/api/session-catalog?limit=0");
+    assert.equal(invalid.status, 400);
   });
 
   test("unauthorized requests are rejected", async () => {

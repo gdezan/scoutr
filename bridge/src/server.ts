@@ -14,6 +14,7 @@ import { createSession, controlSession, SessionsError } from "./sessions.js";
 import { LiveOutputError, readLiveOutput } from "./live-output.js";
 import { readCommandsCatalog, validateSlashCommand } from "./pi/commands.js";
 import { basename, resolve } from "node:path";
+import { listSessionCatalog, SessionCatalogError } from "./session-catalog.js";
 import { existsSync, realpathSync } from "node:fs";
 
 /**
@@ -55,6 +56,7 @@ export interface ServerDeps {
   config: BridgeConfig;
   /** Push publisher for blocked-agent events (layer 5); optional. */
   publisher?: NtfyPublisher;
+  sessionCatalogRoot?: string;
 }
 
 export interface CockpitServer {
@@ -283,6 +285,43 @@ export function createCockpitServer(deps: ServerDeps, options: CreateServerOptio
       }
       const result = await readSession(pathParam, since);
       sendJson(response, 200, { ok: true, ...result });
+      return;
+    }
+
+    if (request.method === "GET" && pathname === "/api/session-catalog") {
+      const snapshot = routeDeps.feed.snapshot as SessionSnapshot | null;
+      const active = snapshot
+        ? deriveAgentCards(snapshot, (paneId) => tracker.since(paneId)).flatMap((card) =>
+            card.sessionPath
+              ? [{
+                  path: card.sessionPath,
+                  paneId: card.paneId,
+                  workspaceId: card.workspaceId,
+                  status: card.status,
+                  title: card.title,
+                }]
+              : [],
+          )
+        : [];
+      try {
+        const limitValue = url.searchParams.get("limit");
+        sendJson(response, 200, {
+          ok: true,
+          ...(await listSessionCatalog({
+            root: routeDeps.sessionCatalogRoot,
+            active,
+            query: url.searchParams.get("q") ?? undefined,
+            limit: limitValue === null ? undefined : Number(limitValue),
+          })),
+        });
+      } catch (error) {
+        if (error instanceof SessionCatalogError) {
+          sendJson(response, error.status, { ok: false, error: error.message });
+        } else {
+          console.error("session catalog failed", error);
+          sendJson(response, 500, { ok: false, error: "session catalog unavailable" });
+        }
+      }
       return;
     }
 
