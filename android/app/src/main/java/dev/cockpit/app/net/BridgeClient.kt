@@ -97,7 +97,7 @@ class BridgeClient(
                     response.use {
                         if (!continuation.isCancelled) {
                             if (it.isSuccessful) {
-                                continuation.resume(decode(it.body?.string() ?: "{}"))
+                                resumeDecoded(continuation, it.body?.string(), decode)
                             } else {
                                 continuation.resumeWithException(IOException("bridge ${it.code}: ${it.message}"))
                             }
@@ -124,6 +124,24 @@ class BridgeClient(
             put("model", JsonPrimitive(model))
             if (name != null) put("name", JsonPrimitive(name))
         }) { json.decodeFromString(CreatedSessionResponse.serializer(), it) }
+
+    /**
+     * Resume a pending bridge call, turning a decode failure into the
+     * coroutine's exception — otherwise the caller hangs forever on a
+     * malformed response.
+     */
+    private fun <T> resumeDecoded(
+        continuation: kotlinx.coroutines.CancellableContinuation<T>,
+        body: String?,
+        decode: (String) -> T,
+    ) {
+        try {
+            continuation.resume(decode(body ?: "{}"))
+        } catch (t: Throwable) {
+            if (!continuation.isCancelled) continuation.resumeWithException(t)
+        }
+    }
+
 
     /** One pane control action: abort/retry/compact/fork/rename/cycle_thinking. */
     suspend fun controlSession(paneId: String, action: String, text: String? = null): ControlResponse =
@@ -152,7 +170,7 @@ class BridgeClient(
                     response.use {
                         if (!continuation.isCancelled) {
                             if (it.isSuccessful) {
-                                continuation.resume(decode(it.body?.string() ?: "{}"))
+                                resumeDecoded(continuation, it.body?.string(), decode)
                             } else {
                                 continuation.resumeWithException(IOException("bridge ${it.code}: ${it.message}"))
                             }

@@ -36,6 +36,8 @@ data class ChatUiState(
     val loading: Boolean = true,
     val sending: Boolean = false,
     val error: String? = null,
+    /** Agent status from the last /api/agents poll ("working", "blocked", …). */
+    val agentStatus: String = "working",
 ) {
     val lastUserMessage: String?
         get() = entries.asReversed().firstOrNull { it.role == "user" }
@@ -55,10 +57,10 @@ class ChatViewModel(
     private val bridge: BridgeClient,
     val paneId: String,
     private val sessionPath: String?,
-    val agentStatus: String = "working",
+    agentStatus: String = "working",
 ) : ViewModel() {
 
-    private val _ui = MutableStateFlow(ChatUiState())
+    private val _ui = MutableStateFlow(ChatUiState(agentStatus = agentStatus))
     val ui: StateFlow<ChatUiState> = _ui.asStateFlow()
 
     private var pollJob: Job? = null
@@ -67,7 +69,7 @@ class ChatViewModel(
     private var resolvedPath: String? = sessionPath
 
     /** True when the agent is blocked on a question the user should answer. */
-    val waitingForAnswer: Boolean get() = agentStatus == "blocked"
+    val waitingForAnswer: Boolean get() = _ui.value.agentStatus == "blocked"
 
     init {
         viewModelScope.launch { refresh() }
@@ -81,7 +83,7 @@ class ChatViewModel(
 
     suspend fun refresh() {
         try {
-            val path = resolvedPath ?: resolveSessionPath()
+            val path = syncStatusAndPath()
             if (path == null) {
                 _ui.update { it.copy(loading = false, exists = false, error = "No session transcript on this agent yet") }
                 return
@@ -100,20 +102,19 @@ class ChatViewModel(
         }
     }
 
-    /** Poll the board until this pane reports a session path (fresh sessions). */
-    private suspend fun resolveSessionPath(): String? {
+    /** Refresh the agent's status and session path from the board. */
+    private suspend fun syncStatusAndPath(): String? {
         try {
             val agents = bridge.agents()
             val card = agents.agents.firstOrNull { it.paneId == paneId }
-            val path = card?.sessionPath
-            if (!path.isNullOrBlank()) {
-                resolvedPath = path
-                return path
+            if (card != null) {
+                resolvedPath = card.sessionPath?.takeIf { it.isNotBlank() } ?: resolvedPath
+                _ui.update { it.copy(agentStatus = card.status) }
             }
         } catch (_: Exception) {
             // bridge unreachable; keep the current state
         }
-        return null
+        return resolvedPath
     }
 
     /** One pane control action (abort/retry/compact/fork/rename/cycle_thinking). */

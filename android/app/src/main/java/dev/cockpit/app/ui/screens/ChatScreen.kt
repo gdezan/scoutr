@@ -91,7 +91,7 @@ fun ChatScreen(
         ChatHeader(
             paneId = viewModel.paneId,
             model = ui.entries.lastOrNull()?.model,
-            status = if (viewModel.waitingForAnswer) "needs you" else viewModel.agentStatus,
+            status = if (viewModel.waitingForAnswer) "needs you" else ui.agentStatus,
             detailsVisible = detailsVisible,
             onToggleDetails = { detailsVisible = !detailsVisible },
             onBack = onBack,
