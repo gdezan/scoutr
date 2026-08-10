@@ -6,6 +6,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -88,7 +89,9 @@ import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import dev.cockpit.app.data.ContentBlock
 import dev.cockpit.app.data.SessionEntry
 import dev.cockpit.app.data.QuestionEntry
@@ -505,15 +508,14 @@ fun ChatList(
     Box(modifier) {
         LazyColumn(
             state = listState,
-            contentPadding = PaddingValues(start = 14.dp, end = 14.dp, top = 10.dp, bottom = 14.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+            contentPadding = PaddingValues(start = 14.dp, end = 14.dp, top = 6.dp, bottom = 14.dp),
             modifier = Modifier.fillMaxSize().testTag("chat_list"),
         ) {
             items(entries, key = { it.entryId }) { entry ->
                 MessageRow(
                     entry = entry,
                     detailsVisible = detailsVisible,
-                    Modifier.animateItem(
+                    Modifier.padding(top = entrySpacing(entry)).animateItem(
                         fadeInSpec = CockpitMotion.itemSpec(reduceMotion),
                         placementSpec = CockpitMotion.itemPlacementSpec(reduceMotion),
                         fadeOutSpec = CockpitMotion.itemSpec(reduceMotion),
@@ -696,14 +698,13 @@ private fun AssistantBubble(
                 }
 
                 "toolCall" -> {
-                    if (detailsVisible) {
-                        ToolCallChip(
-                            block = block,
-                            expanded = true,
-                            onToggle = {},
-                            modifier = Modifier.padding(top = 4.dp),
-                        )
-                    }
+                    // Quiet collapsed chip by default — a one-line dim summary;
+                    // the details toggle (or a tap) reveals the full command.
+                    ToolCallChip(
+                        block = block,
+                        forceExpanded = detailsVisible,
+                        modifier = Modifier.padding(top = 4.dp),
+                    )
                 }
             }
         }
@@ -740,43 +741,69 @@ private fun ThinkingBlock(text: String, modifier: Modifier = Modifier) {
 /** The visible command/argument summary for a tool call block. */
 fun toolCallCommand(block: ContentBlock): String {
     val name = block.name ?: "tool"
-    val args = block.arguments ?: return name
+    val args = block.arguments
+    if (args == null) return name
+    // The tool label already sits next to this text in the chip row, so
+    // prefer the argument payload over a redundant "$name …" repetition.
     val command = args["command"]
     if (command is JsonPrimitive && command.isString && command.content.isNotBlank()) {
         return command.content
     }
     val filePath = args["file_path"]
-    if (filePath is JsonPrimitive && filePath.isString) {
-        return "$name ${filePath.content}"
+    if (filePath is JsonPrimitive && filePath.isString && filePath.content.isNotBlank()) {
+        return filePath.content
     }
-    val compact = "$name ${args}"
+    // Prefer a human-meaningful field (e.g. todo's subject) over raw JSON.
+    for (key in listOf("subject", "text", "message", "title")) {
+        val v = args[key]
+        if (v is JsonPrimitive && v.isString && v.content.isNotBlank()) return v.content
+    }
+    val compact = args.toString()
     return if (compact.length > 64) compact.take(61) + "…" else compact
+}
+
+/** Vertical rhythm: consecutive tool entries group at 4dp; prose gets air. */
+private fun entrySpacing(entry: SessionEntry): Dp = when {
+    entry.role == "toolResult" -> 4.dp
+    entry.role == "assistant" && entry.content.none { it.type == "text" } -> 4.dp
+    else -> 14.dp
 }
 
 @Composable
 private fun ToolCallChip(
     block: ContentBlock,
-    expanded: Boolean,
-    onToggle: () -> Unit,
+    forceExpanded: Boolean,
     modifier: Modifier = Modifier,
 ) {
+    var localExpanded by remember(block.id) { mutableStateOf(false) }
+    val expanded = forceExpanded || localExpanded
     val command = toolCallCommand(block)
     val name = block.name ?: "tool"
-    ToolChipContainer(onClick = onToggle, modifier = modifier.testTag("tool_chip")) {
+    // One-line index entry: label inline with the command, no fill — the mono
+    // face + ▸ caret alone read as machine metadata, keeping prose primary.
+    Row(
+        modifier
+            .fillMaxWidth()
+            .clickable { localExpanded = !localExpanded }
+            .testTag("tool_chip"),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
         Text(
             if (expanded) "▾ $name" else "▸ $name",
-            style = MaterialTheme.typography.labelMedium,
+            style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
             fontFamily = FontFamily.Monospace,
             fontWeight = FontWeight.SemiBold,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
         )
+        Spacer(Modifier.width(8.dp))
         Text(
             command,
-            style = MaterialTheme.typography.bodySmall,
+            style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
             fontFamily = FontFamily.Monospace,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
             maxLines = if (expanded) Int.MAX_VALUE else 1,
             overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
         )
     }
 }
@@ -791,25 +818,29 @@ private fun ToolResultChip(
     val expanded = forceExpanded || localExpanded
     val output = entryText(entry.content)
     val tool = entry.toolName ?: "tool"
+    // Result = evidence: indented under its call, faint fill, no marker — the
+    // indent and fill already say "this belongs to the row above." Errors keep
+    // the explicit label so they break the pattern loudly.
     ToolChipContainer(
         onClick = { localExpanded = !localExpanded },
-        modifier = modifier.fillMaxWidth().testTag("tool_result"),
+        modifier = modifier.fillMaxWidth().padding(start = 14.dp).testTag("tool_result"),
     ) {
-        Text(
-            "${if (expanded) "▾" else "▸"} $tool${if (entry.isError == true) " (error)" else ""}",
-            style = MaterialTheme.typography.labelMedium,
-            fontFamily = FontFamily.Monospace,
-            fontWeight = FontWeight.SemiBold,
-            color = if (entry.isError == true) MaterialTheme.colorScheme.error
-            else MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        if (entry.isError == true) {
+            Text(
+                "▸ $tool (error)",
+                style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
         if (output.isNotBlank()) {
             Text(
                 output,
-                style = MaterialTheme.typography.bodySmall,
+                style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
                 fontFamily = FontFamily.Monospace,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f),
-                maxLines = if (expanded) Int.MAX_VALUE else 3,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                maxLines = if (expanded) Int.MAX_VALUE else 2,
                 overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
             )
         }
@@ -825,10 +856,10 @@ private fun ToolChipContainer(
     androidx.compose.material3.Surface(
         onClick = onClick,
         shape = RoundedCornerShape(12.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
         modifier = modifier.fillMaxWidth(),
     ) {
-        Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+        Column(Modifier.padding(horizontal = 10.dp, vertical = 6.dp)) {
             content()
         }
     }

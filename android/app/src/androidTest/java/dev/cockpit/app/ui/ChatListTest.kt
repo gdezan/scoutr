@@ -17,6 +17,9 @@ import dev.cockpit.app.state.MessageDeliveryState
 import dev.cockpit.app.state.PendingUserMessage
 import dev.cockpit.app.ui.screens.ChatList
 import dev.cockpit.app.ui.theme.CockpitTheme
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import org.junit.Rule
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -118,6 +121,49 @@ class ChatListTest {
     private fun tallList(n: Int = 40): List<SessionEntry> = entries(n)
 
     @Test
+    fun toolCallChipShowsCollapsedByDefaultAndExpandsOnTap() {
+        val entry = SessionEntry(
+            entryId = "tc-1",
+            role = "assistant",
+            content = listOf(
+                ContentBlock(
+                    type = "toolCall",
+                    id = "call-1",
+                    name = "bash",
+                    arguments = buildJsonObject { put("command", JsonPrimitive("npm test")) },
+                ),
+            ),
+        )
+        composeRule.setContent {
+            CockpitTheme { ChatList(entries = listOf(entry), detailsVisible = false) }
+        }
+        // Collapsed by default even with details off: one-line no-fill row.
+        composeRule.onNodeWithText("▸ bash", substring = true).assertIsDisplayed()
+        composeRule.onNodeWithTag("tool_chip").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("▾ bash", substring = true).assertIsDisplayed()
+    }
+
+    @Test
+    fun detailsToggleExpandsToolCallChip() {
+        val entry = SessionEntry(
+            entryId = "tc-2",
+            role = "assistant",
+            content = listOf(
+                ContentBlock(
+                    type = "toolCall",
+                    id = "call-2",
+                    name = "read",
+                ),
+            ),
+        )
+        composeRule.setContent {
+            CockpitTheme { ChatList(entries = listOf(entry), detailsVisible = true) }
+        }
+        // The details toggle force-expands tool calls.
+        composeRule.onNodeWithText("▾ read", substring = true).assertIsDisplayed()
+    }
+    @Test
     fun toolResultChipExpandsOnTap() {
         val entry = SessionEntry(
             entryId = "tr-1",
@@ -128,12 +174,11 @@ class ChatListTest {
         composeRule.setContent {
             CockpitTheme { ChatList(entries = listOf(entry), detailsVisible = false) }
         }
-        // Collapsed: the chip shows the collapsed caret; tap expands it, the
-        // caret flips and the full output becomes visible.
-        composeRule.onNodeWithText("▸ bash", substring = true).assertIsDisplayed()
+        // Collapsed: the indented faint-fill result card shows the 2-line
+        // preview; tapping expands it (full output, no crash).
+        composeRule.onNodeWithTag("tool_result").assertIsDisplayed()
         composeRule.onNodeWithTag("tool_result").performClick()
         composeRule.waitForIdle()
-        composeRule.onNodeWithText("▾ bash", substring = true).assertIsDisplayed()
         composeRule.onNodeWithText("line5", substring = true).assertIsDisplayed()
     }
 

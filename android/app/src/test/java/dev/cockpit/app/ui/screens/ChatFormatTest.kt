@@ -19,18 +19,31 @@ class ChatFormatTest {
     }
 
     @Test
-    fun `edit file path is shown with the tool name`() {
+    fun `edit file path is extracted without repeating the tool name`() {
         val block = ContentBlock(
             type = "toolCall",
             name = "edit",
             arguments = buildJsonObject { put("file_path", "src/main.kt") },
         )
-        assertEquals("edit src/main.kt", toolCallCommand(block))
+        assertEquals("src/main.kt", toolCallCommand(block))
     }
 
     @Test
     fun `falls back to the tool name without arguments`() {
         assertEquals("read", toolCallCommand(ContentBlock(type = "toolCall", name = "read")))
+    }
+
+    @Test
+    fun `prefers a meaningful subject over raw JSON`() {
+        val block = ContentBlock(
+            type = "toolCall",
+            name = "todo",
+            arguments = buildJsonObject {
+                put("action", "create")
+                put("subject", "Fix 1: Chat composer overlap")
+            },
+        )
+        assertEquals("Fix 1: Chat composer overlap", toolCallCommand(block))
     }
 
     @Test
@@ -42,7 +55,7 @@ class ChatFormatTest {
             arguments = buildJsonObject { put("content", long) },
         )
         val out = toolCallCommand(block)
-        assertEquals(true, out.startsWith("write"))
+        assertEquals(true, out.startsWith("{"))
         assertEquals(true, out.length <= 64 + 3)
     }
 }
