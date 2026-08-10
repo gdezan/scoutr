@@ -93,6 +93,49 @@ class ChatListTest {
     }
 
     @Test
+    fun startingIndicatorShowsForBrandNewSessionWithPendingMessage() {
+        // Fix 8: a new session whose first message is queued shows an explicit
+        // "starting" stage (spinner + label) under the pending bubble instead of
+        // a bare empty chat, so a slow first response never reads as broken.
+        composeRule.setContent {
+            CockpitTheme {
+                ChatList(
+                    entries = emptyList(),
+                    pendingMessages = listOf(PendingUserMessage("local-1", "Steer the agent", MessageDeliveryState.QUEUED)),
+                    detailsVisible = false,
+                    starting = true,
+                )
+            }
+        }
+        composeRule.onNodeWithText("Steer the agent").assertIsDisplayed()
+        composeRule.onNodeWithTag("starting_session").assertIsDisplayed()
+        composeRule.onNodeWithText("Starting session… waiting for the agent").assertIsDisplayed()
+    }
+
+    @Test
+    fun noStartingIndicatorOnceEntriesExist() {
+        // The stage is only for the first response window: once any entry lands,
+        // the indicator must be gone even if a pending message remains.
+        val entry = SessionEntry(
+            entryId = "id-1",
+            role = "assistant",
+            content = listOf(ContentBlock(type = "text", text = "first reply")),
+        )
+        composeRule.setContent {
+            CockpitTheme {
+                ChatList(
+                    entries = listOf(entry),
+                    pendingMessages = listOf(PendingUserMessage("local-1", "Steer the agent", MessageDeliveryState.QUEUED)),
+                    detailsVisible = false,
+                    starting = false,
+                )
+            }
+        }
+        composeRule.onNodeWithText("first reply").assertIsDisplayed()
+        composeRule.onNodeWithTag("starting_session").assertDoesNotExist()
+    }
+
+    @Test
     fun pendingMessageShowsDeliveryStateAndRetriesFailure() {
         var pending by mutableStateOf(
             listOf(PendingUserMessage("local-1", "Do it now", MessageDeliveryState.QUEUED)),

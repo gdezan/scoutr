@@ -185,6 +185,18 @@ fun ChatScreen(
                 }
 
                 else -> {
+                    // A brand-new session whose agent is still booting shows an
+                    // explicit starting stage instead of a bare empty chat, so a
+                    // slow first response never reads as broken. Covers both
+                    // entry paths: a composer message queued as a pending bubble,
+                    // and the launcher flow that sent the task via the bridge
+                    // (no pending bubble; the agent reports working). Failed
+                    // sends keep only the retry chip; an idle agent with nothing
+                    // sent keeps the static hint above.
+                    val starting =
+                        ui.entries.isEmpty() &&
+                            (ui.pendingMessages.any { it.state != MessageDeliveryState.FAILED } ||
+                                (!ui.exists && ui.agentStatus == "working"))
                     ChatList(
                         entries = ui.entries,
                         questions = ui.questions,
@@ -192,6 +204,7 @@ fun ChatScreen(
                         pendingMessages = ui.pendingMessages,
                         detailsVisible = detailsVisible,
                         liveOutputExpanded = ui.liveOutputExpanded,
+                        starting = starting,
                         onRetryPending = viewModel::retryPendingMessage,
                         onAnswerQuestion = { id, answer ->
                             haptic(HapticEvent.Confirm)
@@ -469,6 +482,7 @@ fun ChatList(
     questions: List<QuestionEntry> = emptyList(),
     answeringQuestionId: String? = null,
     liveOutputExpanded: Boolean = false,
+    starting: Boolean = false,
     onRetryPending: (String) -> Unit = {},
     onAnswerQuestion: (String, String) -> Unit = { _, _ -> },
     modifier: Modifier = Modifier,
@@ -555,6 +569,15 @@ fun ChatList(
                     )
                 )
             }
+            if (starting) {
+                item(key = "starting") {
+                    StartingSessionRow(Modifier.animateItem(
+                        fadeInSpec = CockpitMotion.itemSpec(reduceMotion),
+                        placementSpec = CockpitMotion.itemPlacementSpec(reduceMotion),
+                        fadeOutSpec = CockpitMotion.itemSpec(reduceMotion),
+                    ))
+                }
+            }
         }
 
         val notAtBottom by remember(listState) {
@@ -627,6 +650,34 @@ private fun UserBubble(entry: SessionEntry, modifier: Modifier = Modifier) {
         ) {
             Text(text, color = MaterialTheme.colorScheme.onSurface)
         }
+    }
+}
+
+/**
+ * Quiet "the agent is booting, your first message is queued" row shown below
+ * the pending bubble while a brand-new session's first response is pending.
+ * Without it, a slow first response reads as a broken/empty chat.
+ */
+@Composable
+private fun StartingSessionRow(modifier: Modifier = Modifier) {
+    Row(
+        modifier
+            .fillMaxWidth()
+            .padding(start = 4.dp, top = 14.dp)
+            .testTag("starting_session"),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        CircularProgressIndicator(
+            modifier = Modifier.size(14.dp),
+            strokeWidth = 2.dp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            "Starting session… waiting for the agent",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 
