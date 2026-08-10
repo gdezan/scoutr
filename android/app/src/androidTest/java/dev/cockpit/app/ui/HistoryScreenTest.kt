@@ -1,11 +1,14 @@
 package dev.cockpit.app.ui
 
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipeLeft
 import androidx.test.platform.app.InstrumentationRegistry
 import dev.cockpit.app.data.ConnectionStore
 import dev.cockpit.app.data.SessionCatalogStore
@@ -20,6 +23,7 @@ import okhttp3.mockwebserver.MockWebServer
 import okhttp3.mockwebserver.RecordedRequest
 import org.junit.After
 import org.junit.Before
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import java.util.concurrent.TimeUnit
@@ -147,6 +151,66 @@ class HistoryScreenTest {
         compose.onNodeWithTag("history_row_menu_abc").performClick()
         compose.onNodeWithText("Close").performClick()
         compose.onNodeWithText("Close session?").assertIsDisplayed()
+    }
+
+    @Test
+    fun swipeLeftRevealsRenameAndOpensDialog() {
+        stubCatalog()
+        setContent(viewModel())
+        compose.waitUntil(5_000) {
+            compose.onAllNodes(androidx.compose.ui.test.hasTestTag("history_row_abc")).fetchSemanticsNodes().isNotEmpty()
+        }
+        // The action bar is covered by the card until the row is swiped open.
+        compose.onNodeWithTag("history_row_abc").performTouchInput { swipeLeft() }
+        compose.waitForIdle()
+        compose.onNodeWithTag("history_row_action_rename_abc").performClick()
+        compose.onNodeWithText("Rename session").assertIsDisplayed()
+    }
+
+    @Test
+    fun coveredRowActionIsNotTappable() {
+        stubCatalog()
+        setContent(viewModel())
+        compose.waitUntil(5_000) {
+            compose.onAllNodes(androidx.compose.ui.test.hasTestTag("history_row_abc")).fetchSemanticsNodes().isNotEmpty()
+        }
+        // Without a swipe the card sits on top of the action bar, so a tap at
+        // the action's coordinates hits the card instead.
+        compose.onNodeWithTag("history_row_action_rename_abc").performClick()
+        compose.onNodeWithText("Rename session").assertDoesNotExist()
+    }
+
+    @Test
+    fun swipeRevealsDeleteOnInactiveRowAndConfirms() {
+        stubCatalog()
+        setContent(viewModel())
+        compose.waitUntil(5_000) {
+            compose.onAllNodes(androidx.compose.ui.test.hasTestTag("history_row_abc")).fetchSemanticsNodes().isNotEmpty()
+        }
+        // The def row is inactive, so it lives in the Completed view, where its
+        // revealed bar ends in Delete.
+        compose.onNodeWithText("Completed").performClick()
+        compose.waitUntil(5_000) {
+            compose.onAllNodes(androidx.compose.ui.test.hasTestTag("history_row_def")).fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithTag("history_row_def").performTouchInput { swipeLeft() }
+        compose.waitForIdle()
+        compose.onNodeWithTag("history_row_action_delete_def").performClick()
+        compose.onNodeWithText("Delete session?").assertIsDisplayed()
+    }
+
+    @Test
+    fun revealedActionBarMatchesRowHeight() {
+        stubCatalog()
+        setContent(viewModel())
+        compose.waitUntil(5_000) {
+            compose.onAllNodes(androidx.compose.ui.test.hasTestTag("history_row_abc")).fetchSemanticsNodes().isNotEmpty()
+        }
+        // The action bar sizes itself from the card (matchParentSize), so a
+        // regression where the bar collapses to icon height shows up here.
+        val row = compose.onNodeWithTag("history_row_abc").getUnclippedBoundsInRoot()
+        val rename = compose.onNodeWithTag("history_row_action_rename_abc").getUnclippedBoundsInRoot()
+        assertTrue(kotlin.math.abs((row.bottom - row.top).value - (rename.bottom - rename.top).value) < 1f)
     }
 
     @Test

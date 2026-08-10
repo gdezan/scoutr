@@ -2,14 +2,21 @@ package dev.cockpit.app.ui.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.AnchoredDraggableState
+import androidx.compose.foundation.gestures.DraggableAnchors
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.anchoredDraggable
+import androidx.compose.foundation.gestures.animateTo
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -28,6 +35,12 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Unarchive
 import androidx.compose.material.icons.filled.WifiOff
+import androidx.compose.material.icons.outlined.Archive
+import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.DriveFileRenameOutline
+import androidx.compose.material.icons.outlined.PushPin
+import androidx.compose.material.icons.outlined.Unarchive
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
@@ -48,14 +61,20 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
 import dev.cockpit.app.CockpitApp
 import dev.cockpit.app.ui.components.CockpitTextField
 import dev.cockpit.app.data.SessionCatalogItem
@@ -276,6 +295,19 @@ private fun HistoryList(
     }
 }
 
+/** Swipe-to-reveal anchor values for a session row. */
+private enum class RowReveal { Closed, Open }
+
+/** A single action button surfaced by the swipe-to-reveal bar. */
+private data class RowAction(
+    /** Stable test-tag suffix; unlike [label] it does not flip with pin/archive state. */
+    val key: String,
+    val label: String,
+    val icon: ImageVector,
+    val tint: Color,
+    val onClick: () -> Unit,
+)
+
 @Composable
 private fun HistoryRow(
     item: HistoryItem,
@@ -291,143 +323,221 @@ private fun HistoryRow(
 ) {
     val session = item.session
     var menuOpen by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
 
-    Box(
-        Modifier
-            .fillMaxWidth()
-            .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(16.dp))
-            .clickable(onClick = onOpen)
-            .testTag("history_row_${session.id}"),
-    ) {
-        Column(Modifier.padding(start = 16.dp, top = 12.dp, bottom = 12.dp, end = 4.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+    // Swipe-to-reveal action bar: rename, pin, archive, plus close for active
+    // sessions (delete for stored ones). Anchored so a half-swiped row settles
+    // open or closed, never in between; horizontal-only, so list scrolling and
+    // the search field are untouched. Tapping a revealed button fires the
+    // action; tapping the row while open just closes the reveal.
+    val scheme = MaterialTheme.colorScheme
+    // Outlined throughout: filled pin/archive/delete glyphs read as much heavier
+    // than the pencil and the cross, which made the bar look like four unrelated
+    // buttons rather than one quiet strip.
+    val actions = buildList {
+        add(RowAction("rename", "Rename", Icons.Outlined.DriveFileRenameOutline, scheme.onSurfaceVariant, onRename))
+        add(RowAction("pin", if (item.pinned) "Unpin" else "Pin", Icons.Outlined.PushPin, scheme.onSurfaceVariant, onTogglePin))
+        add(RowAction(
+            "archive",
+            if (item.archived) "Unarchive" else "Archive",
+            if (item.archived) Icons.Outlined.Unarchive else Icons.Outlined.Archive,
+            scheme.onSurfaceVariant,
+            onToggleArchive,
+        ))
+        if (session.active && session.paneId != null) {
+            add(RowAction("close", "Close", Icons.Outlined.Close, scheme.onSurfaceVariant, onClose))
+        } else {
+            add(RowAction("delete", "Delete", Icons.Outlined.Delete, scheme.error, onDelete))
+        }
+    }
+    val density = LocalDensity.current
+    val revealWidthPx = with(density) { (actions.size * 52).dp.toPx() }
+    val reveal = remember {
+        AnchoredDraggableState(
+            initialValue = RowReveal.Closed,
+            anchors = DraggableAnchors {
+                RowReveal.Closed at 0f
+                RowReveal.Open at -revealWidthPx
+            },
+        )
+    }
+    fun closeReveal() {
+        scope.launch { reveal.animateTo(RowReveal.Closed) }
+    }
+
+    Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp))) {
+        // Action bar, right-aligned, revealed as the card slides left. It sizes
+        // itself from the card rather than the other way round: a LazyColumn
+        // item is measured with an unbounded height, so fillMaxSize() here
+        // would collapse the bar to icon height instead of filling the row.
+        Row(
+            Modifier
+                .matchParentSize()
+                .background(MaterialTheme.colorScheme.surfaceContainerHigh),
+            horizontalArrangement = Arrangement.End,
+        ) {
+            actions.forEach { action ->
                 Box(
                     Modifier
-                        .width(8.dp)
-                        .height(8.dp)
-                        .background(
-                            when {
-                                item.pinned -> MaterialTheme.colorScheme.tertiary
-                                session.active -> MaterialTheme.colorScheme.primary
-                                else -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f)
-                            },
-                            RoundedCornerShape(50),
-                        ),
-                )
-                Spacer(Modifier.width(10.dp))
-                Text(
-                    text = session.title,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f),
-                )
-                Spacer(Modifier.width(8.dp))
-                Text(
-                    text = menuOpenLabel(session, item),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = if (session.active) MaterialTheme.colorScheme.primary
-                    else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                )
-                Box {
+                        .fillMaxHeight()
+                        .width(52.dp)
+                        .clickable {
+                            closeReveal()
+                            action.onClick()
+                        }
+                        .testTag("history_row_action_${action.key}_${session.id}"),
+                    contentAlignment = Alignment.Center,
+                ) {
                     Icon(
-                        Icons.Default.MoreVert,
-                        contentDescription = "Session actions",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier
-                            .clickable { menuOpen = true }
-                            .padding(10.dp)
-                            .testTag("history_row_menu_${session.id}"),
+                        action.icon,
+                        contentDescription = action.label,
+                        tint = action.tint,
                     )
-                    DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                        DropdownMenuItem(
-                            text = { Text(if (session.active) "Open" else "Resume") },
-                            leadingIcon = { Icon(Icons.Default.PlayArrow, contentDescription = null) },
-                            onClick = { menuOpen = false; onOpen() },
+                }
+            }
+        }
+        // Foreground card slides left on a horizontal drag.
+        Box(
+            Modifier
+                .offset { IntOffset(reveal.requireOffset().roundToInt(), 0) }
+                .anchoredDraggable(reveal, reverseDirection = false, orientation = Orientation.Horizontal)
+                .fillMaxWidth()
+                .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(16.dp))
+                .clickable {
+                    if (reveal.currentValue == RowReveal.Open) closeReveal() else onOpen()
+                }
+                .testTag("history_row_${session.id}"),
+        ) {
+            Column(Modifier.padding(start = 16.dp, top = 12.dp, bottom = 12.dp, end = 4.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        Modifier
+                            .width(8.dp)
+                            .height(8.dp)
+                            .background(
+                                when {
+                                    item.pinned -> MaterialTheme.colorScheme.tertiary
+                                    session.active -> MaterialTheme.colorScheme.primary
+                                    else -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f)
+                                },
+                                RoundedCornerShape(50),
+                            ),
+                    )
+                    Spacer(Modifier.width(10.dp))
+                    Text(
+                        text = session.title,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        text = menuOpenLabel(session, item),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (session.active) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                    )
+                    Box {
+                        Icon(
+                            Icons.Default.MoreVert,
+                            contentDescription = "Session actions",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier
+                                .clickable { menuOpen = true }
+                                .padding(10.dp)
+                                .testTag("history_row_menu_${session.id}"),
                         )
-                        DropdownMenuItem(
-                            text = { Text("Fork") },
-                            leadingIcon = { Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null) },
-                            onClick = { menuOpen = false; onFork() },
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Rename") },
-                            leadingIcon = { Icon(Icons.Default.DriveFileRenameOutline, contentDescription = null) },
-                            onClick = { menuOpen = false; onRename() },
-                        )
-                        DropdownMenuItem(
-                            text = { Text(if (item.pinned) "Unpin" else "Pin") },
-                            leadingIcon = { Icon(Icons.Default.PushPin, contentDescription = null) },
-                            onClick = { menuOpen = false; onTogglePin() },
-                        )
-                        DropdownMenuItem(
-                            text = { Text(if (item.archived) "Unarchive" else "Archive") },
-                            leadingIcon = { Icon(if (item.archived) Icons.Default.Unarchive else Icons.Default.Archive, contentDescription = null) },
-                            onClick = { menuOpen = false; onToggleArchive() },
-                        )
-                        if (session.active && session.paneId != null) {
+                        DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                             DropdownMenuItem(
-                                text = { Text("Close") },
-                                leadingIcon = { Icon(Icons.Default.Close, contentDescription = null) },
-                                onClick = { menuOpen = false; onClose() },
+                                text = { Text(if (session.active) "Open" else "Resume") },
+                                leadingIcon = { Icon(Icons.Default.PlayArrow, contentDescription = null) },
+                                onClick = { menuOpen = false; onOpen() },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Fork") },
+                                leadingIcon = { Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null) },
+                                onClick = { menuOpen = false; onFork() },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Rename") },
+                                leadingIcon = { Icon(Icons.Default.DriveFileRenameOutline, contentDescription = null) },
+                                onClick = { menuOpen = false; onRename() },
+                            )
+                            DropdownMenuItem(
+                                text = { Text(if (item.pinned) "Unpin" else "Pin") },
+                                leadingIcon = { Icon(Icons.Default.PushPin, contentDescription = null) },
+                                onClick = { menuOpen = false; onTogglePin() },
+                            )
+                            DropdownMenuItem(
+                                text = { Text(if (item.archived) "Unarchive" else "Archive") },
+                                leadingIcon = { Icon(if (item.archived) Icons.Default.Unarchive else Icons.Default.Archive, contentDescription = null) },
+                                onClick = { menuOpen = false; onToggleArchive() },
+                            )
+                            if (session.active && session.paneId != null) {
+                                DropdownMenuItem(
+                                    text = { Text("Close") },
+                                    leadingIcon = { Icon(Icons.Default.Close, contentDescription = null) },
+                                    onClick = { menuOpen = false; onClose() },
+                                )
+                            }
+                            DropdownMenuItem(
+                                text = { Text("Delete") },
+                                leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null) },
+                                onClick = { menuOpen = false; onDelete() },
+                                enabled = !session.active,
                             )
                         }
-                        DropdownMenuItem(
-                            text = { Text("Delete") },
-                            leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null) },
-                            onClick = { menuOpen = false; onDelete() },
-                            enabled = !session.active,
-                        )
                     }
                 }
-            }
-            Spacer(Modifier.height(4.dp))
-            if (session.preview.isNotBlank()) {
-                Text(
-                    text = session.preview,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
                 Spacer(Modifier.height(4.dp))
-            }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = session.cwd,
-                    style = MaterialTheme.typography.labelSmall,
-                    fontFamily = FontFamily.Monospace,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f),
-                )
-                if (session.model != null) {
+                if (session.preview.isNotBlank()) {
+                    Text(
+                        text = session.preview,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = session.cwd,
+                        style = MaterialTheme.typography.labelSmall,
+                        fontFamily = FontFamily.Monospace,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                    if (session.model != null) {
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            text = shortModel(session.model),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                        )
+                    }
                     Spacer(Modifier.width(8.dp))
                     Text(
-                        text = shortModel(session.model),
+                        text = relativeTime(session.updatedAt),
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
                     )
                 }
-                Spacer(Modifier.width(8.dp))
-                Text(
-                    text = relativeTime(session.updatedAt),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                )
-            }
-            if (busy) {
-                Spacer(Modifier.height(8.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    CircularProgressIndicator(Modifier.width(14.dp).height(14.dp), strokeWidth = 2.dp)
-                    Spacer(Modifier.width(8.dp))
-                    Text(
-                        busyLabel ?: "Working…",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.primary,
-                    )
+                if (busy) {
+                    Spacer(Modifier.height(8.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(Modifier.width(14.dp).height(14.dp), strokeWidth = 2.dp)
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            busyLabel ?: "Working…",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                    }
                 }
             }
         }
