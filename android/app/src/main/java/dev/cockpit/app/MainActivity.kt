@@ -161,9 +161,11 @@ private fun CockpitAppNav() {
                         container::showAgentNotification,
                     ),
                 )
-                val scope = rememberCoroutineScope()
                 val newSessionViewModel: NewSessionViewModel = viewModel(
-                    factory = NewSessionViewModel.factory(container.bridge),
+                    factory = NewSessionViewModel.factory(
+                        container.bridge,
+                        container.launcherSettingsStore,
+                    ),
                 )
                 var showNewSession by remember { mutableStateOf(false) }
                 Scaffold(

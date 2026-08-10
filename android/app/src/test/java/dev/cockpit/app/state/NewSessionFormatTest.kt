@@ -1,7 +1,5 @@
 package dev.cockpit.app.state
 
-import dev.cockpit.app.data.ModelInfo
-import dev.cockpit.app.data.ModelProvider
 import dev.cockpit.app.data.SessionEntry
 import dev.cockpit.app.data.ContentBlock
 import org.junit.Assert.assertEquals
@@ -15,19 +13,6 @@ class NewSessionFormatTest {
         assertEquals(listOf("/home/gdezan", "/home/gdezan/Dev"), quickPicks("/home/gdezan"))
     }
 
-    @Test
-    fun breadcrumbSplitsHomeRelativePaths() {
-        val crumbs = breadcrumb("/home/gdezan/Dev/agents-mobile", "/home/gdezan")
-        assertEquals(
-            listOf("/home/gdezan", "/home/gdezan/Dev", "/home/gdezan/Dev/agents-mobile"),
-            crumbs,
-        )
-    }
-
-    @Test
-    fun breadcrumbOfHomeIsJustHome() {
-        assertEquals(listOf("/home/gdezan"), breadcrumb("/home/gdezan", "/home/gdezan"))
-    }
 
     @Test
     fun crumbLabelsHomeAsTildeAndLeafOtherwise() {
@@ -35,10 +20,6 @@ class NewSessionFormatTest {
         assertEquals("agents-mobile", crumbLabel("/home/gdezan/Dev/agents-mobile", "/home/gdezan"))
     }
 
-    @Test
-    fun providerLabelIsTheProviderName() {
-        assertEquals("openai-codex", providerLabel(ModelProvider("openai-codex", emptyList())))
-    }
 
     @Test
     fun lastUserMessageFindsMostRecentUserEntry() {
@@ -61,19 +42,5 @@ class NewSessionFormatTest {
             ),
         )
         assertNull(state.lastUserMessage)
-    }
-
-    @Test
-    fun modelGroupsRenderByName() {
-        val providers = listOf(
-            ModelProvider(
-                "openai-codex",
-                listOf(ModelInfo(id = "gpt-5.4", name = "GPT-5.4", provider = "openai-codex")),
-            ),
-            ModelProvider("deepseek", listOf(ModelInfo(id = "deepseek-v4-flash", provider = "deepseek"))),
-        )
-        assertEquals(2, providers.size)
-        assertEquals("GPT-5.4", providers[0].models[0].name)
-        assertEquals("deepseek", providers[1].name)
     }
 }

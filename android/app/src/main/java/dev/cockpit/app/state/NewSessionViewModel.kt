@@ -3,35 +3,40 @@ package dev.cockpit.app.state
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import dev.cockpit.app.data.LauncherSettings
+import dev.cockpit.app.data.LauncherSettingsStore
+import dev.cockpit.app.data.ModelInfo
 import dev.cockpit.app.data.ModelProvider
+import dev.cockpit.app.data.SessionLauncherPreset
 import dev.cockpit.app.net.BridgeClient
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-
-/** The home directory the bridge roots dir listings at (also the quick pick). */
-val HOME_DIR: String get() = "/home/${System.getProperty("user.name") ?: "gdezan"}"
+import java.util.UUID
 
 /** Quick-pick roots for the folder picker. */
-fun quickPicks(home: String): List<String> = listOf(home, "$home/Dev")
+fun quickPicks(home: String): List<String> = listOf(home, "$home/Dev").filter(String::isNotBlank)
 
-/** Breadcrumb parts of a path, home-relative. */
-fun breadcrumb(path: String, home: String): List<String> {
-    if (!path.startsWith(home)) return listOf(path)
-    val rest = path.removePrefix(home).trimStart('/')
-    if (rest.isEmpty()) return listOf(home)
-    return listOf(home) + rest.split('/').fold(listOf<String>()) { acc, part ->
-        acc + (acc.lastOrNull()?.let { "$it/$part" } ?: "$home/$part")
-    }
-}
 
 /** Human label for a breadcrumb path. */
 fun crumbLabel(crumb: String, home: String): String = if (crumb == home) "~" else crumb.substringAfterLast('/')
 
-/** Provider label for the model picker. */
-fun providerLabel(provider: ModelProvider): String = provider.name
+
+/** A reusable first-prompt template that never invents repository facts. */
+data class SessionTaskTemplate(
+    val id: String,
+    val title: String,
+    val prompt: String,
+)
+
+val SESSION_TASK_TEMPLATES = listOf(
+    SessionTaskTemplate("fix_bug", "Fix a bug", "Diagnose the reported bug, reproduce it, then implement and verify the smallest complete fix."),
+    SessionTaskTemplate("investigate_tests", "Investigate tests", "Investigate the failing tests, identify the root cause, and report the safest fix before changing behavior."),
+    SessionTaskTemplate("review_changes", "Review changes", "Review the current changes for correctness, regressions, security issues, and missing verification. Do not modify files."),
+    SessionTaskTemplate("plan_feature", "Plan a feature", "Read the relevant product and code context, then propose a dependency-aware implementation plan with verification steps."),
+)
 
 data class NewSessionUiState(
     val loadingDirs: Boolean = true,
@@ -40,22 +45,69 @@ data class NewSessionUiState(
     val path: String = "",
     val dirs: List<String> = emptyList(),
     val providers: List<ModelProvider> = emptyList(),
-    val selectedModel: String? = null,
+    val modelMatches: List<ModelPickerMatch> = emptyList(),
+    val modelFilters: ModelPickerFilters = ModelPickerFilters(),
+    val selectedModelKey: String? = null,
+    val selectedThinkingLevel: String? = null,
+    val favoriteModelKeys: Set<String> = emptySet(),
+    val recentModelKeys: List<String> = emptyList(),
+    val defaultModelKey: String? = null,
+    val recentFolders: List<String> = emptyList(),
+    val presets: List<SessionLauncherPreset> = emptyList(),
     val name: String = "",
+    val initialPrompt: String = "",
     val creating: Boolean = false,
-    val error: String? = null,
+    val folderError: String? = null,
+    val modelError: String? = null,
+    val launcherError: String? = null,
     val created: CreatedSessionResult? = null,
-)
+) {
+    val folderChoices: List<String>
+        get() = (quickPicks(home) + recentFolders).distinct().take(8)
+
+    val selectedModel: ModelPickerMatch?
+        get() = providers.asSequence().flatMap { provider ->
+            provider.models.asSequence().map { model ->
+                val providerName = model.provider.ifBlank { provider.name }
+                ModelPickerMatch(
+                    key = modelPickerKey(providerName, model.id),
+                    provider = providerName,
+                    model = model,
+                    favorite = modelPickerKey(providerName, model.id) in favoriteModelKeys,
+                    recent = modelPickerKey(providerName, model.id) in recentModelKeys,
+                    default = modelPickerKey(providerName, model.id) == defaultModelKey,
+                )
+            }
+        }.firstOrNull { it.key == selectedModelKey }
+
+
+    val canCreate: Boolean
+        get() = selectedModel != null && path.isNotBlank() &&
+            !loadingDirs && !loadingModels && !creating && folderError == null && modelError == null
+}
 
 data class CreatedSessionResult(val paneId: String)
 
 /**
- * The new-session flow: browse folders (bridge /api/dirs, rooted at home),
- * pick a model (bridge /api/models), then create a pane-native pi session.
+ * Owns the fast session launcher: host folders, fuzzy model search, on-device
+ * preferences, presets, and atomic create plus first-prompt delivery.
  */
-class NewSessionViewModel(private val bridge: BridgeClient) : ViewModel() {
-
-    private val _ui = MutableStateFlow(NewSessionUiState())
+class NewSessionViewModel(
+    private val bridge: BridgeClient,
+    private val settingsStore: LauncherSettingsStore,
+) : ViewModel() {
+    private var settings = settingsStore.loadLauncherSettings()
+    private var folderRequestId = 0
+    private val _ui = MutableStateFlow(
+        NewSessionUiState(
+            favoriteModelKeys = settings.favoriteModelKeys,
+            recentModelKeys = settings.recentModelKeys,
+            defaultModelKey = settings.defaultModelKey,
+            recentFolders = settings.recentFolders,
+            presets = settings.presets,
+            selectedModelKey = settings.defaultModelKey ?: settings.recentModelKeys.firstOrNull(),
+        ),
+    )
     val ui: StateFlow<NewSessionUiState> = _ui.asStateFlow()
 
     init {
@@ -64,31 +116,67 @@ class NewSessionViewModel(private val bridge: BridgeClient) : ViewModel() {
     }
 
     suspend fun loadDirs(path: String? = null) {
-        _ui.update { it.copy(loadingDirs = true, error = null) }
+        val requestId = ++folderRequestId
+        _ui.update { it.copy(loadingDirs = true, folderError = null) }
         try {
             val listing = bridge.dirs(path).listing
+            if (requestId != folderRequestId) return
             if (listing != null) {
-                _ui.update { it.copy(loadingDirs = false, path = listing.path, dirs = listing.dirs) }
-                if (path == null) _ui.update { it.copy(home = listing.path) }
+                _ui.update {
+                    it.copy(
+                        loadingDirs = false,
+                        path = listing.path,
+                        dirs = listing.dirs,
+                        home = if (path == null) listing.path else it.home,
+                    )
+                }
             } else {
-                _ui.update { it.copy(loadingDirs = false, error = "folder listing failed") }
+                _ui.update { it.copy(loadingDirs = false, folderError = "Folder listing failed. Check the bridge and retry.") }
             }
-        } catch (e: Exception) {
-            _ui.update { it.copy(loadingDirs = false, error = e.message ?: "folder listing failed") }
+        } catch (error: Exception) {
+            if (requestId != folderRequestId) return
+            _ui.update {
+                it.copy(loadingDirs = false, folderError = error.message ?: "Folder listing failed. Check the bridge and retry.")
+            }
         }
     }
 
     suspend fun loadModels() {
-        _ui.update { it.copy(loadingModels = true) }
+        _ui.update { it.copy(loadingModels = true, modelError = null) }
         try {
             val response = bridge.models()
-            if (response.catalog != null) {
-                _ui.update { it.copy(loadingModels = false, providers = response.catalog.providers) }
+            val providers = response.catalog?.providers
+            if (providers != null) {
+                _ui.update { current ->
+                    val availableKeys = providers.flatMap { provider ->
+                        provider.models.map { modelPickerKey(it.provider.ifBlank { provider.name }, it.id) }
+                    }.toSet()
+                    val selectedKey = current.selectedModelKey?.takeIf { it in availableKeys }
+                        ?: current.defaultModelKey?.takeIf { it in availableKeys }
+                        ?: current.recentModelKeys.firstOrNull { it in availableKeys }
+                        ?: availableKeys.firstOrNull()
+                    val selectedModel = selectedKey?.let { findModel(providers, it) }
+                    val selectedThinking = selectedKey
+                        ?.let(settings.thinkingByModel::get)
+                        ?.takeIf { level -> selectedModel?.thinkingLevels?.contains(level) == true }
+                    withModelMatches(
+                        current.copy(
+                            loadingModels = false,
+                            providers = providers,
+                            selectedModelKey = selectedKey,
+                            selectedThinkingLevel = selectedThinking,
+                        ),
+                    )
+                }
             } else {
-                _ui.update { it.copy(loadingModels = false, error = response.error ?: "model catalog failed") }
+                _ui.update {
+                    it.copy(loadingModels = false, modelError = response.error ?: "Model catalog failed. Check the bridge and retry.")
+                }
             }
-        } catch (e: Exception) {
-            _ui.update { it.copy(loadingModels = false, error = e.message ?: "model catalog failed") }
+        } catch (error: Exception) {
+            _ui.update {
+                it.copy(loadingModels = false, modelError = error.message ?: "Model catalog failed. Check the bridge and retry.")
+            }
         }
     }
 
@@ -97,48 +185,210 @@ class NewSessionViewModel(private val bridge: BridgeClient) : ViewModel() {
     }
 
     fun goUp() {
-        val path = ui.value.path.trimEnd('/')
+        val state = ui.value
+        val path = state.path.trimEnd('/')
         val parent = path.substringBeforeLast('/')
-        if (parent.isNotEmpty() && parent != path) viewModelScope.launch { loadDirs(parent) }
+        if (path != state.home && parent.isNotEmpty() && parent != path) viewModelScope.launch { loadDirs(parent) }
+    }
+
+    fun retryFolders() {
+        viewModelScope.launch { loadDirs(ui.value.path.takeIf(String::isNotBlank)) }
+    }
+
+    fun retryModels() {
+        viewModelScope.launch { loadModels() }
     }
 
     fun jumpTo(path: String) {
         viewModelScope.launch { loadDirs(path) }
     }
 
-    fun selectModel(model: String) {
-        _ui.update { it.copy(selectedModel = model, error = null) }
+    fun setModelQuery(query: String) = updateModelPicker { it.copy(modelFilters = it.modelFilters.copy(query = query)) }
+
+    fun toggleReasoningFilter() = updateModelPicker {
+        it.copy(modelFilters = it.modelFilters.copy(reasoningOnly = !it.modelFilters.reasoningOnly))
+    }
+
+    fun setMinimumContext(tokens: Long?) = updateModelPicker {
+        it.copy(modelFilters = it.modelFilters.copy(minimumContextTokens = tokens))
+    }
+
+    fun setThinkingFilter(level: String?) = updateModelPicker {
+        it.copy(modelFilters = it.modelFilters.copy(thinkingLevel = level))
+    }
+
+    fun clearModelFilters() = updateModelPicker { it.copy(modelFilters = ModelPickerFilters()) }
+
+    fun selectModel(modelKey: String) {
+        val model = findModel(ui.value.providers, modelKey) ?: return
+        updateModelPicker {
+            it.copy(
+                selectedModelKey = modelKey,
+                selectedThinkingLevel = settings.thinkingByModel[modelKey]?.takeIf(model.thinkingLevels::contains),
+                launcherError = null,
+            )
+        }
+    }
+
+    fun toggleFavorite(modelKey: String) {
+        val favorites = settings.favoriteModelKeys.toMutableSet().apply {
+            if (!add(modelKey)) remove(modelKey)
+        }.toSet()
+        saveSettings(settings.copy(favoriteModelKeys = favorites))
+        updateModelPicker { it.copy(favoriteModelKeys = favorites) }
+    }
+
+    fun setDefaultModel(modelKey: String) {
+        val newDefault = modelKey.takeUnless { it == settings.defaultModelKey }
+        saveSettings(settings.copy(defaultModelKey = newDefault))
+        updateModelPicker { it.copy(defaultModelKey = newDefault) }
+    }
+
+    fun setThinkingLevel(level: String?) {
+        val state = ui.value
+        val model = state.selectedModel?.model ?: return
+        if (level != null && level !in model.thinkingLevels) return
+        val modelKey = state.selectedModelKey ?: return
+        val thinking = settings.thinkingByModel.toMutableMap().apply {
+            if (level == null) remove(modelKey) else put(modelKey, level)
+        }
+        saveSettings(settings.copy(thinkingByModel = thinking))
+        _ui.update { it.copy(selectedThinkingLevel = level) }
     }
 
     fun setName(name: String) {
-        _ui.update { it.copy(name = name) }
+        _ui.update { it.copy(name = name.take(100)) }
+    }
+
+    fun setInitialPrompt(prompt: String) {
+        _ui.update { it.copy(initialPrompt = prompt.take(100_000)) }
+    }
+
+    fun applyTaskTemplate(templateId: String) {
+        val template = SESSION_TASK_TEMPLATES.firstOrNull { it.id == templateId } ?: return
+        _ui.update { it.copy(initialPrompt = template.prompt, launcherError = null) }
+    }
+
+    fun savePreset(title: String) {
+        val state = ui.value
+        val modelKey = state.selectedModelKey ?: return
+        val trimmedTitle = title.trim().take(60)
+        if (trimmedTitle.isEmpty() || state.path.isBlank()) return
+        val preset = SessionLauncherPreset(
+            id = UUID.randomUUID().toString(),
+            title = trimmedTitle,
+            cwd = state.path,
+            modelKey = modelKey,
+            thinkingLevel = state.selectedThinkingLevel,
+            sessionName = state.name,
+            initialPrompt = state.initialPrompt,
+        )
+        val presets = (listOf(preset) + settings.presets).take(12)
+        saveSettings(settings.copy(presets = presets))
+        _ui.update { it.copy(presets = presets) }
+    }
+
+    fun applyPreset(presetId: String) {
+        val preset = settings.presets.firstOrNull { it.id == presetId } ?: return
+        val model = findModel(ui.value.providers, preset.modelKey)
+        if (model == null) {
+            _ui.update { it.copy(launcherError = "This preset's model is no longer available. Choose another model and save a new preset.") }
+            return
+        }
+        updateModelPicker {
+            it.copy(
+                selectedModelKey = preset.modelKey,
+                selectedThinkingLevel = preset.thinkingLevel?.takeIf(model.thinkingLevels::contains),
+                name = preset.sessionName,
+                initialPrompt = preset.initialPrompt,
+                launcherError = null,
+            )
+        }
+        jumpTo(preset.cwd)
+    }
+
+    fun deletePreset(presetId: String) {
+        val presets = settings.presets.filterNot { it.id == presetId }
+        saveSettings(settings.copy(presets = presets))
+        _ui.update { it.copy(presets = presets) }
     }
 
     fun create() {
         val state = _ui.value
-        val model = state.selectedModel ?: return
-        if (state.creating) return
+        val modelKey = state.selectedModelKey ?: return
+        if (!state.canCreate) return
         viewModelScope.launch {
-            _ui.update { it.copy(creating = true, error = null) }
+            _ui.update { it.copy(creating = true, launcherError = null) }
             try {
-                val name = state.name.trim().ifEmpty { null }
-                val response = bridge.createSession(state.path, model, name)
+                val response = bridge.createSession(
+                    cwd = state.path,
+                    model = modelKey,
+                    name = state.name.trim().ifEmpty { null },
+                    initialPrompt = state.initialPrompt.takeIf { it.isNotBlank() },
+                    thinkingLevel = state.selectedThinkingLevel,
+                )
                 if (response.ok && response.paneId != null) {
+                    rememberSuccessfulLaunch(state)
                     _ui.update { it.copy(creating = false, created = CreatedSessionResult(response.paneId)) }
                 } else {
-                    _ui.update { it.copy(creating = false, error = response.error ?: "session creation failed") }
+                    _ui.update {
+                        it.copy(creating = false, launcherError = response.error ?: "Session creation failed. The bridge rolled back the workspace.")
+                    }
                 }
-            } catch (e: Exception) {
-                _ui.update { it.copy(creating = false, error = e.message ?: "session creation failed") }
+            } catch (error: Exception) {
+                _ui.update {
+                    it.copy(creating = false, launcherError = error.message ?: "Session creation failed. Check the bridge and retry.")
+                }
             }
         }
     }
 
+
+    fun consumeCreatedSession() {
+        _ui.update { it.copy(created = null) }
+    }
+
+    private fun rememberSuccessfulLaunch(state: NewSessionUiState) {
+        val modelKey = state.selectedModelKey ?: return
+        val recentModels = (listOf(modelKey) + settings.recentModelKeys).distinct().take(8)
+        val recentFolders = (listOf(state.path) + settings.recentFolders).distinct().take(6)
+        saveSettings(settings.copy(recentModelKeys = recentModels, recentFolders = recentFolders))
+        updateModelPicker { it.copy(recentModelKeys = recentModels, recentFolders = recentFolders) }
+    }
+
+    private fun updateModelPicker(transform: (NewSessionUiState) -> NewSessionUiState) {
+        _ui.update { withModelMatches(transform(it)) }
+    }
+
+    private fun withModelMatches(state: NewSessionUiState): NewSessionUiState = state.copy(
+        modelMatches = searchModelCatalog(
+            providers = state.providers,
+            filters = state.modelFilters,
+            favoriteKeys = state.favoriteModelKeys,
+            recentKeys = state.recentModelKeys,
+            defaultKey = state.defaultModelKey,
+            selectedKey = state.selectedModelKey,
+        ),
+    )
+
+    private fun saveSettings(updated: LauncherSettings) {
+        settings = updated
+        settingsStore.saveLauncherSettings(updated)
+    }
+
+    private fun findModel(providers: List<ModelProvider>, modelKey: String): ModelInfo? = providers.asSequence()
+        .flatMap { provider -> provider.models.asSequence().map { modelPickerKey(it.provider.ifBlank { provider.name }, it.id) to it } }
+        .firstOrNull { it.first == modelKey }
+        ?.second
+
     companion object {
-        fun factory(bridge: BridgeClient): ViewModelProvider.Factory = object : ViewModelProvider.Factory {
+        fun factory(
+            bridge: BridgeClient,
+            settingsStore: LauncherSettingsStore,
+        ): ViewModelProvider.Factory = object : ViewModelProvider.Factory {
             @Suppress("UNCHECKED_CAST")
             override fun <T : ViewModel> create(modelClass: Class<T>): T {
-                return NewSessionViewModel(bridge) as T
+                return NewSessionViewModel(bridge, settingsStore) as T
             }
         }
     }

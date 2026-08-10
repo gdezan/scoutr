@@ -1,15 +1,27 @@
-import { describe, it, before, after } from "node:test";
+import { homedir } from "node:os";
+import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { createSession, controlSession, SessionsError } from "../src/sessions.js";
+import {
+  createSession,
+  controlSession,
+  SessionsError,
+  buildLaunchCommand,
+  shellQuote,
+  THINKING_LEVELS,
+} from "../src/sessions.js";
 
-/** Minimal fake herdr recording every call. */
 function fakeHerdr(overrides: Record<string, unknown> = {}) {
-  const calls: { method: string; params: unknown }[] = [];
+  const calls: { method: string; params: any }[] = [];
   const herdr = {
     calls,
     async workspaceCreate(params: unknown) {
       calls.push({ method: "workspace.create", params });
       return overrides.workspaceCreate ?? { workspace: { workspace_id: "ws1" }, root_pane: { pane_id: "p1" } };
+    },
+    async workspaceClose(workspace_id: string) {
+      calls.push({ method: "workspace.close", params: { workspace_id } });
+      if (overrides.workspaceCloseError) throw overrides.workspaceCloseError;
+      return {};
     },
     async paneSendText(pane_id: string, text: string) {
       calls.push({ method: "pane.send_text", params: { pane_id, text } });
@@ -19,8 +31,14 @@ function fakeHerdr(overrides: Record<string, unknown> = {}) {
       calls.push({ method: "pane.send_keys", params: { pane_id, keys } });
       return {};
     },
+    async paneSendInput(pane_id: string, text: string, keys: string[]) {
+      calls.push({ method: "pane.send_input", params: { pane_id, text, keys } });
+      if (overrides.paneSendInputError) throw overrides.paneSendInputError;
+      return {};
+    },
     async agentPrompt(target: string, text: string) {
       calls.push({ method: "agent.prompt", params: { target, text } });
+      if (overrides.agentPromptError) throw overrides.agentPromptError;
       return {};
     },
     async workspaceRename(workspace_id: string, label: string) {
@@ -30,7 +48,7 @@ function fakeHerdr(overrides: Record<string, unknown> = {}) {
     async snapshot() {
       calls.push({ method: "session.snapshot", params: {} });
       return overrides.snapshot ?? {
-        panes: [{ pane_id: "p1", workspace_id: "ws1" }],
+        panes: [{ pane_id: "p1", workspace_id: "ws1", agent: "pi" }],
         workspaces: [],
         tabs: [],
         agents: [],
@@ -40,41 +58,133 @@ function fakeHerdr(overrides: Record<string, unknown> = {}) {
   return herdr as never;
 }
 
+const cwd = homedir();
+
 describe("createSession", () => {
-  it("creates a workspace (herdr pre-creates the root pane) and launches pi with the model", async () => {
+  it("creates a workspace, starts pi in one input call, and waits for agent detection", async () => {
     const herdr = fakeHerdr();
-    const created = await createSession(herdr, { cwd: "/tmp/demo", model: "openai-codex/gpt-5.4", name: "demo" });
+
+    const created = await createSession(herdr, { cwd, model: "openai-codex/gpt-5.4", name: "demo" });
+
     assert.deepEqual(created, { workspaceId: "ws1", paneId: "p1" });
-    const methods = herdr.calls.map((c) => c.method);
-    assert.deepEqual(methods, ["workspace.create", "pane.send_text", "pane.send_keys"]);
-    const ws = herdr.calls[0].params as { cwd: string; label: string };
-    assert.deepEqual(ws, { cwd: "/tmp/demo", label: "demo", focus: false });
-    const launch = herdr.calls[1].params as { text: string };
-    assert.equal(launch.text, "pi --model openai-codex/gpt-5.4");
+    assert.deepEqual(herdr.calls.map((call) => call.method), ["workspace.create", "pane.send_input", "session.snapshot"]);
+    assert.deepEqual(herdr.calls[0].params, { cwd, label: "demo", focus: false });
+    assert.deepEqual(herdr.calls[1].params, {
+      pane_id: "p1",
+      text: "pi --model 'openai-codex/gpt-5.4' --name 'demo'",
+      keys: ["Enter"],
+    });
   });
 
-  it("defaults the name to the cwd basename and launches the model exactly", async () => {
+  it("delivers multiline and option-like prompts through agent.prompt, not the shell", async () => {
     const herdr = fakeHerdr();
-    await createSession(herdr, { cwd: "/home/user/Dev/project", model: "deepseek/deepseek-v4-flash" });
-    const ws = herdr.calls[0].params as { label: string };
-    assert.equal(ws.label, "project");
-    const launch = herdr.calls[1].params as { text: string };
-    assert.equal(launch.text, "pi --model deepseek/deepseek-v4-flash");
+    const initialPrompt = "--help\n\nFix the failing test; don't alter behavior.";
+
+    await createSession(herdr, {
+      cwd,
+      model: "openai-codex/gpt-5.4",
+      thinkingLevel: "high",
+      name: "demo",
+      initialPrompt,
+    });
+
+    assert.deepEqual(herdr.calls.map((call) => call.method), [
+      "workspace.create",
+      "pane.send_input",
+      "session.snapshot",
+      "agent.prompt",
+    ]);
+    assert.equal(herdr.calls[1].params.text, "pi --model 'openai-codex/gpt-5.4' --thinking 'high' --name 'demo'");
+    assert.deepEqual(herdr.calls[3].params, { target: "p1", text: initialPrompt });
   });
 
-  it("rejects a missing cwd or model", async () => {
+  it("preserves prompt-less creation", async () => {
+    for (const initialPrompt of [undefined, ""]) {
+      const herdr = fakeHerdr();
+      await createSession(herdr, { cwd, model: "m1", initialPrompt });
+      assert.equal(herdr.calls[1].params.text, "pi --model 'm1'");
+      assert.equal(herdr.calls.some((call) => call.method === "agent.prompt"), false);
+    }
+  });
+
+  it("quotes every shell argument while keeping the prompt out of the command", async () => {
+    const herdr = fakeHerdr();
+    const initialPrompt = "say 'hi' && echo pwned; $(whoami) `id`";
+
+    await createSession(herdr, {
+      cwd,
+      model: "o'brien; rm -rf /",
+      thinkingLevel: "off",
+      name: "$(id) `ls` \"quoted\"",
+      initialPrompt,
+    });
+
+    assert.equal(
+      herdr.calls[1].params.text,
+      "pi --model 'o'\\''brien; rm -rf /' --thinking 'off' --name '$(id) `ls` \"quoted\"'",
+    );
+    assert.equal(herdr.calls[3].params.text, initialPrompt);
+  });
+
+  it("buildLaunchCommand quotes supported options", () => {
+    assert.equal(buildLaunchCommand({ model: "a b" }), "pi --model 'a b'");
+    assert.equal(
+      buildLaunchCommand({ model: "m", thinkingLevel: "max", name: "it's" }),
+      "pi --model 'm' --thinking 'max' --name 'it'\\''s'",
+    );
+    assert.equal(shellQuote("a; $(id)"), "'a; $(id)'");
+  });
+
+  it("rejects invalid input before creating a workspace", async () => {
     const herdr = fakeHerdr();
     await assert.rejects(createSession(herdr, { cwd: "", model: "m" }), SessionsError);
-    await assert.rejects(createSession(herdr, { cwd: "/tmp", model: "" }), SessionsError);
+    await assert.rejects(createSession(herdr, { cwd, model: "" }), SessionsError);
+    await assert.rejects(createSession(herdr, { cwd: "/", model: "m" }), /outside allowed root/);
+    await assert.rejects(createSession(herdr, { cwd, model: "m\nrm -rf /" }), SessionsError);
+    await assert.rejects(createSession(herdr, { cwd, model: "m", name: "a\u0000b" }), SessionsError);
+    await assert.rejects(createSession(herdr, { cwd, model: "m", initialPrompt: "a\u0000b" }), SessionsError);
+    assert.equal(herdr.calls.length, 0);
   });
 
-  it("fails with 502 when herdr returns no ids", async () => {
-    const herdr = fakeHerdr({ workspaceCreate: {} });
-    await assert.rejects(createSession(herdr, { cwd: "/tmp/a", model: "m" }), (e: unknown) => {
-      assert.ok(e instanceof SessionsError);
-      assert.equal(e.status, 502);
-      return true;
-    });
+  it("accepts every documented thinking level", async () => {
+    for (const level of THINKING_LEVELS) {
+      const herdr = fakeHerdr();
+      await createSession(herdr, { cwd, model: "m", thinkingLevel: level });
+      assert.equal(herdr.calls[1].params.text, `pi --model 'm' --thinking '${level}'`);
+    }
+  });
+
+  it("rejects unknown thinking levels and over-long fields", async () => {
+    const herdr = fakeHerdr();
+    await assert.rejects(createSession(herdr, { cwd, model: "m", thinkingLevel: "insane" }), /unknown thinking level/);
+    await assert.rejects(createSession(herdr, { cwd, model: "m".repeat(201) }), /model is too long/);
+    await assert.rejects(createSession(herdr, { cwd, model: "m", name: "n".repeat(101) }), /name is too long/);
+    await assert.rejects(createSession(herdr, { cwd, model: "m", initialPrompt: "p".repeat(100_001) }), /initialPrompt is too long/);
+    assert.equal(herdr.calls.length, 0);
+  });
+
+  it("closes the workspace when launch input fails", async () => {
+    const herdr = fakeHerdr({ paneSendInputError: new Error("send failed") });
+
+    await assert.rejects(createSession(herdr, { cwd, model: "m" }), /session launch failed: send failed/);
+
+    assert.deepEqual(herdr.calls.map((call) => call.method), ["workspace.create", "pane.send_input", "workspace.close"]);
+  });
+
+  it("closes the workspace when first-prompt delivery fails", async () => {
+    const herdr = fakeHerdr({ agentPromptError: new Error("prompt failed") });
+
+    await assert.rejects(createSession(herdr, { cwd, model: "m", initialPrompt: "Task" }), /session launch failed: prompt failed/);
+
+    assert.equal(herdr.calls.at(-1)?.method, "workspace.close");
+  });
+
+  it("closes a workspace that has no root pane id", async () => {
+    const herdr = fakeHerdr({ workspaceCreate: { workspace: { workspace_id: "ws1" } } });
+
+    await assert.rejects(createSession(herdr, { cwd, model: "m" }), /did not return a pane id/);
+
+    assert.equal(herdr.calls.at(-1)?.method, "workspace.close");
   });
 });
 
@@ -113,18 +223,16 @@ describe("controlSession", () => {
 
   it("rename resolves the pane workspace and renames it", async () => {
     const herdr = fakeHerdr();
-    await controlSession(herdr, { paneId: "p1", action: "rename", text: "my session" });
-    assert.deepEqual(herdr.calls, [
-      { method: "session.snapshot", params: {} },
-      { method: "workspace.rename", params: { workspace_id: "ws1", label: "my session" } },
-    ]);
+    await controlSession(herdr, { paneId: "p1", action: "rename", text: "new name" });
+    assert.deepEqual(herdr.calls.map((call) => call.method), ["session.snapshot", "workspace.rename"]);
+    assert.deepEqual(herdr.calls[1].params, { workspace_id: "ws1", label: "new name" });
   });
 
   it("rename of an unknown pane fails with 404", async () => {
-    const herdr = fakeHerdr({ snapshot: { panes: [{ pane_id: "other", workspace_id: "w2" }] } });
-    await assert.rejects(controlSession(herdr, { paneId: "p1", action: "rename", text: "x" }), (e: unknown) => {
-      assert.ok(e instanceof SessionsError);
-      assert.equal(e.status, 404);
+    const herdr = fakeHerdr({ snapshot: { panes: [], workspaces: [], tabs: [], agents: [] } });
+    await assert.rejects(controlSession(herdr, { paneId: "nope", action: "rename", text: "n" }), (error: unknown) => {
+      assert.ok(error instanceof SessionsError);
+      assert.equal(error.status, 404);
       return true;
     });
   });

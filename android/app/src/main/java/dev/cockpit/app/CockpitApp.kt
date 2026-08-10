@@ -8,6 +8,7 @@ import android.content.Context
 import android.content.Intent
 import androidx.core.app.NotificationCompat
 import dev.cockpit.app.data.ConnectionStore
+import dev.cockpit.app.data.SharedPreferencesLauncherSettingsStore
 import dev.cockpit.app.data.NtfyMessage
 import dev.cockpit.app.net.BridgeClient
 import dev.cockpit.app.net.NtfyClient
@@ -33,6 +34,7 @@ class AppContainer(application: Application) {
     private val appContext: Context = application
 
     val connectionStore = ConnectionStore(appContext)
+    val launcherSettingsStore = SharedPreferencesLauncherSettingsStore(appContext)
 
     private val okHttp = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)

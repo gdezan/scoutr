@@ -254,7 +254,7 @@ data class ModelInfo(
     val provider: String = "",
     val reasoning: Boolean = false,
     val thinkingLevels: List<String> = emptyList(),
-    val contextWindow: Long = 0,
+    val contextWindow: Long? = null,
 )
 
 @Serializable

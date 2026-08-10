@@ -1,6 +1,6 @@
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { listDirs, DirListingError } from "../src/dirs.js";
@@ -16,6 +16,7 @@ describe("listDirs", () => {
     mkdirSync(join(root, "empty-sub"), { recursive: true });
     // a file that must never appear as a dir listing entry
     writeFileSync(join(root, "not-a-dir"), "");
+    symlinkSync("/", join(root, "outside-link"), "dir");
   });
 
   after(() => rmSync(root, { recursive: true, force: true }));
@@ -33,10 +34,12 @@ describe("listDirs", () => {
 
   it("rejects paths outside the root", () => {
     assert.throws(() => listDirs("/tmp", root), DirListingError);
-    assert.throws(
-      () => listDirs(join(root, "..", "outside"), root),
-      /outside allowed root/,
-    );
+    assert.throws(() => listDirs(join(root, "..", "outside"), root), DirListingError);
+  });
+
+
+  it("rejects symlinks that resolve outside the root", () => {
+    assert.throws(() => listDirs(join(root, "outside-link"), root), /outside allowed root/);
   });
 
   it("rejects missing and non-directory paths", () => {

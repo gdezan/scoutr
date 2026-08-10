@@ -1,15 +1,18 @@
 package dev.cockpit.app.ui
 
+import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsEnabled
+import org.junit.Assert.assertTrue
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextInput
-import androidx.compose.ui.test.assertIsDisplayed
-import androidx.compose.ui.test.assertIsEnabled
-import androidx.compose.ui.test.assertIsNotEnabled
-import androidx.compose.ui.test.hasTestTag
 import dev.cockpit.app.data.ConnectionStore
+import dev.cockpit.app.data.SharedPreferencesLauncherSettingsStore
 import dev.cockpit.app.net.BridgeClient
 import dev.cockpit.app.state.NewSessionViewModel
 import dev.cockpit.app.ui.screens.NewSessionSheet
@@ -24,8 +27,8 @@ import org.junit.Test
 import java.util.concurrent.TimeUnit
 
 /**
- * The new-session create sheet against a local mock bridge: folder listing,
- * model catalog, selection, and create gating.
+ * Fast-launch behavior against a local mock bridge: focused pickers, create gating,
+ * and atomic delivery of the first task with launch settings.
  */
 class NewSessionSheetTest {
 
@@ -68,6 +71,12 @@ class NewSessionSheetTest {
         return BridgeClient(OkHttpClient.Builder().readTimeout(5, TimeUnit.SECONDS).build(), store)
     }
 
+    private fun launcherSettingsStore(): SharedPreferencesLauncherSettingsStore {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        context.getSharedPreferences("cockpit_launcher", android.content.Context.MODE_PRIVATE).edit().clear().commit()
+        return SharedPreferencesLauncherSettingsStore(context)
+    }
+
     private fun waitFor(tag: String) {
         compose.waitUntil(timeoutMillis = 10_000) {
             compose.onAllNodes(hasTestTag(tag)).fetchSemanticsNodes().isNotEmpty()
@@ -75,57 +84,63 @@ class NewSessionSheetTest {
     }
 
     @Test
-    fun folderListingRendersAndCreateGatesOnModel() {
+    fun launcherSendsPromptAndExecutionSettingsInOneCreateRequest() {
         stubEndpoints(
             home = """{"ok":true,"listing":{"path":"/home/gdezan","dirs":["Dev","Downloads"]}}""",
             dev = """{"ok":true,"listing":{"path":"/home/gdezan/Dev","dirs":["agents-mobile"]}}""",
-            models = """{"ok":true,"catalog":{"providers":[{"name":"openai-codex","models":[{"id":"gpt-5.4","name":"GPT-5.4","provider":"openai-codex"}]}]}}""",
+            models = """{"ok":true,"catalog":{"providers":[{"name":"openai-codex","models":[{"id":"gpt-5.4","name":"GPT-5.4","provider":"openai-codex","reasoning":true,"thinkingLevels":["low","high"],"contextWindow":200000}]}]}}""",
             create = """{"ok":true,"workspaceId":"wN","paneId":"wN:p1"}""",
         )
 
-        val vm = NewSessionViewModel(bridge())
+        val vm = NewSessionViewModel(bridge(), launcherSettingsStore())
+        var createdPane: String? = null
         compose.setContent {
-            NewSessionSheet(viewModel = vm, onDismiss = {}, onCreated = {})
+            NewSessionSheet(viewModel = vm, onDismiss = {}, onCreated = { createdPane = it })
         }
 
+        compose.onNodeWithTag("initial_prompt").performTextInput("Fix the flaky sync test")
+        compose.onNodeWithTag("open_folder_picker").performScrollTo().performClick()
         waitFor("folder_item_Dev")
-        compose.onNodeWithTag("folder_item_Dev").assertIsDisplayed().performClick()
-
+        compose.onNodeWithTag("folder_item_Dev").performClick()
         waitFor("folder_item_agents-mobile")
-        compose.onNodeWithText("/home/gdezan/Dev").assertIsDisplayed()
-        compose.onNodeWithTag("folder_item_agents-mobile").assertIsDisplayed()
+        compose.onNodeWithTag("use_folder").performClick()
 
-        // create is disabled until a model is picked
-        compose.onNodeWithTag("create_session").assertIsNotEnabled()
-
+        compose.onNodeWithTag("create_session").assertIsEnabled()
+        compose.onNodeWithTag("open_model_picker").performScrollTo().performClick()
         waitFor("model_item_gpt-5.4")
         compose.onNodeWithTag("model_item_gpt-5.4").performClick()
-        compose.onNodeWithTag("create_session").assertIsEnabled()
-
+        compose.onNodeWithTag("new_session_content").performScrollToNode(hasTestTag("thinking_high"))
+        compose.onNodeWithTag("thinking_high").performClick()
+        compose.onNodeWithTag("new_session_content").performScrollToNode(hasTestTag("session_name"))
         compose.onNodeWithTag("session_name").performTextInput("demo")
-        compose.onNodeWithTag("create_session").performClick()
+        compose.onNodeWithTag("create_session").assertIsEnabled().performClick()
 
-        // after create, the sheet stays up until onCreated fires; the request
-        // must have been served (MockWebServer holds the record).
-        waitFor("create_session")
+        compose.waitUntil(timeoutMillis = 10_000) { createdPane == "wN:p1" }
+        val requests = generateSequence { server.takeRequest(100, TimeUnit.MILLISECONDS) }.toList()
+        val createRequest = requests.single { it.path == "/api/sessions" }
+        val body = createRequest.body.readUtf8()
+        assertTrue(body.contains("\"cwd\":\"/home/gdezan/Dev\""))
+        assertTrue(body.contains("\"model\":\"openai-codex/gpt-5.4\""))
+        assertTrue(body.contains("\"initialPrompt\":\"Fix the flaky sync test\""))
+        assertTrue(body.contains("\"thinkingLevel\":\"high\""))
     }
 
     @Test
-    fun quickPickJumpsToDev() {
+    fun quickPickChangesTheSelectedFolder() {
         stubEndpoints(
             home = """{"ok":true,"listing":{"path":"/home/gdezan","dirs":["Dev","Downloads"]}}""",
             dev = """{"ok":true,"listing":{"path":"/home/gdezan/Dev","dirs":["agents-mobile"]}}""",
             models = """{"ok":true,"catalog":{"providers":[]}}""",
         )
 
-        val vm = NewSessionViewModel(bridge())
+        val vm = NewSessionViewModel(bridge(), launcherSettingsStore())
         compose.setContent {
             NewSessionSheet(viewModel = vm, onDismiss = {}, onCreated = {})
         }
 
         waitFor("quick_pick_Dev")
-        compose.onNodeWithTag("quick_pick_Dev").performClick()
-        waitFor("folder_item_agents-mobile")
+        compose.onNodeWithTag("quick_pick_Dev").performScrollTo().performClick()
+        compose.waitUntil(timeoutMillis = 10_000) { vm.ui.value.path == "/home/gdezan/Dev" }
         compose.onNodeWithText("/home/gdezan/Dev").assertIsDisplayed()
     }
 }

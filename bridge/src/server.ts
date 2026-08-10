@@ -32,6 +32,8 @@ export interface JsonBody {
   cwd?: string;
   model?: string;
   name?: string;
+  thinkingLevel?: string;
+  initialPrompt?: string;
   action?: string;
   text?: string;
 }
@@ -116,11 +118,25 @@ export function createCockpitServer(deps: ServerDeps, options: CreateServerOptio
         let size = 0;
         for await (const chunk of request) {
           size += chunk.length;
-          if (size > 1_000_000) throw new Error("body too large");
+          if (size > 1_000_000) {
+            sendJson(response, 413, { ok: false, error: "body too large" });
+            return;
+          }
           chunks.push(chunk);
         }
         const raw = Buffer.concat(chunks).toString("utf8");
-        (request as IncomingMessage & { body?: JsonBody }).body = raw ? JSON.parse(raw) : {};
+        let body: unknown = {};
+        try {
+          body = raw ? JSON.parse(raw) : {};
+        } catch {
+          sendJson(response, 400, { ok: false, error: "request body must be valid JSON" });
+          return;
+        }
+        if (body === null || Array.isArray(body) || typeof body !== "object") {
+          sendJson(response, 400, { ok: false, error: "request body must be a JSON object" });
+          return;
+        }
+        (request as IncomingMessage & { body?: JsonBody }).body = body as JsonBody;
       }
       await route(request, response, url, deps);
     } catch (error) {
@@ -265,8 +281,15 @@ export function createCockpitServer(deps: ServerDeps, options: CreateServerOptio
     if (request.method === "POST" && pathname === "/api/sessions") {
       const body = (request as IncomingMessage & { body?: JsonBody }).body ?? {};
       try {
-        if (!body.cwd || !body.model) throw new SessionsError("cwd and model are required");
-        const created = await createSession(routeDeps.herdr, { cwd: body.cwd, model: body.model, name: body.name });
+        // createSession validates; one authenticated call creates the pane and
+        // delivers the first prompt (optional initialPrompt, thinkingLevel).
+        const created = await createSession(routeDeps.herdr, {
+          cwd: body.cwd ?? "",
+          model: body.model ?? "",
+          name: body.name,
+          thinkingLevel: body.thinkingLevel,
+          initialPrompt: body.initialPrompt,
+        });
         sendJson(response, 200, { ok: true, ...created });
       } catch (error) {
         const status = error instanceof SessionsError ? error.status : 502;

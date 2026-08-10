@@ -1,4 +1,4 @@
-import { readdirSync, statSync } from "node:fs";
+import { readdirSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve, sep } from "node:path";
 
@@ -16,26 +16,29 @@ export class DirListingError extends Error {
   }
 }
 
-/**
- * List the immediate subdirectories of `requested` (resolved against
- * `baseRoot`), refusing to go outside the root. Root defaults to the user's
- * home so the phone can only browse the user's own files.
- */
-export function listDirs(requested: string, baseRoot = homedir()): DirListing {
-  const root = resolve(baseRoot);
-  const target = resolve(requested);
-  if (target !== root && !target.startsWith(root + sep)) {
-    throw new DirListingError("path outside allowed root");
-  }
+/** Resolve an existing directory without allowing access outside the user's home. */
+export function resolveAllowedDir(requested: string, baseRoot = homedir()): string {
+  let root: string;
+  let target: string;
   let stat;
   try {
+    root = realpathSync(resolve(baseRoot));
+    target = realpathSync(resolve(requested));
     stat = statSync(target);
   } catch {
     throw new DirListingError("no such directory");
   }
+  if (target !== root && !target.startsWith(root + sep)) {
+    throw new DirListingError("path outside allowed root");
+  }
   if (!stat.isDirectory()) {
     throw new DirListingError("not a directory");
   }
+  return target;
+}
+
+export function listDirs(requested: string, baseRoot = homedir()): DirListing {
+  const target = resolveAllowedDir(requested, baseRoot);
   let entries: string[] = [];
   try {
     entries = readdirSync(target, { withFileTypes: true })

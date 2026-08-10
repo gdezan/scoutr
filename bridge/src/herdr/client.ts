@@ -288,6 +288,10 @@ export class HerdrClient {
     return this.request("workspace.create", params);
   }
 
+  async workspaceClose(workspace_id: string): Promise<unknown> {
+    return this.request("workspace.close", { workspace_id });
+  }
+
   async workspaceRename(workspace_id: string, label: string): Promise<unknown> {
     return this.request("workspace.rename", { workspace_id, label });
   }

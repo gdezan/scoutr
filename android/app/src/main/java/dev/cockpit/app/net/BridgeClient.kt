@@ -117,13 +117,20 @@ class BridgeClient(
     suspend fun models(): ModelsCatalogResponse =
         call("/api/models") { json.decodeFromString(ModelsCatalogResponse.serializer(), it) }
 
-    /** Create a pane-native pi session (new herdr workspace + pane + pi launch). */
-    suspend fun createSession(cwd: String, model: String, name: String? = null): CreatedSessionResponse =
-        post("/api/sessions", buildJsonObject {
-            put("cwd", JsonPrimitive(cwd))
-            put("model", JsonPrimitive(model))
-            if (name != null) put("name", JsonPrimitive(name))
-        }) { json.decodeFromString(CreatedSessionResponse.serializer(), it) }
+    /** Create a pane-native pi session and deliver its optional first prompt in one bridge call. */
+    suspend fun createSession(
+        cwd: String,
+        model: String,
+        name: String? = null,
+        initialPrompt: String? = null,
+        thinkingLevel: String? = null,
+    ): CreatedSessionResponse = post("/api/sessions", buildJsonObject {
+        put("cwd", JsonPrimitive(cwd))
+        put("model", JsonPrimitive(model))
+        if (name != null) put("name", JsonPrimitive(name))
+        if (initialPrompt != null) put("initialPrompt", JsonPrimitive(initialPrompt))
+        if (thinkingLevel != null) put("thinkingLevel", JsonPrimitive(thinkingLevel))
+    }) { json.decodeFromString(CreatedSessionResponse.serializer(), it) }
 
     /**
      * Resume a pending bridge call, turning a decode failure into the
