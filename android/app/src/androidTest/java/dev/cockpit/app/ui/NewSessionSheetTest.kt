@@ -2,6 +2,7 @@ package dev.cockpit.app.ui
 
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertCountEquals
 import org.junit.Assert.assertTrue
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -107,8 +108,8 @@ class NewSessionSheetTest {
 
         compose.onNodeWithTag("create_session").assertIsEnabled()
         compose.onNodeWithTag("open_model_picker").performScrollTo().performClick()
-        waitFor("model_item_gpt-5.4")
-        compose.onNodeWithTag("model_item_gpt-5.4").performClick()
+        waitFor("model_item_openai-codex/gpt-5.4")
+        compose.onNodeWithTag("model_item_openai-codex/gpt-5.4").performClick()
         compose.onNodeWithTag("new_session_content").performScrollToNode(hasTestTag("thinking_high"))
         compose.onNodeWithTag("thinking_high").performClick()
         compose.onNodeWithTag("new_session_content").performScrollToNode(hasTestTag("session_name"))
@@ -142,5 +143,44 @@ class NewSessionSheetTest {
         compose.onNodeWithTag("quick_pick_Dev").performScrollTo().performClick()
         compose.waitUntil(timeoutMillis = 10_000) { vm.ui.value.path == "/home/gdezan/Dev" }
         compose.onNodeWithText("/home/gdezan/Dev").assertIsDisplayed()
+    }
+
+    @Test
+    fun modelPickerGroupsModelsUnderProviderHeaders() {
+        stubEndpoints(
+            home = """{"ok":true,"listing":{"path":"/home/gdezan","dirs":["Dev","Downloads"]}}""",
+            dev = """{"ok":true,"listing":{"path":"/home/gdezan/Dev","dirs":["agents-mobile"]}}""",
+            models = """{"ok":true,"catalog":{"providers":[
+                {"name":"openai-codex","models":[
+                    {"id":"gpt-5.4","name":"GPT-5.4","provider":"openai-codex","reasoning":true,"thinkingLevels":["low","high"],"contextWindow":200000},
+                    {"id":"gpt-4.1","name":"GPT-4.1","provider":"openai-codex","reasoning":true,"thinkingLevels":["low"],"contextWindow":128000}]},
+                {"name":"deepseek","models":[
+                    {"id":"deepseek-v4-flash","name":"DeepSeek V4 Flash","provider":"deepseek","reasoning":false,"thinkingLevels":[],"contextWindow":128000}]}
+            ]}}""",
+        )
+
+        val vm = NewSessionViewModel(bridge(), launcherSettingsStore())
+        compose.setContent {
+            NewSessionSheet(viewModel = vm, onDismiss = {}, onCreated = {})
+        }
+
+        compose.onNodeWithTag("open_model_picker").performScrollTo().performClick()
+        waitFor("provider_header_openai-codex")
+        compose.onNodeWithTag("provider_header_openai-codex").assertIsDisplayed()
+        // The second provider's models are below the fold; scroll the list.
+        compose.onNodeWithTag("model_list").performScrollToNode(hasTestTag("provider_header_deepseek"))
+        compose.onNodeWithTag("provider_header_deepseek").assertIsDisplayed()
+
+        // Every model appears exactly once, under exactly one provider group.
+        // The tag is the provider-qualified key, so a model id shared by two
+        // providers (e.g. deepseek-v4-flash) still resolves to a single node.
+        compose.onNodeWithTag("model_item_openai-codex/gpt-5.4").assertIsDisplayed()
+        compose.onAllNodes(hasTestTag("model_item_openai-codex/gpt-5.4")).assertCountEquals(1)
+        compose.onAllNodes(hasTestTag("model_item_openai-codex/gpt-4.1")).assertCountEquals(1)
+        compose.onAllNodes(hasTestTag("model_item_deepseek/deepseek-v4-flash")).assertCountEquals(1)
+
+        // Selection still lands and closes the picker.
+        compose.onNodeWithTag("model_item_deepseek/deepseek-v4-flash").performClick()
+        compose.waitUntil(timeoutMillis = 5_000) { vm.ui.value.selectedModelKey == "deepseek/deepseek-v4-flash" }
     }
 }

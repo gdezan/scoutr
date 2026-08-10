@@ -53,6 +53,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import dev.cockpit.app.state.ModelPickerMatch
@@ -96,22 +97,34 @@ internal fun ModelPickerDialog(
                     ui.loadingModels -> PickerLoading()
                     ui.modelError != null -> PickerError(ui.modelError, viewModel::retryModels)
                     ui.modelMatches.isEmpty() -> ModelPickerEmpty(viewModel::clearModelFilters)
-                    else -> LazyColumn(
-                        modifier = Modifier.fillMaxSize().testTag("model_list"),
-                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-                        verticalArrangement = Arrangement.spacedBy(4.dp),
-                    ) {
-                        items(ui.modelMatches, key = { it.key }) { match ->
-                            ModelPickerRow(
-                                match = match,
-                                selected = match.key == ui.selectedModelKey,
-                                onSelect = {
-                                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                    viewModel.selectModel(match.key)
-                                    onDismiss()
-                                },
-                                onToggleFavorite = { viewModel.toggleFavorite(match.key) },
-                            )
+                    else -> {
+                        // Provider-first structure: models group under one provider
+                        // header each (fix 6). groupBy keeps the ranked encounter
+                        // order, so the top match still leads while every model
+                        // appears under exactly one provider.
+                        val providerGroups = ui.modelMatches.groupBy { it.provider }
+                        LazyColumn(
+                            modifier = Modifier.fillMaxSize().testTag("model_list"),
+                            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            providerGroups.forEach { (provider, matches) ->
+                                item(key = "provider:$provider") {
+                                    ProviderHeader(name = provider, count = matches.size)
+                                }
+                                items(matches, key = { it.key }) { match ->
+                                    ModelPickerRow(
+                                        match = match,
+                                        selected = match.key == ui.selectedModelKey,
+                                        onSelect = {
+                                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                            viewModel.selectModel(match.key)
+                                            onDismiss()
+                                        },
+                                        onToggleFavorite = { viewModel.toggleFavorite(match.key) },
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -237,6 +250,38 @@ private fun ModelFilters(ui: NewSessionUiState, viewModel: NewSessionViewModel) 
 }
 
 @Composable
+private fun ProviderHeader(name: String, count: Int) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 12.dp, end = 12.dp, top = 26.dp, bottom = 4.dp)
+            .testTag("provider_header_$name"),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        // Brighter than the mono key line it presides over: same face (a provider
+        // is an identifier) but a clear contrast step up, so the header reads as
+        // structure instead of another key line.
+        Text(
+            name,
+            style = MaterialTheme.typography.labelSmall,
+            fontFamily = FontFamily.Monospace,
+            fontWeight = FontWeight.SemiBold,
+            letterSpacing = 0.6.sp,
+            color = MaterialTheme.colorScheme.onSurface,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+        Spacer(Modifier.width(8.dp))
+        Text(
+            count.toString(),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+        )
+    }
+}
+
+@Composable
 private fun ModelPickerRow(
     match: ModelPickerMatch,
     selected: Boolean,
@@ -247,7 +292,7 @@ private fun ModelPickerRow(
         onClick = onSelect,
         color = if (selected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.72f) else Color.Transparent,
         shape = RoundedCornerShape(10.dp),
-        modifier = Modifier.fillMaxWidth().testTag("model_item_${match.model.id}"),
+        modifier = Modifier.fillMaxWidth().testTag("model_item_${match.key}"),
     ) {
         Row(
             modifier = Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(start = 12.dp, end = 2.dp, top = 8.dp, bottom = 8.dp),
