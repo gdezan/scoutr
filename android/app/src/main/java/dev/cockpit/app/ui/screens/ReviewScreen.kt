@@ -49,6 +49,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.cockpit.app.CockpitApp
 import dev.cockpit.app.state.ReviewViewModel
+
+import dev.cockpit.app.ui.theme.DiffPalette
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -292,9 +294,12 @@ private fun StatusRow(code: String, path: String) {
 private fun statusCodeColor(code: String): Color {
     val first = code.firstOrNull() ?: ' '
     return when {
-        first == '?' -> MaterialTheme.colorScheme.tertiary
-        first == 'M' || first == 'A' || first == 'R' || first == 'C' -> MaterialTheme.colorScheme.primary
-        else -> MaterialTheme.colorScheme.error
+        first == '?' -> DiffPalette.Added // untracked
+        first == 'D' -> DiffPalette.Deleted
+        first == 'R' -> DiffPalette.Renamed
+        first == 'U' -> DiffPalette.Conflict
+        first == 'M' || first == 'A' || first == 'C' -> DiffPalette.Modified
+        else -> DiffPalette.Ignored
     }
 }
 
@@ -413,15 +418,18 @@ private fun DiffMode(
 
 @Composable
 private fun DiffLine(line: String) {
-    val color = when {
-        line.startsWith("+++") || line.startsWith("---") -> MaterialTheme.colorScheme.onSurfaceVariant
-        line.startsWith('+') -> MaterialTheme.colorScheme.secondary
-        line.startsWith('-') -> MaterialTheme.colorScheme.error
-        line.startsWith("@@") -> MaterialTheme.colorScheme.primary
-        else -> MaterialTheme.colorScheme.onSurface
+    // gdezan-material version_control mapping: inserted cyan, deleted red,
+    // hunk headers quiet muted; line backgrounds are the editor's faint tints.
+    val (color, background) = when {
+        line.startsWith("+++") -> DiffPalette.Added to DiffPalette.AddedBackground
+        line.startsWith("---") -> DiffPalette.Deleted to DiffPalette.DeletedBackground
+        line.startsWith('+') -> DiffPalette.Added to DiffPalette.AddedBackground
+        line.startsWith('-') -> DiffPalette.Deleted to DiffPalette.DeletedBackground
+        line.startsWith("@@") -> DiffPalette.Ignored to Color.Transparent
+        else -> MaterialTheme.colorScheme.onSurface to Color.Transparent
     }
     Row(
-        Modifier.fillMaxWidth().background(color.copy(alpha = 0.06f)).padding(horizontal = 16.dp, vertical = 1.dp),
+        Modifier.fillMaxWidth().background(background).padding(horizontal = 16.dp, vertical = 1.dp),
     ) {
         Text(
             line,

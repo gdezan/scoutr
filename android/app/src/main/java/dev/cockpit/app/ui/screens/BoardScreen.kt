@@ -41,6 +41,8 @@ import dev.cockpit.app.data.AgentCard
 import dev.cockpit.app.data.AgentStatus
 import dev.cockpit.app.CockpitApp
 import dev.cockpit.app.state.BoardViewModel
+import dev.cockpit.app.ui.motion.CockpitMotion
+import dev.cockpit.app.ui.motion.useReduceMotion
 
 /**
  * Attention-first Board. Phase vocabulary is the section header plus a per-card
@@ -55,6 +57,7 @@ fun BoardScreen(
     modifier: Modifier = Modifier,
 ) {
     val ui by viewModel.ui.collectAsState()
+    val reduceMotion = useReduceMotion()
 
     if (ui.loading && ui.board.total == 0) {
         BoardSkeleton(modifier)
@@ -90,11 +93,11 @@ fun BoardScreen(
                 }
             }
         } else {
-            boardSection("Needs you", ui.board.needsYou, onOpenAgent)
-            boardSection("Working", ui.board.working, onOpenAgent)
-            boardSection("Done", ui.board.done, onOpenAgent)
-            boardSection("Idle", ui.board.idle, onOpenAgent)
-            boardSection("Other", ui.board.unknown, onOpenAgent)
+            boardSection("Needs you", ui.board.needsYou, onOpenAgent, reduceMotion)
+            boardSection("Working", ui.board.working, onOpenAgent, reduceMotion)
+            boardSection("Done", ui.board.done, onOpenAgent, reduceMotion)
+            boardSection("Idle", ui.board.idle, onOpenAgent, reduceMotion)
+            boardSection("Other", ui.board.unknown, onOpenAgent, reduceMotion)
         }
         item { Spacer(Modifier.height(24.dp)) }
     }
@@ -105,6 +108,7 @@ private fun LazyListScope.boardSection(
     title: String,
     agents: List<AgentCard>,
     onOpenAgent: (AgentCard) -> Unit,
+    reduceMotion: Boolean,
 ) {
     if (agents.isEmpty()) return
     item(key = "header_$title") {
@@ -133,7 +137,15 @@ private fun LazyListScope.boardSection(
         }
     }
     items(agents, key = { it.paneId }) { agent ->
-        AgentCardRow(agent, onClick = { onOpenAgent(agent) }, modifier = Modifier.animateItem())
+        AgentCardRow(
+            agent,
+            onClick = { onOpenAgent(agent) },
+            modifier = Modifier.animateItem(
+                fadeInSpec = CockpitMotion.itemSpec(reduceMotion),
+                placementSpec = CockpitMotion.itemPlacementSpec(reduceMotion),
+                fadeOutSpec = CockpitMotion.itemSpec(reduceMotion),
+            ),
+        )
     }
 }
 

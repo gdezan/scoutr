@@ -41,6 +41,9 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -67,6 +70,7 @@ import dev.cockpit.app.state.CommandPaletteViewModel
 import dev.cockpit.app.state.SessionHistoryViewModel
 import dev.cockpit.app.state.UsageViewModel
 import dev.cockpit.app.state.ReviewViewModel
+import dev.cockpit.app.state.ReduceMotionStore
 import dev.cockpit.app.ui.screens.BoardScreen
 import dev.cockpit.app.ui.screens.NewSessionSheet
 import dev.cockpit.app.ui.screens.ChatScreen
@@ -75,6 +79,11 @@ import dev.cockpit.app.ui.screens.ConnectScreen
 import dev.cockpit.app.ui.screens.HistoryScreen
 import dev.cockpit.app.ui.screens.UsageScreen
 import dev.cockpit.app.ui.screens.ReviewScreen
+
+import dev.cockpit.app.ui.motion.HapticEvent
+import dev.cockpit.app.ui.motion.OverlayPresence
+import dev.cockpit.app.ui.motion.rememberHaptic
+import dev.cockpit.app.ui.motion.useReduceMotion
 import dev.cockpit.app.ui.theme.CockpitTheme
 
 private object Routes {
@@ -118,7 +127,15 @@ class MainActivity : ComponentActivity() {
             navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
         )
         setContent {
-            CockpitTheme {
+            // Mirror the system "Remove animations" setting into the theme so
+            // every motion helper collapses to zero duration when asked.
+            val context = LocalContext.current
+            val motionStore = remember { ReduceMotionStore(context) }
+            DisposableEffect(motionStore) {
+                onDispose { motionStore.close() }
+            }
+            val reduceMotion by motionStore.reduceMotion.collectAsState()
+            CockpitTheme(reduceMotion = reduceMotion) {
                 CockpitAppNav()
             }
         }
@@ -281,7 +298,8 @@ private fun CockpitAppNav() {
                         viewModel = usageViewModel,
                         modifier = Modifier.padding(innerUsage),
                     )
-
+                }
+            }
             composable(Routes.REVIEW) {
                 val reviewViewModel: ReviewViewModel = viewModel(
                     factory = ReviewViewModel.factory(container.bridge, container.connectionStore),
@@ -293,22 +311,26 @@ private fun CockpitAppNav() {
                     )
                 }
             }
-                }
-            }
         }
         }
 
         if (paletteOpen) {
-            LaunchedEffect(Unit) { paletteViewModel.open() }
-            CommandPalette(
-                viewModel = paletteViewModel,
-                onOpenAgent = { paneId, sessionPath ->
-                    navController.navigate(Routes.chat(paneId, sessionPath, "working"))
-                },
-                onOpenSession = { paneId, sessionPath ->
-                    navController.navigate(Routes.chat(paneId, sessionPath, "working"))
-                },
-            )
+            val haptic = rememberHaptic()
+            LaunchedEffect(Unit) {
+                haptic(HapticEvent.Select)
+                paletteViewModel.open()
+            }
+            OverlayPresence(reduceMotion = useReduceMotion()) {
+                CommandPalette(
+                    viewModel = paletteViewModel,
+                    onOpenAgent = { paneId, sessionPath ->
+                        navController.navigate(Routes.chat(paneId, sessionPath, "working"))
+                    },
+                    onOpenSession = { paneId, sessionPath ->
+                        navController.navigate(Routes.chat(paneId, sessionPath, "working"))
+                    },
+                )
+            }
         }
     }
 }
@@ -367,11 +389,16 @@ private fun CockpitTab(
     badge: Int,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+
 ) {
+    val haptic = rememberHaptic()
     Column(
         modifier
             .clip(RoundedCornerShape(12.dp))
-            .clickable(onClick = onClick)
+            .clickable {
+                haptic(HapticEvent.Select)
+                onClick()
+            }
             .padding(vertical = 6.dp, horizontal = 4.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {

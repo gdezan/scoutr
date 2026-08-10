@@ -79,6 +79,11 @@ import dev.cockpit.app.data.QuestionEntry
 import dev.cockpit.app.data.SlashCommandInfo
 import dev.cockpit.app.data.entryText
 import dev.cockpit.app.ui.components.QuestionCard
+
+import dev.cockpit.app.ui.motion.CockpitMotion
+import dev.cockpit.app.ui.motion.HapticEvent
+import dev.cockpit.app.ui.motion.rememberHaptic
+import dev.cockpit.app.ui.motion.useReduceMotion
 import dev.cockpit.app.state.ChatUiState
 import dev.cockpit.app.state.ChatViewModel
 import dev.cockpit.app.state.MessageDeliveryState
@@ -98,6 +103,8 @@ fun ChatScreen(
     modifier: Modifier = Modifier,
 ) {
     val ui by viewModel.ui.collectAsState()
+
+    val haptic = rememberHaptic()
     var input by remember { mutableStateOf("") }
     var detailsVisible by rememberSaveable { mutableStateOf(false) }
     var renameOpen by remember { mutableStateOf(false) }
@@ -157,7 +164,10 @@ fun ChatScreen(
                         detailsVisible = detailsVisible,
                         liveOutputExpanded = ui.liveOutputExpanded,
                         onRetryPending = viewModel::retryPendingMessage,
-                        onAnswerQuestion = viewModel::answerQuestion,
+                        onAnswerQuestion = { id, answer ->
+                            haptic(HapticEvent.Confirm)
+                            viewModel.answerQuestion(id, answer)
+                        },
                         modifier = Modifier.fillMaxSize(),
                     )
                 }
@@ -189,6 +199,7 @@ fun ChatScreen(
                 onRetryCommands = viewModel::retryCommands,
                 onSend = {
                     if (input.isNotBlank()) {
+                        haptic(HapticEvent.Confirm)
                         viewModel.send(input)
                         input = ""
                     }
@@ -411,6 +422,8 @@ fun ChatList(
     modifier: Modifier = Modifier,
 ) {
     val listState = rememberLazyListState()
+
+    val reduceMotion = useReduceMotion()
     var followNew by remember { mutableStateOf(true) }
 
     // A new entry only lands while the user is at the bottom; the moment they
@@ -451,7 +464,11 @@ fun ChatList(
                 MessageRow(
                     entry = entry,
                     detailsVisible = detailsVisible,
-                    modifier = Modifier.animateItem(),
+                    Modifier.animateItem(
+                        fadeInSpec = CockpitMotion.itemSpec(reduceMotion),
+                        placementSpec = CockpitMotion.itemPlacementSpec(reduceMotion),
+                        fadeOutSpec = CockpitMotion.itemSpec(reduceMotion),
+                    )
                 )
             }
             items(questions, key = { it.id }) { question ->
@@ -459,14 +476,22 @@ fun ChatList(
                     question = question,
                     sending = answeringQuestionId == question.id,
                     onAnswer = { answer -> onAnswerQuestion(question.id, answer) },
-                    modifier = Modifier.animateItem(),
+                    Modifier.animateItem(
+                        fadeInSpec = CockpitMotion.itemSpec(reduceMotion),
+                        placementSpec = CockpitMotion.itemPlacementSpec(reduceMotion),
+                        fadeOutSpec = CockpitMotion.itemSpec(reduceMotion),
+                    )
                 )
             }
             items(pendingMessages, key = { it.localId }) { message ->
                 PendingUserBubble(
                     message = message,
                     onRetry = { onRetryPending(message.localId) },
-                    modifier = Modifier.animateItem(),
+                    Modifier.animateItem(
+                        fadeInSpec = CockpitMotion.itemSpec(reduceMotion),
+                        placementSpec = CockpitMotion.itemPlacementSpec(reduceMotion),
+                        fadeOutSpec = CockpitMotion.itemSpec(reduceMotion),
+                    )
                 )
             }
         }

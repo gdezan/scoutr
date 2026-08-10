@@ -4,7 +4,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.graphics.Color
+import dev.cockpit.app.ui.motion.LocalReduceMotion
 
 /**
  * Cockpit visual world — direction contract (impeccable, user-pinned brief).
@@ -65,11 +67,14 @@ private val LightColors = lightColorScheme(
 @Composable
 fun CockpitTheme(
     darkTheme: Boolean = true,
+    reduceMotion: Boolean = false,
     content: @Composable () -> Unit,
 ) {
-    MaterialTheme(
-        colorScheme = if (darkTheme) DarkColors else LightColors,
-        typography = MaterialTheme.typography,
-        content = content,
-    )
+    CompositionLocalProvider(LocalReduceMotion provides reduceMotion) {
+        MaterialTheme(
+            colorScheme = if (darkTheme) DarkColors else LightColors,
+            typography = MaterialTheme.typography,
+            content = content,
+        )
+    }
 }
