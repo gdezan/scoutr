@@ -466,8 +466,7 @@ private fun CockpitTab(
                     Modifier
                         .padding(top = (-6).dp, end = (-6).dp)
                         .size(16.dp)
-                        .background(MaterialTheme.colorScheme.error, RoundedCornerShape(50))
-                        .clickable(onClick = onClick),
+                        .background(MaterialTheme.colorScheme.error, RoundedCornerShape(50)),
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(

@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
-import { realpathSync } from "node:fs";
+import { readdirSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { isAbsolute, resolve, sep } from "node:path";
+import { isAbsolute, join, resolve, sep } from "node:path";
 
 /**
  * Read-only git review API.
@@ -50,10 +50,28 @@ export interface ReviewOverview {
   path: string;
   root: string;
   branch: string | null;
+  /** Upstream tracking branch, e.g. "origin/main", when known. */
+  upstream: string | null;
+  /** Commits ahead of the upstream tracking branch. */
+  ahead: number;
+  /** Commits behind the upstream tracking branch. */
+  behind: number;
   status: ReviewStatusEntry[];
   statusTruncated: boolean;
   log: ReviewCommit[];
   logTruncated: boolean;
+}
+
+/** One generated artifact (build output, dependency tree, test report). */
+export interface ReviewArtifact {
+  path: string;
+  size: number;
+  mtimeMs: number;
+}
+
+export interface ReviewArtifactsResult {
+  artifacts: ReviewArtifact[];
+  truncated: boolean;
 }
 
 export interface ReviewDiffFileStat {
@@ -150,20 +168,42 @@ async function currentBranch(path: string): Promise<string | null> {
   }
 }
 
-function parsePorcelainStatus(output: string): { entries: ReviewStatusEntry[]; truncated: boolean } {
+function parsePorcelainStatus(output: string): {
+  entries: ReviewStatusEntry[];
+  truncated: boolean;
+  branch: string | null;
+  upstream: string | null;
+  ahead: number;
+  behind: number;
+} {
   const entries: ReviewStatusEntry[] = [];
+  let branch: string | null = null;
+  let upstream: string | null = null;
+  let ahead = 0;
+  let behind = 0;
   const lines = output.split("\n");
   for (const line of lines) {
-    if (entries.length >= REVIEW_STATUS_MAX_ENTRIES) return { entries, truncated: true };
+    if (entries.length >= REVIEW_STATUS_MAX_ENTRIES) return { entries, truncated: true, branch, upstream, ahead, behind };
     if (!line) continue;
-    if (line.startsWith("##")) continue; // branch header
+    if (line.startsWith("##")) {
+      // ## main...origin/main [ahead 1, behind 2] (or ## main [gone])
+      const head = line.slice(2).trim();
+      const match = head.match(/^(\S+?)(?:\.\.\.(\S+?))?(?:\s*\[(?:ahead (\d+))?(?:, )?(?:behind (\d+))?\])?$/);
+      if (match) {
+        branch = match[1] || null;
+        upstream = match[2] || null;
+        ahead = Number(match[3] ?? 0);
+        behind = Number(match[4] ?? 0);
+      }
+      continue;
+    }
     if (line.length < 4) continue;
     const code = line.slice(0, 2);
     const path = line.slice(3);
     if (!path) continue;
     entries.push({ code, path });
   }
-  return { entries, truncated: false };
+  return { entries, truncated: false, branch, upstream, ahead, behind };
 }
 
 function parseLog(output: string): ReviewCommit[] {
@@ -199,7 +239,10 @@ export async function reviewOverview(requestedPath: string): Promise<ReviewOverv
   return {
     path,
     root: realpathSync(path),
-    branch,
+    branch: status.branch ?? branch,
+    upstream: status.upstream,
+    ahead: status.ahead,
+    behind: status.behind,
     status: status.entries,
     statusTruncated: status.truncated,
     log: commits,
@@ -268,4 +311,81 @@ export async function reviewDiff(
     truncated = true;
   }
   return { diff, truncated, stat: parseDiffStat(statOut) };
+}
+
+/**
+ * Generated-artifact roots (build output, dependency trees, test reports).
+ * Conservative on purpose: these are the dirs a repo's own build and tooling
+ * create; anything else stays invisible to the review surface.
+ */
+const ARTIFACT_DIRS = new Set([
+  "build",
+  "dist",
+  "out",
+  "target",
+  "coverage",
+  ".gradle",
+  ".cache",
+  ".next",
+  "node_modules",
+  "__pycache__",
+  ".venv",
+  "venv",
+]);
+
+const ARTIFACTS_MAX = 100;
+const ARTIFACTS_MAX_DIRS = 2000;
+const ARTIFACTS_MAX_DEPTH = 8;
+
+/**
+ * Bounded walk that collects generated-artifact files (size + mtime) without
+ * ever following symlinks or escaping the repository root.
+ */
+export function reviewArtifacts(requestedPath: string): ReviewArtifactsResult {
+  const path = resolveAllowedRepoPath(requestedPath);
+  const artifacts: ReviewArtifact[] = [];
+  const queue: Array<{ dir: string; depth: number; inArtifact: boolean }> = [
+    { dir: path, depth: 0, inArtifact: false },
+  ];
+  let visited = 0;
+  let truncated = false;
+
+  while (queue.length > 0 && visited < ARTIFACTS_MAX_DIRS) {
+    const { dir, depth, inArtifact } = queue.shift()!;
+    if (depth > ARTIFACTS_MAX_DEPTH) continue;
+    visited++;
+    let entries: string[] = [];
+    try {
+      entries = readdirSync(dir);
+    } catch {
+      continue; // unreadable dir (permissions): skip, not fatal
+    }
+    for (const name of entries) {
+      if (name === ".git") continue;
+      const full = join(dir, name);
+      let stat;
+      try {
+        stat = statSync(full);
+      } catch {
+        continue;
+      }
+      if (stat.isDirectory()) {
+        const childArtifact = inArtifact || ARTIFACT_DIRS.has(name);
+        if (queue.length < ARTIFACTS_MAX_DIRS) {
+          queue.push({ dir: full, depth: depth + 1, inArtifact: childArtifact });
+        } else {
+          truncated = true;
+        }
+      } else if (inArtifact) {
+        artifacts.push({ path: full, size: stat.size, mtimeMs: stat.mtimeMs });
+        if (artifacts.length >= ARTIFACTS_MAX) {
+          truncated = true;
+          break;
+        }
+      }
+    }
+  }
+  if (visited >= ARTIFACTS_MAX_DIRS) truncated = true;
+  artifacts.sort((a, b) => b.size - a.size);
+  return { artifacts, truncated };
 }

@@ -11,6 +11,7 @@ import {
   REVIEW_STATUS_MAX_ENTRIES,
   REVIEW_DIFF_MAX_BYTES,
   REVIEW_LOG_MAX,
+  reviewArtifacts,
 } from "../src/review.js";
 
 let repoRoot: string;
@@ -44,6 +45,11 @@ test.after(() => {
 test("overview reports branch, status, and recent log", async () => {
   await writeFile(join(repoRoot, "c.txt"), "uncommitted\n");
   const overview = await reviewOverview(repoRoot);
+
+  // Clean repo: no upstream, so ahead/behind parse as 0 with the branch name.
+  assert.equal(overview.branch, "main");
+  assert.equal(overview.ahead, 0);
+  assert.equal(overview.behind, 0);
   assert.equal(overview.branch, "main");
   assert.equal(overview.status.length, 1);
   assert.equal(overview.status[0].code, "??");
@@ -83,6 +89,25 @@ test("commit kind diffs the commit against its parent", async () => {
   // noise (c.txt / d.txt from other tests) must not leak into a commit diff.
   assert.ok(result.diff.includes("+new file"), "commit diff should contain +new file");
   assert.ok(!result.diff.includes("+draft"), "working-tree changes must not leak in");
+});
+
+test("artifacts lists bounded generated files and rejects outside roots", async () => {
+  await mkdir(join(repoRoot, "build"));
+  await writeFile(join(repoRoot, "build", "app.apk"), "x".repeat(64));
+  await writeFile(join(repoRoot, "notes.txt"), "not an artifact\n");
+
+  const result = await reviewArtifacts(repoRoot);
+  const paths = result.artifacts.map((a) => a.path);
+  assert.ok(paths.some((p) => p.endsWith("build/app.apk")), "build outputs should be listed");
+  assert.ok(!paths.some((p) => p.endsWith("notes.txt")), "non-artifact files must not appear");
+  const apk = result.artifacts.find((a) => a.path.endsWith("build/app.apk"));
+  assert.equal(apk?.size, 64);
+
+  await assert.rejects(async () => reviewArtifacts(outsideRoot), (error: unknown) => {
+    assert.ok(error instanceof ReviewError);
+    assert.equal(error.status, 403);
+    return true;
+  });
 });
 
 test("rejects paths outside the allow-list", async () => {

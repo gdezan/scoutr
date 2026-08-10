@@ -8,6 +8,7 @@ import androidx.compose.ui.test.performClick
 import androidx.test.platform.app.InstrumentationRegistry
 import dev.cockpit.app.data.ConnectionStore
 import dev.cockpit.app.net.BridgeClient
+import dev.cockpit.app.state.ReviewStore
 import dev.cockpit.app.state.ReviewViewModel
 import dev.cockpit.app.ui.screens.ReviewScreen
 import dev.cockpit.app.ui.theme.CockpitTheme
@@ -78,7 +79,7 @@ class ReviewScreenTest {
             save(server.url("/").toString().trimEnd('/'), "test-token", null, null)
         }
         val bridge = BridgeClient(OkHttpClient.Builder().readTimeout(5, TimeUnit.SECONDS).build(), connection)
-        return ReviewViewModel(bridge, connection)
+        return ReviewViewModel(bridge, connection, ReviewStore(context))
     }
 
     @Test

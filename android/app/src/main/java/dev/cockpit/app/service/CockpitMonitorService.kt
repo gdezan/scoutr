@@ -128,8 +128,13 @@ class CockpitMonitorService : Service() {
             .setContentText(message.message ?: "An agent is waiting for input")
             .setPriority(if (status == "blocked") NotificationCompat.PRIORITY_HIGH else NotificationCompat.PRIORITY_DEFAULT)
             .setAutoCancel(true)
-            .setContentIntent(pending)
-            .addAction(NotificationReplyReceiver.replyAction(this, paneId))
+            // Inline reply only makes sense when the agent is waiting on input;
+            // a finished agent has nothing to steer into.
+            .apply {
+                if (status == "blocked") {
+                    addAction(NotificationReplyReceiver.replyAction(this@CockpitMonitorService, paneId))
+                }
+            }
             .build()
         val manager = getSystemService(NotificationManager::class.java)
         manager.notify(message.id.hashCode(), notification)

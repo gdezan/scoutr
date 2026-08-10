@@ -60,6 +60,8 @@ fun QuestionCard(
     sending: Boolean,
     onAnswer: (String) -> Unit,
     modifier: Modifier = Modifier,
+    /** When this question is part of a multi-question ask, its 1-based position. */
+    position: Pair<Int, Int>? = null,
 ) {
     val pending = !question.answered
     val accent = MaterialTheme.colorScheme.primary
@@ -71,6 +73,15 @@ fun QuestionCard(
     ) {
         Column(Modifier.padding(14.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
+                if (position != null) {
+                    Text(
+                        text = "Question ${position.first} of ${position.second}",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                    Spacer(Modifier.width(8.dp))
+                }
                 Text(
                     text = question.header.ifBlank { "Question" }.uppercase(),
                     style = MaterialTheme.typography.labelSmall,

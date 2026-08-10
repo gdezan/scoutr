@@ -14,10 +14,16 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -27,6 +33,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.KeyboardArrowDown
@@ -53,12 +61,20 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.runtime.produceState
+import androidx.compose.foundation.Image
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.key.Key
@@ -106,6 +122,15 @@ fun ChatScreen(
 
     val haptic = rememberHaptic()
     var input by remember { mutableStateOf("") }
+    var attachment by remember { mutableStateOf<android.net.Uri?>(null) }
+    var attachmentUploading by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    val pickImage = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        if (uri != null) attachment = uri
+    }
+    LaunchedEffect(ui.sending) {
+        if (!ui.sending) attachmentUploading = false
+    }
     var detailsVisible by rememberSaveable { mutableStateOf(false) }
     var renameOpen by remember { mutableStateOf(false) }
     var closeOpen by rememberSaveable { mutableStateOf(false) }
@@ -197,11 +222,31 @@ fun ChatScreen(
                 commandsLoading = ui.commandsLoading,
                 commandsError = ui.commandsError,
                 onRetryCommands = viewModel::retryCommands,
+                attachment = attachment,
+                attachmentUploading = attachmentUploading,
+                onPickAttachment = { pickImage.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+                onClearAttachment = { attachment = null },
                 onSend = {
-                    if (input.isNotBlank()) {
+                    val text = input
+                    val current = attachment
+                    if (text.isNotBlank() || current != null) {
                         haptic(HapticEvent.Confirm)
-                        viewModel.send(input)
+                        if (current != null) {
+                            val bytes = readAttachmentBytes(context, current)
+                            if (bytes != null) {
+                                attachmentUploading = true
+                                viewModel.sendWithAttachment(
+                                    text = text,
+                                    name = "image.${extensionFor(context, current)}",
+                                    mime = mimeFor(context, current),
+                                    bytes = bytes,
+                                )
+                            }
+                        } else {
+                            viewModel.send(text)
+                        }
                         input = ""
+                        attachment = null
                     }
                 },
             )
@@ -345,10 +390,12 @@ private fun ChatHeader(
             modifier = Modifier
                 .fillMaxWidth()
                 .horizontalScroll(rememberScrollState())
+                .height(IntrinsicSize.Min)
                 .padding(start = 16.dp, end = 16.dp, bottom = 10.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            HeaderStatusChip(status)
+            HeaderStatusChip(status, Modifier.height(IntrinsicSize.Min))
             HeaderConfigurationChip(
                 label = "Thinking",
                 value = thinkingLevel ?: "…",
@@ -367,8 +414,9 @@ private fun ChatHeader(
 }
 
 @Composable
-private fun HeaderStatusChip(status: String) {
+private fun HeaderStatusChip(status: String, modifier: Modifier = Modifier) {
     Surface(
+        modifier = modifier,
         shape = RoundedCornerShape(50),
         color = if (status == "needs you") MaterialTheme.colorScheme.primaryContainer
         else MaterialTheme.colorScheme.surfaceContainerHighest,
@@ -471,17 +519,27 @@ fun ChatList(
                     )
                 )
             }
-            items(questions, key = { it.id }) { question ->
-                QuestionCard(
-                    question = question,
-                    sending = answeringQuestionId == question.id,
-                    onAnswer = { answer -> onAnswerQuestion(question.id, answer) },
-                    Modifier.animateItem(
-                        fadeInSpec = CockpitMotion.itemSpec(reduceMotion),
-                        placementSpec = CockpitMotion.itemPlacementSpec(reduceMotion),
-                        fadeOutSpec = CockpitMotion.itemSpec(reduceMotion),
-                    )
-                )
+            // Questions from one ask_user_question call share a call-id prefix
+            // ("<callId>#<index>"); render them as one questionnaire with
+            // visible positions so multi-question asks read coherently.
+            val groupedQuestions = questions.groupBy { it.id.substringBefore('#') }
+            groupedQuestions.forEach { (_, group) ->
+                val multiple = group.size > 1
+                group.forEachIndexed { index, question ->
+                    items(group, key = { it.id }) { item ->
+                        QuestionCard(
+                            question = item,
+                            sending = answeringQuestionId == item.id,
+                            onAnswer = { answer -> onAnswerQuestion(item.id, answer) },
+                            position = if (multiple) (index + 1) to group.size else null,
+                            modifier = Modifier.animateItem(
+                                fadeInSpec = CockpitMotion.itemSpec(reduceMotion),
+                                placementSpec = CockpitMotion.itemPlacementSpec(reduceMotion),
+                                fadeOutSpec = CockpitMotion.itemSpec(reduceMotion),
+                            ),
+                        )
+                    }
+                }
             }
             items(pendingMessages, key = { it.localId }) { message ->
                 PendingUserBubble(
@@ -786,6 +844,10 @@ internal fun ChatComposer(
     commandsLoading: Boolean = false,
     commandsError: String? = null,
     onRetryCommands: () -> Unit = {},
+    attachment: android.net.Uri? = null,
+    attachmentUploading: Boolean = false,
+    onPickAttachment: () -> Unit = {},
+    onClearAttachment: () -> Unit = {},
     onSend: () -> Unit,
 ) {
     val query = slashCommandQuery(value)
@@ -805,6 +867,13 @@ internal fun ChatComposer(
     }
 
     Column {
+        if (attachment != null) {
+            AttachmentChip(
+                uri = attachment,
+                uploading = attachmentUploading,
+                onClear = onClearAttachment,
+            )
+        }
         if (query != null) {
             SlashCommandMenu(
                 commands = matches,
@@ -821,7 +890,8 @@ internal fun ChatComposer(
             onValueChange = onValueChange,
             placeholder = { Text(placeholder) },
             enabled = enabled,
-            singleLine = true,
+            minLines = 1,
+            maxLines = 6,
             shape = RoundedCornerShape(22.dp),
             colors = OutlinedTextFieldDefaults.colors(
                 focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f),
@@ -830,10 +900,28 @@ internal fun ChatComposer(
                 unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
                 cursorColor = MaterialTheme.colorScheme.primary,
             ),
-            keyboardOptions = KeyboardOptions(imeAction = if (acceptingCompletion) ImeAction.Next else ImeAction.Send),
-            keyboardActions = KeyboardActions(onNext = { submit() }, onSend = { submit() }),
+            // Enter inserts a newline; sending happens only via the send button.
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.None),
+            keyboardActions = KeyboardActions(
+                onSend = {},
+                onDone = {},
+                onNext = {},
+                onPrevious = {},
+                onGo = {},
+                onSearch = {},
+            ),
             trailingIcon = {
-                IconButton(onClick = { submit() }, enabled = enabled && value.isNotBlank()) {
+                IconButton(onClick = onPickAttachment, enabled = enabled) {
+                    Icon(
+                        Icons.Default.Image,
+                        contentDescription = "Attach image",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                IconButton(
+                    onClick = { submit() },
+                    enabled = enabled && (value.isNotBlank() || attachment != null),
+                ) {
                     Icon(
                         imageVector = if (acceptingCompletion) Icons.AutoMirrored.Filled.KeyboardArrowRight else Icons.AutoMirrored.Filled.Send,
                         contentDescription = if (acceptingCompletion) "Complete command" else "Send",
@@ -846,8 +934,15 @@ internal fun ChatComposer(
                 .fillMaxWidth()
                 .padding(horizontal = 12.dp, vertical = 6.dp)
                 .onPreviewKeyEvent { event ->
+                    // Enter completes an accepting slash command; otherwise the field
+                    // itself inserts a newline (multiline + imeAction None) and the
+                    // empty KeyboardActions guarantee no editor action can send.
                     if (event.type != KeyEventType.KeyDown || query == null || matches.isEmpty()) return@onPreviewKeyEvent false
                     when (event.key) {
+                        Key.Enter, Key.NumPadEnter -> {
+                            submit()
+                            true
+                        }
                         Key.DirectionDown -> {
                             selectedIndex = (selectedIndex + 1).coerceAtMost(matches.lastIndex)
                             true
@@ -856,14 +951,88 @@ internal fun ChatComposer(
                             selectedIndex = (selectedIndex - 1).coerceAtLeast(0)
                             true
                         }
-                        Key.Enter, Key.NumPadEnter -> {
-                            submit()
-                            true
-                        }
                         else -> false
                     }
                 }
                 .testTag("chat_input"),
         )
+    }
+}
+
+private fun readAttachmentBytes(context: android.content.Context, uri: android.net.Uri): ByteArray? =
+    try {
+        context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+    } catch (_: Exception) {
+        null
+    }
+
+private fun mimeFor(context: android.content.Context, uri: android.net.Uri): String =
+    context.contentResolver.getType(uri) ?: "image/png"
+
+private fun extensionFor(context: android.content.Context, uri: android.net.Uri): String = when {
+    mimeFor(context, uri) == "image/jpeg" -> "jpg"
+    mimeFor(context, uri) == "image/gif" -> "gif"
+    mimeFor(context, uri) == "image/webp" -> "webp"
+    else -> "png"
+}
+
+@Composable
+private fun AttachmentChip(
+    uri: android.net.Uri,
+    uploading: Boolean,
+    onClear: () -> Unit,
+) {
+    val context = LocalContext.current
+    val bitmap by produceState<android.graphics.Bitmap?>(initialValue = null, uri) {
+        value = try {
+            context.contentResolver.openInputStream(uri)?.use { stream ->
+                val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                android.graphics.BitmapFactory.decodeStream(stream, null, bounds)
+                stream.reset()
+                val sample = (bounds.outWidth / 96).coerceAtLeast(1)
+                val opts = android.graphics.BitmapFactory.Options().apply { inSampleSize = sample }
+                android.graphics.BitmapFactory.decodeStream(stream, null, opts)
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp).testTag("attachment_chip"),
+    ) {
+        Row(
+            Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (bitmap != null) {
+                Image(
+                    bitmap = bitmap!!.asImageBitmap(),
+                    contentDescription = null,
+                    modifier = Modifier
+                        .width(36.dp)
+                        .height(36.dp)
+                        .clip(RoundedCornerShape(6.dp)),
+                )
+                Spacer(Modifier.width(10.dp))
+            }
+            if (uploading) {
+                CircularProgressIndicator(modifier = Modifier.width(14.dp).height(14.dp), strokeWidth = 2.dp)
+                Spacer(Modifier.width(8.dp))
+                Text("Uploading image…", style = MaterialTheme.typography.labelMedium)
+            } else {
+                Text("Image attached", style = MaterialTheme.typography.labelMedium)
+            }
+            Spacer(Modifier.width(8.dp))
+            IconButton(onClick = onClear, modifier = Modifier.width(28.dp).height(28.dp)) {
+                Icon(
+                    Icons.Default.Close,
+                    contentDescription = "Remove attachment",
+                    modifier = Modifier.size(16.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
     }
 }

@@ -370,6 +370,10 @@ data class RepoOverviewResponse(
     val path: String = "",
     val root: String = "",
     val branch: String? = null,
+
+    val upstream: String? = null,
+    val ahead: Int = 0,
+    val behind: Int = 0,
     val status: List<RepoStatusEntry> = emptyList(),
     val statusTruncated: Boolean = false,
     val log: List<RepoCommit> = emptyList(),
@@ -405,4 +409,26 @@ data class RepoDiffFileStat(
     val path: String = "",
     val additions: Int = 0,
     val deletions: Int = 0,
+)
+
+@Serializable
+data class RepoArtifactsResponse(
+    val ok: Boolean = true,
+    val artifacts: List<RepoArtifact> = emptyList(),
+    val truncated: Boolean = false,
+    val error: String? = null,
+)
+
+@Serializable
+data class AttachmentResponse(
+    val ok: Boolean = true,
+    val path: String = "",
+    val error: String? = null,
+)
+
+@Serializable
+data class RepoArtifact(
+    val path: String = "",
+    val size: Long = 0,
+    val mtimeMs: Double = 0.0,
 )

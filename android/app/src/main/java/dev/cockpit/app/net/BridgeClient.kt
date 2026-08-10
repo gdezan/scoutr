@@ -1,6 +1,7 @@
 package dev.cockpit.app.net
 
 import dev.cockpit.app.data.AgentsResponse
+import dev.cockpit.app.data.AttachmentResponse
 import dev.cockpit.app.data.ConnectionStore
 import dev.cockpit.app.data.CommandsCatalogResponse
 import dev.cockpit.app.data.ControlResponse
@@ -9,6 +10,7 @@ import dev.cockpit.app.data.DirListingResponse
 import dev.cockpit.app.data.HealthResponse
 import dev.cockpit.app.data.LiveOutputResponse
 import dev.cockpit.app.data.ModelsCatalogResponse
+import dev.cockpit.app.data.RepoArtifactsResponse
 import dev.cockpit.app.data.RepoDiffResponse
 import dev.cockpit.app.data.RepoOverviewResponse
 import dev.cockpit.app.data.SessionCatalogResponse
@@ -129,6 +131,48 @@ class BridgeClient(
     suspend fun repoDiff(path: String, base: String = "HEAD", kind: String = "working"): RepoDiffResponse =
         call("/api/repo/diff", query = mapOf("path" to path, "base" to base, "kind" to kind)) {
             json.decodeFromString(RepoDiffResponse.serializer(), it)
+        }
+
+    /** Bounded listing of generated artifacts (build outputs, deps, test reports). */
+    suspend fun repoArtifacts(path: String): RepoArtifactsResponse =
+        call("/api/repo/artifacts", query = mapOf("path" to path)) {
+            json.decodeFromString(RepoArtifactsResponse.serializer(), it)
+        }
+
+    /**
+     * Upload an image attachment for the chat composer; returns the host path
+     * pi can attach via its `@path` prompt syntax.
+     */
+    suspend fun uploadAttachment(name: String, mime: String, bytes: ByteArray): AttachmentResponse =
+        suspendCancellableCoroutine { continuation ->
+            val httpUrl = (baseUrl() + "/api/attachments").toHttpUrl().newBuilder()
+                .addQueryParameter("name", name)
+                .build()
+            val request = Request.Builder()
+                .url(httpUrl)
+                .header("Authorization", "Bearer ${'$'}{token()}")
+                .post(bytes.toRequestBody(mime.toMediaType()))
+                .build()
+            val call = okHttp.newCall(request)
+            continuation.invokeOnCancellation { call.cancel() }
+            call.enqueue(object : Callback {
+                override fun onFailure(call: Call, e: IOException) {
+                    if (!continuation.isCancelled) continuation.resumeWithException(e)
+                }
+
+                override fun onResponse(call: Call, response: Response) {
+                    response.use {
+                        if (!continuation.isCancelled) {
+                            if (it.isSuccessful) {
+                                val body = it.body?.string().orEmpty()
+                                continuation.resume(json.decodeFromString(AttachmentResponse.serializer(), body))
+                            } else {
+                                continuation.resumeWithException(IOException("bridge ${it.code}: ${it.message}"))
+                            }
+                        }
+                    }
+                }
+            })
         }
 
     /** Full model catalog from pi's models-store.json. */

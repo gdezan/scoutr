@@ -11,7 +11,10 @@ import { NtfyPublisher } from "./notify.js";
 import { StatusTracker } from "./status.js";
 import { BoardDetailCache, cleanActivity } from "./board-detail.js";
 import { listDirs, DirListingError } from "./dirs.js";
-import { reviewOverview, reviewDiff, ReviewError } from "./review.js";
+import { defaultConfigPath } from "./config.js";
+import { reviewOverview, reviewDiff, reviewArtifacts, ReviewError } from "./review.js";
+
+import { readAttachmentBody, storeAttachment, uploadsDir, AttachmentError } from "./attachments.js";
 import { readModelsCatalog } from "./pi/models.js";
 import { createSession, controlSession, launchStoredSession, SessionsError } from "./sessions.js";
 import { LiveOutputError, readLiveOutput } from "./live-output.js";
@@ -477,11 +480,16 @@ export function createCockpitServer(deps: ServerDeps, options: CreateServerOptio
       return;
     }
 
-    if (request.method === "GET" && (pathname === "/api/repo" || pathname === "/api/repo/diff")) {
+    if (
+      request.method === "GET" &&
+      (pathname === "/api/repo" || pathname === "/api/repo/diff" || pathname === "/api/repo/artifacts")
+    ) {
       const requestedPath = url.searchParams.get("path") ?? "";
       try {
         if (pathname === "/api/repo") {
           sendJson(response, 200, { ok: true, ...(await reviewOverview(requestedPath)) });
+        } else if (pathname === "/api/repo/artifacts") {
+          sendJson(response, 200, { ok: true, ...reviewArtifacts(requestedPath) });
         } else {
           const base = url.searchParams.get("base") ?? "HEAD";
           const kind = url.searchParams.get("kind") === "commit" ? "commit" : "working";
@@ -489,6 +497,24 @@ export function createCockpitServer(deps: ServerDeps, options: CreateServerOptio
         }
       } catch (error) {
         const status = error instanceof ReviewError ? error.status : 500;
+        sendJson(response, status, {
+          ok: false,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+      return;
+    }
+
+    if (request.method === "POST" && pathname === "/api/attachments") {
+      const name = url.searchParams.get("name") ?? "image.png";
+      const contentType = request.headers["content-type"] ?? "";
+      try {
+        const body = await readAttachmentBody(request);
+        const dir = uploadsDir(defaultConfigPath());
+        const filePath = storeAttachment(dir, name, body, contentType);
+        sendJson(response, 201, { ok: true, path: filePath });
+      } catch (error) {
+        const status = error instanceof AttachmentError ? error.status : 500;
         sendJson(response, status, {
           ok: false,
           error: error instanceof Error ? error.message : String(error),

@@ -12,6 +12,7 @@ import dev.cockpit.app.data.entryText
 import dev.cockpit.app.net.BridgeClient
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import java.io.IOException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -74,8 +75,11 @@ internal fun dropConfirmedMessages(
 ): List<PendingUserMessage> {
     val freshUsers = incoming.filter { it.role == "user" }.toMutableList()
     return pending.filter { message ->
+        // entryText collapses whitespace runs, so the typed text must be
+        // normalized the same way or multi-space/newline messages never reconcile.
+        val normalizedText = message.text.replace(Regex("\\s+"), " ").trim()
         val match = freshUsers.indexOfFirst { entry ->
-            entry.entryId !in message.baselineIds && entryText(entry.content) == message.text
+            entry.entryId !in message.baselineIds && entryText(entry.content) == normalizedText
         }
         if (match >= 0) freshUsers.removeAt(match)
         match < 0
@@ -393,6 +397,33 @@ class ChatViewModel(
         )
         _ui.update { it.copy(pendingMessages = it.pendingMessages + message, sending = true, error = null) }
         deliver(message.localId)
+    }
+
+    /**
+     * Upload an image attachment, then send "@path [text]" so pi attaches the
+     * image to the next prompt. The upload failure marks the send as FAILED.
+     */
+    fun sendWithAttachment(text: String, name: String, mime: String, bytes: ByteArray) {
+        val trimmed = text.trim()
+        if (bytes.isEmpty() && trimmed.isEmpty()) return
+        viewModelScope.launch {
+            _ui.update { it.copy(sending = true, error = null) }
+            try {
+                val response = bridge.uploadAttachment(name, mime, bytes)
+                if (response.error != null) throw IOException(response.error)
+                val prefix = "@${response.path}"
+                val full = if (trimmed.isEmpty()) prefix else "$prefix $trimmed"
+                _ui.update { it.copy(sending = false) }
+                send(full)
+            } catch (error: Exception) {
+                _ui.update {
+                    it.copy(
+                        sending = false,
+                        error = error.message ?: "Attachment upload failed",
+                    )
+                }
+            }
+        }
     }
 
     /**

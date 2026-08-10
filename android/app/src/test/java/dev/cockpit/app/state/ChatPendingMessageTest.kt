@@ -201,6 +201,26 @@ class ChatPendingMessageTest {
     }
 
     @Test
+    fun multiSpaceAndNewlineMessagesStillReconcile() {
+        val message = PendingUserMessage(
+            localId = "local-1",
+            text = "hello  world\nsecond line",
+            state = MessageDeliveryState.QUEUED,
+        )
+        // pi records the user message with normalized spacing; entryText
+        // collapses runs, so the typed text must be normalized the same way.
+        val confirmation = listOf(
+            SessionEntry(
+                entryId = "server-1",
+                role = "user",
+                content = listOf(ContentBlock(type = "text", text = "hello world second line")),
+            ),
+        )
+
+        assertTrue(dropConfirmedMessages(listOf(message), confirmation).isEmpty())
+    }
+
+    @Test
     fun oldMatchingTextDoesNotDropNewMessage() {
         val message = PendingUserMessage(
             localId = "local-1",

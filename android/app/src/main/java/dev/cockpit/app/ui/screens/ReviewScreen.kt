@@ -23,8 +23,10 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -68,8 +70,11 @@ fun ReviewScreen(
 ) {
     val ui by viewModel.ui.collectAsState()
 
-    // Self-initializing: show the repo picker whenever no repo is selected.
-    LaunchedEffect(Unit) { viewModel.openPicker() }
+    // Self-initializing: show the repo picker when no repo is selected. The
+    // guard keeps a config change (rotation) from wiping the open review.
+    LaunchedEffect(Unit) {
+        if (ui.repoPath == null) viewModel.openPicker()
+    }
     var diffOpen by rememberSaveable { mutableStateOf(false) }
 
     if (ui.repoPath == null) {
@@ -85,7 +90,46 @@ private fun PickerMode(
     ui: dev.cockpit.app.state.ReviewUiState,
     modifier: Modifier = Modifier,
 ) {
+    // Editable path: breadcrumbs are nice, but dot-directories (the default
+    // worktree root) are hidden from the listing, so typing a path is the
+    // reliable way to reach a repo.
+    var pathText by rememberSaveable(ui.dirPath) { mutableStateOf(ui.dirPath) }
+    LaunchedEffect(ui.dirPath) { pathText = ui.dirPath }
+
     Column(modifier.fillMaxSize()) {
+        if (ui.lastRepoPath != null) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clickable { viewModel.selectRepo(ui.lastRepoPath) }
+                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    Icons.Default.History,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                )
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f).testTag("review_resume_last")) {
+                    Text(
+                        ui.lastRepoPath?.substringAfterLast('/') ?: "",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Medium,
+                        color = MaterialTheme.colorScheme.primary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        ui.lastRepoPath?.substringBeforeLast('/') ?: "",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+        }
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -97,18 +141,18 @@ private fun PickerMode(
             ) {
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Up")
             }
-            Text(
-                ui.dirPath.ifBlank { "Home" },
-                style = MaterialTheme.typography.labelMedium,
-                fontFamily = FontFamily.Monospace,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f),
+            OutlinedTextField(
+                value = pathText,
+                onValueChange = { pathText = it },
+                singleLine = true,
+                textStyle = MaterialTheme.typography.labelMedium.copy(fontFamily = FontFamily.Monospace),
+                modifier = Modifier
+                    .weight(1f)
+                    .testTag("review_path"),
             )
             TextButton(
-                onClick = { viewModel.selectRepo(ui.dirPath) },
-                enabled = ui.dirPath.isNotBlank(),
+                onClick = { viewModel.selectRepo(pathText.trim().ifBlank { ui.dirPath }) },
+                enabled = pathText.isNotBlank() || ui.dirPath.isNotBlank(),
                 modifier = Modifier.testTag("review_select"),
             ) {
                 Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.width(16.dp).height(16.dp))
@@ -117,12 +161,13 @@ private fun PickerMode(
             }
         }
         HorizontalDivider()
-        if (ui.dirsError != null) {
+        val pickerError = ui.dirsError ?: ui.error
+        if (pickerError != null) {
             Text(
-                ui.dirsError ?: "",
+                pickerError,
                 color = MaterialTheme.colorScheme.error,
                 style = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.padding(16.dp),
+                modifier = Modifier.padding(16.dp).testTag("review_picker_error"),
             )
         }
         if (ui.dirsLoading) {
@@ -198,7 +243,8 @@ private fun ReviewMode(
                 )
                 Text(
                     (overview.branch?.let { "branch $it" } ?: "detached HEAD") +
-                        " · ${overview.status.size} changed",
+                        " · ${overview.status.size} changed" +
+                        syncSuffix(overview),
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -248,6 +294,36 @@ private fun ReviewMode(
                 }
                 if (overview.logTruncated) {
                     item { TruncatedNote("recent commits truncated") }
+                }
+                if (ui.artifacts.isNotEmpty()) {
+                    item {
+                        SectionLabel("Generated artifacts")
+                    }
+                    items(ui.artifacts, key = { it.path }) { artifact ->
+                        Row(
+                            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                artifact.path.removePrefix(overview.root).removePrefix("/"),
+                                style = MaterialTheme.typography.bodySmall,
+                                fontFamily = FontFamily.Monospace,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f),
+                            )
+                            Text(
+                                humanSize(artifact.size),
+                                style = MaterialTheme.typography.labelSmall,
+                                fontFamily = FontFamily.Monospace,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                    if (ui.artifactsTruncated) {
+                        item { TruncatedNote("artifacts truncated") }
+                    }
                 }
                 item { Spacer(Modifier.height(24.dp)) }
             }
@@ -465,4 +541,20 @@ fun rememberReviewViewModel(): ReviewViewModel {
     return androidx.lifecycle.viewmodel.compose.viewModel(
         factory = ReviewViewModel.factory(app.container.bridge, app.container.connectionStore),
     )
+}
+
+private fun syncSuffix(overview: dev.cockpit.app.data.RepoOverviewResponse): String {
+    val upstream = overview.upstream ?: return ""
+    return when {
+        overview.ahead > 0 && overview.behind > 0 -> " · ahead ${overview.ahead}, behind ${overview.behind}"
+        overview.ahead > 0 -> " · ahead ${overview.ahead}"
+        overview.behind > 0 -> " · behind ${overview.behind}"
+        else -> " · in sync with $upstream"
+    }
+}
+
+private fun humanSize(bytes: Long): String = when {
+    bytes >= 1024 * 1024 -> "%.1f MB".format(bytes / (1024.0 * 1024.0))
+    bytes >= 1024 -> "%.0f KB".format(bytes / 1024.0)
+    else -> "$bytes B"
 }

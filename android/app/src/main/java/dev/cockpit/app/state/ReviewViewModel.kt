@@ -2,6 +2,7 @@ package dev.cockpit.app.state
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.viewmodel.CreationExtras
 import androidx.lifecycle.viewModelScope
 import dev.cockpit.app.data.ConnectionStore
 import dev.cockpit.app.data.RepoDiffResponse
@@ -19,6 +20,11 @@ data class ReviewUiState(
     val overview: RepoOverviewResponse? = null,
     val loading: Boolean = false,
     val error: String? = null,
+
+    // Generated-artifact listing (bounded by the bridge).
+    val artifacts: List<dev.cockpit.app.data.RepoArtifact> = emptyList(),
+    val artifactsTruncated: Boolean = false,
+    val artifactsLoading: Boolean = false,
     // Folder picker state.
     val dirPath: String = "",
     val dirs: List<String> = emptyList(),
@@ -28,6 +34,8 @@ data class ReviewUiState(
     val diff: RepoDiffResponse? = null,
     val diffRef: String? = null,
     val diffLoading: Boolean = false,
+    /** Last reviewed repo (persisted), offered as a quick reopen in the picker. */
+    val lastRepoPath: String? = null,
 )
 
 /**
@@ -39,6 +47,7 @@ data class ReviewUiState(
 class ReviewViewModel(
     private val bridge: BridgeClient,
     private val connectionStore: ConnectionStore,
+    private val store: ReviewStore,
 ) : ViewModel() {
 
     private val _ui = MutableStateFlow(ReviewUiState())
@@ -46,7 +55,15 @@ class ReviewViewModel(
 
     fun openPicker() {
         viewModelScope.launch {
-            _ui.update { it.copy(repoPath = null, overview = null, diff = null, diffRef = null) }
+            _ui.update {
+                it.copy(
+                    repoPath = null,
+                    overview = null,
+                    diff = null,
+                    diffRef = null,
+                    lastRepoPath = store.lastRepoPath,
+                )
+            }
             browse("")
         }
     }
@@ -91,9 +108,33 @@ class ReviewViewModel(
                     _ui.update { it.copy(loading = false, error = overview.error) }
                     return@launch
                 }
-                _ui.update { it.copy(repoPath = path, overview = overview, loading = false) }
+                store.lastRepoPath = path
+                _ui.update {
+                    it.copy(repoPath = path, overview = overview, loading = false, lastRepoPath = path)
+                }
+                loadArtifacts(path)
             } catch (error: Exception) {
                 _ui.update { it.copy(loading = false, error = error.message ?: "Repo read failed") }
+            }
+        }
+    }
+
+    fun loadArtifacts(path: String) {
+        if (_ui.value.artifactsLoading) return
+        viewModelScope.launch {
+            _ui.update { it.copy(artifactsLoading = true) }
+            try {
+                val result = bridge.repoArtifacts(path)
+                _ui.update {
+                    it.copy(
+                        artifacts = result.artifacts,
+                        artifactsTruncated = result.truncated,
+                        artifactsLoading = false,
+                    )
+                }
+            } catch (_: Exception) {
+                // Artifacts are supplementary; a failure must not break the overview.
+                _ui.update { it.copy(artifactsLoading = false) }
             }
         }
     }
@@ -123,8 +164,10 @@ class ReviewViewModel(
         fun factory(bridge: BridgeClient, connectionStore: ConnectionStore): ViewModelProvider.Factory =
             object : ViewModelProvider.Factory {
                 @Suppress("UNCHECKED_CAST")
-                override fun <T : ViewModel> create(modelClass: Class<T>): T =
-                    ReviewViewModel(bridge, connectionStore) as T
+                override fun <T : ViewModel> create(modelClass: Class<T>, extras: CreationExtras): T {
+                    val app = extras[androidx.lifecycle.ViewModelProvider.AndroidViewModelFactory.Companion.APPLICATION_KEY] ?: error("application missing in ReviewViewModel factory")
+                    return ReviewViewModel(bridge, connectionStore, ReviewStore(app)) as T
+                }
             }
     }
 }

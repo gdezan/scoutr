@@ -96,6 +96,10 @@ fun NewSessionSheet(
         sheetState = sheetState,
         containerColor = MaterialTheme.colorScheme.surface,
         dragHandle = null,
+
+        // At the top scroll position the sheet's drag gesture would fight the
+        // inner list and flicker; the header close button handles dismissal.
+        sheetGesturesEnabled = false,
     ) {
         Column(
             modifier = Modifier

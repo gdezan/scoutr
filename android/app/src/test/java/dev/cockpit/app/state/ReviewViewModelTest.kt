@@ -36,7 +36,7 @@ class ReviewViewModelTest {
         connectionStore = ConnectionStore(RuntimeEnvironment.getApplication())
         saveConnection(server.url("/").toString().trimEnd('/'))
         val bridge = BridgeClient(OkHttpClient.Builder().readTimeout(5, TimeUnit.SECONDS).build(), connectionStore)
-        viewModel = ReviewViewModel(bridge, connectionStore)
+        viewModel = ReviewViewModel(bridge, connectionStore, ReviewStore(RuntimeEnvironment.getApplication()))
     }
 
     @After
@@ -143,6 +143,7 @@ class ReviewViewModelTest {
             """{"ok":true,"path":"/home/test/repo-a","root":"/home/test/repo-a","branch":"main",
                "status":[],"statusTruncated":false,"log":[],"logTruncated":false}""",
         )
+        enqueueJson("""{"ok":true,"artifacts":[],"truncated":false}""")
         viewModel.selectRepo("/home/test/repo-a")
         waitFor { viewModel.ui.value.overview != null }
 
@@ -169,6 +170,7 @@ class ReviewViewModelTest {
             """{"ok":true,"path":"/home/test/repo-a","root":"/home/test/repo-a","branch":"main",
                "status":[],"statusTruncated":false,"log":[],"logTruncated":false}""",
         )
+        enqueueJson("""{"ok":true,"artifacts":[],"truncated":false}""")
         viewModel.selectRepo("/home/test/repo-a")
         waitFor { viewModel.ui.value.overview != null }
 
