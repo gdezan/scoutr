@@ -24,6 +24,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -42,6 +43,8 @@ import dev.cockpit.app.data.AgentStatus
 import dev.cockpit.app.CockpitApp
 import dev.cockpit.app.state.BoardViewModel
 import dev.cockpit.app.ui.motion.CockpitMotion
+import dev.cockpit.app.ui.motion.HapticEvent
+import dev.cockpit.app.ui.motion.rememberHaptic
 import dev.cockpit.app.ui.motion.useReduceMotion
 
 /**
@@ -58,6 +61,12 @@ fun BoardScreen(
 ) {
     val ui by viewModel.ui.collectAsState()
     val reduceMotion = useReduceMotion()
+    // A subtle tap when an agent first lands in "needs you" so the glance is
+    // backed by touch, not just color.
+    val haptic = rememberHaptic()
+    LaunchedEffect(ui.board.needsYou.size) {
+        if (ui.board.needsYou.isNotEmpty()) haptic(HapticEvent.NeedsYou)
+    }
 
     if (ui.loading && ui.board.total == 0) {
         BoardSkeleton(modifier)

@@ -26,6 +26,12 @@ import androidx.compose.ui.graphics.graphicsLayer
  */
 object CockpitMotion {
 
+    /** Standard interactive motion (rows, chips, list placement). */
+    const val DURATION_STANDARD = 220
+
+    /** Emphasized transitions (screen-level content swaps). */
+    const val DURATION_EMPHASIZED = 300
+
     /** Overlay arrival (palette, dialogs). */
     const val DURATION_OVERLAY = 180
 

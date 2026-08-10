@@ -45,6 +45,11 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.fadeIn
 
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
@@ -86,6 +91,7 @@ import dev.cockpit.app.ui.screens.ReviewScreen
 import dev.cockpit.app.service.parseCockpitUri
 import dev.cockpit.app.ui.screens.SettingsScreen
 
+import dev.cockpit.app.ui.motion.CockpitMotion
 import dev.cockpit.app.ui.motion.HapticEvent
 import dev.cockpit.app.ui.motion.OverlayPresence
 import dev.cockpit.app.ui.motion.rememberHaptic
@@ -232,10 +238,40 @@ private fun CockpitAppNav(
             }
         },
     ) { inner ->
+        val motion = useReduceMotion()
         NavHost(
             navController = navController,
             startDestination = startDestination,
             modifier = Modifier.padding(inner),
+            // Shared-axis-style navigation: the incoming destination slides in
+            // softly while the outgoing one fades; reduced motion collapses to
+            // a straight swap.
+            enterTransition = {
+                if (motion) {
+                    fadeIn(animationSpec = tween(0))
+                } else {
+                    slideInHorizontally(initialOffsetX = { it / 4 }) + fadeIn(
+                        animationSpec = tween(CockpitMotion.DURATION_EMPHASIZED),
+                    )
+                }
+            },
+            exitTransition = {
+                if (motion) fadeOut(animationSpec = tween(0))
+                else fadeOut(animationSpec = tween(CockpitMotion.DURATION_STANDARD))
+            },
+            popEnterTransition = {
+                if (motion) fadeIn(animationSpec = tween(0))
+                else fadeIn(animationSpec = tween(CockpitMotion.DURATION_STANDARD))
+            },
+            popExitTransition = {
+                if (motion) {
+                    fadeOut(animationSpec = tween(0))
+                } else {
+                    slideOutHorizontally(targetOffsetX = { it / 4 }) + fadeOut(
+                        animationSpec = tween(CockpitMotion.DURATION_EMPHASIZED),
+                    )
+                }
+            },
         ) {
             composable(Routes.CONNECT) {
                 ConnectScreen(

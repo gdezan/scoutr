@@ -22,6 +22,12 @@ enum class HapticEvent {
 
     /** The action failed or was rejected. */
     Error,
+
+    /** A condition needs attention (e.g. an agent is waiting). */
+    NeedsYou,
+
+    /** A warning surfaced (error banner, quota near limit). */
+    Warning,
 }
 
 /** Maps a semantic event to the strongest platform-appropriate motor output. */
@@ -30,6 +36,8 @@ fun HapticEvent.toFeedbackType(): HapticFeedbackType = when (this) {
     HapticEvent.Confirm -> HapticFeedbackType.LongPress
     HapticEvent.Destructive -> HapticFeedbackType.LongPress
     HapticEvent.Error -> HapticFeedbackType.Reject
+    HapticEvent.NeedsYou -> HapticFeedbackType.LongPress
+    HapticEvent.Warning -> HapticFeedbackType.ContextClick
 }
 
 /**
