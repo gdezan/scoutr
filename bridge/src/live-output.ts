@@ -1,4 +1,4 @@
-import type { HerdrClient } from "./herdr/client.js";
+import type { HerdrPort } from "./herdr/port.js";
 
 export const LIVE_OUTPUT_DEFAULT_LINES = 80;
 export const LIVE_OUTPUT_MAX_LINES = 120;
@@ -24,7 +24,7 @@ export class LiveOutputError extends Error {
 
 /** Read one capped, plain-text snapshot from a target Herdr still recognizes as a live agent. */
 export async function readLiveOutput(
-  herdr: HerdrClient,
+  herdr: HerdrPort,
   paneId: string,
   requestedLines: string | null,
   timeoutMs = LIVE_OUTPUT_TIMEOUT_MS,

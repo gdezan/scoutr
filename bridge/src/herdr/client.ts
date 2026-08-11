@@ -1,6 +1,7 @@
 import net from "node:net";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import type { HerdrPort } from "./port.js";
 import type { HerdrPong, SessionSnapshot, Subscription, SubscriptionEventEnvelope } from "./types.js";
 
 /**
@@ -233,7 +234,7 @@ export interface AgentReadResponse {
     truncated: boolean;
   };
 }
-export class HerdrClient {
+export class HerdrClient implements HerdrPort {
   private readonly socketPath: string;
   private readonly timeoutMs: number;
 

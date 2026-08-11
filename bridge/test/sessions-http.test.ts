@@ -4,60 +4,49 @@ import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { createCockpitServer, type CockpitServer } from "../src/server.js";
+import type { PaneInfo } from "../src/herdr/types.js";
+import { fakeHerdr, type SentInput } from "./support/fake-herdr.js";
 import WebSocket from "ws";
 
 const PORT = 8792;
 const TOKEN = "test_token_for_sessions_0003";
 const cwd = homedir();
 
+/** Snapshot pane so control actions can resolve p1 -> ws1 (see fake-herdr.ts). */
+const SNAPSHOT_PANE: PaneInfo = {
+  pane_id: "p1",
+  workspace_id: "ws1",
+  tab_id: "t1",
+  terminal_id: "term1",
+  focused: false,
+  agent_status: "idle",
+  revision: 0,
+  agent: "pi",
+  display_agent: "pi",
+  agent_session: null,
+  cwd,
+  foreground_cwd: cwd,
+  label: null,
+  title: null,
+  terminal_title: null,
+  terminal_title_stripped: null,
+  state_labels: {},
+  scroll: null,
+};
+
 function fakeDeps(sessionCatalogRoot?: string) {
-  const calls: { method: string; params: unknown }[] = [];
-  const herdr = {
-    calls,
-    async workspaceCreate(params: unknown) {
-      calls.push({ method: "workspace.create", params });
-      return { workspace: { workspace_id: "ws1" }, root_pane: { pane_id: "p1" } };
-    },
-    async workspaceClose(workspace_id: string) {
-      calls.push({ method: "workspace.close", params: { workspace_id } });
-      return {};
-    },
-    async paneSendText(pane_id: string, text: string) {
-      calls.push({ method: "pane.send_text", params: { pane_id, text } });
-      return {};
-    },
-    async paneSendKeys(pane_id: string, keys: string[]) {
-      calls.push({ method: "pane.send_keys", params: { pane_id, keys } });
-      return {};
-    },
-    async paneSendInput(pane_id: string, text: string, keys: string[]) {
-      calls.push({ method: "pane.send_input", params: { pane_id, text, keys } });
-      return {};
-    },
-    async agentPrompt(target: string, text: string) {
-      calls.push({ method: "agent.prompt", params: { target, text } });
-      return {};
-    },
-    async workspaceRename(workspace_id: string, label: string) {
-      calls.push({ method: "workspace.rename", params: { workspace_id, label } });
-      return {};
-    },
-    async snapshot() {
-      calls.push({ method: "session.snapshot", params: {} });
-      return { panes: [{ pane_id: "p1", workspace_id: "ws1", agent: "pi" }], workspaces: [], tabs: [], agents: [] };
-    },
-  };
+  const fake = fakeHerdr({ panes: [SNAPSHOT_PANE] });
   const feed = { onMessage: () => {}, removeMessage: () => {}, stop: async () => {}, start: async () => {} };
   const usage = { all: async () => ({}) };
   return {
     deps: {
-      herdr: herdr as never,
+      herdr: fake,
       feed: feed as never,
       usage: usage as never,
       config: { token: TOKEN, port: PORT },
       sessionCatalogRoot,
     },
-    calls,
+    sent: fake.sent,
   };
 }
 
@@ -90,14 +79,14 @@ async function wsCommand(command: unknown): Promise<any> {
   });
 }
 
-function lastLaunch(calls: { method: string; params: unknown }[]): string {
-  const send = calls.filter((call) => call.method === "pane.send_input").at(-1) as { params: { text: string } };
-  return send.params.text;
+function lastLaunch(sent: readonly SentInput[]): string {
+  const send = sent.filter((call) => call.method === "paneSendInput").at(-1);
+  return (send?.params.text as string) ?? "";
 }
 
 describe("POST /api/sessions and /api/sessions/:paneId/control", () => {
   let server: CockpitServer;
-  let calls: { method: string; params: unknown }[];
+  let sent: SentInput[];
   let sessionRoot: string;
   let sessionPath: string;
 
@@ -114,7 +103,7 @@ describe("POST /api/sessions and /api/sessions/:paneId/control", () => {
       cwd,
     })}\n`);
     const fake = fakeDeps(sessionRoot);
-    calls = fake.calls;
+    sent = fake.sent;
     server = createCockpitServer(fake.deps, { listen: true });
   });
 
@@ -124,26 +113,26 @@ describe("POST /api/sessions and /api/sessions/:paneId/control", () => {
   });
 
   it("delivers one slash command as exact pane text plus Enter", async () => {
-    calls.length = 0;
+    sent.length = 0;
 
     const frame = await wsCommand({ type: "slash_command", paneId: "p1", text: "/skill:research compare APIs" });
 
     assert.equal(frame.type, "command_sent");
-    assert.deepEqual(calls, [
+    assert.deepEqual(sent, [
       {
-        method: "pane.send_input",
+        method: "paneSendInput",
         params: { pane_id: "p1", text: "/skill:research compare APIs", keys: ["Enter"] },
       },
     ]);
   });
 
   it("rejects slash commands containing terminal control input", async () => {
-    calls.length = 0;
+    sent.length = 0;
 
     const frame = await wsCommand({ type: "slash_command", paneId: "p1", text: "/compact\n/quit" });
 
     assert.equal(frame.type, "error");
-    assert.deepEqual(calls, []);
+    assert.deepEqual(sent, []);
   });
 
   it("creates a session and returns the pane and workspace", async () => {
@@ -156,21 +145,21 @@ describe("POST /api/sessions and /api/sessions/:paneId/control", () => {
     assert.equal(status, 200);
     assert.equal(data.ok, true);
     assert.equal(data.paneId, "p1");
-    assert.equal(lastLaunch(calls), "pi --model 'openai-codex/gpt-5.4' --name 'demo'");
+    assert.equal(lastLaunch(sent), "pi --model 'openai-codex/gpt-5.4' --name 'demo'");
   });
 
   it("resumes a stored session through a quoted headless launch", async () => {
-    calls.length = 0;
+    sent.length = 0;
     const { status, data } = await post("/api/session-catalog/resume", { path: sessionPath });
 
     assert.equal(status, 201);
     assert.equal(data.paneId, "p1");
-    assert.equal(lastLaunch(calls), `pi --session '${sessionPath}'`);
+    assert.equal(lastLaunch(sent), `pi --session '${sessionPath}'`);
   });
 
   it("delivers thinking through launch and the exact prompt through agent.prompt", async () => {
     const prompt = "--help\n\nfix the tests";
-    const before = calls.length;
+    const before = sent.length;
 
     const { status } = await post("/api/sessions", {
       cwd,
@@ -180,22 +169,22 @@ describe("POST /api/sessions and /api/sessions/:paneId/control", () => {
     });
 
     assert.equal(status, 200);
-    assert.equal(lastLaunch(calls), "pi --model 'openai-codex/gpt-5.4' --thinking 'high'");
-    const promptCall = calls.slice(before).find((call) => call.method === "agent.prompt") as { params: { text: string } };
-    assert.equal(promptCall.params.text, prompt);
+    assert.equal(lastLaunch(sent), "pi --model 'openai-codex/gpt-5.4' --thinking 'high'");
+    const promptCall = sent.slice(before).find((call) => call.method === "agentPrompt");
+    assert.equal(promptCall?.params.text, prompt);
   });
 
   it("keeps empty-prompt creation working", async () => {
-    const before = calls.length;
+    const before = sent.length;
     const { status } = await post("/api/sessions", { cwd, model: "m", initialPrompt: "" });
 
     assert.equal(status, 200);
-    assert.equal(lastLaunch(calls), "pi --model 'm'");
-    assert.equal(calls.slice(before).some((call) => call.method === "agent.prompt"), false);
+    assert.equal(lastLaunch(sent), "pi --model 'm'");
+    assert.equal(sent.slice(before).some((call) => call.method === "agentPrompt"), false);
   });
 
   it("rejects invalid creation input with 400 and no Herdr call", async () => {
-    const before = calls.length;
+    const before = sent.length;
     const invalid = [
       { cwd, model: "m", thinkingLevel: "turbo" },
       { cwd, model: "m", initialPrompt: "a\u0000b" },
@@ -208,7 +197,7 @@ describe("POST /api/sessions and /api/sessions/:paneId/control", () => {
       const { status } = await post("/api/sessions", body);
       assert.equal(status, 400);
     }
-    assert.equal(calls.length, before);
+    assert.equal(sent.length, before);
   });
 
   it("rejects malformed and non-object JSON with 400", async () => {
@@ -230,25 +219,25 @@ describe("POST /api/sessions and /api/sessions/:paneId/control", () => {
   it("control: abort maps to pane.send_keys escape", async () => {
     const { status } = await post("/api/sessions/p1/control", { action: "abort" });
     assert.equal(status, 200);
-    const last = calls.at(-1) as { method: string; params: { keys: string[] } };
-    assert.equal(last.method, "pane.send_keys");
-    assert.deepEqual(last.params.keys, ["escape"]);
+    const last = sent.at(-1);
+    assert.equal(last?.method, "paneSendKeys");
+    assert.deepEqual(last?.params.keys, ["escape"]);
   });
 
   it("control: rename resolves workspace and renames", async () => {
     const { status } = await post("/api/sessions/p1/control", { action: "rename", text: "newname" });
     assert.equal(status, 200);
-    const last = calls.at(-1) as { method: string; params: { workspace_id: string; label: string } };
-    assert.equal(last.method, "workspace.rename");
-    assert.deepEqual(last.params, { workspace_id: "ws1", label: "newname" });
+    const last = sent.at(-1);
+    assert.equal(last?.method, "workspaceRename");
+    assert.deepEqual(last?.params, { workspace_id: "ws1", label: "newname" });
   });
 
   it("control: close resolves and closes the workspace", async () => {
     const { status } = await post("/api/sessions/p1/control", { action: "close" });
     assert.equal(status, 200);
-    const last = calls.at(-1) as { method: string; params: { workspace_id: string } };
-    assert.equal(last.method, "workspace.close");
-    assert.deepEqual(last.params, { workspace_id: "ws1" });
+    const last = sent.at(-1);
+    assert.equal(last?.method, "workspaceClose");
+    assert.deepEqual(last?.params, { workspace_id: "ws1" });
   });
 
   it("control: unknown action returns 400", async () => {

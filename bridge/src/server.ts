@@ -1,6 +1,6 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { WebSocketServer, WebSocket } from "ws";
-import { HerdrClient } from "./herdr/client.js";
+import type { HerdrPort } from "./herdr/port.js";
 import { HerdrEventFeed, type FeedMessage } from "./herdr/feed.js";
 import type { SessionSnapshot } from "./herdr/types.js";
 import { readTranscript, entryText, inspectSessionFile, type TranscriptEntry } from "./transcript.js";
@@ -63,7 +63,7 @@ export type CommandMessage =
   | { type: "subscribe"; filter?: string[] };
 
 export interface ServerDeps {
-  herdr: HerdrClient;
+  herdr: HerdrPort;
   feed: HerdrEventFeed;
   usage: UsageService;
   config: BridgeConfig;

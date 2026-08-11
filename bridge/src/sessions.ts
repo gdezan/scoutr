@@ -1,4 +1,4 @@
-import type { HerdrClient } from "./herdr/client.js";
+import type { HerdrPort } from "./herdr/port.js";
 import { resolveAllowedDir } from "./dirs.js";
 import { readModelsCatalog, type ModelsCatalog } from "./pi/models.js";
 import { readTranscript, type Transcript } from "./transcript.js";
@@ -140,7 +140,7 @@ export function buildLaunchCommand(params: {
  * first prompt through agent.prompt. Any launch failure closes the workspace.
  */
 export async function createSession(
-  herdr: HerdrClient,
+  herdr: HerdrPort,
   params: CreateSessionParams,
 ): Promise<CreatedSession> {
   validateCreateSessionParams(params);
@@ -164,7 +164,7 @@ export async function createSession(
 
 /** Open an existing pi session in a new Herdr workspace. */
 export async function launchStoredSession(
-  herdr: HerdrClient,
+  herdr: HerdrPort,
   params: LaunchStoredSessionParams,
 ): Promise<CreatedSession> {
   const path = await resolveCatalogSessionPath(params.path, params.sessionRoot);
@@ -209,7 +209,7 @@ function resolveSessionWorkspace(
 }
 
 async function launchWorkspace(
-  herdr: HerdrClient,
+  herdr: HerdrPort,
   cwd: string,
   label: string,
   command: string,
@@ -236,7 +236,7 @@ async function launchWorkspace(
   }
 }
 
-async function waitForAgent(herdr: HerdrClient, paneId: string): Promise<void> {
+async function waitForAgent(herdr: HerdrPort, paneId: string): Promise<void> {
   const deadline = Date.now() + AGENT_START_TIMEOUT_MS;
   while (Date.now() < deadline) {
     try {
@@ -251,7 +251,7 @@ async function waitForAgent(herdr: HerdrClient, paneId: string): Promise<void> {
   throw new SessionsError("pi did not start before the launch timeout", 502);
 }
 
-async function closeWorkspaceQuietly(herdr: HerdrClient, workspaceId: string): Promise<void> {
+async function closeWorkspaceQuietly(herdr: HerdrPort, workspaceId: string): Promise<void> {
   try {
     await herdr.workspaceClose(workspaceId);
   } catch {
@@ -265,7 +265,7 @@ async function closeWorkspaceQuietly(herdr: HerdrClient, workspaceId: string): P
  * shortest deterministic sequence of pi's documented Shift+Tab action.
  */
 export async function controlSession(
-  herdr: HerdrClient,
+  herdr: HerdrPort,
   params: ControlParams,
   deps: SessionControlDeps = {},
 ): Promise<void> {
@@ -330,7 +330,7 @@ export async function controlSession(
 }
 
 /** Resolve a pane's workspace id from the live snapshot. */
-async function findPaneWorkspace(herdr: HerdrClient, paneId: string): Promise<string> {
+async function findPaneWorkspace(herdr: HerdrPort, paneId: string): Promise<string> {
   try {
     const snapshot = await herdr.snapshot();
     for (const pane of snapshot.panes) {
@@ -361,7 +361,7 @@ function requireCatalogModel(catalog: ModelsCatalog, key: string | undefined) {
   return model;
 }
 
-async function findPaneSessionPath(herdr: HerdrClient, paneId: string): Promise<string> {
+async function findPaneSessionPath(herdr: HerdrPort, paneId: string): Promise<string> {
   try {
     const snapshot = await herdr.snapshot();
     const pane = snapshot.panes.find((candidate) => candidate.pane_id === paneId);
