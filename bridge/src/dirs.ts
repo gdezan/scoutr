@@ -1,5 +1,6 @@
 import { readdirSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
+import { BridgeError } from "./errors.js";
 import { join, resolve, sep } from "node:path";
 
 export interface DirListing {
@@ -9,9 +10,9 @@ export interface DirListing {
   dirs: string[];
 }
 
-export class DirListingError extends Error {
+export class DirListingError extends BridgeError {
   constructor(message: string) {
-    super(message);
+    super(message, 400);
     this.name = "DirListingError";
   }
 }
@@ -59,4 +60,13 @@ export function rootWithTrailingSep(root = homedir()): string {
 /** Convenience for callers that want a path joined to the home root. */
 export function homeJoin(...parts: string[]): string {
   return join(homedir(), ...parts);
+}
+
+/** realpath when the path exists, otherwise its resolved form. */
+export function canonicalPath(path: string): string {
+  try {
+    return realpathSync(path);
+  } catch {
+    return resolve(path);
+  }
 }

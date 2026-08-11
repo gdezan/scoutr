@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { readSession } from "../src/server.js";
+import { readSession } from "../src/routes/sessions.js";
 
 const TOOL_CALL_ID = "call_integration|fc_0001";
 

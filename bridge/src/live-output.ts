@@ -1,4 +1,5 @@
 import type { HerdrPort } from "./herdr/port.js";
+import { BridgeError } from "./errors.js";
 
 export const LIVE_OUTPUT_DEFAULT_LINES = 80;
 export const LIVE_OUTPUT_MAX_LINES = 120;
@@ -13,12 +14,9 @@ export interface LiveOutputResult {
   lineLimit: number;
 }
 
-export class LiveOutputError extends Error {
-  constructor(
-    message: string,
-    public readonly status: number,
-  ) {
-    super(message);
+export class LiveOutputError extends BridgeError {
+  constructor(message: string, status: number) {
+    super(message, status);
   }
 }
 

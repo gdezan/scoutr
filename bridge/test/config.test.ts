@@ -1,0 +1,81 @@
+import { test, describe, before, after } from "node:test";
+import assert from "node:assert/strict";
+import { mkdtempSync, mkdirSync, rmSync, statSync } from "node:fs";
+import { writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { defaultConfigPath, generateToken, loadOrCreateConfig } from "../src/config.js";
+
+describe("defaultConfigPath", () => {
+  test("honors XDG_CONFIG_HOME", () => {
+    const previous = process.env.XDG_CONFIG_HOME;
+    process.env.XDG_CONFIG_HOME = "/tmp/cockpit-xdg-test";
+    try {
+      assert.equal(defaultConfigPath(), join("/tmp/cockpit-xdg-test", "cockpit", "config.json"));
+    } finally {
+      if (previous === undefined) delete process.env.XDG_CONFIG_HOME;
+      else process.env.XDG_CONFIG_HOME = previous;
+    }
+  });
+});
+
+describe("generateToken", () => {
+  test("produces a long random token with the cockpit_ prefix", () => {
+    const token = generateToken();
+    assert.ok(token.startsWith("cockpit_"));
+    assert.ok(token.length >= 16);
+    assert.notEqual(token, generateToken());
+  });
+});
+
+describe("loadOrCreateConfig", () => {
+  let dir: string;
+
+  before(() => {
+    dir = mkdtempSync(join(tmpdir(), "cockpit-config-"));
+  });
+
+  after(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  test("creates a config with a fresh token when none exists", async () => {
+    const path = join(dir, "fresh", "config.json");
+    const config = await loadOrCreateConfig(path);
+    assert.ok(config.token.length >= 16);
+    assert.equal(config.port, 8737);
+    assert.ok(config.ntfyTopic?.startsWith("cockpit_"));
+    // Written with owner-only permissions.
+    assert.equal(statSync(path).mode & 0o777, 0o600);
+  });
+
+  test("loads an existing valid config and persists missing fields", async () => {
+    const path = join(dir, "valid", "config.json");
+    const config = await loadOrCreateConfig(path);
+    const again = await loadOrCreateConfig(path);
+    assert.equal(again.token, config.token);
+    assert.equal(again.port, 8737);
+    assert.equal(again.ntfyTopic, config.ntfyTopic);
+  });
+
+  test("recreates the config when the stored token is shorter than 16 chars", async () => {
+    const path = join(dir, "short-token", "config.json");
+    mkdirSync(join(dir, "short-token"), { recursive: true });
+    await writeFile(path, JSON.stringify({ token: "short", port: 1 }));
+    const config = await loadOrCreateConfig(path);
+    assert.ok(config.token.length >= 16);
+    assert.notEqual(config.token, "short");
+  });
+
+  test("generates a topic when ntfy is enabled but the topic is missing", async () => {
+    const path = join(dir, "with-url", "config.json");
+    mkdirSync(join(dir, "with-url"), { recursive: true });
+    await writeFile(
+      path,
+      JSON.stringify({ token: "0123456789abcdef", port: 8737, ntfyUrl: "https://ntfy.example" }),
+    );
+    const config = await loadOrCreateConfig(path);
+    assert.equal(config.ntfyUrl, "https://ntfy.example");
+    assert.ok(config.ntfyTopic?.startsWith("cockpit_"));
+  });
+});

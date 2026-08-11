@@ -1,0 +1,115 @@
+import { test, describe } from "node:test";
+import assert from "node:assert/strict";
+import { handleCommand } from "../src/commands.js";
+import { fakeHerdr } from "./support/fake-herdr.js";
+import type { ServerDeps } from "../src/routes/types.js";
+
+function makeDeps(): { herdr: ReturnType<typeof fakeHerdr>; deps: ServerDeps } {
+  const herdr = fakeHerdr();
+  return {
+    herdr,
+    deps: {
+      herdr,
+      feed: {} as never,
+      usage: {} as never,
+      config: { token: "x".repeat(16), port: 1 },
+    },
+  };
+}
+
+describe("WS command dispatch", () => {
+  test("ping returns a pong with a timestamp", async () => {
+    const { deps } = makeDeps();
+    const result = await handleCommand({ type: "ping" }, deps);
+    assert.equal(result.type, "pong");
+    assert.ok((result as { ts: number }).ts > 0);
+  });
+
+  test("subscribe acknowledges the requested filters (no-op wiring)", async () => {
+    const { deps } = makeDeps();
+    const result = await handleCommand({ type: "subscribe", filter: ["pane_closed"] }, deps);
+    assert.deepEqual(result, { type: "subscribed", filters: ["pane_closed"] });
+  });
+
+  test("steer sends the prompt through agent.prompt", async () => {
+    const { herdr, deps } = makeDeps();
+    const result = await handleCommand({ type: "steer", target: "p1", text: "keep going" }, deps);
+    assert.equal(result.type, "steered");
+    assert.equal((result as { target: string }).target, "p1");
+    assert.deepEqual(herdr.sent, [{ method: "agentPrompt", params: { target: "p1", text: "keep going" } }]);
+  });
+
+  test("steer requires target and text", async () => {
+    const { deps } = makeDeps();
+    await assert.rejects(() => handleCommand({ type: "steer", target: "", text: "x" } as never, deps), /target and text/);
+  });
+
+  test("answer_question types the sanitized answer then Enter", async () => {
+    const { herdr, deps } = makeDeps();
+    const result = await handleCommand({ type: "answer_question", paneId: "p1", text: "yes, do it" }, deps);
+    assert.equal(result.type, "answered");
+    assert.equal((result as { text: string }).text, "yes, do it");
+    assert.deepEqual(herdr.sent, [
+      { method: "paneSendText", params: { pane_id: "p1", text: "yes, do it" } },
+      { method: "paneSendKeys", params: { pane_id: "p1", keys: ["Enter"] } },
+    ]);
+  });
+
+  test("answer_question strips control characters before sending", async () => {
+    const { herdr, deps } = makeDeps();
+    const result = await handleCommand({ type: "answer_question", paneId: "p1", text: "a\u0000b\u001bc" }, deps);
+    assert.equal((result as { text: string }).text, "abc");
+    assert.equal((herdr.sent[0]?.params as { text: string }).text, "abc");
+  });
+
+  test("slash_command sends the validated command plus Enter", async () => {
+    const { herdr, deps } = makeDeps();
+    const result = await handleCommand({ type: "slash_command", paneId: "p1", text: "/compact" }, deps);
+    assert.equal(result.type, "command_sent");
+    assert.equal((result as { text: string }).text, "/compact");
+    assert.deepEqual(herdr.sent, [
+      { method: "paneSendInput", params: { pane_id: "p1", text: "/compact", keys: ["Enter"] } },
+    ]);
+  });
+
+  test("slash_command rejects terminal control input", async () => {
+    const { herdr, deps } = makeDeps();
+    await assert.rejects(
+      () => handleCommand({ type: "slash_command", paneId: "p1", text: "/compact\n/quit" } as never, deps),
+      /invalid slash command/,
+    );
+    assert.deepEqual(herdr.sent, []);
+  });
+
+  test("send_text delivers raw text without keys", async () => {
+    const { herdr, deps } = makeDeps();
+    const result = await handleCommand({ type: "send_text", paneId: "p1", text: "hello" }, deps);
+    assert.equal(result.type, "sent");
+    assert.deepEqual(herdr.sent, [{ method: "paneSendText", params: { pane_id: "p1", text: "hello" } }]);
+  });
+
+  test("unknown commands throw", async () => {
+    const { herdr, deps } = makeDeps();
+    await assert.rejects(() => handleCommand({ type: "explode" } as never, deps), /unknown command/);
+    assert.deepEqual(herdr.sent, []);
+  });
+});
+
+describe("fake herdr recording", () => {
+  test("failNext makes exactly one call fail with the given error", async () => {
+    const herdr = fakeHerdr();
+    const boom = new Error("boom");
+    herdr.failNext("workspaceCreate", boom);
+    await assert.rejects(() => herdr.workspaceCreate({}), boom);
+    // The next call behaves normally.
+    const created = await herdr.workspaceCreate({});
+    assert.deepEqual(created, { workspace: { workspace_id: "ws1" }, root_pane: { pane_id: "p1" } });
+  });
+
+  test("setSnapshot replaces the served snapshot", async () => {
+    const herdr = fakeHerdr();
+    const next = { ...herdr.snapshot() };
+    await herdr.setSnapshot({ ...next, version: "9.9.9" } as never);
+    assert.equal((await herdr.snapshot()).version, "9.9.9");
+  });
+});

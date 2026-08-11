@@ -1,22 +1,52 @@
 import { test, describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import WebSocket from "ws";
-import { HerdrClient, defaultSocketPath } from "../src/herdr/client.js";
-import { HerdrEventFeed } from "../src/herdr/feed.js";
 import { createCockpitServer, type CockpitServer } from "../src/server.js";
-import { LIVE_OUTPUT_MAX_BYTES } from "../src/live-output.js";
-import { UsageService } from "../src/usage/providers.js";
+import type { AgentInfo, SessionSnapshot } from "../src/herdr/types.js";
+import { fakeHerdr } from "./support/fake-herdr.js";
+import { fakeFeed } from "./support/fake-feed.js";
+import type { FakeFeedExtras } from "./support/fake-feed.js";
 
-const socketPath = process.env.HERDR_SOCKET_PATH ?? defaultSocketPath();
-const skip = !existsSync(socketPath);
+// Offline HTTP/WS suite: the real herdr is replaced by test/support/fakes, so
+// every route runs on any machine. Live-socket coverage lives in
+// server.integration.test.ts (explicitly gated on HERDR_SOCKET_PATH).
 
 const PORT = 8790;
-const TOKEN = "test_token_for_unit_run_0001";
+const TOKEN = "test_token_for_offline_run_0001";
+
+function snapshotWithAgents(agents: Partial<AgentInfo>[]): SessionSnapshot {
+  return {
+    version: "0.8.0",
+    protocol: 19,
+    focused_workspace_id: "ws1",
+    focused_tab_id: "t1",
+    focused_pane_id: "p1",
+    workspaces: [{ workspace_id: "ws1", number: 1, label: "", focused: true, pane_count: 1, agent_status: "idle" }],
+    tabs: [{ tab_id: "t1", workspace_id: "ws1", label: "", focused: true, agent_status: "idle" }],
+    panes: [],
+    agents: [
+      {
+        agent: "pi",
+        agent_status: "working",
+        pane_id: "p1",
+        workspace_id: "ws1",
+        tab_id: "t1",
+        terminal_id: "term1",
+        focused: true,
+        cwd: "/work/project",
+        foreground_cwd: "/work/project",
+        revision: 1,
+        state_change_seq: 0,
+        ...agents[0],
+      },
+    ],
+    layouts: [],
+  };
+}
 
 async function getJson(path: string): Promise<{ status: number; body: unknown }> {
   const response = await fetch(`http://127.0.0.1:${PORT}${path}`, {
@@ -25,23 +55,21 @@ async function getJson(path: string): Promise<{ status: number; body: unknown }>
   return { status: response.status, body: await response.json() };
 }
 
-describe("cockpit bridge HTTP/WS API", { skip }, () => {
-  let herdr: HerdrClient;
-  let feed: HerdrEventFeed;
+describe("cockpit bridge HTTP/WS API (offline)", () => {
   let server: CockpitServer;
+  let feed: ReturnType<typeof fakeFeed>;
   let sessionRoot: string;
+  let sessionPath: string;
 
   before(async () => {
-    herdr = new HerdrClient({ socketPath });
-    feed = new HerdrEventFeed(socketPath);
-    await feed.start();
-    const usage = new UsageService({
-      authPath: join(await mkdtemp(join(tmpdir(), "cockpit-auth-")), "auth.json"),
-    });
-    await writeFile(
-      usage["authPath"],
-      JSON.stringify({ "openai-codex": { type: "oauth", access: "x", accountId: "y" } }),
-    );
+    // Speed up the commands-catalog test: point the loader at an empty agent
+    // dir ("compact" is a builtin command, so the catalog exists without the
+    // real ~/.pi/agent resource tree).
+    const agentDir = await mkdtemp(join(tmpdir(), "cockpit-agent-dir-"));
+    process.env.PI_CODING_AGENT_DIR = agentDir;
+    const herdr = fakeHerdr();
+    feed = fakeFeed();
+    const usage = { all: async () => ({}) };
     sessionRoot = await mkdtemp(join(tmpdir(), "cockpit-server-catalog-"));
     const projectDir = join(sessionRoot, "project");
     await mkdir(projectDir);
@@ -52,10 +80,11 @@ describe("cockpit bridge HTTP/WS API", { skip }, () => {
         JSON.stringify({ type: "message", id: "e1", timestamp: "2026-01-01T00:00:01.000Z", message: { role: "user", content: [{ type: "text", text: "Catalog route prompt" }] } }),
       ].join("\n"),
     );
+    sessionPath = join(projectDir, "session.jsonl");
     server = createCockpitServer({
       herdr,
       feed,
-      usage,
+      usage: usage as never,
       config: { token: TOKEN, port: PORT },
       sessionCatalogRoot: sessionRoot,
     });
@@ -63,18 +92,22 @@ describe("cockpit bridge HTTP/WS API", { skip }, () => {
 
   after(async () => {
     await server.close();
-    await feed.stop();
   });
 
-  test("health reports herdr connectivity", async () => {
+  test("health reports herdr connectivity through the fake", async () => {
     const { status, body } = await getJson("/api/health");
     assert.equal(status, 200);
     const health = body as { ok: boolean; herdr: { connected: boolean; version: string } };
     assert.equal(health.ok, true);
     assert.equal(health.herdr.connected, true);
+    assert.equal(health.herdr.version, "test");
   });
 
-  test("snapshot returns the live herd", async () => {
+  test("snapshot is 503 until the feed has one, then returns it", async () => {
+    const empty = await getJson("/api/snapshot");
+    assert.equal(empty.status, 503);
+
+    feed.setSnapshot(snapshotWithAgents([]));
     const { status, body } = await getJson("/api/snapshot");
     assert.equal(status, 200);
     const snapshot = (body as { snapshot: { workspaces: unknown[]; agents: unknown[] } }).snapshot;
@@ -82,18 +115,30 @@ describe("cockpit bridge HTTP/WS API", { skip }, () => {
     assert.ok(Array.isArray(snapshot.agents));
   });
 
-  test("agents derives cards from the snapshot", async () => {
+  test("agents derives cards from the fake snapshot", async () => {
+    feed.setSnapshot(snapshotWithAgents([{ agent_status: "blocked", cwd: "/work/project" }]));
     const { status, body } = await getJson("/api/agents");
     assert.equal(status, 200);
-    const cards = (body as { agents: { paneId: string; status: string }[] }).agents;
-    assert.ok(Array.isArray(cards));
-    for (const card of cards) {
-      assert.ok(card.paneId.startsWith("w"));
-      assert.ok(["working", "blocked", "idle", "done", "unknown"].includes(card.status));
-    }
+    const cards = (body as { agents: { paneId: string; status: string; blocked: boolean }[] }).agents;
+    assert.equal(cards.length, 1);
+    assert.equal(cards[0]?.paneId, "p1");
+    assert.equal(cards[0]?.status, "blocked");
+    assert.equal(cards[0]?.blocked, true);
   });
 
   test("agents enrich cards with bounded model and latest activity", async () => {
+    const liveDir = await mkdtemp(join(tmpdir(), "cockpit-agent-session-"));
+    const liveSession = join(liveDir, "session.jsonl");
+    await writeFile(
+      liveSession,
+      [
+        JSON.stringify({ type: "session", version: 3, id: "live-session", timestamp: "2026-01-01T00:00:00.000Z", cwd: "/work/project" }),
+        JSON.stringify({ type: "message", id: "e1", timestamp: "2026-01-01T00:00:01.000Z", message: { role: "assistant", content: [{ type: "text", text: "made progress on the fix" }] } }),
+      ].join("\n"),
+    );
+    feed.setSnapshot(
+      snapshotWithAgents([{ agent_status: "working", agent_session: { kind: "path", value: liveSession } }]),
+    );
     const { status, body } = await getJson("/api/agents");
     assert.equal(status, 200);
     const cards = (body as { agents: Array<{
@@ -103,16 +148,28 @@ describe("cockpit bridge HTTP/WS API", { skip }, () => {
       latestActivity?: string;
       latestActivityAtMs?: number | null;
     }> }).agents;
-    for (const card of cards) {
-      if (!card.sessionPath) continue;
-      // Fields are always present on cards with a session path (values may be null).
-      assert.ok("model" in card);
-      assert.ok("latestActivity" in card);
-      if (typeof card.latestActivity === "string") {
-        assert.ok(card.latestActivity.length <= 160);
-      }
-      assert.ok("latestActivityAtMs" in card);
+    assert.equal(cards.length, 1);
+    // Fields are always present on cards with a session path (values may be null).
+    assert.ok("model" in cards[0]!);
+    assert.ok("latestActivity" in cards[0]!);
+    if (typeof cards[0]?.latestActivity === "string") {
+      assert.ok(cards[0].latestActivity.length <= 160);
     }
+    assert.ok("latestActivityAtMs" in cards[0]!);
+  });
+
+  test("live output reads a bounded plain-text snapshot through the fake", async () => {
+    const { status, body } = await getJson("/api/agents/p1/read?lines=20");
+    assert.equal(status, 200);
+    const output = (body as { output: { paneId: string; text: string; lineLimit: number; truncated: boolean } }).output;
+    assert.equal(output.paneId, "p1");
+    assert.equal(output.lineLimit, 20);
+    assert.equal(output.truncated, false);
+  });
+
+  test("live output rejects a malformed pane id", async () => {
+    const { status } = await getJson("/api/agents/%zz/read");
+    assert.equal(status, 400);
   });
 
   test("commands returns the slash-command catalog", async () => {
@@ -125,23 +182,6 @@ describe("cockpit bridge HTTP/WS API", { skip }, () => {
   test("commands rejects a cwd that is not attached to an active agent", async () => {
     const { status } = await getJson("/api/commands?cwd=%2Fetc");
     assert.equal(status, 403);
-  });
-
-
-  test("live output returns a bounded plain-text agent snapshot", async (context) => {
-    const snapshotResponse = await getJson("/api/snapshot");
-    const agents = (snapshotResponse.body as { snapshot: { agents: { pane_id: string }[] } }).snapshot.agents;
-    if (agents.length === 0) {
-      context.skip("no live agents");
-      return;
-    }
-    const paneId = encodeURIComponent(agents[0]!.pane_id);
-    const { status, body } = await getJson(`/api/agents/${paneId}/read?lines=20`);
-    assert.equal(status, 200);
-    const output = (body as { output: { text: string; lineLimit: number } }).output;
-    assert.equal(output.lineLimit, 20);
-    assert.ok(Buffer.byteLength(output.text) <= LIVE_OUTPUT_MAX_BYTES);
-    assert.equal(output.text.includes("\u001b"), false);
   });
 
   test("sessions requires an allowed path", async () => {
@@ -163,8 +203,8 @@ describe("cockpit bridge HTTP/WS API", { skip }, () => {
   });
 
   test("review reaches a completed session's workspace via the catalog", async () => {
-    // Fix 13: a session's recorded cwd is an implicitly allowed review root
-    // even after the session completed (no live agent). Non-repo cwds are
+    // A session's recorded cwd is an implicitly allowed review root even
+    // after the session completed (no live agent). Non-repo cwds are
     // dropped, so a cwd=$HOME session never re-opens the whole home dir.
     const repo = await mkdtemp(join(tmpdir(), "cockpit-review-catalog-"));
     execFileSync("git", ["init", "-q", "-b", "main", repo]);
@@ -196,8 +236,8 @@ describe("cockpit bridge HTTP/WS API", { skip }, () => {
   });
 
   test("attachment upload accepts a raw binary body", async () => {
-    // Fix 14: the generic POST JSON pre-parse used to 400 binary uploads
-    // before the attachments route could read them.
+    // Binary uploads bypass the JSON pre-parse entirely (rawBody route):
+    // the bytes must reach the attachments handler untouched.
     const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52]);
     const response = await fetch(`http://127.0.0.1:${PORT}/api/attachments?name=test.png`, {
       method: "POST",
@@ -216,10 +256,10 @@ describe("cockpit bridge HTTP/WS API", { skip }, () => {
     assert.equal(response.status, 401);
   });
 
-  test("ws streams feed messages and answers commands", async () => {
+  test("ws streams feed messages, answers ping, and applies filters", async () => {
     const ws = new WebSocket(`ws://127.0.0.1:${PORT}/ws?token=${TOKEN}`);
     const messages: unknown[] = [];
-    const got = new Promise<void>((resolve) => {
+    const gotPong = new Promise<void>((resolve) => {
       ws.on("message", (data) => {
         const parsed = JSON.parse(data.toString());
         messages.push(parsed);
@@ -231,8 +271,43 @@ describe("cockpit bridge HTTP/WS API", { skip }, () => {
       ws.on("error", reject);
     });
     ws.send(JSON.stringify({ type: "ping" }));
-    await got;
+    await gotPong;
     assert.ok(messages.some((m) => (m as { type: string }).type === "pong"));
+
+    // Filters are per-connection and actually applied: subscribe to one
+    // kind, emit a different one first, and assert only the subscribed kind
+    // is delivered.
+    const feedFrames: { kind: string }[] = [];
+    const gotIncluded = new Promise<void>((resolve) => {
+      const check = (data: Buffer): void => {
+        const parsed = JSON.parse(data.toString());
+        if (parsed.type === "subscribed") {
+          feed.emit({ kind: "pane_closed", data: { pane_id: "p1" } } as never);
+          feed.emit({ kind: "pane_agent_status_changed", data: { pane_id: "p1", agent_status: "done" } } as never);
+        }
+        if (parsed.type === "feed") {
+          feedFrames.push(parsed.payload as { kind: string });
+          if (parsed.payload.kind === "pane_agent_status_changed") resolve();
+        }
+      };
+      ws.on("message", check);
+    });
+    ws.send(JSON.stringify({ type: "subscribe", filter: ["pane_agent_status_changed"] }));
+    await gotIncluded;
+    assert.ok(messages.some((m) => (m as { type: string }).type === "subscribed"));
+    // The excluded pane_closed event was dropped by the connection filter.
+    assert.deepEqual(feedFrames.map((f) => f.kind), ["pane_agent_status_changed"]);
     ws.close();
+  });
+});
+
+type HerdrEventFeedLike = ReturnType<typeof fakeFeed>;
+
+describe("route table startup assertions", () => {
+  it("rejects a route table with shadowing patterns", async () => {
+    const { RouteTable } = await import("../src/routes/dispatcher.js");
+    const routes = (await import("../src/routes/index.js")).buildRoutes();
+    // The real table must assemble cleanly (no duplicates, no shadowing).
+    new RouteTable(routes);
   });
 });

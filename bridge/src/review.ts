@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { readdirSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve, sep } from "node:path";
+import { BridgeError } from "./errors.js";
 
 /**
  * Read-only git review API.
@@ -23,12 +24,9 @@ export const REVIEW_STATUS_MAX_ENTRIES = 200;
 export const REVIEW_LOG_MAX = 50;
 export const REVIEW_COMMAND_TIMEOUT_MS = 8_000;
 
-export class ReviewError extends Error {
-  constructor(
-    message: string,
-    public readonly status: number,
-  ) {
-    super(message);
+export class ReviewError extends BridgeError {
+  constructor(message: string, status: number) {
+    super(message, status);
   }
 }
 

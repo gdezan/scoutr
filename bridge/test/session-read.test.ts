@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { readSession } from "../src/server.js";
+import { readSession } from "../src/routes/sessions.js";
 
 /**
  * Fixture whose message ids are random 8-hex strings in an order that is NOT

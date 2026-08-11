@@ -1,0 +1,91 @@
+import type { HerdrEventFeed } from "../herdr/feed.js";
+import type { HerdrPort } from "../herdr/port.js";
+import type { UsageService } from "../usage/providers.js";
+import type { BridgeConfig } from "../config.js";
+import type { NtfyPublisher } from "../notify.js";
+import type { StatusTracker } from "../status.js";
+import type { BoardDetailCache } from "../board-detail.js";
+
+/** JSON body of a POST request, after parsing and object validation. */
+export interface JsonBody {
+  cwd?: string;
+  model?: string;
+  name?: string;
+  thinkingLevel?: string;
+  initialPrompt?: string;
+  action?: string;
+  text?: string;
+  path?: string;
+}
+
+/** Everything the HTTP + WS layers need beyond the caller-provided wiring. */
+export interface ServerDeps {
+  herdr: HerdrPort;
+  feed: HerdrEventFeed;
+  usage: UsageService;
+  config: BridgeConfig;
+  /** Push publisher for blocked-agent events (layer 5); optional. */
+  publisher?: NtfyPublisher;
+  sessionCatalogRoot?: string;
+}
+
+/**
+ * Route deps: ServerDeps plus the per-server derived state the server owns
+ * (status timestamps and the bounded board-detail cache). The server builds
+ * these inside createCockpitServer and hands them to every handler.
+ */
+export interface RouteDeps extends ServerDeps {
+  tracker: StatusTracker;
+  boardDetail: BoardDetailCache;
+}
+
+export interface RouteContext {
+  /** Path parameters captured by `:name` segments, percent-encoded as in the URL. */
+  params: Record<string, string>;
+  query: URLSearchParams;
+  /** Parsed JSON body ({} for GET routes and when no body was sent). */
+  body: JsonBody;
+  /**
+   * The unconsumed request body stream — present only on routes with
+   * `rawBody: true` (e.g. binary attachment uploads), which read it
+   * themselves instead of the dispatcher parsing JSON.
+   */
+  rawBody?: AsyncIterable<Buffer>;
+  /** Content-Type header, for routes that validate it (rawBody routes). */
+  contentType?: string;
+  deps: RouteDeps;
+}
+
+/** Everything the dispatcher needs to serve one HTTP request. */
+export interface DispatchRequest {
+  method: string;
+  /** Raw (percent-encoded) path, e.g. "/api/agents/p%201/read". */
+  pathname: string;
+  search: URLSearchParams;
+  /** Raw Authorization header value, if any. */
+  authorization?: string;
+  /** Request body stream; JSON routes are parsed by the dispatcher. */
+  body?: AsyncIterable<Buffer>;
+  /** Content-Type header, for routes that validate it (rawBody routes). */
+  contentType?: string;
+}
+
+export interface RouteResult {
+  status: number;
+  body: unknown;
+}
+
+export interface Route {
+  method: "GET" | "POST";
+  /**
+   * Literal path or a pattern with :params — "/api/sessions/:paneId/control".
+   * Literals always match before patterns regardless of table order.
+   */
+  path: string;
+  /**
+   * Consume the raw request body stream instead of JSON: the dispatcher
+   * hands the unconsumed stream to `ctx.rawBody` and skips body parsing.
+   */
+  rawBody?: boolean;
+  handle(ctx: RouteContext): Promise<RouteResult> | RouteResult;
+}

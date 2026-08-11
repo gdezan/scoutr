@@ -1,5 +1,6 @@
 import { mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { basename, extname, join } from "node:path";
+import { BridgeError } from "./errors.js";
 
 /**
  * Image-attachment uploads for the chat composer.
@@ -18,12 +19,9 @@ const ATTACHMENTS_MAX_FILES = 200;
 const ATTACHMENTS_MAX_TOTAL_BYTES = 200 * 1024 * 1024;
 const ALLOWED_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp"]);
 
-export class AttachmentError extends Error {
-  constructor(
-    message: string,
-    public readonly status: number,
-  ) {
-    super(message);
+export class AttachmentError extends BridgeError {
+  constructor(message: string, status: number) {
+    super(message, status);
   }
 }
 

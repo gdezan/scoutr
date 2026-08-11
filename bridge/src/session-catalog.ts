@@ -1,5 +1,6 @@
 import { basename, isAbsolute, relative, resolve } from "node:path";
 import { readdir, realpath, stat, unlink } from "node:fs/promises";
+import { BridgeError } from "./errors.js";
 import { MAX_SESSION_TITLE_LENGTH, readTranscript, writeSessionTitle } from "./transcript.js";
 
 const MAX_CANDIDATES = 2_000;
@@ -57,9 +58,9 @@ interface ParsedCatalogFile {
   model: string | null;
 }
 
-export class SessionCatalogError extends Error {
-  constructor(message: string, public readonly status = 400) {
-    super(message);
+export class SessionCatalogError extends BridgeError {
+  constructor(message: string, status = 400) {
+    super(message, status);
   }
 }
 

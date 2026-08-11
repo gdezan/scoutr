@@ -1,4 +1,5 @@
 import type { HerdrPort } from "./herdr/port.js";
+import { BridgeError } from "./errors.js";
 import { resolveAllowedDir } from "./dirs.js";
 import { readModelsCatalog, type ModelsCatalog } from "./pi/models.js";
 import { readTranscript, type Transcript } from "./transcript.js";
@@ -53,12 +54,9 @@ export interface SessionControlDeps {
   readSession?: (path: string) => Promise<Pick<Transcript, "model" | "thinkingLevel">>;
 }
 
-export class SessionsError extends Error {
-  constructor(
-    message: string,
-    public readonly status = 400,
-  ) {
-    super(message);
+export class SessionsError extends BridgeError {
+  constructor(message: string, status = 400) {
+    super(message, status);
   }
 }
 

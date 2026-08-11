@@ -1,5 +1,6 @@
 import net from "node:net";
 import { homedir } from "node:os";
+import { BridgeError } from "../errors.js";
 import { join } from "node:path";
 import type { HerdrPort } from "./port.js";
 import type { HerdrPong, SessionSnapshot, Subscription, SubscriptionEventEnvelope } from "./types.js";
@@ -14,11 +15,11 @@ import type { HerdrPong, SessionSnapshot, Subscription, SubscriptionEventEnvelop
  *    followed by streamed `{"event": "kind", "data": {...}}` envelopes.
  */
 
-export class HerdrError extends Error {
+export class HerdrError extends BridgeError {
   readonly code?: string;
 
   constructor(message: string, code?: string) {
-    super(message);
+    super(message, 502);
     this.name = "HerdrError";
     this.code = code;
   }
