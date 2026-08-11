@@ -12,3 +12,6 @@ bridge/dist/
 
 # OS
 .DS_Store
+
+# Local implementation plans
+.plans/
