@@ -68,6 +68,30 @@ curl -s -H "Authorization: Bearer testtoken1234567890" http://127.0.0.1:8791/api
 - Stop it with `pkill -f 'cli[.]ts serve'` (bracket trick — a plain
   `pkill -f cli.ts` also matches your own shell).
 
+## Deploying bridge changes
+
+The apps talk to the **real** systemd unit (`cockpit-bridge.service`, port
+8737, `~/.config/cockpit/config.json`, exposed to the phone via
+`tailscale serve`), which runs the **compiled `dist/`** — NOT the `tsx`
+scratch bridge above. The scratch bridge is source-level validation only.
+
+The review-403 incident (fixes 5/13) shipped with every test green while the
+user still hit `bridge 403: path outside allowed repo roots`: `dist/` had been
+built at 17:41, before the fixes landed, and the service was never rebuilt or
+restarted. A stale deployed artifact is invisible to source-level tests.
+
+Every bridge change ends with:
+
+```bash
+cd bridge && npm run deploy          # tsc build + restart the service + run the gate
+npm run check:deployed               # gate: dist >= src AND service restarted after build AND real /api/health OK
+```
+
+`check:deployed` fails on any of: dist older than the newest src file, the
+service started before the dist build, or the real bridge not answering
+health with the deployed token. Treat a failing gate as a hard stop — the
+app in your hand talks to that process, not to `tsx`.
+
 ## Testing patterns
 
 - **BridgeClient is final** — emulator ViewModel tests use a real

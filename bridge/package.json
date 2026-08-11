@@ -10,6 +10,8 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "build": "tsc",
+    "deploy": "npm run build && systemctl --user restart cockpit-bridge.service && sleep 2 && npm run check:deployed",
+    "check:deployed": "node scripts/check-deployed.mjs",
     "test": "node --import tsx --test test/*.test.ts",
     "cli": "tsx src/cli.ts"
   },
