@@ -33,7 +33,7 @@ that is what makes it expensive. Bound it up front instead of discovering it aft
 
 1. **Bound before you run, not after it hangs.** Anything touching a socket, device,
    emulator, or network gets an explicit limit: `timeout 120 <cmd>`, `--test-timeout` for
-   `node --test`, `--timeout` for `herdr pane wait-output`, `-timeout` for gradle. A
+   `node --test`, `--timeout` for `herdr agent prompt --wait` / `herdr agent wait`, `-timeout` for gradle. A
    command with no natural end (`tail -f`, `adb logcat`) needs one every time.
 2. **Decide the expected duration first, then hold it to ~2x.** `cd bridge && npm test` is
    ~90s; gradle managed-device tests are ~2 min. Past twice that, kill it and diagnose —
@@ -48,8 +48,8 @@ that is what makes it expensive. Bound it up front instead of discovering it aft
 Known unbounded spots, already bounded — keep them that way: the live-socket suites in
 `bridge/test/herdr-client.test.ts` (a real herdr under load leaves `snapshot()`/`subscribe()`
 pending forever, which used to hang the whole run silently), `npm test` overall, gradle
-managed-device tasks, and every `herdr pane wait-output` in the Vision and Code review
-workflows below.
+managed-device tasks, and every `herdr agent prompt … --wait` in the Vision and Code
+review workflows below.
 
 ## Gotchas (read before touching)
 
@@ -61,10 +61,11 @@ workflows below.
 - Bridge envs: `XDG_CONFIG_HOME` picks the config dir; `COCKPIT_REPO_ROOTS` allow-lists review repos; config tokens must be ≥16 chars.
 - ntfy drops custom JSON publish fields — deep links must travel in ntfy's documented `click` field (see `notify.ts`).
 - Composer keyboard contract: Enter inserts a newline and must never send; keep multiline + `ImeAction.None` + no-op `KeyboardActions` (pinned by `ChatComposerKeyTest`).
+- `herdr pane wait-output --match` also matches the pane's echoed command line (the sentinel text is in the command itself) — anchor with `--regex '^SENTINEL$'` or use a sentinel absent from the command.
 
 ## Vision
 
-When a task involves an image — a screenshot, mockup, rendered UI, or diagram — inspect it directly when the current model supports vision. Otherwise, delegate the description to a vision-capable pi in a sibling herdr pane (`HERDR_ENV=1`).
+When a task involves an image — a screenshot, mockup, rendered UI, or diagram — inspect it directly when the current model supports vision. Otherwise, delegate the description to a vision-capable pi in a sibling herdr pane (`HERDR_ENV=1`). The wait is event-driven: pi in TUI mode pushes `working`/`idle` lifecycle events to herdr over its socket, and `herdr agent prompt --wait` returns the moment the answer is done — no sentinels, no polling. Run pi in TUI mode (no `-p`); print mode is headless and never reports lifecycle state.
 
 1. Split a sibling pane without stealing focus, then parse the new pane id from `.result.pane.pane_id`:
 
@@ -72,32 +73,38 @@ When a task involves an image — a screenshot, mockup, rendered UI, or diagram 
    herdr pane split --current --direction right --cwd "$PWD" --no-focus
    ```
 
-2. Run non-interactive pi with the vision model, attach the image with `@path` (one or more), write the answer to a temp file, and echo a sentinel the wait can match:
+2. Start pi in that pane as a named agent with the vision model (`agent start` returns once pi is detected and ready):
 
    ```bash
-   herdr pane run <pane-id> 'pi -p --model opencode-go/gpt-5.6-luna @<abs-image-path> "Describe this image in detail: layout, text, colors, and any UI state or errors visible." > /tmp/vision-answer.md 2>&1; echo VISION_DONE'
+   herdr agent start vision --kind pi --pane <pane-id> -- --model opencode-go/gpt-5.6-luna
    ```
 
-3. Wait for the sentinel, then read the answer:
+3. Submit the description request with the image attached via `@path`; `--wait` returns as soon as pi settles (or with `blocked` if it raises a question UI):
 
    ```bash
-   herdr pane wait-output <pane-id> --match VISION_DONE --timeout 180000
-   cat /tmp/vision-answer.md
+   herdr agent prompt vision "@<abs-image-path> Describe this image in detail: layout, text, colors, and any UI state or errors visible." --wait --timeout 180000
    ```
 
-4. Close the pane you created once the description is in hand: `herdr pane close <pane-id>`.
+4. Read the answer, then close the pane you created:
 
-Done when the description answers the specific question you had about the image. An empty file means a bad image path or a failed model call — fix and re-run. If `opencode-go/gpt-5.6-luna` no longer works, pick a model with `images: yes` from `pi --list-models`.
+   ```bash
+   herdr agent read vision --source recent-unwrapped --lines 200 > /tmp/vision-answer.md
+   herdr pane close <pane-id>
+   ```
+
+Done when the description answers the specific question you had about the image. If the read is empty or the agent says the image was not attached, the model call or `@path` failed — fix and re-run. If `opencode-go/gpt-5.6-luna` no longer works, pick a model with `images: yes` from `pi --list-models`.
 
 ## Code review
 
-Before committing, review the current work with a fresh pi in a sibling herdr pane (`HERDR_ENV=1`), using `openai-codex/gpt-5.6-sol` at low reasoning. Use the same pane workflow as Vision (split, run, wait, close), with this command in step 2:
+Before committing, review the current work with a fresh pi in a sibling herdr pane (`HERDR_ENV=1`), using `openai-codex/gpt-5.6-sol` at low reasoning. Use the same pane workflow as Vision (split, start, prompt, read, close), with the reviewer model and prompt:
 
 ```bash
-herdr pane run <pane-id> 'pi -p --model openai-codex/gpt-5.6-sol --thinking low "Review the current uncommitted work (git status, git diff, git diff --cached). Report concrete correctness bugs, spec mismatches, and violations of the conventions in AGENTS.md, each with file and line; skip style nits." > /tmp/code-review.md 2>&1; echo REVIEW_DONE'
+herdr agent start reviewer --kind pi --pane <pane-id> -- --model openai-codex/gpt-5.6-sol --thinking low
+herdr agent prompt reviewer "Review the current uncommitted work (git status, git diff, git diff --cached). Report concrete correctness bugs, spec mismatches, and violations of the conventions in AGENTS.md, each with file and line; skip style nits." --wait --timeout 300000
+herdr agent read reviewer --source recent-unwrapped --lines 200 > /tmp/code-review.md
 ```
 
-Wait for `REVIEW_DONE` (`--timeout 300000`), read `/tmp/code-review.md`, then close the pane. Fix every issue it raises, or consciously dismiss it, before committing. An empty file means a failed model call — fix and re-run. If `openai-codex/gpt-5.6-sol` no longer works, pick another model from `pi --list-models`.
+Read `/tmp/code-review.md`, then close the pane. Fix every issue it raises, or consciously dismiss it, before committing. If the wait returns `blocked`/`agent_prompt_stalled`/`timeout` or the read is empty, the review did not complete — inspect `herdr agent get reviewer` and `herdr agent read reviewer`, unblock or re-prompt, and re-run. If `openai-codex/gpt-5.6-sol` no longer works, pick another model from `pi --list-models`.
 
 ## Communication principles
 
