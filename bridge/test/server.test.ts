@@ -55,6 +55,15 @@ async function getJson(path: string): Promise<{ status: number; body: unknown }>
   return { status: response.status, body: await response.json() };
 }
 
+async function postJson(path: string, body: unknown): Promise<{ status: number; body: unknown }> {
+  const response = await fetch(`http://127.0.0.1:${PORT}${path}`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return { status: response.status, body: await response.json() };
+}
+
 describe("cockpit bridge HTTP/WS API (offline)", () => {
   let server: CockpitServer;
   let feed: ReturnType<typeof fakeFeed>;
@@ -71,6 +80,11 @@ describe("cockpit bridge HTTP/WS API (offline)", () => {
     feed = fakeFeed();
     const usage = { all: async () => ({}) };
     sessionRoot = await mkdtemp(join(tmpdir(), "cockpit-server-catalog-"));
+    process.env.PI_CODING_AGENT_SESSION_DIR = sessionRoot;
+    // Isolate the claude backend's store too, or the catalog scans the
+    // developer's real ~/.claude/projects in test runs.
+    process.env.CLAUDECONFIGDIR = await mkdtemp(join(tmpdir(), "cockpit-server-claude-"));
+    await mkdir(join(process.env.CLAUDECONFIGDIR, "projects"), { recursive: true });
     const projectDir = join(sessionRoot, "project");
     await mkdir(projectDir);
     await writeFile(
@@ -86,7 +100,6 @@ describe("cockpit bridge HTTP/WS API (offline)", () => {
       feed,
       usage: usage as never,
       config: { token: TOKEN, port: PORT },
-      sessionCatalogRoot: sessionRoot,
     });
   });
 
@@ -200,6 +213,41 @@ describe("cockpit bridge HTTP/WS API (offline)", () => {
 
     const invalid = await getJson("/api/session-catalog?limit=0");
     assert.equal(invalid.status, 400);
+  });
+
+  test("catalog actions treat an active claude session (id-kind ref) as running", async () => {
+    // Live claude panes report agent_session as {kind:"id", value:<uuid>}.
+    // The action path must resolve that id to its transcript and see the
+    // session as active: resume returns the existing pane instead of
+    // launching a duplicate, delete is refused while it is running.
+    const claudeStore = process.env.CLAUDECONFIGDIR!;
+    const dir = join(claudeStore, "projects", "-encoded-");
+    await mkdir(dir, { recursive: true });
+    const claudePath = join(dir, "claude-live-1.jsonl");
+    await writeFile(claudePath, `${JSON.stringify({
+      type: "user",
+      uuid: "u1",
+      sessionId: "claude-live-1",
+      cwd: "/work/claude",
+      timestamp: "2026-01-01T00:00:00.000Z",
+      message: { role: "user", content: "hello" },
+    })}\n`);
+    feed.setSnapshot(snapshotWithAgents([
+      {
+        agent: "claude",
+        agent_status: "working",
+        agent_session: { source: "herdr:claude", agent: "claude", kind: "id", value: "claude-live-1" },
+      },
+    ]));
+
+    const resumed = await postJson("/api/session-catalog/resume", { path: claudePath });
+    assert.equal(resumed.status, 200);
+    assert.deepEqual(resumed.body, { ok: true, workspaceId: "ws1", paneId: "p1" });
+
+    const deleted = await postJson("/api/session-catalog/delete", { path: claudePath });
+    assert.equal(deleted.status, 409);
+
+    feed.setSnapshot(null);
   });
 
   test("review reaches a completed session's workspace via the catalog", async () => {

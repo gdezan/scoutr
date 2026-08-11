@@ -56,6 +56,7 @@ class NewSessionSheetTest {
                 val body = when {
                     path == "/api/dirs" && request.path?.contains("%2FDev") == true -> dev
                     path == "/api/dirs" -> home
+                    path == "/api/agents/kinds" -> """{"ok":true,"kinds":[{"id":"pi","displayName":"Pi","capabilities":["abort","retry","compact","fork","rename","close","set_model","set_thinking"],"hasModelCatalog":true,"hasSlashCommands":true}]}"""
                     path == "/api/models" -> models
                     path == "/api/sessions" -> create ?: """{"ok":false,"error":"not stubbed"}"""
                     else -> """{"ok":false,"error":"unexpected path $path"}"""

@@ -1,6 +1,6 @@
 import { canonicalPath } from "../dirs.js";
 import type { SessionSnapshot } from "../herdr/types.js";
-import { readCommandsCatalog } from "../pi/commands.js";
+import { backendFor } from "../agents/registry.js";
 import { deriveAgentCards } from "./agents.js";
 import type { Route, RouteContext, RouteResult } from "./types.js";
 
@@ -21,5 +21,13 @@ async function commands(ctx: RouteContext): Promise<RouteResult> {
       return { status: 403, body: { ok: false, error: "cwd is not attached to an active agent" } };
     }
   }
-  return { status: 200, body: { ok: true, catalog: await readCommandsCatalog(cwd) } };
+  const agent = ctx.query.get("agent") ?? "pi";
+  let backend;
+  try {
+    backend = backendFor(agent);
+  } catch {
+    return { status: 404, body: { ok: false, error: `unknown agent: ${agent}` } };
+  }
+  // Catalog-less backends (e.g. claude) return an empty catalog, never a 404.
+  return { status: 200, body: { ok: true, catalog: await backend.commands(cwd) } };
 }

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { readModelsCatalog, modelsStorePath } from "../src/pi/models.js";
+import { readModelsCatalog, modelsStorePath } from "../src/agents/pi/models.js";
 
 describe("modelsStorePath", () => {
   it("joins the pi agent dir with models-store.json", () => {

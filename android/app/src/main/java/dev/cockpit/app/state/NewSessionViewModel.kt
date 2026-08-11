@@ -3,6 +3,7 @@ package dev.cockpit.app.state
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import dev.cockpit.app.data.AgentKindInfo
 import dev.cockpit.app.data.LauncherSettings
 import dev.cockpit.app.data.LauncherSettingsStore
 import dev.cockpit.app.data.ModelInfo
@@ -44,6 +45,9 @@ data class NewSessionUiState(
     val home: String = "",
     val path: String = "",
     val dirs: List<String> = emptyList(),
+    /** Registered agent backends for the selector (GET /api/agents/kinds). */
+    val agentKinds: List<AgentKindInfo> = emptyList(),
+    val selectedAgent: String = "pi",
     val providers: List<ModelProvider> = emptyList(),
     val modelMatches: List<ModelPickerMatch> = emptyList(),
     val modelFilters: ModelPickerFilters = ModelPickerFilters(),
@@ -82,8 +86,13 @@ data class NewSessionUiState(
 
 
     val canCreate: Boolean
-        get() = selectedModel != null && path.isNotBlank() &&
-            !loadingDirs && !loadingModels && !creating && folderError == null && modelError == null
+        get() = path.isNotBlank() &&
+            !loadingDirs && !loadingModels && !creating && folderError == null && modelError == null &&
+            (selectedModel != null || !selectedAgentHasModelCatalog)
+
+    /** Derived: catalog-less backends (e.g. claude) never need a model pick. */
+    val selectedAgentHasModelCatalog: Boolean
+        get() = agentKinds.firstOrNull { it.id == selectedAgent }?.hasModelCatalog != false
 }
 
 data class CreatedSessionResult(val paneId: String)
@@ -112,6 +121,30 @@ class NewSessionViewModel(
 
     init {
         viewModelScope.launch { loadDirs() }
+        viewModelScope.launch { loadAgentKinds() }
+        viewModelScope.launch { loadModels() }
+    }
+
+    suspend fun loadAgentKinds() {
+        try {
+            val response = bridge.agentKinds()
+            val kinds = response.kinds
+            _ui.update {
+                val current = it.selectedAgent
+                val stillKnown = kinds.any { kind -> kind.id == current }
+                it.copy(
+                    agentKinds = kinds,
+                    selectedAgent = if (stillKnown || kinds.isEmpty()) current else (kinds.firstOrNull()?.id ?: "pi"),
+                )
+            }
+        } catch (_: Exception) {
+            // The selector is a convenience; without it the launcher still works for pi.
+        }
+    }
+
+    fun selectAgent(agent: String) {
+        if (agent == ui.value.selectedAgent) return
+        _ui.update { it.copy(selectedAgent = agent, selectedModelKey = null, selectedThinkingLevel = null, modelError = null) }
         viewModelScope.launch { loadModels() }
     }
 
@@ -144,7 +177,7 @@ class NewSessionViewModel(
     suspend fun loadModels() {
         _ui.update { it.copy(loadingModels = true, modelError = null) }
         try {
-            val response = bridge.models()
+            val response = bridge.models(_ui.value.selectedAgent)
             val providers = response.catalog?.providers
             if (providers != null) {
                 _ui.update { current ->
@@ -271,17 +304,18 @@ class NewSessionViewModel(
 
     fun savePreset(title: String) {
         val state = ui.value
-        val modelKey = state.selectedModelKey ?: return
+        if (state.selectedAgentHasModelCatalog && state.selectedModelKey == null) return
         val trimmedTitle = title.trim().take(60)
         if (trimmedTitle.isEmpty() || state.path.isBlank()) return
         val preset = SessionLauncherPreset(
             id = UUID.randomUUID().toString(),
             title = trimmedTitle,
             cwd = state.path,
-            modelKey = modelKey,
+            modelKey = state.selectedModelKey ?: "",
             thinkingLevel = state.selectedThinkingLevel,
             sessionName = state.name,
             initialPrompt = state.initialPrompt,
+            agent = state.selectedAgent,
         )
         val presets = (listOf(preset) + settings.presets).take(12)
         saveSettings(settings.copy(presets = presets))
@@ -289,20 +323,34 @@ class NewSessionViewModel(
     }
 
     fun applyPreset(presetId: String) {
+        val state = ui.value
         val preset = settings.presets.firstOrNull { it.id == presetId } ?: return
-        val model = findModel(ui.value.providers, preset.modelKey)
-        if (model == null) {
-            _ui.update { it.copy(launcherError = "This preset's model is no longer available. Choose another model and save a new preset.") }
-            return
-        }
-        updateModelPicker {
-            it.copy(
-                selectedModelKey = preset.modelKey,
-                selectedThinkingLevel = preset.thinkingLevel?.takeIf(model.thinkingLevels::contains),
-                name = preset.sessionName,
-                initialPrompt = preset.initialPrompt,
-                launcherError = null,
-            )
+        val wantsModel = state.selectedAgentHasModelCatalog
+        if (wantsModel) {
+            val model = findModel(state.providers, preset.modelKey)
+            if (model == null) {
+                _ui.update { it.copy(launcherError = "This preset's model is no longer available. Choose another model and save a new preset.") }
+                return
+            }
+            updateModelPicker {
+                it.copy(
+                    selectedModelKey = preset.modelKey,
+                    selectedThinkingLevel = preset.thinkingLevel?.takeIf(model.thinkingLevels::contains),
+                    name = preset.sessionName,
+                    initialPrompt = preset.initialPrompt,
+                    launcherError = null,
+                )
+            }
+        } else {
+            updateModelPicker {
+                it.copy(
+                    selectedModelKey = null,
+                    selectedThinkingLevel = null,
+                    name = preset.sessionName,
+                    initialPrompt = preset.initialPrompt,
+                    launcherError = null,
+                )
+            }
         }
         jumpTo(preset.cwd)
     }
@@ -315,17 +363,17 @@ class NewSessionViewModel(
 
     fun create() {
         val state = _ui.value
-        val modelKey = state.selectedModelKey ?: return
         if (!state.canCreate) return
         viewModelScope.launch {
             _ui.update { it.copy(creating = true, launcherError = null) }
             try {
                 val response = bridge.createSession(
                     cwd = state.path,
-                    model = modelKey,
+                    model = state.selectedModelKey ?: "",
                     name = state.name.trim().ifEmpty { null },
                     initialPrompt = state.initialPrompt.takeIf { it.isNotBlank() },
                     thinkingLevel = state.selectedThinkingLevel,
+                    agent = state.selectedAgent,
                 )
                 if (response.ok && response.paneId != null) {
                     rememberSuccessfulLaunch(state)

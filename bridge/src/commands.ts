@@ -1,5 +1,6 @@
 import { sanitizeAnswerText } from "./questions.js";
-import { validateSlashCommand } from "./pi/commands.js";
+import { backendForAgentSessionInfo, getBackendOrNull } from "./agents/registry.js";
+import type { SessionSnapshot } from "./herdr/types.js";
 import type { ServerDeps } from "./routes/types.js";
 
 export type CommandMessage =
@@ -41,9 +42,16 @@ export async function handleCommand(command: CommandMessage, deps: ServerDeps): 
       if (!paneId || !text) throw new Error("answer_question requires paneId and text");
       const safe = sanitizeAnswerText(text);
       if (!safe) throw new Error("answer_question text is empty after sanitization");
-      // Type the answer, then Enter to submit it in pi's questionnaire UI.
-      await deps.herdr.paneSendText(paneId, safe);
-      await deps.herdr.paneSendKeys(paneId, ["Enter"]);
+      const backend = backendForPane(deps, paneId);
+      if (backend) {
+        // Each backend knows how an answer is delivered into its own UI
+        // (pi's questionnaire vs claude's input prompt).
+        await backend.answerQuestion(deps.herdr, paneId, safe);
+      } else {
+        // Unknown agents still get the generic type-then-submit treatment.
+        await deps.herdr.paneSendText(paneId, safe);
+        await deps.herdr.paneSendKeys(paneId, ["Enter"]);
+      }
       return { type: "answered", paneId, text: safe };
     }
     case "slash_command": {
@@ -64,4 +72,30 @@ export async function handleCommand(command: CommandMessage, deps: ServerDeps): 
       throw new Error(`unknown command ${JSON.stringify(exhaustive)}`);
     }
   }
+}
+
+/**
+ * Validate a `/command [args]` string for pane-native entry. Both known
+ * backends share the slash grammar, so this is a wire-level rule.
+ */
+export function validateSlashCommand(text: unknown): string {
+  if (typeof text !== "string") throw new Error("slash command text must be a string");
+  if (text.length === 0 || text.length > 10_000) throw new Error("slash command text must be 1 to 10000 characters");
+  if (!text.startsWith("/") || !/^\/[^\s\u0000-\u001f\u007f]+(?:[ \t][^\r\n\u0000-\u001f\u007f]*)?$/.test(text)) {
+    throw new Error("invalid slash command text");
+  }
+  return text;
+}
+
+function backendForPane(deps: ServerDeps, paneId: string) {
+  const snapshot = deps.feed.snapshot as SessionSnapshot | null;
+  const pane = snapshot?.panes.find((candidate) => candidate.pane_id === paneId);
+  if (pane) {
+    return backendForAgentSessionInfo(pane.agent_session) ?? getBackendOrNull(pane.agent ?? "");
+  }
+  const agent = snapshot?.agents.find((candidate) => candidate.pane_id === paneId);
+  if (agent) {
+    return backendForAgentSessionInfo(agent.agent_session) ?? getBackendOrNull(agent.agent);
+  }
+  return null;
 }

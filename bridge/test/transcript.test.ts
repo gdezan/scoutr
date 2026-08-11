@@ -8,10 +8,13 @@ import {
   TAIL_WINDOW_BYTES,
   entryText,
   inspectSessionFile,
-  parseTranscript,
-  readTranscript,
-  writeSessionTitle,
+  readTranscriptText,
 } from "../src/transcript.js";
+import { parsePiTranscript, writePiSessionTitle } from "../src/agents/pi/transcript.js";
+
+async function readTranscript(path: string, opts?: Parameters<typeof readTranscriptText>[1]) {
+  return parsePiTranscript(await readTranscriptText(path, opts), opts ?? {});
+}
 
 const SAMPLE = `{"type":"session","version":3,"id":"abc123","timestamp":"2026-08-09T16:39:48.826Z","cwd":"/home/gdezan/Dev/x"}
 {"type":"model_change","id":"m1","parentId":null,"timestamp":"2026-08-09T16:39:50Z","provider":"opencode-go","modelId":"deepseek-v4-flash"}
@@ -24,7 +27,7 @@ const SAMPLE = `{"type":"session","version":3,"id":"abc123","timestamp":"2026-08
 
 describe("parseTranscript", () => {
   it("parses a version-3 pi session file", () => {
-    const transcript = parseTranscript(SAMPLE);
+    const transcript = parsePiTranscript(SAMPLE);
     assert.equal(transcript.id, "abc123");
     assert.equal(transcript.cwd, "/home/gdezan/Dev/x");
     assert.equal(transcript.timestamp, "2026-08-09T16:39:48.826Z");
@@ -33,7 +36,7 @@ describe("parseTranscript", () => {
   });
 
   it("tracks the active model and thinking level", () => {
-    const transcript = parseTranscript(
+    const transcript = parsePiTranscript(
       `${SAMPLE}\n{"type":"model_change","provider":"openai-codex","modelId":"gpt-5.4"}\n{"type":"thinking_level_change","thinkingLevel":"xhigh"}`,
     );
     assert.equal(transcript.model, "openai-codex/gpt-5.4");
@@ -41,7 +44,7 @@ describe("parseTranscript", () => {
   });
 
   it("extracts user text and assistant blocks", () => {
-    const transcript = parseTranscript(SAMPLE);
+    const transcript = parsePiTranscript(SAMPLE);
     const [user, assistant, toolResult] = transcript.entries;
     assert.equal(user.role, "user");
     assert.equal((user.content[0] as { text: string }).text, "hello");
@@ -59,19 +62,19 @@ describe("parseTranscript", () => {
   });
 
   it("string content is normalized to a text block", () => {
-    const transcript = parseTranscript(
+    const transcript = parsePiTranscript(
       `{"type":"message","id":"s1","parentId":null,"timestamp":"2026-08-09T00:00:00Z","message":{"role":"user","content":"plain"}}`,
     );
     assert.equal((transcript.entries[0].content[0] as { text: string }).text, "plain");
   });
 
   it("tolerates garbage lines in a growing file", () => {
-    const transcript = parseTranscript(`${SAMPLE}\nnot json at all\n{"type":"message","id":"e9",`);
+    const transcript = parsePiTranscript(`${SAMPLE}\nnot json at all\n{"type":"message","id":"e9",`);
     assert.equal(transcript.entries.length, 3);
   });
 
   it("reads the title from session_info and the preview from the first user turn", () => {
-    const transcript = parseTranscript(
+    const transcript = parsePiTranscript(
       `${SAMPLE}{"type":"session_info","id":"i1","parentId":null,"timestamp":"2026-08-09T17:00:00Z","name":"Release review"}\n`,
     );
     assert.equal(transcript.title, "Release review");
@@ -79,7 +82,7 @@ describe("parseTranscript", () => {
   });
 
   it("leaves title null and preview empty when the file has neither", () => {
-    const transcript = parseTranscript(
+    const transcript = parsePiTranscript(
       `{"type":"session","version":3,"id":"only","timestamp":"2026-08-09T00:00:00Z","cwd":"/w"}`,
     );
     assert.equal(transcript.title, null);
@@ -87,7 +90,7 @@ describe("parseTranscript", () => {
   });
 
   it("collapses whitespace in the preview and ignores non-user turns", () => {
-    const transcript = parseTranscript(
+    const transcript = parsePiTranscript(
       [
         `{"type":"message","id":"a1","timestamp":"2026-08-09T00:00:00Z","message":{"role":"assistant","content":"assistant first"}}`,
         `{"type":"message","id":"u1","timestamp":"2026-08-09T00:00:01Z","message":{"role":"user","content":"  wrapped\\n  prompt  "}}`,
@@ -100,13 +103,13 @@ describe("parseTranscript", () => {
 
 describe("parseTranscript read modes", () => {
   it("tail keeps only the last N entries", () => {
-    const transcript = parseTranscript(SAMPLE, { tail: 2 });
+    const transcript = parsePiTranscript(SAMPLE, { tail: 2 });
     assert.deepEqual(transcript.entries.map((entry) => entry.entryId), ["e2", "e3"]);
     assert.equal(transcript.lastEntryId, "e3");
   });
 
   it("metadataOnly retains metadata but no entries", () => {
-    const transcript = parseTranscript(SAMPLE, { metadataOnly: true });
+    const transcript = parsePiTranscript(SAMPLE, { metadataOnly: true });
     assert.deepEqual(transcript.entries, []);
     assert.equal(transcript.id, "abc123");
     assert.equal(transcript.model, "opencode-go/deepseek-v4-flash");
@@ -115,9 +118,9 @@ describe("parseTranscript read modes", () => {
   });
 
   it("all three modes agree on the metadata of one file", () => {
-    const full = parseTranscript(SAMPLE);
-    const tailed = parseTranscript(SAMPLE, { tail: 40 });
-    const metadata = parseTranscript(SAMPLE, { metadataOnly: true });
+    const full = parsePiTranscript(SAMPLE);
+    const tailed = parsePiTranscript(SAMPLE, { tail: 40 });
+    const metadata = parsePiTranscript(SAMPLE, { metadataOnly: true });
     for (const other of [tailed, metadata]) {
       assert.equal(other.id, full.id);
       assert.equal(other.cwd, full.cwd);
@@ -134,7 +137,7 @@ describe("parseTranscript read modes", () => {
 
 describe("entryText", () => {
   it("skips thinking, names tool calls, and truncates", () => {
-    const assistant = parseTranscript(SAMPLE).entries[1];
+    const assistant = parsePiTranscript(SAMPLE).entries[1];
     assert.ok(entryText(assistant, 40).startsWith("[bash] on it"));
     assert.equal(entryText(assistant, 6), "[bash]…");
   });
@@ -302,7 +305,7 @@ describe("readTranscript", () => {
   });
 });
 
-describe("writeSessionTitle", () => {
+describe("writePiSessionTitle", () => {
   let dir: string;
 
   beforeEach(async () => {
@@ -316,7 +319,7 @@ describe("writeSessionTitle", () => {
   it("appends a session_info record the parser reads back", async () => {
     const path = join(dir, "s.jsonl");
     await writeFile(path, SAMPLE);
-    await writeSessionTitle(path, "Release follow-up");
+    await writePiSessionTitle(path, "Release follow-up");
     assert.equal((await readTranscript(path)).title, "Release follow-up");
     // The transcript itself is untouched — the record is appended, never rewritten.
     assert.deepEqual((await readTranscript(path)).entries.map((entry) => entry.entryId), ["e1", "e2", "e3"]);
@@ -332,8 +335,8 @@ describe("writeSessionTitle", () => {
   it("keeps the newest title when several are appended", async () => {
     const path = join(dir, "s.jsonl");
     await writeFile(path, SAMPLE);
-    await writeSessionTitle(path, "First");
-    await writeSessionTitle(path, "Second");
+    await writePiSessionTitle(path, "First");
+    await writePiSessionTitle(path, "Second");
     assert.equal((await readTranscript(path)).title, "Second");
   });
 });

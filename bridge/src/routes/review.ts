@@ -1,7 +1,7 @@
 import { canonicalPath } from "../dirs.js";
 import type { SessionSnapshot } from "../herdr/types.js";
 import { gitRepoRoot, reviewArtifacts, reviewDiff, reviewOverview, ReviewError } from "../review.js";
-import { listSessionCatalog } from "../session-catalog.js";
+import { listSessionCatalog, sessionCatalogRoots } from "../session-catalog.js";
 import type { Route, RouteContext, RouteResult } from "./types.js";
 
 export const reviewRoutes: Route[] = [
@@ -57,7 +57,7 @@ async function reviewRoots(ctx: RouteContext): Promise<string[]> {
   // COCKPIT_REPO_ROOTS still works and is joined in.
   let catalogCwds: string[] = [];
   try {
-    const catalog = await listSessionCatalog({ root: ctx.deps.sessionCatalogRoot, active: [] });
+    const catalog = await listSessionCatalog({ roots: sessionCatalogRoots(), active: [] });
     catalogCwds = catalog.sessions.map((s) => s.cwd).filter((cwd): cwd is string => Boolean(cwd));
   } catch {
     // A catalog failure must not take down review; live roots still apply.

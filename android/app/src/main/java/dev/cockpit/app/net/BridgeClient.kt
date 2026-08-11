@@ -1,5 +1,6 @@
 package dev.cockpit.app.net
 
+import dev.cockpit.app.data.AgentKindsResponse
 import dev.cockpit.app.data.AgentsResponse
 import dev.cockpit.app.data.AttachmentResponse
 import dev.cockpit.app.data.ConnectionStore
@@ -192,15 +193,24 @@ class BridgeClient(
             })
         }
 
-    /** Full model catalog from pi's models-store.json. */
-    suspend fun models(): ModelsCatalogResponse =
-        call("/api/models") { json.decodeFromString(ModelsCatalogResponse.serializer(), it) }
+    /** Model catalog for a backend (defaults to pi); catalog-less backends return an empty catalog. */
+    suspend fun models(agent: String? = null): ModelsCatalogResponse =
+        call("/api/models", query = if (agent == null) emptyMap() else mapOf("agent" to agent)) {
+            json.decodeFromString(ModelsCatalogResponse.serializer(), it)
+        }
 
-    /** Built-in pi commands and installed skill commands for autocomplete. */
-    suspend fun commands(cwd: String? = null): CommandsCatalogResponse =
-        call("/api/commands", query = if (cwd == null) emptyMap() else mapOf("cwd" to cwd)) {
+    /** Slash commands for a backend (defaults to pi); catalog-less backends return an empty catalog. */
+    suspend fun commands(cwd: String? = null, agent: String? = null): CommandsCatalogResponse =
+        call("/api/commands", query = buildMap {
+            if (cwd != null) put("cwd", cwd)
+            if (agent != null) put("agent", agent)
+        }) {
             json.decodeFromString(CommandsCatalogResponse.serializer(), it)
         }
+
+    /** Registered agent backends for the new-session sheet's backend selector. */
+    suspend fun agentKinds(): AgentKindsResponse =
+        call("/api/agents/kinds") { json.decodeFromString(AgentKindsResponse.serializer(), it) }
     /** Bounded list of persisted pi sessions, joined with live pane state. */
     suspend fun sessionCatalog(query: String? = null, limit: Int? = null): SessionCatalogResponse =
         call("/api/session-catalog", query = buildMap {
@@ -224,19 +234,21 @@ class BridgeClient(
             json.decodeFromString(LiveOutputResponse.serializer(), it)
         }
 
-    /** Create a pane-native pi session and deliver its optional first prompt in one bridge call. */
+    /** Create a pane-native agent session and deliver its optional first prompt in one bridge call. */
     suspend fun createSession(
         cwd: String,
         model: String,
         name: String? = null,
         initialPrompt: String? = null,
         thinkingLevel: String? = null,
+        agent: String? = null,
     ): CreatedSessionResponse = post("/api/sessions", buildJsonObject {
         put("cwd", JsonPrimitive(cwd))
         put("model", JsonPrimitive(model))
         if (name != null) put("name", JsonPrimitive(name))
         if (initialPrompt != null) put("initialPrompt", JsonPrimitive(initialPrompt))
         if (thinkingLevel != null) put("thinkingLevel", JsonPrimitive(thinkingLevel))
+        if (agent != null) put("agent", JsonPrimitive(agent))
     }) { json.decodeFromString(CreatedSessionResponse.serializer(), it) }
 
     /**

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it, beforeEach, afterEach } from "node:test";
 import { BoardDetailCache, deriveBoardDetail, cleanActivity } from "../src/board-detail.js";
-import { parseTranscript } from "../src/transcript.js";
+import { parsePiTranscript } from "../src/agents/pi/transcript.js";
 
 let nextId = 0;
 
@@ -15,7 +15,7 @@ function sessionLine(type: string, fields: Record<string, unknown>, ts: string):
 
 /** Board detail as the cache computes it: a parsed tail plus the file mtime. */
 function detailOf(text: string, mtimeMs: number) {
-  return deriveBoardDetail(parseTranscript(text, { tail: 40 }), mtimeMs);
+  return deriveBoardDetail(parsePiTranscript(text, { tail: 40 }), mtimeMs);
 }
 
 describe("deriveBoardDetail", () => {
@@ -82,6 +82,7 @@ describe("BoardDetailCache", () => {
 
   beforeEach(async () => {
     dir = await mkdtemp(join(tmpdir(), "cockpit-board-detail-"));
+    process.env.PI_CODING_AGENT_SESSION_DIR = dir;
   });
 
   afterEach(async () => {

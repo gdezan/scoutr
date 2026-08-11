@@ -17,7 +17,9 @@ import okhttp3.mockwebserver.MockWebServer
 import okhttp3.mockwebserver.RecordedRequest
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -162,13 +164,51 @@ class NewSessionViewModelTest {
         assertTrue(viewModel.ui.value.selectedModelKey != "removed/model")
     }
 
+    @Test
+    fun selectingCataloglessBackendSkipsModelRequirementAndSendsAgent() {
+        val viewModel = NewSessionViewModel(bridge(), settingsStore)
+        viewModel.waitForLoaded()
+
+        // Pi loads a model catalog and requires a model.
+        viewModel.selectModel("openai-codex/gpt-5.4")
+        assertTrue(viewModel.ui.value.canCreate)
+
+        // Claude has no catalog: no model needed, and creation carries the agent.
+        viewModel.selectAgent("claude")
+        runBlocking {
+            repeat(100) {
+                org.robolectric.shadows.ShadowLooper.idleMainLooper()
+                if (!viewModel.ui.value.loadingModels) return@runBlocking
+                delay(25)
+            }
+        }
+        assertTrue(viewModel.ui.value.agentKinds.size == 2)
+        assertTrue(viewModel.ui.value.selectedAgent == "claude")
+        assertFalse(viewModel.ui.value.selectedAgentHasModelCatalog)
+        assertNull(viewModel.ui.value.selectedModelKey)
+        assertTrue(viewModel.ui.value.canCreate)
+
+        viewModel.create()
+        viewModel.waitForCreated()
+        val create = takeRequestsUntilCreate()
+        val body = Json.parseToJsonElement(create.body.readUtf8()).jsonObject
+        assertEquals("claude", body["agent"]?.jsonPrimitive?.content)
+        assertEquals("", body["model"]?.jsonPrimitive?.content)
+    }
+
     private fun stubEndpoints() {
         server.dispatcher = object : Dispatcher() {
             override fun dispatch(request: RecordedRequest): MockResponse {
                 val path = (request.path ?: "").substringBefore('?')
                 val body = when (path) {
                     "/api/dirs" -> """{"ok":true,"listing":{"path":"/home/gdezan","dirs":["Dev","Downloads"]}}"""
-                    "/api/models" -> """{"ok":true,"catalog":{"providers":[{"name":"openai-codex","models":[{"id":"gpt-5.4","name":"GPT-5.4","reasoning":true,"thinkingLevels":["low","high"],"contextWindow":200000}]},{"name":"anthropic","models":[{"id":"claude-sonnet-4-6","name":"Claude Sonnet 4.6","reasoning":true,"thinkingLevels":["high"],"contextWindow":null}]}]}}"""
+                    "/api/agents/kinds" -> """{"ok":true,"kinds":[{"id":"pi","displayName":"Pi","capabilities":["abort","retry","compact","fork","rename","close","set_model","set_thinking"],"hasModelCatalog":true,"hasSlashCommands":true},{"id":"claude","displayName":"Claude Code","capabilities":["abort","compact","close","set_model"],"hasModelCatalog":false,"hasSlashCommands":false}]}"""
+                    "/api/models" ->
+                        if (request.requestUrl?.queryParameter("agent") == "claude") {
+                            """{"ok":true,"catalog":{"providers":[]}}"""
+                        } else {
+                            """{"ok":true,"catalog":{"providers":[{"name":"openai-codex","models":[{"id":"gpt-5.4","name":"GPT-5.4","reasoning":true,"thinkingLevels":["low","high"],"contextWindow":200000}]},{"name":"anthropic","models":[{"id":"claude-sonnet-4-6","name":"Claude Sonnet 4.6","reasoning":true,"thinkingLevels":["high"],"contextWindow":null}]}]}}"""
+                        }
                     "/api/sessions" -> """{"ok":true,"workspaceId":"wN","paneId":"wN:p1"}"""
                     else -> """{"ok":false,"error":"unexpected path $path"}"""
                 }

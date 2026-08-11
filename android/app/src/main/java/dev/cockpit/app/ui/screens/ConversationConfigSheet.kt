@@ -20,6 +20,7 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.CircularProgressIndicator
+import dev.cockpit.app.ui.components.SectionLabel
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
@@ -89,42 +90,38 @@ internal fun ConversationConfigSheet(
                 }
             }
 
-            Text(
-                "THINKING LEVEL",
-                style = MaterialTheme.typography.labelSmall,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.padding(horizontal = 20.dp),
-            )
-            Text(
-                ui.thinkingLevel?.replaceFirstChar(Char::uppercase) ?: "Not reported yet",
-                style = MaterialTheme.typography.titleMedium,
-                modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp),
-            )
-            if (ui.availableThinkingLevels.isEmpty()) {
+            if (ui.canSetThinking) {
+                SectionLabel("Thinking level", Modifier.padding(horizontal = 20.dp))
                 Text(
-                    "Thinking options appear after the active model is loaded.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
+                    ui.thinkingLevel?.replaceFirstChar(Char::uppercase) ?: "Not reported yet",
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp),
                 )
-            } else {
-                LazyRow(
-                    contentPadding = PaddingValues(horizontal = 20.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.testTag("thinking_level_options"),
-                ) {
-                    items(ui.availableThinkingLevels, key = { it }) { level ->
-                        FilterChip(
-                            selected = level == ui.thinkingLevel,
-                            enabled = !ui.configurationLoading,
-                            onClick = { onSelectThinking(level) },
-                            label = { Text(level.replaceFirstChar(Char::uppercase)) },
-                            leadingIcon = if (level == ui.thinkingLevel) {
-                                { Icon(Icons.Default.Check, contentDescription = null) }
-                            } else null,
-                            modifier = Modifier.testTag("thinking_level_$level"),
-                        )
+                if (ui.availableThinkingLevels.isEmpty()) {
+                    Text(
+                        "Thinking options appear after the active model is loaded.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
+                    )
+                } else {
+                    LazyRow(
+                        contentPadding = PaddingValues(horizontal = 20.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.testTag("thinking_level_options"),
+                    ) {
+                        items(ui.availableThinkingLevels, key = { it }) { level ->
+                            FilterChip(
+                                selected = level == ui.thinkingLevel,
+                                enabled = !ui.configurationLoading,
+                                onClick = { onSelectThinking(level) },
+                                label = { Text(level.replaceFirstChar(Char::uppercase)) },
+                                leadingIcon = if (level == ui.thinkingLevel) {
+                                    { Icon(Icons.Default.Check, contentDescription = null) }
+                                } else null,
+                                modifier = Modifier.testTag("thinking_level_$level"),
+                            )
+                        }
                     }
                 }
             }
@@ -133,13 +130,7 @@ internal fun ConversationConfigSheet(
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             Spacer(Modifier.height(14.dp))
 
-            Text(
-                "MODEL",
-                style = MaterialTheme.typography.labelSmall,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.padding(horizontal = 20.dp),
-            )
+            SectionLabel("Model", Modifier.padding(horizontal = 20.dp))
             Text(
                 ui.model ?: "Not reported yet",
                 style = MaterialTheme.typography.bodyMedium,
@@ -148,6 +139,9 @@ internal fun ConversationConfigSheet(
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp),
             )
+            // A catalog-less backend (claude) has no pickable models; the
+            // value line stays informative, the dead search does not render.
+            if (ui.modelProviders.isNotEmpty()) {
             OutlinedTextField(
                 value = query,
                 onValueChange = { query = it },
@@ -214,6 +208,7 @@ internal fun ConversationConfigSheet(
                         }
                     }
                 }
+            }
             }
             Spacer(Modifier.height(24.dp))
         }

@@ -10,6 +10,12 @@ import {
   SessionCatalogError,
 } from "../src/session-catalog.js";
 
+async function newCatalogRoot(): Promise<string> {
+  const root = await mkdtemp(join(tmpdir(), "cockpit-catalog-"));
+  process.env.PI_CODING_AGENT_SESSION_DIR = root;
+  return root;
+}
+
 async function writeSession(
   root: string,
   project: string,
@@ -43,7 +49,7 @@ function userLine(text: string): Record<string, unknown> {
 
 describe("session catalog", () => {
   it("lists persisted sessions newest-first and joins active pane state", async () => {
-    const root = await mkdtemp(join(tmpdir(), "cockpit-catalog-"));
+    const root = await newCatalogRoot();
     const older = await writeSession(
       root,
       "project-a",
@@ -68,7 +74,7 @@ describe("session catalog", () => {
     );
 
     const result = await listSessionCatalog({
-      root,
+      roots: [root],
       active: [{
         path: older,
         paneId: "pane-1",
@@ -89,7 +95,7 @@ describe("session catalog", () => {
   });
 
   it("searches bounded metadata and reports result truncation", async () => {
-    const root = await mkdtemp(join(tmpdir(), "cockpit-catalog-"));
+    const root = await newCatalogRoot();
     await writeSession(
       root,
       "project",
@@ -105,16 +111,16 @@ describe("session catalog", () => {
       "2026-01-03T00:00:00.000Z",
     );
 
-    const search = await listSessionCatalog({ root, query: "ANDROID", limit: 10 });
+    const search = await listSessionCatalog({ roots: [root], query: "ANDROID", limit: 10 });
     assert.deepEqual(search.sessions.map((session) => session.id), ["one"]);
 
-    const limited = await listSessionCatalog({ root, query: "navigation", limit: 1 });
+    const limited = await listSessionCatalog({ roots: [root], query: "navigation", limit: 1 });
     assert.equal(limited.sessions.length, 1);
     assert.equal(limited.truncated, true);
   });
 
   it("ignores malformed files and symlinks that escape the sessions root", async () => {
-    const root = await mkdtemp(join(tmpdir(), "cockpit-catalog-"));
+    const root = await newCatalogRoot();
     const outside = await mkdtemp(join(tmpdir(), "cockpit-outside-"));
     await mkdir(join(root, "project"), { recursive: true });
     await writeFile(join(root, "project", "malformed.jsonl"), "not json\n");
@@ -127,12 +133,12 @@ describe("session catalog", () => {
     );
     await symlink(outsideSession, join(root, "project", "escaped.jsonl"));
 
-    const result = await listSessionCatalog({ root });
+    const result = await listSessionCatalog({ roots: [root] });
     assert.deepEqual(result.sessions, []);
   });
 
   it("renames and deletes a stored session", async () => {
-    const root = await mkdtemp(join(tmpdir(), "cockpit-catalog-"));
+    const root = await newCatalogRoot();
     const path = await writeSession(
       root,
       "project",
@@ -141,18 +147,57 @@ describe("session catalog", () => {
       "2026-01-01T00:00:00.000Z",
     );
 
-    await renameStoredSession(path, "Release follow-up", root);
-    const renamed = await listSessionCatalog({ root });
+    await renameStoredSession(path, "Release follow-up");
+    const renamed = await listSessionCatalog({ roots: [root] });
     assert.equal(renamed.sessions[0]?.title, "Release follow-up");
 
-    await deleteStoredSession(path, root);
-    const deleted = await listSessionCatalog({ root });
+    await deleteStoredSession(path);
+    const deleted = await listSessionCatalog({ roots: [root] });
     assert.deepEqual(deleted.sessions, []);
   });
 
+  it("splits the candidate budget fairly so a giant first store cannot starve later roots", async () => {
+    // Two registered stores: pi (scanned first) with more files than its half
+    // of the global candidate cap, claude behind it with one session. The
+    // claude root must still be scanned.
+    const piRoot = await mkdtemp(join(tmpdir(), "cockpit-catalog-pi-"));
+    process.env.PI_CODING_AGENT_SESSION_DIR = piRoot;
+    const claudeRoot = await mkdtemp(join(tmpdir(), "cockpit-catalog-claude-"));
+    process.env.CLAUDECONFIGDIR = claudeRoot;
+
+    // One project dir with MAX_CANDIDATES/2 files (1000) exhausts pi's
+    // per-root budget exactly; file 1001 proves the budget, not the cap.
+    const piProject = join(piRoot, "project-a");
+    await mkdir(piProject, { recursive: true });
+    const slot = "2026-01-01T00:00:00.000Z";
+    for (let i = 0; i < 1001; i += 1) {
+      const file = join(piProject, `s${String(i).padStart(4, "0")}.jsonl`);
+      await writeFile(file, `${JSON.stringify(sessionLine(`s${i}`, "/work/alpha", slot))}\n`);
+      // old mtimes keep the pi store out of the newest-500 metadata slice
+      await utimes(file, new Date(slot), new Date(slot));
+    }
+
+    const claudeFile = join(claudeRoot, "projects", "-encoded-", "7d012817-0fb3-4810-9172-f26710238ead.jsonl");
+    await mkdir(join(claudeRoot, "projects", "-encoded-"), { recursive: true });
+    await writeFile(
+      claudeFile,
+      `${JSON.stringify({ type: "user", uuid: "u1", sessionId: "7d012817-0fb3-4810-9172-f26710238ead", cwd: "/work/beta", timestamp: "2026-01-01T00:00:01.000Z", message: { role: "user", content: "hello" } })}\n`,
+    );
+    // newest file wins the metadata slice despite the saturated pi store
+    await utimes(claudeFile, new Date(), new Date());
+
+    const catalog = await listSessionCatalog({ roots: [piRoot, join(claudeRoot, "projects")], limit: 200 });
+    assert.equal(
+      catalog.sessions.some((sess) => sess.path.endsWith("7d012817-0fb3-4810-9172-f26710238ead.jsonl")),
+      true,
+      "claude root must be scanned despite the saturated pi store",
+    );
+    assert.equal(catalog.truncated, true, "pi hit its per-root budget, so the listing is truncated");
+  });
+
   it("rejects invalid limits and queries", async () => {
-    const root = await mkdtemp(join(tmpdir(), "cockpit-catalog-"));
-    await assert.rejects(() => listSessionCatalog({ root, limit: 0 }), SessionCatalogError);
-    await assert.rejects(() => listSessionCatalog({ root, query: "bad\nquery" }), SessionCatalogError);
+    const root = await newCatalogRoot();
+    await assert.rejects(() => listSessionCatalog({ roots: [root], limit: 0 }), SessionCatalogError);
+    await assert.rejects(() => listSessionCatalog({ roots: [root], query: "bad\nquery" }), SessionCatalogError);
   });
 });

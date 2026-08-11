@@ -100,6 +100,14 @@ data class ChatUiState(
     val error: String? = null,
     /** Agent status from the last /api/agents poll ("working", "blocked", …). */
     val agentStatus: String = "working",
+    /** Registry backend id from the card; null until the first poll. */
+    val agentKind: String? = null,
+    /**
+     * Control verbs the backend supports; null until the first poll. Null
+     * means "assume pi" so controls never flicker out before the card lands.
+     */
+    val capabilities: List<String>? = null,
+    val agentDisplayName: String? = null,
     val sessionTitle: String = "Session",
     val model: String? = null,
     val thinkingLevel: String? = null,
@@ -127,6 +135,10 @@ data class ChatUiState(
 
     val availableThinkingLevels: List<String>
         get() = activeModel?.thinkingLevels ?: emptyList()
+
+    /** Derived: set_thinking is only offered when the backend advertises it. */
+    val canSetThinking: Boolean
+        get() = capabilities == null || "set_thinking" in capabilities
 
     val liveOutputSummary: String
         get() = meaningfulLiveOutputLines(liveOutputText)
@@ -184,13 +196,13 @@ class ChatViewModel(
     private var nextMessageId = 0L
     private var commandRequestGeneration = 0L
     private var commandCatalogCwd: String? = null
+    private var configurationAgent: String? = null
     private var lastCommandRefreshAt = 0L
 
     /** True when the agent is blocked on a question the user should answer. */
     val waitingForAnswer: Boolean get() = _ui.value.agentStatus == "blocked"
 
     init {
-        viewModelScope.launch { refreshConfiguration() }
         viewModelScope.launch { refresh() }
         pollJob = viewModelScope.launch {
             while (isActive) {
@@ -249,15 +261,34 @@ class ChatViewModel(
         }
     }
 
+    /**
+     * Model catalog for the session's backend. The backend id comes from the
+     * agents poll, so this no-ops until the card lands; refresh() re-invokes
+     * it after syncStatusAndPath() and whenever the kind changes.
+     */
     suspend fun refreshConfiguration() {
-        _ui.update { it.copy(configurationLoading = it.modelProviders.isEmpty(), configurationError = null) }
+        val agent = _ui.value.agentKind ?: return
+        val agentChanged = agent != configurationAgent
+        // configurationAgent is set only after a successful fetch, so an
+        // empty catalog (catalog-less backend like claude) is cached too —
+        // never refetch on the 2.5s poll cycle. A failed fetch leaves
+        // configurationAgent unset and retries on the next poll.
+        if (!agentChanged) return
+        _ui.update {
+            it.copy(
+                configurationLoading = true,
+                configurationError = null,
+                modelProviders = emptyList(),
+            )
+        }
         try {
-            val response = bridge.models()
+            val response = bridge.models(agent)
             val catalog = response.catalog
             if (catalog == null) {
                 _ui.update { it.copy(configurationLoading = false, configurationError = response.error ?: "Model catalog unavailable") }
                 return
             }
+            configurationAgent = agent
             _ui.update { it.copy(modelProviders = catalog.providers, configurationLoading = false, configurationError = null) }
         } catch (error: Exception) {
             _ui.update { it.copy(configurationLoading = false, configurationError = error.message ?: "Model catalog unavailable") }
@@ -276,7 +307,7 @@ class ChatViewModel(
             )
         }
         try {
-            val response = bridge.commands(cwd)
+            val response = bridge.commands(cwd, _ui.value.agentKind)
             if (commandRequestGeneration != requestGeneration) return
             val catalog = response.catalog
             if (catalog == null) {
@@ -299,6 +330,7 @@ class ChatViewModel(
     suspend fun refresh() {
         try {
             val path = syncStatusAndPath()
+            refreshConfiguration()
             if (_ui.value.commandsLoading || System.currentTimeMillis() - lastCommandRefreshAt >= COMMAND_REFRESH_MS) {
                 refreshCommands(_ui.value.cwd)
             }
@@ -336,6 +368,11 @@ class ChatViewModel(
                 _ui.update {
                     it.copy(
                         agentStatus = card.status,
+                        agentKind = card.agentKind.takeIf(String::isNotBlank) ?: it.agentKind,
+                        agentDisplayName = card.displayName?.takeIf(String::isNotBlank)
+                            ?: card.agentKind?.takeIf(String::isNotBlank)
+                            ?: it.agentDisplayName,
+                        capabilities = card.capabilities ?: it.capabilities,
                         cwd = cwd,
                         sessionTitle = card.title?.takeIf(String::isNotBlank)
                             ?: cwd?.substringAfterLast('/')?.takeIf(String::isNotBlank)
@@ -357,6 +394,10 @@ class ChatViewModel(
     fun control(action: String, text: String? = null, onSuccess: () -> Unit = {}) {
         viewModelScope.launch {
             val configurationAction = action == "set_model" || action == "set_thinking"
+            if (action == "set_thinking" && !_ui.value.canSetThinking) {
+                _ui.update { it.copy(configurationLoading = false, configurationError = "This agent does not support thinking levels") }
+                return@launch
+            }
             _ui.update {
                 it.copy(
                     sending = !configurationAction,

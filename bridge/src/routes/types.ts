@@ -13,6 +13,7 @@ export interface JsonBody {
   name?: string;
   thinkingLevel?: string;
   initialPrompt?: string;
+  agent?: string;
   action?: string;
   text?: string;
   path?: string;
@@ -26,7 +27,6 @@ export interface ServerDeps {
   config: BridgeConfig;
   /** Push publisher for blocked-agent events (layer 5); optional. */
   publisher?: NtfyPublisher;
-  sessionCatalogRoot?: string;
 }
 
 /**

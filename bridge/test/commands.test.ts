@@ -3,7 +3,8 @@ import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
-import { readCommandsCatalog, validateSlashCommand } from "../src/pi/commands.js";
+import { readCommandsCatalog } from "../src/agents/pi/commands.js";
+import { validateSlashCommand } from "../src/commands.js";
 
 const roots: string[] = [];
 

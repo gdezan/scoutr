@@ -33,12 +33,41 @@ data class AgentsResponse(
     val agents: List<AgentCard> = emptyList(),
 )
 
+/** Registry of available agent backends (GET /api/agents/kinds). */
+@Serializable
+data class AgentKindsResponse(
+    val ok: Boolean = true,
+    val kinds: List<AgentKindInfo> = emptyList(),
+    val error: String? = null,
+)
+
+@Serializable
+data class AgentKindInfo(
+    val id: String,
+    val displayName: String,
+    val capabilities: List<String> = emptyList(),
+    val hasModelCatalog: Boolean = false,
+    val hasSlashCommands: Boolean = false,
+) {
+    /** Derived: the app only offers thinking-level controls when the backend supports them. */
+    val supportsThinking: Boolean get() = "set_thinking" in capabilities
+}
+
 @Serializable
 data class AgentCard(
     val paneId: String,
     val workspaceId: String,
     val tabId: String,
     val agent: String,
+    /** Registry backend id (same as `agent` for known backends). */
+    val agentKind: String = agent,
+    /** Human-readable backend name (e.g. "Claude Code"). Null when unknown. */
+    val displayName: String? = null,
+    /**
+     * Control actions the backend supports; the app gates its menus on this.
+     * Null when the bridge omitted it (older bridge or unknown agent).
+     */
+    val capabilities: List<String>? = null,
     val status: String,
     val cwd: String? = null,
     val title: String? = null,
@@ -102,6 +131,7 @@ data class FeedMessage(
 data class SessionReadResponse(
     val ok: Boolean = true,
     val path: String = "",
+    val agentKind: String? = null,
     val name: String = "",
     val exists: Boolean = false,
     val since: String? = null,
@@ -348,6 +378,7 @@ data class SessionCatalogResponse(
 data class SessionCatalogItem(
     val id: String,
     val path: String,
+    val agentKind: String = "pi",
     val cwd: String,
     val title: String,
     val preview: String = "",

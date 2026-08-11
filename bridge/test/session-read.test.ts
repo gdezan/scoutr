@@ -27,8 +27,9 @@ function fixtureJsonl(): string {
 function fixtureDir(): { dir: string; agentDir: string; file: string } {
   const dir = mkdtempSync(join(tmpdir(), "cockpit-session-"));
   const agentDir = join(dir, "agent");
-  mkdirSync(agentDir, { recursive: true });
-  const file = join(agentDir, "session.jsonl");
+  const sessionsDir = join(agentDir, "sessions");
+  mkdirSync(sessionsDir, { recursive: true });
+  const file = join(sessionsDir, "session.jsonl");
   writeFileSync(file, fixtureJsonl());
   return { dir, agentDir, file };
 }
@@ -83,10 +84,10 @@ test("readSession rejects paths outside the agent root", async () => {
   const { dir, agentDir } = fixtureDir();
   process.env.PI_CODING_AGENT_DIR = agentDir;
   try {
-    await assert.rejects(() => readSession("/etc/passwd", null), /must live under the pi agent directory/);
+    await assert.rejects(() => readSession("/etc/passwd", null), /outside a registered session store/);
     await assert.rejects(
       () => readSession(`${agentDir}-evil/session.jsonl`, null),
-      /must live under the pi agent directory/,
+      /outside a registered session store/,
     );
   } finally {
     rmSync(dir, { recursive: true, force: true });

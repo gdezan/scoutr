@@ -1,7 +1,8 @@
 import { basename, isAbsolute, relative, resolve } from "node:path";
 import { canonicalPath } from "../dirs.js";
-import { entryText, inspectSessionFile, readTranscript, type TranscriptEntry } from "../transcript.js";
-import { extractQuestions, type QuestionEntry } from "../questions.js";
+import { entryText, inspectSessionFile, type TranscriptEntry } from "../transcript.js";
+import type { QuestionEntry } from "../questions.js";
+import { backendForSessionPath } from "../agents/registry.js";
 import { createSession, controlSession } from "../sessions.js";
 import type { Route, RouteContext, RouteResult } from "./types.js";
 
@@ -13,11 +14,12 @@ export const sessionsRoutes: Route[] = [
 
 interface SessionReadResult {
   path: string;
+  agentKind: string;
   name: string;
   exists: boolean;
   since: string | null;
   entries: TranscriptEntry[];
-  /** Structured ask_user_question cards, derived from the same entries. */
+  /** Structured question cards, derived from the same entries. */
   questions: QuestionEntry[];
   model: string | null;
   thinkingLevel: string | null;
@@ -46,18 +48,17 @@ async function readSessionRoute(ctx: RouteContext): Promise<RouteResult> {
 }
 
 export async function readSession(pathParam: string, since: string | null): Promise<SessionReadResult> {
-  // Only allow absolute paths under the user's pi agent directory (read-only data).
-  const agentRoot = canonicalPath(resolve(process.env.PI_CODING_AGENT_DIR?.trim() || `${process.env.HOME}/.pi/agent`));
+  // Only allow absolute paths claimed by a registered backend (read-only data).
   const target = canonicalPath(resolve(pathParam));
-  const pathFromRoot = relative(agentRoot, target);
-  if (!pathFromRoot || pathFromRoot.startsWith("..") || isAbsolute(pathFromRoot)) {
-    throw new Error("session path must live under the pi agent directory");
+  const backend = backendForSessionPath(target);
+  if (!backend) {
+    throw new Error("session path is outside a registered session store");
   }
   const info = await inspectSessionFile(target);
   if (!info.exists) {
-    return { path: target, name: basename(target), exists: false, since, entries: [], questions: [], model: null, thinkingLevel: null, lastEntryId: null, mtimeMs: 0 };
+    return { path: target, agentKind: backend.id, name: basename(target), exists: false, since, entries: [], questions: [], model: null, thinkingLevel: null, lastEntryId: null, mtimeMs: 0 };
   }
-  const session = await readTranscript(target);
+  const session = await backend.readTranscript(target);
   let entries = session.entries;
   let cursor: string | null = since;
   if (since) {
@@ -76,11 +77,12 @@ export async function readSession(pathParam: string, since: string | null): Prom
   const lastEntry = entries[entries.length - 1];
   return {
     path: target,
+    agentKind: backend.id,
     name: basename(target),
     exists: true,
     since: cursor,
     entries,
-    questions: extractQuestions(entries),
+    questions: backend.extractQuestions(session),
     model: session.model,
     thinkingLevel: session.thinkingLevel,
     preview: lastEntry ? entryText(lastEntry, 120) : undefined,
@@ -99,6 +101,7 @@ async function createSessionRoute(ctx: RouteContext): Promise<RouteResult> {
     name: body.name,
     thinkingLevel: body.thinkingLevel,
     initialPrompt: body.initialPrompt,
+    agent: body.agent,
   });
   return { status: 200, body: { ok: true, ...created } };
 }

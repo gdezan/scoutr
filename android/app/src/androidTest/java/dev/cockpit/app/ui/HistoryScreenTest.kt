@@ -60,7 +60,7 @@ class HistoryScreenTest {
     private val catalogBody = """
         {"ok":true,"truncated":false,"sessions":[
           {"id":"abc","path":"/root/sessions/abc.jsonl","title":"Fix billing bug","cwd":"/repo/a","model":"openai-codex/gpt-5.4","updatedAt":${System.currentTimeMillis()}.0,"preview":"User asked to fix the billing math","active":true,"paneId":"pane1","workspaceId":"ws1","status":"blocked"},
-          {"id":"def","path":"/root/sessions/def.jsonl","title":"Docs refresh","cwd":"/repo/b","model":"anthropic/claude-sonnet-4-6","updatedAt":${System.currentTimeMillis() - 3_600_000}.0,"preview":"Update the README","active":false}
+          {"id":"def","path":"/root/sessions/def.jsonl","agentKind":"claude","title":"Docs refresh","cwd":"/repo/b","model":"anthropic/claude-sonnet-4-6","updatedAt":${System.currentTimeMillis() - 3_600_000}.0,"preview":"Update the README","active":false}
         ]}
     """.trimIndent()
 
@@ -190,6 +190,22 @@ class HistoryScreenTest {
             .getSystemService(ClipboardManager::class.java)
             .primaryClip?.getItemAt(0)?.text?.toString()
         assertEquals("clipboard should hold the session cwd", "/repo/a", clip)
+    }
+
+    @Test
+    fun claudeSessionHidesRenameAndFork() {
+        stubCatalog()
+        setContent(viewModel())
+        compose.onNodeWithText("Completed").performClick()
+        compose.waitUntil(5_000) {
+            compose.onAllNodes(androidx.compose.ui.test.hasTestTag("history_row_def")).fetchSemanticsNodes().isNotEmpty()
+        }
+        // Claude sessions reject rename (title lives in a pi session file) and
+        // fork (no fork-at-path launch), so the menu must not offer them.
+        compose.onNodeWithTag("history_row_menu_def").performClick()
+        compose.onNodeWithText("Fork").assertDoesNotExist()
+        compose.onNodeWithText("Rename").assertDoesNotExist()
+        compose.onNodeWithText("Copy path").assertIsDisplayed()
     }
 
     @Test

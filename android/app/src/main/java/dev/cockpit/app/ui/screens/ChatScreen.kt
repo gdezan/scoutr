@@ -159,6 +159,8 @@ fun ChatScreen(
             sessionTitle = ui.sessionTitle,
             model = ui.model,
             thinkingLevel = ui.thinkingLevel,
+            capabilities = ui.capabilities,
+            agentDisplayName = ui.agentDisplayName,
             status = if (viewModel.waitingForAnswer) "needs you" else ui.agentStatus,
             detailsVisible = detailsVisible,
             onToggleDetails = { detailsVisible = !detailsVisible },
@@ -359,6 +361,8 @@ private fun ChatHeader(
     sessionTitle: String,
     model: String?,
     thinkingLevel: String?,
+    capabilities: List<String>?,
+    agentDisplayName: String?,
     status: String,
     detailsVisible: Boolean,
     onToggleDetails: () -> Unit,
@@ -409,7 +413,9 @@ private fun ChatHeader(
                     Icon(Icons.Default.MoreVert, contentDescription = "Session actions")
                 }
                 DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                    val items = listOf(
+                    // Null capabilities mean the backend is unknown yet; show the
+                    // full pi surface until the first agents poll names it.
+                    val all = listOf(
                         "abort" to "Abort response",
                         "retry" to "Retry last message",
                         "compact" to "Compact context",
@@ -417,6 +423,8 @@ private fun ChatHeader(
                         "rename" to "Rename session…",
                         "close" to "Close session…",
                     )
+                    val items = if (capabilities == null) all
+                    else all.filter { (action, _) -> action in capabilities }
                     items.forEach { (action, label) ->
                         DropdownMenuItem(
                             text = { Text(label) },
@@ -439,12 +447,22 @@ private fun ChatHeader(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             HeaderStatusChip(status, Modifier.height(IntrinsicSize.Min))
-            HeaderConfigurationChip(
-                label = "Thinking",
-                value = thinkingLevel ?: "…",
-                onClick = onOpenConfiguration,
-                testTag = "chat_thinking_config",
-            )
+            if (capabilities == null || "set_thinking" in capabilities) {
+                HeaderConfigurationChip(
+                    label = "Thinking",
+                    value = thinkingLevel ?: "…",
+                    onClick = onOpenConfiguration,
+                    testTag = "chat_thinking_config",
+                )
+            }
+            if (capabilities != null) {
+                HeaderConfigurationChip(
+                    label = "Agent",
+                    value = agentDisplayName ?: capabilities?.let { "" } ?: "",
+                    onClick = null,
+                    testTag = "chat_agent_config",
+                )
+            }
             HeaderConfigurationChip(
                 label = "Model",
                 value = model?.substringAfterLast('/') ?: "…",
@@ -478,19 +496,22 @@ private fun HeaderStatusChip(status: String, modifier: Modifier = Modifier) {
 private fun HeaderConfigurationChip(
     label: String,
     value: String,
-    onClick: () -> Unit,
+    onClick: (() -> Unit)?,
     testTag: String,
 ) {
-    Surface(
-        onClick = onClick,
-        shape = RoundedCornerShape(50),
-        color = MaterialTheme.colorScheme.surfaceContainer,
-        modifier = Modifier.testTag(testTag),
-    ) {
+    val shape = RoundedCornerShape(50)
+    val color = MaterialTheme.colorScheme.surfaceContainer
+    val modifier = Modifier.testTag(testTag)
+    val content: @Composable () -> Unit = {
         Row(Modifier.padding(horizontal = 12.dp, vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("$label  ", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Text(value, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
         }
+    }
+    if (onClick != null) {
+        Surface(onClick = onClick, shape = shape, color = color, modifier = modifier, content = content)
+    } else {
+        Surface(shape = shape, color = color, modifier = modifier, content = content)
     }
 }
 

@@ -14,6 +14,8 @@ data class SessionLauncherPreset(
     val thinkingLevel: String? = null,
     val sessionName: String = "",
     val initialPrompt: String,
+    /** Backend id the preset was saved under; null means a legacy pi preset. */
+    val agent: String? = null,
 )
 
 /** Persistent model-picker and session-launcher settings stored only on this device. */

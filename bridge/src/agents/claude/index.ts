@@ -1,0 +1,172 @@
+import { readdir } from "node:fs/promises";
+import { realpathSync } from "node:fs";
+import { isAbsolute, join, relative, resolve } from "node:path";
+import { BridgeError } from "../../errors.js";
+import type { HerdrPort } from "../../herdr/port.js";
+import type { AgentSessionInfo } from "../../herdr/types.js";
+import {
+  readTranscriptText,
+  type Transcript,
+  type TranscriptReadOpts,
+} from "../../transcript.js";
+import { findPaneWorkspace } from "../../herdr/panes.js";
+import { shellQuote } from "../../shell.js";
+import type {
+  AgentBackend,
+  ControlAction,
+  ControlParams,
+  LaunchParams,
+} from "../types.js";
+import { parseClaudeTranscript } from "./transcript.js";
+
+/** Claude config dir honors CLAUDECONFIGDIR (default ~/.claude), like the herdr hook. */
+export function claudeConfigDir(): string {
+  return process.env.CLAUDECONFIGDIR?.trim() || `${process.env.HOME ?? ""}/.claude`;
+}
+
+export function claudeSessionRoot(): string {
+  return resolve(claudeConfigDir(), "projects");
+}
+
+export function claudeLaunchCommand(params: LaunchParams): string {
+  const parts = ["claude"];
+  if (params.model) parts.push("--model", shellQuote(params.model));
+  if (params.name) parts.push("--name", shellQuote(params.name));
+  return parts.join(" ");
+}
+
+/** Claude resumes by session **id**; the path's basename is the session uuid. */
+export function claudeResumeCommand(path: string, mode: "resume" | "fork"): string {
+  if (mode === "fork") throw new Error("claude has no fork-at-path launch; resume the session and use /fork");
+  const id = path.replace(/\.jsonl$/, "").split(/[\\/]/).pop() ?? path;
+  return `claude --resume ${shellQuote(id)}`;
+}
+
+/** Canonical containment check, symmetric with the pi adapter (see piOwnsSessionPath). */
+export function claudeOwnsSessionPath(path: string): boolean {
+  let root = resolve(claudeSessionRoot());
+  try {
+    root = realpathSync(root);
+  } catch {
+    // keep the lexical root when the store does not exist yet
+  }
+  let target = resolve(path);
+  try {
+    target = realpathSync(target);
+  } catch {
+    // a live pane may not have created its session file yet
+  }
+  const rel = relative(root, target);
+  return rel !== "" && !rel.startsWith("..") && !isAbsolute(rel) && target.endsWith(".jsonl");
+}
+
+const MAX_SCAN_FILES = 5_000;
+const MAX_SCAN_DEPTH = 3;
+
+/**
+ * Resolve a herdr agent_session reference to a transcript path. Claude reports
+ * `kind: "id"` (the hook sends agent_session_id, not a path), so an id must be
+ * matched against `~/.claude/projects/<project>/<uuid>.jsonl` filenames.
+ */
+export async function claudeResolveSessionPath(ref: AgentSessionInfo): Promise<string | null> {
+  if (ref.kind === "path") return ref.value;
+  const root = claudeSessionRoot();
+  const wanted = `${ref.value}.jsonl`;
+  let visited = 0;
+  const walk = async (dir: string, depth: number): Promise<string | null> => {
+    if (depth > MAX_SCAN_DEPTH) return null;
+    let entries;
+    try {
+      entries = await readdir(dir, { withFileTypes: true });
+    } catch {
+      return null;
+    }
+    for (const entry of entries) {
+      if (visited++ >= MAX_SCAN_FILES) return null;
+      if (entry.name.startsWith(".")) continue;
+      const full = join(dir, entry.name);
+      if (entry.isFile() && entry.name === wanted) return full;
+      if (entry.isDirectory()) {
+        const found = await walk(full, depth + 1);
+        if (found) return found;
+      }
+    }
+    return null;
+  };
+  return walk(root, 0);
+}
+
+export async function claudeReadTranscript(path: string, opts?: TranscriptReadOpts): Promise<Transcript> {
+  return parseClaudeTranscript(await readTranscriptText(path, opts), opts ?? {});
+}
+
+/** Claude has no ask_user_question equivalent; herdr's blocked state drives "needs you". */
+export function claudeExtractQuestions(): [] {
+  return [];
+}
+
+/** Claude blocks on an input prompt; type the answer and submit with Enter. */
+export async function claudeAnswerQuestion(herdr: HerdrPort, paneId: string, answer: string): Promise<void> {
+  const singleLine = answer.replace(/[\r\n\u2028\u2029]+/g, " ");
+  if (!singleLine.trim()) throw new Error("answer text is empty");
+  await herdr.paneSendText(paneId, singleLine);
+  await herdr.paneSendKeys(paneId, ["Enter"]);
+}
+
+export async function claudeControl(herdr: HerdrPort, params: ControlParams): Promise<void> {
+  const { paneId, action, text } = params;
+  switch (action) {
+    case "abort":
+      await herdr.paneSendKeys(paneId, ["escape"]);
+      return;
+    case "compact":
+      await herdr.paneSendInput(paneId, "/compact", ["Enter"]);
+      return;
+    case "close": {
+      const workspaceId = await findPaneWorkspace(herdr, paneId);
+      if (!workspaceId) throw new BridgeError("pane not found in the snapshot", 404);
+      await herdr.workspaceClose(workspaceId);
+      return;
+    }
+    case "set_model": {
+      // Same control-character guard as the pi adapter: the text goes into a
+      // PTY, so anything that could alter submission is rejected outright.
+      if (!text || text.length > 200 || /[\u0000-\u001f\u007f]/.test(text)) {
+        throw new Error("valid model is required");
+      }
+      await herdr.paneSendInput(paneId, `/model ${text}`, ["Enter"]);
+      return;
+    }
+    default: {
+      const exhaustive: never = action as never;
+      throw new Error(`unsupported control action for claude: ${String(exhaustive)}`);
+    }
+  }
+}
+
+export const CLAUDE_CAPABILITIES: ReadonlySet<ControlAction> = new Set([
+  "abort",
+  "compact",
+  "close",
+  "set_model",
+]);
+
+export const claudeBackend: AgentBackend = {
+  id: "claude",
+  displayName: "Claude Code",
+  capabilities: CLAUDE_CAPABILITIES,
+  hasModelCatalog: false,
+  hasSlashCommands: false,
+
+  launchCommand: claudeLaunchCommand,
+  resumeCommand: claudeResumeCommand,
+  sessionRoot: claudeSessionRoot,
+  ownsSessionPath: claudeOwnsSessionPath,
+  resolveSessionPath: claudeResolveSessionPath,
+  readTranscript: claudeReadTranscript,
+  extractQuestions: claudeExtractQuestions,
+  answerQuestion: claudeAnswerQuestion,
+  control: claudeControl,
+  models: () => ({ providers: [] }),
+  commands: async () => ({ commands: [] }),
+};

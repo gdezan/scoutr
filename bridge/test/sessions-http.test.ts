@@ -1,4 +1,4 @@
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
@@ -92,6 +92,10 @@ describe("POST /api/sessions and /api/sessions/:paneId/control", () => {
 
   before(async () => {
     sessionRoot = await mkdtemp(join(homedir(), ".cockpit-session-http-"));
+    process.env.PI_CODING_AGENT_SESSION_DIR = sessionRoot;
+    // Isolate the claude backend's store so catalog scans stay hermetic.
+    process.env.CLAUDECONFIGDIR = await mkdtemp(join(tmpdir(), "cockpit-http-claude-"));
+    await mkdir(join(process.env.CLAUDECONFIGDIR, "projects"), { recursive: true });
     const project = join(sessionRoot, "project");
     await mkdir(project);
     sessionPath = join(project, "saved.jsonl");

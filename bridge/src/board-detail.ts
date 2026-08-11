@@ -1,5 +1,6 @@
 import { basename } from "node:path";
-import { entryText, inspectSessionFile, readTranscript, type Transcript } from "./transcript.js";
+import { inspectSessionFile, entryText, type Transcript } from "./transcript.js";
+import { backendForSessionPath } from "./agents/registry.js";
 
 /**
  * Bounded per-agent board detail: the active model and the latest meaningful
@@ -32,7 +33,9 @@ export class BoardDetailCache {
     if (cached && cached.mtimeMs === info.mtimeMs && cached.size === info.size) {
       return cached.detail;
     }
-    const transcript = await readTranscript(path, { tail: TAIL_ENTRIES }).catch(() => null);
+    const backend = backendForSessionPath(path);
+    if (!backend) return null;
+    const transcript = await backend.readTranscript(path, { tail: TAIL_ENTRIES }).catch(() => null);
     if (!transcript) return null;
     const detail = deriveBoardDetail(transcript, info.mtimeMs);
     this.memo.set(path, { mtimeMs: info.mtimeMs, size: info.size, detail });

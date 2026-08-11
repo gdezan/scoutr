@@ -69,8 +69,8 @@ test("readSession surfaces structured questions derived from session events", as
   const path = join(agentRoot, "int-project", "session.jsonl");
   await writeFile(path, SESSION_LINES.join("\n"));
 
-  const previous = process.env.PI_CODING_AGENT_DIR;
-  process.env.PI_CODING_AGENT_DIR = agentRoot;
+  const previous = process.env.PI_CODING_AGENT_SESSION_DIR;
+  process.env.PI_CODING_AGENT_SESSION_DIR = agentRoot;
   try {
     const result = await readSession(path, null);
     assert.equal(result.exists, true);
@@ -84,8 +84,8 @@ test("readSession surfaces structured questions derived from session events", as
     assert.equal(question.answered, true);
     assert.equal(question.answerText, "Yes");
   } finally {
-    if (previous === undefined) delete process.env.PI_CODING_AGENT_DIR;
-    else process.env.PI_CODING_AGENT_DIR = previous;
+    if (previous === undefined) delete process.env.PI_CODING_AGENT_SESSION_DIR;
+    else process.env.PI_CODING_AGENT_SESSION_DIR = previous;
   }
 });
 
@@ -95,15 +95,15 @@ test("readSession keeps pending questions pending when unanswered", async () => 
   const path = join(agentRoot, "int-project", "session.jsonl");
   await writeFile(path, SESSION_LINES.slice(0, 2).join("\n"));
 
-  const previous = process.env.PI_CODING_AGENT_DIR;
-  process.env.PI_CODING_AGENT_DIR = agentRoot;
+  const previous = process.env.PI_CODING_AGENT_SESSION_DIR;
+  process.env.PI_CODING_AGENT_SESSION_DIR = agentRoot;
   try {
     const result = await readSession(path, null);
     assert.equal(result.questions.length, 1);
     assert.equal(result.questions[0].answered, false);
     assert.equal(result.questions[0].answerText, null);
   } finally {
-    if (previous === undefined) delete process.env.PI_CODING_AGENT_DIR;
-    else process.env.PI_CODING_AGENT_DIR = previous;
+    if (previous === undefined) delete process.env.PI_CODING_AGENT_SESSION_DIR;
+    else process.env.PI_CODING_AGENT_SESSION_DIR = previous;
   }
 });

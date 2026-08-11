@@ -63,6 +63,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.cockpit.app.state.NewSessionUiState
+import dev.cockpit.app.ui.components.SectionLabel
 import dev.cockpit.app.state.NewSessionViewModel
 import dev.cockpit.app.state.SESSION_TASK_TEMPLATES
 import dev.cockpit.app.state.crumbLabel
@@ -116,7 +117,10 @@ fun NewSessionSheet(
             ) {
                 item { PromptSection(ui, viewModel) }
                 item { TemplateSection(viewModel::applyTaskTemplate) }
-                if (ui.presets.isNotEmpty()) {
+                if (ui.agentKinds.size >= 2) {
+                    item { BackendSection(ui, viewModel::selectAgent) }
+                }
+                if (ui.presets.any { (it.agent ?: "pi") == ui.selectedAgent }) {
                     item { PresetsSection(ui, viewModel) }
                 }
                 item {
@@ -126,14 +130,16 @@ fun NewSessionSheet(
                         onJumpTo = viewModel::jumpTo,
                     )
                 }
-                item {
-                    ModelSummary(
-                        ui = ui,
-                        onOpenPicker = { showModelPicker = true },
-                        onToggleDefault = { ui.selectedModelKey?.let(viewModel::setDefaultModel) },
-                    )
+                if (ui.selectedAgentHasModelCatalog) {
+                    item {
+                        ModelSummary(
+                            ui = ui,
+                            onOpenPicker = { showModelPicker = true },
+                            onToggleDefault = { ui.selectedModelKey?.let(viewModel::setDefaultModel) },
+                        )
+                    }
+                    item { ThinkingLevelSection(ui, viewModel::setThinkingLevel) }
                 }
-                item { ThinkingLevelSection(ui, viewModel::setThinkingLevel) }
                 item {
                     OutlinedTextField(
                         value = ui.name,
@@ -243,10 +249,13 @@ private fun TemplateSection(onApply: (String) -> Unit) {
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun PresetsSection(ui: NewSessionUiState, viewModel: NewSessionViewModel) {
+    // Presets are backend-scoped: a saved model + thinking level only make
+    // sense for the agent they were saved under.
+    val presets = ui.presets.filter { (it.agent ?: "pi") == ui.selectedAgent }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         SectionLabel("Saved presets")
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            ui.presets.forEach { preset ->
+            presets.forEach { preset ->
                 Surface(
                     color = Color.Transparent,
                     shape = RoundedCornerShape(8.dp),
@@ -323,6 +332,26 @@ private fun FolderSummary(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun BackendSection(ui: NewSessionUiState, onSelect: (String) -> Unit) {
+    if (ui.agentKinds.size < 2) return
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        SectionLabel("Agent")
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            ui.agentKinds.forEach { kind ->
+                FilterChip(
+                    selected = kind.id == ui.selectedAgent,
+                    onClick = { onSelect(kind.id) },
+                    label = { Text(kind.displayName) },
+                    modifier = Modifier.testTag("agent_kind_${kind.id}"),
+                )
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ModelSummary(
     ui: NewSessionUiState,
@@ -432,7 +461,7 @@ private fun LauncherActions(
     ) {
         OutlinedButton(
             onClick = onSavePreset,
-            enabled = ui.selectedModel != null && ui.path.isNotBlank() && !ui.loadingDirs,
+            enabled = (!ui.selectedAgentHasModelCatalog || ui.selectedModel != null) && ui.path.isNotBlank() && !ui.loadingDirs,
             modifier = Modifier.heightIn(min = 48.dp).testTag("save_preset"),
         ) {
             Text("Save preset")
@@ -482,12 +511,3 @@ private fun SavePresetDialog(onDismiss: () -> Unit, onSave: (String) -> Unit) {
     )
 }
 
-@Composable
-private fun SectionLabel(text: String) {
-    Text(
-        text,
-        style = MaterialTheme.typography.labelLarge,
-        fontWeight = FontWeight.SemiBold,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-    )
-}

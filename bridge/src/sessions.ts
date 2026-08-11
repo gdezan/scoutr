@@ -1,13 +1,20 @@
 import type { HerdrPort } from "./herdr/port.js";
 import { BridgeError } from "./errors.js";
 import { resolveAllowedDir } from "./dirs.js";
-import { readModelsCatalog, type ModelsCatalog } from "./pi/models.js";
-import { readTranscript, type Transcript } from "./transcript.js";
+import type { Transcript } from "./transcript.js";
 import { resolveCatalogSessionPath } from "./session-catalog.js";
+import { backendFor, backendForAgentSessionInfo, getBackendOrNull } from "./agents/registry.js";
+import type { AgentBackend, ControlAction, ControlParams } from "./agents/types.js";
+import { shellQuote } from "./shell.js";
+import { findPaneWorkspace } from "./herdr/panes.js";
 import { realpathSync, statSync } from "node:fs";
 import { basename, dirname, resolve } from "node:path";
 
-/** pi's documented `--thinking` levels (README: Model Options). */
+/**
+ * pi's documented `--thinking` levels (README: Model Options) — the only
+ * thinking vocabulary the create-session surface knows. Backends that cannot
+ * express a thinking level simply never receive one (capability gated).
+ */
 export const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 export type ThinkingLevel = (typeof THINKING_LEVELS)[number];
 
@@ -17,6 +24,8 @@ export interface CreateSessionParams {
   name?: string;
   thinkingLevel?: string;
   initialPrompt?: string;
+  /** Registry backend id; defaults to "pi". */
+  agent?: string;
 }
 
 export interface CreatedSession {
@@ -29,29 +38,6 @@ export type StoredSessionMode = "resume" | "fork";
 export interface LaunchStoredSessionParams {
   path: string;
   mode: StoredSessionMode;
-  sessionRoot?: string;
-}
-
-export type ControlAction =
-  | "abort"
-  | "retry"
-  | "compact"
-  | "fork"
-  | "rename"
-  | "close"
-  | "set_model"
-  | "set_thinking";
-
-export interface ControlParams {
-  paneId: string;
-  action: ControlAction;
-  /** Retry: last user message. Rename: the new workspace label. */
-  text?: string;
-}
-
-export interface SessionControlDeps {
-  readCatalog?: () => ModelsCatalog;
-  readSession?: (path: string) => Promise<Pick<Transcript, "model" | "thinkingLevel">>;
 }
 
 export class SessionsError extends BridgeError {
@@ -80,14 +66,17 @@ function assertNoControlChars(field: string, value: string): void {
  * pi's documented set. Runs before any herdr call.
  */
 export function validateCreateSessionParams(params: CreateSessionParams): void {
-  if (typeof params.cwd !== "string" || params.cwd === "" || typeof params.model !== "string" || params.model === "") {
-    throw new SessionsError("cwd and model are required");
+  if (typeof params.cwd !== "string" || params.cwd === "") {
+    throw new SessionsError("cwd is required");
   }
   assertNoControlChars("cwd", params.cwd);
-  if (params.model.length > MAX_MODEL_LENGTH) {
-    throw new SessionsError(`model is too long (max ${MAX_MODEL_LENGTH} characters)`);
+  if (params.model !== undefined && params.model !== "") {
+    if (typeof params.model !== "string") throw new SessionsError("model must be a string");
+    if (params.model.length > MAX_MODEL_LENGTH) {
+      throw new SessionsError(`model is too long (max ${MAX_MODEL_LENGTH} characters)`);
+    }
+    assertNoControlChars("model", params.model);
   }
-  assertNoControlChars("model", params.model);
 
   if (params.thinkingLevel !== undefined) {
     if (typeof params.thinkingLevel !== "string" || !(THINKING_LEVELS as readonly string[]).includes(params.thinkingLevel)) {
@@ -113,29 +102,9 @@ export function validateCreateSessionParams(params: CreateSessionParams): void {
 }
 
 /**
- * POSIX single-quote escaping: the value survives any shell as one literal
- * argument. Apostrophes become `'\''`; every other metacharacter (`;`, `$`,
- * backtick, `"`, `\`, spaces) is inert inside single quotes.
- */
-export function shellQuote(value: string): string {
-  return `'${value.replace(/'/g, `'\\''`)}'`;
-}
-
-/** Build the shell command that starts pi. Prompt delivery uses agent.prompt. */
-export function buildLaunchCommand(params: {
-  model: string;
-  thinkingLevel?: string;
-  name?: string;
-}): string {
-  const parts = ["pi", "--model", shellQuote(params.model)];
-  if (params.thinkingLevel) parts.push("--thinking", shellQuote(params.thinkingLevel));
-  if (params.name) parts.push("--name", shellQuote(params.name));
-  return parts.join(" ");
-}
-
-/**
- * Create a workspace, start pi, wait for Herdr to detect it, and deliver the
- * first prompt through agent.prompt. Any launch failure closes the workspace.
+ * Create a workspace, start the agent, wait for Herdr to detect it, and
+ * deliver the first prompt through agent.prompt. Any launch failure closes
+ * the workspace. The launch command is the selected backend's own grammar.
  */
 export async function createSession(
   herdr: HerdrPort,
@@ -149,9 +118,13 @@ export async function createSession(
     throw new SessionsError(error instanceof Error ? error.message : String(error));
   }
 
+  const backend = backendFor(params.agent ?? "pi");
+  if (backend.hasModelCatalog && !params.model?.trim()) {
+    throw new SessionsError("cwd and model are required");
+  }
   const name = params.name?.trim() || basename(cwd) || "session";
-  const command = buildLaunchCommand({
-    model: params.model,
+  const command = backend.launchCommand({
+    model: params.model?.trim() || undefined,
     thinkingLevel: params.thinkingLevel,
     name: params.name?.trim() || undefined,
   });
@@ -160,20 +133,27 @@ export async function createSession(
   });
 }
 
-/** Open an existing pi session in a new Herdr workspace. */
+/** Open a stored session in a new Herdr workspace, via the owning backend. */
 export async function launchStoredSession(
   herdr: HerdrPort,
   params: LaunchStoredSessionParams,
 ): Promise<CreatedSession> {
-  const path = await resolveCatalogSessionPath(params.path, params.sessionRoot);
-  const session = await readTranscript(path);
+  const { path, backend } = await resolveCatalogSessionPath(params.path);
+  const session = await backend.readTranscript(path, { metadataOnly: true });
   if (!session.cwd) throw new SessionsError("session working directory is unavailable", 409);
-  const cwd = resolveSessionWorkspace(session.cwd, path, params.sessionRoot);
+  const cwd = resolveSessionWorkspace(session.cwd, path, backend.sessionRoot());
+  let command: string;
+  try {
+    command = backend.resumeCommand(path, params.mode);
+  } catch (error) {
+    // e.g. forking a claude transcript, which has no fork-at-path launch.
+    throw new SessionsError(error instanceof Error ? error.message : String(error), 400);
+  }
   return launchWorkspace(
     herdr,
     cwd,
     basename(cwd) || "session",
-    `pi --${params.mode === "fork" ? "fork" : "session"} ${shellQuote(path)}`,
+    command,
   );
 }
 
@@ -182,26 +162,22 @@ export async function launchStoredSession(
  * session file is trusted (the user already ran an agent there — the same
  * least-privilege reasoning as the review allow-list in review.ts), so a
  * session run outside $HOME can still be resumed. When that directory no
- * longer exists, fall back to the session store root, then to the session
- * file's own directory, so the transcript still opens.
+ * longer exists, fall back to the backend's session store root, then to the
+ * session file's own directory, so the transcript still opens (resume
+ * contract, docs/production-goal-checklist.md fix 7).
  */
-function resolveSessionWorkspace(
-  recorded: string,
-  sessionPath: string,
-  sessionRoot?: string,
-): string {
+function resolveSessionWorkspace(recorded: string, sessionPath: string, sessionRoot: string): string {
   try {
     const target = realpathSync(resolve(recorded));
     if (statSync(target).isDirectory()) return target;
   } catch {
-    // recorded cwd is gone or unresolvable — fall back below
+    // recorded cwd is gone or unresolvable — try the store root below
   }
-  if (sessionRoot?.trim()) {
-    try {
-      return realpathSync(resolve(sessionRoot.trim()));
-    } catch {
-      // keep the session-directory fallback
-    }
+  try {
+    const root = realpathSync(resolve(sessionRoot));
+    if (statSync(root).isDirectory()) return root;
+  } catch {
+    // store root gone too — the session file's own directory still opens
   }
   return dirname(sessionPath);
 }
@@ -242,11 +218,11 @@ async function waitForAgent(herdr: HerdrPort, paneId: string): Promise<void> {
       const pane = snapshot.panes.find((candidate) => candidate.pane_id === paneId);
       if (pane?.agent || snapshot.agents.some((agent) => agent.pane_id === paneId)) return;
     } catch {
-      // The next poll may succeed while Herdr and pi finish startup.
+      // The next poll may succeed while Herdr and the agent finish startup.
     }
     await new Promise((resolve) => setTimeout(resolve, AGENT_POLL_MS));
   }
-  throw new SessionsError("pi did not start before the launch timeout", 502);
+  throw new SessionsError("agent did not start before the launch timeout", 502);
 }
 
 async function closeWorkspaceQuietly(herdr: HerdrPort, workspaceId: string): Promise<void> {
@@ -258,116 +234,51 @@ async function closeWorkspaceQuietly(herdr: HerdrPort, workspaceId: string): Pro
 }
 
 /**
- * One pane-native control action. Model changes use pi's exact `/model
- * provider/id` form. Thinking changes translate an explicit target into the
- * shortest deterministic sequence of pi's documented Shift+Tab action.
+ * One pane-native control action, expressed in the owning backend's own TUI
+ * vocabulary. Unsupported verbs are rejected by the backend's capability set.
  */
 export async function controlSession(
   herdr: HerdrPort,
   params: ControlParams,
-  deps: SessionControlDeps = {},
 ): Promise<void> {
-  const { paneId, action, text } = params;
-  switch (action) {
-    case "abort":
-      await herdr.paneSendKeys(paneId, ["escape"]);
-      return;
-    case "retry": {
-      if (!text) throw new SessionsError("retry needs the last user message");
-      await herdr.agentPrompt(paneId, text);
-      return;
-    }
-    case "compact":
-      await herdr.paneSendInput(paneId, "/compact", ["Enter"]);
-      return;
-    case "fork":
-      await herdr.paneSendInput(paneId, "/fork", ["Enter"]);
-      return;
-    case "rename": {
-      const name = text?.trim() ?? "";
-      if (!name) throw new SessionsError("rename needs a label");
-      if (name.length > MAX_NAME_LENGTH) {
-        throw new SessionsError(`name is too long (max ${MAX_NAME_LENGTH} characters)`);
-      }
-      assertNoControlChars("name", name);
-      const workspaceId = await findPaneWorkspace(herdr, paneId);
-      if (!workspaceId) throw new SessionsError("pane not found in the snapshot", 404);
-      await herdr.paneSendInput(paneId, `/name ${name}`, ["Enter"]);
-      await herdr.workspaceRename(workspaceId, name);
-      return;
-    }
-    case "close": {
-      const workspaceId = await findPaneWorkspace(herdr, paneId);
-      if (!workspaceId) throw new SessionsError("pane not found in the snapshot", 404);
-      await herdr.workspaceClose(workspaceId);
-      return;
-    }
-    case "set_model": {
-      const model = requireCatalogModel(deps.readCatalog?.() ?? readModelsCatalog(), text);
-      await herdr.paneSendInput(paneId, `/model ${model.provider}/${model.id}`, ["Enter"]);
-      return;
-    }
-    case "set_thinking": {
-      if (!text || !(THINKING_LEVELS as readonly string[]).includes(text)) {
-        throw new SessionsError(`unknown thinking level: ${String(text)}`);
-      }
-      const path = await findPaneSessionPath(herdr, paneId);
-      if (!path) throw new SessionsError("active pi session path is unavailable", 409);
-      const session = await (deps.readSession?.(path) ?? readTranscript(path));
-      if (!session.model || !session.thinkingLevel) {
-        throw new SessionsError("active model or thinking level is unavailable", 409);
-      }
-      const model = requireCatalogModel(deps.readCatalog?.() ?? readModelsCatalog(), session.model);
-      const keys = thinkingLevelKeys(session.thinkingLevel, text, model.thinkingLevels);
-      if (keys.length > 0) await herdr.paneSendKeys(paneId, keys);
-      return;
-    }
-    default:
-      throw new SessionsError(`unknown control action: ${String(action)}`);
+  const { paneId, action } = params;
+  // Abort is the one emergency control: Escape is identical across backends
+  // and runs without pane identity, so a transient snapshot failure can never
+  // block it. Every other verb goes through the pane's backend, which rejects
+  // actions outside the agent's capabilities (e.g. retry/fork on claude).
+  if (action === "abort") {
+    await herdr.paneSendKeys(paneId, ["escape"]);
+    return;
   }
-}
-
-/** Resolve a pane's workspace id from the live snapshot. */
-async function findPaneWorkspace(herdr: HerdrPort, paneId: string): Promise<string> {
+  const backend = await backendForPane(herdr, paneId);
   try {
-    const snapshot = await herdr.snapshot();
-    for (const pane of snapshot.panes) {
-      if (pane.pane_id === paneId) return pane.workspace_id;
-    }
-  } catch {
-    // fall through
+    await backend.control(herdr, params);
+  } catch (error) {
+    // Backends throw BridgeError with a deliberate status (e.g. 404 for a
+    // vanished pane); everything else is a bad control request.
+    if (error instanceof BridgeError) throw error;
+    throw new SessionsError(error instanceof Error ? error.message : String(error), 400);
   }
-  return "";
 }
 
-/** Keys needed to cycle from the active thinking level to an explicit target. */
-export function thinkingLevelKeys(current: string, target: string, available: string[]): string[] {
-  const currentIndex = available.indexOf(current);
-  const targetIndex = available.indexOf(target);
-  if (targetIndex === -1) throw new SessionsError(`${target} is not supported by the active model`);
-  if (currentIndex === -1) throw new SessionsError(`active thinking level is unknown: ${current}`, 409);
-  const count = (targetIndex - currentIndex + available.length) % available.length;
-  return Array.from({ length: count }, () => "shift+tab");
-}
-
-function requireCatalogModel(catalog: ModelsCatalog, key: string | undefined) {
-  if (!key || key.length > MAX_MODEL_LENGTH || CONTROL_CHAR.test(key)) throw new SessionsError("valid model is required");
-  const model = catalog.providers
-    .flatMap((provider) => provider.models)
-    .find((candidate) => `${candidate.provider}/${candidate.id}` === key);
-  if (!model) throw new SessionsError(`model is not available: ${key}`);
-  return model;
-}
-
-async function findPaneSessionPath(herdr: HerdrPort, paneId: string): Promise<string> {
+/** The registered backend that owns a live pane (by herdr's agent label). */
+async function backendForPane(herdr: HerdrPort, paneId: string): Promise<AgentBackend> {
   try {
     const snapshot = await herdr.snapshot();
     const pane = snapshot.panes.find((candidate) => candidate.pane_id === paneId);
-    if (pane?.agent_session?.kind === "path") return pane.agent_session.value;
-    const agent = snapshot.agents.find((candidate) => candidate.pane_id === paneId);
-    if (agent?.agent_session?.kind === "path") return agent.agent_session.value;
+    const backend =
+      backendForAgentSessionInfo(pane?.agent_session) ??
+      getBackendOrNull(pane?.agent ?? "") ??
+      (() => {
+        const agent = snapshot.agents.find((candidate) => candidate.pane_id === paneId);
+        return agent ? backendForAgentSessionInfo(agent.agent_session) ?? getBackendOrNull(agent.agent) : null;
+      })();
+    if (backend) return backend;
   } catch {
     // fall through
   }
-  return "";
+  throw new SessionsError("pane has no registered agent backend", 404);
 }
+
+export { shellQuote, findPaneWorkspace };
+export type { ControlAction };

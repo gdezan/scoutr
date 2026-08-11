@@ -367,7 +367,12 @@ private fun HistoryRow(
         // mark. RateReview's speech-bubble-and-pencil both misread as "comment"
         // and collided with the Rename pencil sitting right next to it.
         add(RowAction("review", "Review", Icons.Outlined.Code, scheme.onSurfaceVariant, onReview))
-        add(RowAction("rename", "Rename", Icons.Outlined.DriveFileRenameOutline, scheme.onSurfaceVariant, onRename))
+        // Rename persists the title in the pi session file; claude sessions
+        // (agentKind != pi) reject it at the bridge, so the action is only
+        // offered where it works.
+        if (session.agentKind == "pi") {
+            add(RowAction("rename", "Rename", Icons.Outlined.DriveFileRenameOutline, scheme.onSurfaceVariant, onRename))
+        }
         add(RowAction("pin", if (item.pinned) "Unpin" else "Pin", Icons.Outlined.PushPin, scheme.onSurfaceVariant, onTogglePin))
         add(RowAction(
             "archive",
@@ -487,16 +492,18 @@ private fun HistoryRow(
                                 leadingIcon = { Icon(Icons.Default.PlayArrow, contentDescription = null) },
                                 onClick = { menuOpen = false; onOpen() },
                             )
-                            DropdownMenuItem(
-                                text = { Text("Fork") },
-                                leadingIcon = { Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null) },
-                                onClick = { menuOpen = false; onFork() },
-                            )
-                            DropdownMenuItem(
-                                text = { Text("Rename") },
-                                leadingIcon = { Icon(Icons.Default.DriveFileRenameOutline, contentDescription = null) },
-                                onClick = { menuOpen = false; onRename() },
-                            )
+                            if (session.agentKind == "pi") {
+                                DropdownMenuItem(
+                                    text = { Text("Fork") },
+                                    leadingIcon = { Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null) },
+                                    onClick = { menuOpen = false; onFork() },
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Rename") },
+                                    leadingIcon = { Icon(Icons.Default.DriveFileRenameOutline, contentDescription = null) },
+                                    onClick = { menuOpen = false; onRename() },
+                                )
+                            }
                             DropdownMenuItem(
                                 text = { Text(if (item.pinned) "Unpin" else "Pin") },
                                 leadingIcon = { Icon(Icons.Default.PushPin, contentDescription = null) },
