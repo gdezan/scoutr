@@ -10,6 +10,7 @@ Cockpit is a self-hosted mobile cockpit for herdr panes and pi agents: a Node/TS
 - `android/` — Compose app, manual DI via `CockpitApp.AppContainer` (no Hilt/Room). Source dirs under `app/src/main/java/dev/cockpit/app/`: `data/` (DTOs + SharedPreferences stores), `net/` (BridgeClient, NtfyClient — BridgeClient is `final`), `state/` (ViewModels), `service/` (monitor service, deep links, reply receiver), `ui/components/`, `ui/screens/`, `ui/theme/` (Theme.kt + DiffPalette.kt), `ui/motion/` (motion vocabulary + haptics).
 - Design contract: always-dark Material 3, one accent `#5B8CFF` reserved for AI-owned states, calm surface cards, mono only for paths/commands/tool output, state is the color. See `ui/theme/Theme.kt` and `docs/DESIGN.md`.
 - Long-running goal contract: `docs/production-goal-checklist.md` (live item map) with `docs/COMPLETION-REPORT.md` and `docs/AUDIT.md`.
+- Extendability plans (adding a second agent backend, new screens/endpoints): `docs/architecture/README.md` — read before any refactor in `bridge/src/pi/`, `bridge/src/sessions.ts`, `bridge/src/server.ts`, or `android/…/net/BridgeClient.kt`.
 - Verification recipes and traps: `docs/dev-workflow.md`; the `skills/cockpit-verification/SKILL.md` skill bundles the same loop (install to `~/.pi/agent/skills/` to make it loadable from any repo).
 
 ## Verification workflow
