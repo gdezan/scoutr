@@ -2,14 +2,21 @@ package dev.cockpit.app.ui.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.AnchoredDraggableState
+import androidx.compose.foundation.gestures.DraggableAnchors
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.anchoredDraggable
+import androidx.compose.foundation.gestures.animateTo
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -18,6 +25,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.WifiOff
+import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.Code
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
@@ -27,25 +36,35 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.cockpit.app.data.AgentCard
 import dev.cockpit.app.data.AgentStatus
 import dev.cockpit.app.CockpitApp
 import dev.cockpit.app.state.BoardViewModel
+import dev.cockpit.app.ui.components.ConfirmDialog
 import dev.cockpit.app.ui.motion.CockpitMotion
 import dev.cockpit.app.ui.motion.HapticEvent
 import dev.cockpit.app.ui.motion.rememberHaptic
 import dev.cockpit.app.ui.motion.useReduceMotion
+import kotlin.math.roundToInt
+import kotlinx.coroutines.launch
 
 /**
  * Attention-first Board. Phase vocabulary is the section header plus a per-card
@@ -55,9 +74,11 @@ import dev.cockpit.app.ui.motion.useReduceMotion
  */
 @Composable
 fun BoardScreen(
-    onOpenAgent: (AgentCard) -> Unit,
+    onOpenAgent: (AgentCard) -> Unit = {},
     viewModel: BoardViewModel = rememberBoardViewModel(),
     modifier: Modifier = Modifier,
+    onReviewAgent: (AgentCard) -> Unit = {},
+    onCloseAgent: (AgentCard) -> Unit = {},
 ) {
     val ui by viewModel.ui.collectAsState()
     val reduceMotion = useReduceMotion()
@@ -67,10 +88,28 @@ fun BoardScreen(
     LaunchedEffect(ui.board.needsYou.size) {
         if (ui.board.needsYou.isNotEmpty()) haptic(HapticEvent.NeedsYou)
     }
+    // Close stops a live pane, so it is gated the same way Sessions gates it:
+    // a swipe is easy to trigger while scrolling, and every board card is by
+    // definition a running agent.
+    var pendingClose by remember { mutableStateOf<AgentCard?>(null) }
 
     if (ui.loading && ui.board.total == 0) {
         BoardSkeleton(modifier)
         return
+    }
+
+    pendingClose?.let { agent ->
+        ConfirmDialog(
+            title = "Close agent?",
+            text = "Closing “${agent.cardTitle()}” stops its live pane. " +
+                "The transcript is preserved and can be resumed from Sessions.",
+            confirmLabel = "Close",
+            onConfirm = {
+                pendingClose = null
+                onCloseAgent(agent)
+            },
+            onDismiss = { pendingClose = null },
+        )
     }
 
     LazyColumn(
@@ -95,11 +134,11 @@ fun BoardScreen(
                 }
             }
         } else {
-            boardSection("Needs you", ui.board.needsYou, onOpenAgent, reduceMotion)
-            boardSection("Working", ui.board.working, onOpenAgent, reduceMotion)
-            boardSection("Done", ui.board.done, onOpenAgent, reduceMotion)
-            boardSection("Idle", ui.board.idle, onOpenAgent, reduceMotion)
-            boardSection("Other", ui.board.unknown, onOpenAgent, reduceMotion)
+            boardSection("Needs you", ui.board.needsYou, onOpenAgent, reduceMotion, onReviewAgent, { pendingClose = it })
+            boardSection("Working", ui.board.working, onOpenAgent, reduceMotion, onReviewAgent, { pendingClose = it })
+            boardSection("Done", ui.board.done, onOpenAgent, reduceMotion, onReviewAgent, { pendingClose = it })
+            boardSection("Idle", ui.board.idle, onOpenAgent, reduceMotion, onReviewAgent, { pendingClose = it })
+            boardSection("Other", ui.board.unknown, onOpenAgent, reduceMotion, onReviewAgent, { pendingClose = it })
         }
         item { Spacer(Modifier.height(24.dp)) }
     }
@@ -111,6 +150,8 @@ private fun LazyListScope.boardSection(
     agents: List<AgentCard>,
     onOpenAgent: (AgentCard) -> Unit,
     reduceMotion: Boolean,
+    onReviewAgent: (AgentCard) -> Unit,
+    onCloseAgent: (AgentCard) -> Unit,
 ) {
     if (agents.isEmpty()) return
     item(key = "header_$title") {
@@ -142,6 +183,8 @@ private fun LazyListScope.boardSection(
         AgentCardRow(
             agent,
             onClick = { onOpenAgent(agent) },
+            onReview = { onReviewAgent(agent) },
+            onClose = { onCloseAgent(agent) },
             modifier = Modifier.animateItem(
                 fadeInSpec = CockpitMotion.itemSpec(reduceMotion),
                 placementSpec = CockpitMotion.itemPlacementSpec(reduceMotion),
@@ -187,78 +230,166 @@ private fun DisconnectedBanner(error: String?, onRetry: () -> Unit) {
     }
 }
 
+/** The name the card shows, so the close confirmation names the same thing. */
+private fun AgentCard.cardTitle(): String =
+    title?.takeIf { it.isNotBlank() } ?: agent
+
+/** Swipe-to-reveal anchor values for a board card. */
+private enum class BoardReveal { Closed, Open }
+
+/** A single action button surfaced by the swipe-to-reveal bar. */
+private data class BoardAction(
+    val key: String,
+    val label: String,
+    val icon: ImageVector,
+    val tint: Color,
+    val onClick: () -> Unit,
+)
+
 @Composable
-private fun AgentCardRow(agent: AgentCard, onClick: () -> Unit, modifier: Modifier = Modifier) {
+private fun AgentCardRow(
+    agent: AgentCard,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    onReview: () -> Unit = {},
+    onClose: () -> Unit = {},
+) {
     val status = AgentStatus.fromWire(agent.status)
     val isNeedsYou = status == AgentStatus.NeedsYou
     val accent = statusColor(status)
+    val scheme = MaterialTheme.colorScheme
 
-    Card(
-        onClick = onClick,
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        shape = RoundedCornerShape(16.dp),
-        border = androidx.compose.foundation.BorderStroke(
-            width = if (isNeedsYou) 1.dp else 0.dp,
-            color = if (isNeedsYou) accent else Color.Transparent,
-        ),
-        modifier = modifier
-            .fillMaxWidth()
-            .testTag("agent_card_${agent.paneId}"),
-    ) {
+    // Swipe-to-reveal action bar: review the agent's workspace + close the
+    // agent's pane. Same anchored-draggable pattern as the Sessions rows so a
+    // half-swiped card settles open or closed; horizontal-only so vertical
+    // board scrolling is untouched. Tapping a revealed button fires the
+    // action; tapping the card while open just closes the reveal.
+    val actions = buildList {
+        add(BoardAction("review", "Review", Icons.Outlined.Code, scheme.onSurfaceVariant, onReview))
+        add(BoardAction("close", "Close", Icons.Outlined.Close, scheme.onSurfaceVariant, onClose))
+    }
+    val density = LocalDensity.current
+    val revealWidthPx = with(density) { (actions.size * 52).dp.toPx() }
+    val reveal = remember {
+        AnchoredDraggableState(
+            initialValue = BoardReveal.Closed,
+            anchors = DraggableAnchors {
+                BoardReveal.Closed at 0f
+                BoardReveal.Open at -revealWidthPx
+            },
+        )
+    }
+    val scope = rememberCoroutineScope()
+    fun closeReveal() {
+        scope.launch { reveal.animateTo(BoardReveal.Closed) }
+    }
+
+    Box(modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp))) {
+        // Action bar, right-aligned, revealed as the card slides left. It
+        // sizes itself from the card (matchParentSize) because LazyColumn
+        // items measure with unbounded height.
         Row(
-            Modifier.padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically,
+            Modifier
+                .matchParentSize()
+                .background(MaterialTheme.colorScheme.surfaceContainerHigh),
+            horizontalArrangement = Arrangement.End,
         ) {
-            Column(Modifier.weight(1f)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(
-                        Modifier
-                            .width(8.dp)
-                            .height(8.dp)
-                            .background(accent, RoundedCornerShape(50)),
-                    )
-                    Spacer(Modifier.width(10.dp))
-                    Text(
-                        text = agent.title?.takeIf { it.isNotBlank() } ?: agent.agent,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f),
-                    )
-                }
-                agent.latestActivity?.takeIf { it.isNotBlank() }?.let { activity ->
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        text = activity,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-                Spacer(Modifier.height(6.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = agent.cwd ?: agent.workspaceId,
-                        style = MaterialTheme.typography.labelSmall,
-                        fontFamily = FontFamily.Monospace,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f),
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Text(
-                        text = agent.model?.let { shortModel(it) } ?: "—",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f),
-                        fontFamily = FontFamily.Monospace,
+            actions.forEach { action ->
+                Box(
+                    Modifier
+                        .fillMaxHeight()
+                        .width(52.dp)
+                        .clickable {
+                            closeReveal()
+                            action.onClick()
+                        }
+                        .testTag("board_action_${action.key}_${agent.paneId}"),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        action.icon,
+                        contentDescription = action.label,
+                        tint = action.tint,
                     )
                 }
             }
-            Spacer(Modifier.width(12.dp))
-            StatusPill(status, agent.statusSinceMs)
+        }
+        // Foreground card slides left on a horizontal drag.
+        Box(
+            Modifier
+                .offset { IntOffset(reveal.requireOffset().roundToInt(), 0) }
+                .anchoredDraggable(reveal, reverseDirection = false, orientation = Orientation.Horizontal)
+                .fillMaxWidth()
+                .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(16.dp))
+                .clickable {
+                    if (reveal.currentValue == BoardReveal.Open) closeReveal() else onClick()
+                }
+                .testTag("agent_card_${agent.paneId}"),
+        ) {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                shape = RoundedCornerShape(16.dp),
+                border = androidx.compose.foundation.BorderStroke(
+                    width = if (isNeedsYou) 1.dp else 0.dp,
+                    color = if (isNeedsYou) accent else Color.Transparent,
+                ),
+            ) {
+                Row(
+                    Modifier.padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                Modifier
+                                    .width(8.dp)
+                                    .height(8.dp)
+                                    .background(accent, RoundedCornerShape(50)),
+                            )
+                            Spacer(Modifier.width(10.dp))
+                            Text(
+                                text = agent.cardTitle(),
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f),
+                            )
+                        }
+                        agent.latestActivity?.takeIf { it.isNotBlank() }?.let { activity ->
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                text = activity,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                        Spacer(Modifier.height(6.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = agent.cwd ?: agent.workspaceId,
+                                style = MaterialTheme.typography.labelSmall,
+                                fontFamily = FontFamily.Monospace,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f),
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                text = agent.model?.let { shortModel(it) } ?: "—",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f),
+                                fontFamily = FontFamily.Monospace,
+                            )
+                        }
+                    }
+                    Spacer(Modifier.width(12.dp))
+                    StatusPill(status, agent.statusSinceMs)
+                }
+            }
         }
     }
 }

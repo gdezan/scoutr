@@ -314,6 +314,14 @@ private fun CockpitAppNav(
                         onOpenAgent = { agent ->
                             navController.navigate(Routes.chat(agent.paneId, agent.sessionPath, agent.status))
                         },
+                        onReviewAgent = { agent ->
+                            val cwd = agent.cwd
+                            if (cwd != null) {
+                                reviewViewModel.selectRepo(cwd)
+                                onTab(Routes.REVIEW)
+                            }
+                        },
+                        onCloseAgent = { agent -> boardViewModel.closeAgent(agent.paneId) },
                         viewModel = boardViewModel,
                         modifier = Modifier.padding(innerBoard),
                     )

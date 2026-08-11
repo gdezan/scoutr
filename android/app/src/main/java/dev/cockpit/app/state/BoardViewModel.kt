@@ -146,6 +146,17 @@ class BoardViewModel(
         _ui.update { it.copy(error = message) }
     }
 
+    /** Closes an agent's pane via the bridge control action (swipe-bar Close). */
+    fun closeAgent(paneId: String) {
+        viewModelScope.launch {
+            try {
+                bridge.controlSession(paneId, "close")
+            } catch (e: IOException) {
+                reportError(e.message ?: "could not close agent")
+            }
+        }
+    }
+
     override fun onCleared() {
         pollJob?.cancel()
         ntfyJob?.cancel()

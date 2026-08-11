@@ -1,9 +1,16 @@
 package dev.cockpit.app.ui
 
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.filterToOne
+import androidx.compose.ui.test.getUnclippedBoundsInRoot
+import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipeLeft
 import dev.cockpit.app.data.AgentCard
 import dev.cockpit.app.data.BoardState
 import dev.cockpit.app.data.ConnectionStore
@@ -11,8 +18,10 @@ import dev.cockpit.app.state.BoardUiState
 import dev.cockpit.app.state.BoardViewModel
 import dev.cockpit.app.ui.screens.BoardScreen
 import dev.cockpit.app.ui.theme.CockpitTheme
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
+import kotlin.math.abs
 
 /** Board card composition: phase, model, latest activity, and needs-you emphasis. */
 class BoardScreenTest {
@@ -91,6 +100,130 @@ class BoardScreenTest {
             }
         }
         compose.onNodeWithText("No agents running").assertIsDisplayed()
+    }
+
+    @Test
+    fun swipeLeftRevealsReviewAndFiresIt() {
+        var reviewedCwd: String? = null
+        var opened: String? = null
+        compose.setContent {
+            CockpitTheme {
+                BoardScreen(
+                    onOpenAgent = { opened = it.paneId },
+                    onReviewAgent = { reviewedCwd = it.cwd },
+                    viewModel = staticBoardViewModel(
+                        BoardUiState(
+                            board = BoardState.group(listOf(blockedAgent("p1", "Fix billing bug", "/repo/a", "openai-codex/gpt-5.4", "Found it"))),
+                            connected = true,
+                        ),
+                    ),
+                )
+            }
+        }
+        compose.onNodeWithTag("agent_card_p1").performTouchInput { swipeLeft() }
+        compose.onNodeWithTag("board_action_review_p1").assertIsDisplayed()
+        compose.onNodeWithTag("board_action_review_p1").performClick()
+        compose.waitForIdle()
+        assertTrue("review callback should carry the agent cwd", reviewedCwd == "/repo/a")
+        assertTrue("review must not also open the card", opened == null)
+    }
+
+    @Test
+    fun swipeLeftRevealsCloseAndFiresIt() {
+        var closed: String? = null
+        compose.setContent {
+            CockpitTheme {
+                BoardScreen(
+                    onCloseAgent = { closed = it.paneId },
+                    viewModel = staticBoardViewModel(
+                        BoardUiState(
+                            board = BoardState.group(listOf(blockedAgent("p1", "Fix billing bug", "/repo/a", "openai-codex/gpt-5.4", "Found it"))),
+                            connected = true,
+                        ),
+                    ),
+                )
+            }
+        }
+        compose.onNodeWithTag("agent_card_p1").performTouchInput { swipeLeft() }
+        compose.onNodeWithTag("board_action_close_p1").performClick()
+        compose.waitForIdle()
+        // Close stops a live pane, so it asks first — same gate as Sessions.
+        assertTrue("close must not fire before the confirm", closed == null)
+        compose.onNodeWithText("Close agent?").assertIsDisplayed()
+        compose.onAllNodesWithText("Close").filterToOne(hasClickAction()).performClick()
+        compose.waitForIdle()
+        assertTrue("close callback should carry the pane id", closed == "p1")
+    }
+
+    @Test
+    fun dismissingTheCloseConfirmLeavesTheAgentRunning() {
+        var closed: String? = null
+        compose.setContent {
+            CockpitTheme {
+                BoardScreen(
+                    onCloseAgent = { closed = it.paneId },
+                    viewModel = staticBoardViewModel(
+                        BoardUiState(
+                            board = BoardState.group(listOf(blockedAgent("p1", "Fix billing bug", "/repo/a", "openai-codex/gpt-5.4", "Found it"))),
+                            connected = true,
+                        ),
+                    ),
+                )
+            }
+        }
+        compose.onNodeWithTag("agent_card_p1").performTouchInput { swipeLeft() }
+        compose.onNodeWithTag("board_action_close_p1").performClick()
+        compose.waitForIdle()
+        compose.onNodeWithText("Cancel").performClick()
+        compose.waitForIdle()
+        assertTrue("cancelling must not close the agent", closed == null)
+        compose.onNodeWithTag("agent_card_p1").assertIsDisplayed()
+    }
+
+    @Test
+    fun coveredBoardActionIsNotTappable() {
+        var reviewed = false
+        compose.setContent {
+            CockpitTheme {
+                BoardScreen(
+                    onReviewAgent = { reviewed = true },
+                    viewModel = staticBoardViewModel(
+                        BoardUiState(
+                            board = BoardState.group(listOf(blockedAgent("p1", "Fix billing bug", "/repo/a", "openai-codex/gpt-5.4", "Found it"))),
+                            connected = true,
+                        ),
+                    ),
+                )
+            }
+        }
+        // With the card covering the bar, a click at the action's coordinates
+        // must hit the card (opening nothing here) — never the hidden action.
+        compose.onNodeWithTag("board_action_review_p1").performClick()
+        compose.waitForIdle()
+        assertTrue("covered action must not fire", !reviewed)
+    }
+
+    @Test
+    fun revealedActionBarMatchesRowHeight() {
+        compose.setContent {
+            CockpitTheme {
+                BoardScreen(
+                    viewModel = staticBoardViewModel(
+                        BoardUiState(
+                            board = BoardState.group(listOf(blockedAgent("p1", "Fix billing bug", "/repo/a", "openai-codex/gpt-5.4", "Found it"))),
+                            connected = true,
+                        ),
+                    ),
+                )
+            }
+        }
+        val card = compose.onNodeWithTag("agent_card_p1").getUnclippedBoundsInRoot()
+        compose.onNodeWithTag("agent_card_p1").performTouchInput { swipeLeft() }
+        val action = compose.onNodeWithTag("board_action_review_p1").getUnclippedBoundsInRoot()
+        assertTrue(
+            "action bar should match the card height",
+            abs((card.bottom - card.top).value - (action.bottom - action.top).value) < 1f,
+        )
     }
 
     private fun staticBoardViewModel(ui: BoardUiState): BoardViewModel {

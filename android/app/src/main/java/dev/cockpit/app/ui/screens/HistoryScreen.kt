@@ -78,6 +78,7 @@ import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 import dev.cockpit.app.CockpitApp
 import dev.cockpit.app.ui.components.CockpitTextField
+import dev.cockpit.app.ui.components.ConfirmDialog
 import dev.cockpit.app.data.SessionCatalogItem
 import dev.cockpit.app.state.HistoryItem
 import dev.cockpit.app.state.HistoryUiState
@@ -580,30 +581,6 @@ internal fun relativeTime(epochMs: Double): String {
             date
         }
     }
-}
-
-@Composable
-private fun ConfirmDialog(
-    title: String,
-    text: String,
-    confirmLabel: String,
-    onConfirm: () -> Unit,
-    onDismiss: () -> Unit,
-    destructive: Boolean = false,
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(title) },
-        text = { Text(text) },
-        confirmButton = {
-            TextButton(onClick = onConfirm) {
-                Text(confirmLabel, color = if (destructive) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary)
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
-        },
-    )
 }
 
 @Composable
