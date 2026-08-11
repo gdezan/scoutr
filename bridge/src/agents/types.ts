@@ -80,6 +80,14 @@ export interface AgentBackend {
   answerQuestion(herdr: HerdrPort, paneId: string, answer: string): Promise<void>;
   control(herdr: HerdrPort, params: ControlParams): Promise<void>;
 
+  /**
+   * Deliver the initial prompt into a freshly launched pane. Defaults to
+   * `herdr.agentPrompt`; agents whose TUI is not ready to accept input at
+   * launch (claude drops prompts typed in the first ~2s) override this with
+   * a verify-and-retry loop.
+   */
+  deliverInitialPrompt?(herdr: HerdrPort, paneId: string, text: string): Promise<void>;
+
   models(): ModelsCatalog;
   commands(cwd?: string): Promise<CommandsCatalog>;
 }

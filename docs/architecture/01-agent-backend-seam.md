@@ -90,6 +90,8 @@ export interface AgentBackend {
   extractQuestions(transcript: Transcript): QuestionEntry[];
   answerQuestion(herdr: HerdrPort, paneId: string, answer: string): Promise<void>;
   control(herdr: HerdrPort, params: ControlParams): Promise<void>;
+  /** Initial-prompt delivery into a fresh pane; defaults to `herdr.agentPrompt`. */
+  deliverInitialPrompt?(herdr: HerdrPort, paneId: string, text: string): Promise<void>;
 
   models(): ModelsCatalog;
   commands(cwd?: string): Promise<CommandsCatalog>;

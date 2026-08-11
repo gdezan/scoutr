@@ -130,6 +130,41 @@ export async function claudeAnswerQuestion(herdr: HerdrPort, paneId: string, ans
   await herdr.paneSendKeys(paneId, ["Enter"]);
 }
 
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Deliver the initial prompt of a freshly launched session. Claude's TUI is
+ * not ready to accept typed input for the first ~1-2s after launch, and a
+ * prompt sent in that window is silently dropped by herdr (verified live:
+ * a prompt at +950ms vanished, the retry at +10s landed). Send, verify the
+ * pane actually shows the typed text, and re-send with backoff until it does.
+ * `delays` is injectable for tests.
+ */
+export async function claudeDeliverInitialPrompt(
+  herdr: HerdrPort,
+  paneId: string,
+  text: string,
+  delays: number[] = [3_000, 5_000, 8_000],
+): Promise<void> {
+  // The pane renders the typed line; the first line of the prompt is the
+  // delivery marker (long prompts may wrap, so only the head is matched).
+  const marker = (text.split(/\r?\n/, 1)[0] ?? "").slice(0, 24);
+  for (let attempt = 0; ; attempt += 1) {
+    await herdr.agentPrompt(paneId, text);
+    await sleep(2_500);
+    const read = await herdr
+      .agentRead(paneId, "recent_unwrapped", {
+        lines: 80,
+        stripAnsi: true,
+        requestTimeoutMs: 4_000,
+      })
+      .catch(() => null);
+    if (read?.read?.text?.includes(marker)) return;
+    if (attempt >= delays.length) return; // give up quietly; the session is still usable manually
+    await sleep(delays[attempt] ?? 3_000);
+  }
+}
+
 export async function claudeControl(herdr: HerdrPort, params: ControlParams): Promise<void> {
   const { paneId, action, text } = params;
   switch (action) {
@@ -184,6 +219,7 @@ export const claudeBackend: AgentBackend = {
   extractQuestions: claudeExtractQuestions,
   answerQuestion: claudeAnswerQuestion,
   control: claudeControl,
+  deliverInitialPrompt: claudeDeliverInitialPrompt,
   models: () => ({ providers: [] }),
   commands: async () => ({ commands: [] }),
 };

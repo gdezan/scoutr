@@ -13,6 +13,7 @@ import {
   claudeResumeCommand,
 } from "../src/agents/claude/index.js";
 import { parseClaudeTranscript } from "../src/agents/claude/transcript.js";
+import { claudeDeliverInitialPrompt } from "../src/agents/claude/index.js";
 import { fakeHerdr } from "./support/fake-herdr.js";
 
 /** CLAUDECONFIGDIR honing: point the claude adapter at a temp store. */
@@ -166,6 +167,33 @@ describe("claude adapter", () => {
       const herdr = fakeHerdr();
       await claudeControl(herdr, { paneId: "p1", action: "set_model", text: "claude-sonnet-4-6" });
       assert.equal(herdr.sent[0].params.text, "/model claude-sonnet-4-6");
+    });
+    it("retries the initial prompt until the pane shows it, then stops", async () => {
+      // Simulates the live drop: prompts sent in claude's first ~2s vanish,
+      // so delivery must verify the pane text and re-send with backoff.
+      let reads = 0;
+      const base = fakeHerdr();
+      const herdr = {
+        ...base,
+        agentRead: async () => {
+          reads += 1;
+          return { read: { text: reads >= 3 ? "\u276f Reply with exactly: HI there" : "" } } as never;
+        },
+      };
+      await claudeDeliverInitialPrompt(herdr as never, "p1", "Reply with exactly: HI there", [1, 1]);
+      const prompts = base.sent.filter((c) => c.method === "agentPrompt");
+      assert.equal(prompts.length, 3, "one prompt per attempt until the marker is visible");
+      assert.equal(reads, 3);
+    });
+    it("stops after the first prompt when delivery succeeds", async () => {
+      const base = fakeHerdr();
+      const herdr = {
+        ...base,
+        agentRead: async () => ({ read: { text: "\u276f Hello there" } }) as never,
+      };
+      await claudeDeliverInitialPrompt(herdr as never, "p1", "Hello there", [1, 1]);
+      const prompts = base.sent.filter((c) => c.method === "agentPrompt");
+      assert.equal(prompts.length, 1);
     });
     it("rejects control characters in set_model", async () => {
       const herdr = fakeHerdr();

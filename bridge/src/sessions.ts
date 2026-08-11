@@ -129,7 +129,12 @@ export async function createSession(
     name: params.name?.trim() || undefined,
   });
   return launchWorkspace(herdr, cwd, name, command, async (paneId) => {
-    if (params.initialPrompt) await herdr.agentPrompt(paneId, params.initialPrompt);
+    if (!params.initialPrompt) return;
+    if (backend.deliverInitialPrompt) {
+      await backend.deliverInitialPrompt(herdr, paneId, params.initialPrompt);
+    } else {
+      await herdr.agentPrompt(paneId, params.initialPrompt);
+    }
   });
 }
 
