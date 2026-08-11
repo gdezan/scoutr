@@ -1,6 +1,7 @@
 import { test, describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -159,6 +160,55 @@ describe("cockpit bridge HTTP/WS API", { skip }, () => {
 
     const invalid = await getJson("/api/session-catalog?limit=0");
     assert.equal(invalid.status, 400);
+  });
+
+  test("review reaches a completed session's workspace via the catalog", async () => {
+    // Fix 13: a session's recorded cwd is an implicitly allowed review root
+    // even after the session completed (no live agent). Non-repo cwds are
+    // dropped, so a cwd=$HOME session never re-opens the whole home dir.
+    const repo = await mkdtemp(join(tmpdir(), "cockpit-review-catalog-"));
+    execFileSync("git", ["init", "-q", "-b", "main", repo]);
+    execFileSync("git", ["config", "user.email", "test@cockpit.dev"], { cwd: repo });
+    execFileSync("git", ["config", "user.name", "Cockpit Test"], { cwd: repo });
+    await writeFile(join(repo, "doc.txt"), "catalog session workspace\n");
+    execFileSync("git", ["add", "."], { cwd: repo });
+    execFileSync("git", ["commit", "-q", "-m", "initial"], { cwd: repo });
+    const sessionDir = join(sessionRoot, "completed-session");
+    await mkdir(sessionDir, { recursive: true });
+    await writeFile(
+      join(sessionDir, "session.jsonl"),
+      [
+        JSON.stringify({ type: "session", version: 3, id: "completed-session", timestamp: "2026-01-02T00:00:00.000Z", cwd: repo }),
+        JSON.stringify({ type: "message", message: { role: "user", content: [{ type: "text", text: "work in the repo" }] } }),
+      ].join("\n"),
+    );
+    const { status, body } = await getJson(`/api/repo?path=${encodeURIComponent(repo)}`);
+    assert.equal(status, 200, JSON.stringify(body));
+    assert.equal((body as { ok: boolean }).ok, true);
+    // Rewrite the completed session's cwd to a non-repo path ($HOME-like):
+    // the repo must no longer be reachable through it.
+    await writeFile(
+      join(sessionDir, "session.jsonl"),
+      JSON.stringify({ type: "session", version: 3, id: "completed-session", timestamp: "2026-01-02T00:00:00.000Z", cwd: "/home" }),
+    );
+    const denied = await getJson(`/api/repo?path=${encodeURIComponent(repo)}`);
+    assert.equal(denied.status, 403, JSON.stringify(denied.body));
+  });
+
+  test("attachment upload accepts a raw binary body", async () => {
+    // Fix 14: the generic POST JSON pre-parse used to 400 binary uploads
+    // before the attachments route could read them.
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52]);
+    const response = await fetch(`http://127.0.0.1:${PORT}/api/attachments?name=test.png`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${TOKEN}`, "content-type": "image/png" },
+      body: png,
+    });
+    const body = await response.text();
+    assert.equal(response.status, 201, body);
+    const parsed = JSON.parse(body) as { ok: boolean; path: string };
+    assert.equal(parsed.ok, true);
+    assert.ok(typeof parsed.path === "string" && parsed.path.endsWith("test.png"));
   });
 
   test("unauthorized requests are rejected", async () => {

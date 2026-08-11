@@ -490,10 +490,23 @@ export function createCockpitServer(deps: ServerDeps, options: CreateServerOptio
       (pathname === "/api/repo" || pathname === "/api/repo/diff" || pathname === "/api/repo/artifacts")
     ) {
       const requestedPath = url.searchParams.get("path") ?? "";
-      // Live agent workspaces are implicitly allowed: an agent already runs
-      // there with full shell access, so read-only git review adds no
-      // privilege. COCKPIT_REPO_ROOTS still works and is joined in.
-      const extraRoots = await sessionWorkspaceRoots(routeDeps.feed.snapshot as SessionSnapshot | null);
+      // Live agent workspaces AND any bridge-known session workspace are
+      // implicitly allowed: the user already authorized an agent to run in
+      // that cwd (active or historical), so read-only git review adds no
+      // privilege. Each cwd is narrowed to its git repo root so a
+      // cwd=/home/gdezan session never makes the whole home reviewable.
+      // COCKPIT_REPO_ROOTS still works and is joined in.
+      let catalogCwds: string[] = [];
+      try {
+        const catalog = await listSessionCatalog({ root: routeDeps.sessionCatalogRoot, active: [] });
+        catalogCwds = catalog.sessions.map((s) => s.cwd).filter((cwd): cwd is string => Boolean(cwd));
+      } catch {
+        // A catalog failure must not take down review; live roots still apply.
+      }
+      const extraRoots = await sessionWorkspaceRoots(
+        routeDeps.feed.snapshot as SessionSnapshot | null,
+        catalogCwds,
+      );
       try {
         if (pathname === "/api/repo") {
           sendJson(response, 200, { ok: true, ...(await reviewOverview(requestedPath, extraRoots)) });
@@ -641,7 +654,7 @@ export interface AgentCard {
   /** Active model from the session file (bounded tail read). */
   model?: string | null;
   /** Latest meaningful transcript line (bounded). */
-  latestActivity?: string;
+  latestActivity?: string | null;
   /** Epoch ms of the latest activity record. */
   latestActivityAtMs?: number | null;
 }
@@ -681,10 +694,12 @@ async function deriveAgentCardsWithDetail(
   await Promise.all(cards.map(async (card) => {
     if (!card.sessionPath) return;
     const detail = await cache.detailFor(card.sessionPath).catch(() => null);
-    if (!detail) return;
-    card.model = detail.model;
-    card.latestActivity = detail.latestActivity ? cleanActivity(detail.latestActivity) : undefined;
-    card.latestActivityAtMs = detail.latestActivityAtMs;
+    // Stable shape: fields always present on cards with a session path,
+    // values may be null (a live agent whose session file is missing/empty
+    // — e.g. a just-launched session — must still produce well-typed cards).
+    card.model = detail?.model ?? null;
+    card.latestActivity = detail?.latestActivity ? cleanActivity(detail.latestActivity) : null;
+    card.latestActivityAtMs = detail?.latestActivityAtMs ?? null;
   }));
   return cards;
 }
@@ -771,22 +786,29 @@ export async function readSession(pathParam: string, since: string | null): Prom
  * $HOME, scratch dirs — contribute nothing, so a cwd=/home/gdezan agent
  * never makes the whole home directory reviewable.
  */
-async function sessionWorkspaceRoots(snapshot: SessionSnapshot | null): Promise<string[]> {
-  if (!snapshot) return [];
+async function sessionWorkspaceRoots(
+  snapshot: SessionSnapshot | null,
+  catalogCwds: string[] = [],
+): Promise<string[]> {
   const seen = new Set<string>();
   const roots: string[] = [];
-  for (const agent of snapshot.agents) {
-    for (const cwd of [agent.cwd, agent.foreground_cwd]) {
-      if (!cwd) continue;
-      const repoRoot = await gitRepoRoot(cwd);
-      if (!repoRoot) continue;
-      const canonical = canonicalPath(repoRoot);
-      if (!seen.has(canonical)) {
-        seen.add(canonical);
-        roots.push(canonical);
-      }
+  const add = async (cwd: string | null | undefined) => {
+    if (!cwd) return;
+    const repoRoot = await gitRepoRoot(cwd);
+    if (!repoRoot) return;
+    const canonical = canonicalPath(repoRoot);
+    if (!seen.has(canonical)) {
+      seen.add(canonical);
+      roots.push(canonical);
+    }
+  };
+  if (snapshot) {
+    for (const agent of snapshot.agents) {
+      await add(agent.cwd);
+      await add(agent.foreground_cwd);
     }
   }
+  for (const cwd of catalogCwds) await add(cwd);
   return roots;
 }
 
