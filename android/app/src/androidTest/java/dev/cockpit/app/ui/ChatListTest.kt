@@ -3,12 +3,14 @@ package dev.cockpit.app.ui
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -96,6 +98,60 @@ class ChatListTest {
         composeRule.onNodeWithText("new tail").assertIsDisplayed()
     }
 
+
+    @Test
+    fun inlineLiveOutputRendersTailWithTrimmedMarker() {
+        composeRule.setContent {
+            CockpitTheme {
+                ChatList(
+                    entries = emptyList(),
+                    detailsVisible = false,
+                    liveOutputVisible = true,
+                    liveOutputLines = listOf("line a", "line b", "line c", "line d", "line e", "line f"),
+                    liveOutputTruncated = true,
+                )
+            }
+        }
+        composeRule.onNodeWithTag("inline_live_output").assertIsDisplayed()
+        // The card renders the tail (last 5 lines) as one joined mono text,
+        // never the whole buffer.
+        composeRule.onNodeWithText("line b\nline c\nline d\nline e\nline f").assertIsDisplayed()
+        composeRule.onAllNodesWithText("line a", substring = true).assertCountEquals(0)
+        composeRule.onNodeWithText("earlier output trimmed").assertIsDisplayed()
+    }
+
+
+    @Test
+    fun inlineLiveOutputShowsStaleStateOnError() {
+        composeRule.setContent {
+            CockpitTheme {
+                ChatList(
+                    entries = emptyList(),
+                    detailsVisible = false,
+                    liveOutputVisible = true,
+                    liveOutputLines = listOf("frozen line"),
+                    liveOutputError = "read timed out",
+                )
+            }
+        }
+        composeRule.onNodeWithTag("inline_live_output").assertIsDisplayed()
+        composeRule.onNodeWithText("STALE · RECONNECTING").assertIsDisplayed()
+        composeRule.onNodeWithText("LIVE").assertDoesNotExist()
+    }
+    @Test
+    fun inlineLiveOutputAbsentWhenNotVisible() {
+        composeRule.setContent {
+            CockpitTheme {
+                ChatList(
+                    entries = emptyList(),
+                    detailsVisible = false,
+                    liveOutputVisible = false,
+                    liveOutputLines = emptyList(),
+                )
+            }
+        }
+        composeRule.onNodeWithTag("inline_live_output").assertDoesNotExist()
+    }
     @Test
     fun startingIndicatorShowsForBrandNewSessionWithPendingMessage() {
         // Fix 8: a new session whose first message is queued shows an explicit

@@ -202,11 +202,17 @@ class ChatViewModel(
 
     fun setLiveOutputExpanded(expanded: Boolean) {
         _ui.update { it.copy(liveOutputExpanded = expanded) }
-        if (!expanded) stopLiveOutputPolling()
     }
 
+    /**
+     * Live-output polling is owned by the screen, not the panel: the chat
+     * composable starts it while the screen is visible AND the agent is
+     * working (fix 10 — the inline live card is the default surface, the
+     * drawer is just a bigger view), and stops it on background or when the
+     * run ends. The VM only guards idempotence.
+     */
     fun startLiveOutputPolling() {
-        if (!_ui.value.liveOutputExpanded || liveOutputJob?.isActive == true) return
+        if (liveOutputJob?.isActive == true) return
         liveOutputJob = viewModelScope.launch {
             while (isActive) {
                 refreshLiveOutput()
@@ -520,7 +526,10 @@ class ChatViewModel(
 
     companion object {
         private const val LIVE_OUTPUT_LINES = 80
-        private const val LIVE_OUTPUT_POLL_MS = 1_500L
+        // Shorter than the 2.5s transcript poll; the inline card is the
+        // primary "agent is working" surface so it must not feel stale.
+        // Guarded by the screen-visibility + working-state lifecycle effect.
+        private const val LIVE_OUTPUT_POLL_MS = 900L
         private const val COMMAND_REFRESH_MS = 30_000L
         fun factory(
             bridge: BridgeClient,

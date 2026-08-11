@@ -83,23 +83,33 @@ class ChatLiveOutputViewModelTest {
     }
 
     @Test
-    fun pollingStopsWhenPanelCollapses() = runBlocking {
+    fun pollingContinuesWhileWorkingAfterPanelCollapses() = runBlocking {
         val viewModel = viewModel()
         viewModel.setLiveOutputExpanded(true)
         viewModel.startLiveOutputPolling()
-        val deadline = System.currentTimeMillis() + 1_000
+        var deadline = System.currentTimeMillis() + 1_000
         while (outputReads.get() == 0 && System.currentTimeMillis() < deadline) {
             org.robolectric.shadows.ShadowLooper.idleMainLooper()
             delay(25)
         }
         assertTrue(outputReads.get() > 0)
 
+        // Fix 10: closing the drawer must NOT stop streaming — while the agent
+        // works, the inline card is the live surface and polling continues.
         viewModel.setLiveOutputExpanded(false)
         delay(100)
-        val stoppedAt = outputReads.get()
-        delay(1_700)
-
-        assertEquals(stoppedAt, outputReads.get())
+        val atCollapse = outputReads.get()
+        deadline = System.currentTimeMillis() + 3_000
+        while (outputReads.get() <= atCollapse && System.currentTimeMillis() < deadline) {
+            // Advance the PAUSED main looper's clock past the poll delay so
+            // the next 900ms tick actually fires.
+            org.robolectric.shadows.ShadowLooper.idleMainLooper(900, TimeUnit.MILLISECONDS)
+            delay(25)
+        }
+        assertTrue(
+            "streaming continues after the drawer closes while the agent works",
+            outputReads.get() > atCollapse,
+        )
     }
 
     private fun viewModel(): ChatViewModel {

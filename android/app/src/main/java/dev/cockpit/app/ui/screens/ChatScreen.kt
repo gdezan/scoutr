@@ -106,6 +106,7 @@ import dev.cockpit.app.ui.motion.HapticEvent
 import dev.cockpit.app.ui.motion.rememberHaptic
 import dev.cockpit.app.ui.motion.useReduceMotion
 import dev.cockpit.app.state.ChatUiState
+import dev.cockpit.app.state.meaningfulLiveOutputLines
 import dev.cockpit.app.state.ChatViewModel
 import dev.cockpit.app.state.MessageDeliveryState
 import dev.cockpit.app.state.PendingUserMessage
@@ -141,8 +142,14 @@ fun ChatScreen(
     var closeOpen by rememberSaveable { mutableStateOf(false) }
     var configurationOpen by rememberSaveable { mutableStateOf(false) }
 
-    LifecycleStartEffect(ui.liveOutputExpanded) {
-        if (ui.liveOutputExpanded) viewModel.startLiveOutputPolling()
+    // Live-output polling is owned by visibility + work state (fix 10): the
+    // inline card is the default surface while the agent works, so we poll
+    // whenever the screen is alive AND the agent is working, and stop on
+    // background (onStopOrDispose) or when the run ends (key change).
+    // Opening the expanded drawer in any state (blocked/idle/done) also starts
+    // polling — the drawer must fetch what the agent did even after it stopped.
+    LifecycleStartEffect(ui.agentStatus, ui.liveOutputExpanded) {
+        if (ui.agentStatus == "working" || ui.liveOutputExpanded) viewModel.startLiveOutputPolling()
         onStopOrDispose { viewModel.stopLiveOutputPolling() }
     }
 
@@ -167,15 +174,22 @@ fun ChatScreen(
             },
         )
 
+        // Live output state computed once per recomposition and shared by the
+        // list branches and the strip gate below.
+        val liveLines = meaningfulLiveOutputLines(ui.liveOutputText)
+        val inlineLiveVisible =
+            ui.agentStatus == "working" && liveLines.isNotEmpty() && !ui.liveOutputExpanded
+        val emptyTranscriptHint = !ui.exists && ui.pendingMessages.isEmpty()
+        val loadingSkeleton = ui.loading && ui.entries.isEmpty() && ui.pendingMessages.isEmpty()
         Box(Modifier.weight(1f).fillMaxWidth()) {
             when {
-                ui.loading && ui.entries.isEmpty() && ui.pendingMessages.isEmpty() -> {
+                loadingSkeleton -> {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         CircularProgressIndicator()
                     }
                 }
 
-                !ui.exists && ui.pendingMessages.isEmpty() -> {
+                emptyTranscriptHint -> {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         Text(
                             "No session transcript for this agent yet.\nUse the input below to steer it.",
@@ -205,6 +219,11 @@ fun ChatScreen(
                         pendingMessages = ui.pendingMessages,
                         detailsVisible = detailsVisible,
                         liveOutputExpanded = ui.liveOutputExpanded,
+                        liveOutputLines = liveLines,
+                        liveOutputTruncated = ui.liveOutputTruncated,
+                        liveOutputError = ui.liveOutputError,
+                        liveOutputVisible = inlineLiveVisible,
+                        onToggleLiveOutput = { viewModel.setLiveOutputExpanded(true) },
                         starting = starting,
                         onRetryPending = viewModel::retryPendingMessage,
                         onAnswerQuestion = { id, answer ->
@@ -227,10 +246,16 @@ fun ChatScreen(
                 )
             }
             LiveOutputDrawer(ui)
-            LiveOutputStrip(
-                ui = ui,
-                onToggle = { viewModel.setLiveOutputExpanded(!ui.liveOutputExpanded) },
-            )
+            // The strip is the fallback affordance: it is hidden only while the
+            // inline card actually owns the surface (list branch + working +
+            // output). On the loading and empty-transcript branches there is no
+            // inline card, so the strip stays available.
+            if (!(inlineLiveVisible && !loadingSkeleton && !emptyTranscriptHint)) {
+                LiveOutputStrip(
+                    ui = ui,
+                    onToggle = { viewModel.setLiveOutputExpanded(!ui.liveOutputExpanded) },
+                )
+            }
             ChatComposer(
                 value = input,
                 onValueChange = { input = it },
@@ -483,6 +508,11 @@ fun ChatList(
     questions: List<QuestionEntry> = emptyList(),
     answeringQuestionId: String? = null,
     liveOutputExpanded: Boolean = false,
+    liveOutputLines: List<String> = emptyList(),
+    liveOutputTruncated: Boolean = false,
+    liveOutputError: String? = null,
+    liveOutputVisible: Boolean = false,
+    onToggleLiveOutput: () -> Unit = {},
     starting: Boolean = false,
     onRetryPending: (String) -> Unit = {},
     onAnswerQuestion: (String, String) -> Unit = { _, _ -> },
@@ -504,11 +534,14 @@ fun ChatList(
         }
     }
 
-    // Follow: initial open + every append while at the bottom. Bounded index
-    // and a guard mean this can never throw on a race with the 2.5s poll.
+    // Follow: initial open + every append while at the bottom. The index is
+    // computed the same way the LazyColumn emits items (entries, questions,
+    // pending, starting, inline live output) so follow always lands on the
+    // true last item; bounded + guarded against a race with the poll.
     val lastItemKey = pendingMessages.lastOrNull()?.localId ?: entries.lastOrNull()?.entryId
-    LaunchedEffect(entries.size, pendingMessages.size, lastItemKey, liveOutputExpanded) {
-        val lastIndex = entries.size + pendingMessages.size - 1
+    val lastIndex = entries.size + questions.size + pendingMessages.size +
+        (if (starting) 1 else 0) + (if (liveOutputVisible) 1 else 0) - 1
+    LaunchedEffect(entries.size, pendingMessages.size, lastItemKey, liveOutputExpanded, liveOutputVisible, starting) {
         if (followNew && lastIndex >= 0) {
             try {
                 listState.scrollToItem(lastIndex)
@@ -579,6 +612,23 @@ fun ChatList(
                     ))
                 }
             }
+            if (liveOutputVisible) {
+                item(key = "inline_live_output") {
+                    InlineLiveOutput(
+                        lines = liveOutputLines,
+                        truncated = liveOutputTruncated,
+                        error = liveOutputError,
+                        onTap = onToggleLiveOutput,
+                        modifier = Modifier
+                            .padding(top = 10.dp)
+                            .animateItem(
+                                fadeInSpec = CockpitMotion.itemSpec(reduceMotion),
+                                placementSpec = CockpitMotion.itemPlacementSpec(reduceMotion),
+                                fadeOutSpec = CockpitMotion.itemSpec(reduceMotion),
+                            ),
+                    )
+                }
+            }
         }
 
         val notAtBottom by remember(listState) {
@@ -599,7 +649,7 @@ fun ChatList(
                     followNew = true
                     scope.launch {
                         try {
-                            listState.scrollToItem((entries.size + pendingMessages.size - 1).coerceAtLeast(0))
+                            listState.scrollToItem(lastIndex.coerceAtLeast(0))
                             listState.scrollBy(Float.MAX_VALUE)
                         } catch (_: Exception) {
                             // List changed between the tap and the scroll; retry next frame.

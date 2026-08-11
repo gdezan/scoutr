@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -218,4 +219,74 @@ private fun liveStatusColor(status: String): Color = when (status) {
     "working" -> MaterialTheme.colorScheme.primary
     "done" -> MaterialTheme.colorScheme.secondary
     else -> MaterialTheme.colorScheme.outline
+}
+
+/**
+ * The default live-output surface while an agent is working (fix 10): a quiet
+ * inline card at the bottom of the transcript instead of a hidden drawer. It
+ * shows the last few meaningful lines of real agent output, is capped like the
+ * drawer (bridge 120 lines / 48 KiB, we render the tail), and tapping it
+ * expands the full drawer. Only composed while the agent is working — when the
+ * run ends or the app backgrounds, the card (and its polling) disappears.
+ */
+@Composable
+internal fun InlineLiveOutput(
+    lines: List<String>,
+    truncated: Boolean,
+    onTap: () -> Unit,
+    modifier: Modifier = Modifier,
+    error: String? = null,
+) {
+    val visibleLines = lines.takeLast(5)
+    val scheme = MaterialTheme.colorScheme
+    // Polling failure with frozen output must not read as live streaming:
+    // the accent dot and LIVE badge swap to the error state ("state is the
+    // color"), mirroring the drawer's STALE · RECONNECTING marker.
+    val stale = error != null
+    val accent = if (stale) scheme.error else scheme.primary
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(scheme.surfaceVariant.copy(alpha = 0.35f))
+            .clickable(role = Role.Button, onClick = onTap)
+            .padding(horizontal = 12.dp, vertical = 8.dp)
+            .testTag("inline_live_output")
+            .semantics { contentDescription = "Live output. Tap to expand." },
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                Modifier
+                    .size(6.dp)
+                    .clip(CircleShape)
+                    .background(accent),
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(
+                if (stale) "STALE · RECONNECTING" else "LIVE",
+                color = accent,
+                style = MaterialTheme.typography.labelSmall,
+                letterSpacing = 1.sp,
+            )
+            if (truncated) {
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    "earlier output trimmed",
+                    color = scheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.labelSmall,
+                )
+            }
+        }
+        Spacer(Modifier.height(6.dp))
+        Text(
+            visibleLines.joinToString("\n"),
+            color = scheme.onSurfaceVariant,
+            style = MaterialTheme.typography.bodySmall,
+            lineHeight = 16.sp,
+            fontFamily = FontFamily.Monospace,
+            maxLines = 5,
+            softWrap = false,
+            overflow = TextOverflow.Clip,
+        )
+    }
 }

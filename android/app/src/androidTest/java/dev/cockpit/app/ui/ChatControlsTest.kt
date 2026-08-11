@@ -20,6 +20,7 @@ import org.junit.After
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
@@ -33,12 +34,14 @@ class ChatControlsTest {
     private lateinit var server: MockWebServer
     private val liveOutputRequests = AtomicInteger()
     private val controlBodies = CopyOnWriteArrayList<String>()
+    @Volatile private var agentStatus = "working"
 
     @Before
     fun setUp() {
         server = MockWebServer()
         liveOutputRequests.set(0)
         controlBodies.clear()
+        agentStatus = "working"
         server.start()
         server.dispatcher = object : okhttp3.mockwebserver.Dispatcher() {
             override fun dispatch(request: okhttp3.mockwebserver.RecordedRequest): MockResponse {
@@ -49,7 +52,7 @@ class ChatControlsTest {
                     path == "/api/models" ->
                         """{"ok":true,"catalog":{"providers":[{"name":"openai-codex","models":[{"id":"gpt-5.4","name":"GPT-5.4","provider":"openai-codex","reasoning":true,"thinkingLevels":["off","low","high"],"contextWindow":200000},{"id":"gpt-5.3","name":"GPT-5.3","provider":"openai-codex","reasoning":true,"thinkingLevels":["off","low","high"],"contextWindow":128000}]}]}}"""
                     path == "/api/agents" ->
-                        """{"ok":true,"agents":[{"paneId":"w1:p1","workspaceId":"w1","tabId":"t1","agent":"pi","status":"working","sessionPath":"/tmp/session.jsonl"}]}"""
+                        """{"ok":true,"agents":[{"paneId":"w1:p1","workspaceId":"w1","tabId":"t1","agent":"pi","status":"$agentStatus","sessionPath":"/tmp/session.jsonl"}]}"""
                     path == "/api/agents/w1:p1/read" -> {
                         liveOutputRequests.incrementAndGet()
                         """{"ok":true,"output":{"paneId":"w1:p1","text":"build running\n42 tests passed","revision":2,"truncated":false,"lineLimit":80}}"""
@@ -124,6 +127,26 @@ class ChatControlsTest {
         compose.runOnIdle { assertEquals(1, backCalls.get()) }
     }
 
+
+    @Test
+    fun drawerStillFetchesWhenAgentIsNotWorking() {
+        agentStatus = "idle"
+        val store = ConnectionStore(InstrumentationRegistry.getInstrumentation().targetContext)
+        store.save(server.url("/").toString().trimEnd('/'), "t", null, null)
+        val bridge = BridgeClient(OkHttpClient.Builder().readTimeout(5, TimeUnit.SECONDS).build(), store)
+        val vm = ChatViewModel(bridge, "w1:p1", null, "idle")
+
+        compose.setContent { ChatScreen(viewModel = vm, onBack = {}) }
+        // Not working -> no inline card; the strip remains and opening the
+        // drawer must still fetch (the user opens it to see what the agent did).
+        compose.waitUntil(timeoutMillis = 10_000) {
+            compose.onAllNodes(hasTestTag("live_output_toggle")).fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithTag("live_output_toggle").performClick()
+        compose.waitUntil(timeoutMillis = 10_000) { vm.ui.value.liveOutputText.contains("42 tests passed") }
+        compose.onNodeWithTag("live_output_drawer").assertIsDisplayed()
+        compose.onAllNodesWithText("42 tests passed", substring = true)[0].assertIsDisplayed()
+    }
     @Test
     fun configurationSheetShowsAndSelectsExactThinkingAndModel() {
         val store = ConnectionStore(InstrumentationRegistry.getInstrumentation().targetContext)
@@ -144,22 +167,39 @@ class ChatControlsTest {
         compose.waitUntil(timeoutMillis = 5_000) { controlBodies.any { "set_model" in it && "openai-codex/gpt-5.3" in it } }
     }
     @Test
-    fun liveOutputPollsOnlyWhileExpanded() {
+    fun liveOutputStreamsInlineWhileWorkingAndKeepsPolling() {
         val store = ConnectionStore(InstrumentationRegistry.getInstrumentation().targetContext)
         store.save(server.url("/").toString().trimEnd('/'), "t", null, null)
         val bridge = BridgeClient(OkHttpClient.Builder().readTimeout(5, TimeUnit.SECONDS).build(), store)
         val vm = ChatViewModel(bridge, "w1:p1", null, "working")
 
         compose.setContent { ChatScreen(viewModel = vm, onBack = {}) }
-        compose.onNodeWithTag("live_output_toggle").assertIsDisplayed().performClick()
+        // Fix 10: while the agent works, real output streams inline at the
+        // bottom of the transcript — no expand needed, polling just runs.
         compose.waitUntil(timeoutMillis = 10_000) { vm.ui.value.liveOutputText.contains("42 tests passed") }
+        compose.onNodeWithTag("inline_live_output").assertIsDisplayed()
+        compose.onAllNodesWithText("42 tests passed", substring = true)[0].assertIsDisplayed()
+        assertTrue("polling must run while working without interaction", liveOutputRequests.get() > 0)
+        Thread.sleep(1_800)
+        val beforeExpand = liveOutputRequests.get()
+        assertTrue("inline streaming keeps polling while working", beforeExpand > 0)
+
+        // Tapping the inline card expands the full drawer; inline hides while
+        // the drawer owns the surface.
+        compose.onNodeWithTag("inline_live_output").performClick()
         compose.onNodeWithTag("live_output_drawer").assertIsDisplayed()
         compose.onAllNodesWithText("42 tests passed", substring = true)[0].assertIsDisplayed()
 
+        // Collapsing the drawer brings the inline card back and polling keeps
+        // running — the screen-visibility/work-state lifecycle owns it now,
+        // not the panel toggle.
         compose.onNodeWithTag("live_output_toggle").performClick()
-        Thread.sleep(250)
-        val requestsAfterCollapse = liveOutputRequests.get()
+        compose.onNodeWithTag("inline_live_output").assertIsDisplayed()
+        val afterCollapse = liveOutputRequests.get()
         Thread.sleep(1_800)
-        assertEquals(requestsAfterCollapse, liveOutputRequests.get())
+        assertTrue(
+            "streaming must continue after the drawer closes while the agent works",
+            liveOutputRequests.get() > afterCollapse,
+        )
     }
 }
