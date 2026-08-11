@@ -34,7 +34,7 @@ and four hand-maintained lists that must agree for a new tab to appear.
 | # | Plan | Strength | Unlocks |
 |---|---|---|---|
 | 1 | [Agent backend seam in the bridge](01-agent-backend-seam.md) | **Strong** | A second agent at all |
-| 2 | [One transcript module, three parsers deleted](02-transcript-module.md) | **Strong** | Prerequisite for 1 |
+| 2 | [One transcript module, three parsers deleted](02-transcript-module.md) | **Shipped** | Prerequisite for 1 |
 | 3 | [Herdr port + route table so the HTTP surface is actually tested](03-bridge-route-table-and-herdr-fake.md) | **Strong** | Safe change to 1 and 2 |
 | 4 | [A `CockpitApi` seam on Android](04-android-cockpit-api-seam.md) | **Strong** | Testable features + WS coverage |
 | 5 | [Capability-driven session actions](05-capability-driven-session-actions.md) | Worth exploring | Per-agent control sets |
@@ -43,7 +43,9 @@ and four hand-maintained lists that must agree for a new tab to appear.
 
 ## Top recommendation
 
-**Start with plan 2, then plan 3, then plan 1.**
+**Start with plan 2, then plan 3, then plan 1.** Plan 2 shipped on 2026-08-11 as
+`bridge/src/transcript.ts`; its `Transcript` type is the return shape plan 1's adapters
+should produce.
 
 Plan 1 is the goal, but attempting it first means rewriting three duplicated parsers and
 a router whose tests silently skip (`bridge/test/server.test.ts:16` gates the entire HTTP

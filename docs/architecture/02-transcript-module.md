@@ -1,5 +1,26 @@
 # 2. One transcript module, three parsers deleted
 
+**Status: shipped 2026-08-11** as `bridge/src/transcript.ts`. Two findings from doing it:
+
+- **`tool_use` / `tool_result` were dead.** A census of all 274 live session files
+  (63,291 message records) found zero such records and zero `tool_use` content blocks —
+  the vocabulary is `message` records with role `toolResult` and `toolCall` content
+  blocks. `board-detail.ts`'s handling of them was speculative and is deleted. It did,
+  however, mean the board ignored real `toolCall` blocks; it now shows them as `[name]`,
+  the same rendering chat and Android already use.
+- **`metadataOnly` returns no entries, and `Transcript` gained `preview`.** "Skip content
+  blocks" did not survive contact: the catalog needs the first user turn's text. First-turn
+  preview is a property of a transcript, not of the catalog, so it is parsed in every mode
+  and `metadataOnly` drops the entries array entirely.
+
+One property of the plan is weaker than written. "It reads the same records and discards
+content, so a new record type cannot be understood by one caller and not another" holds for
+the *vocabulary* — one parser, one edit — but not for *coverage*: `metadataOnly` reads a
+128 KiB head plus a 64 KiB tail, so on a multi-megabyte transcript the catalog does not see
+records in the middle that a full chat read sees. That bound is what makes a 500-file scan
+affordable and is exactly what the old catalog did. Where the two windows meet, they are now
+joined seam to seam, so no record is lost to the boundary — the old reader dropped it.
+
 **Strength: Strong.** Do this first — it is the cheapest plan with the best existing test
 coverage, and plan 1 depends on it.
 

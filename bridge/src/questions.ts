@@ -1,4 +1,4 @@
-import type { PiMessageEntry, PiToolCallBlock } from "./pi/session.js";
+import type { TranscriptEntry, ToolCallBlock } from "./transcript.js";
 
 /**
  * Structured questions from pi session events.
@@ -55,14 +55,14 @@ interface RawAnswer {
 }
 
 /** Extract all pending/answered questions from a session's message entries. */
-export function extractQuestions(entries: PiMessageEntry[]): QuestionEntry[] {
-  const calls: Array<{ entryId: string; timestamp: string; call: PiToolCallBlock }> = [];
+export function extractQuestions(entries: TranscriptEntry[]): QuestionEntry[] {
+  const calls: Array<{ entryId: string; timestamp: string; call: ToolCallBlock }> = [];
   const answersByCallId = new Map<string, RawAnswer[]>();
 
   for (const entry of entries) {
     for (const block of entry.content) {
       if (block.type !== "toolCall") continue;
-      const call = block as PiToolCallBlock;
+      const call = block as ToolCallBlock;
       if (call.name !== ASK_USER_QUESTION_TOOL) continue;
       calls.push({ entryId: entry.entryId, timestamp: entry.timestamp, call });
     }
@@ -125,7 +125,7 @@ function parseQuestions(argumentsValue: unknown): RawQuestion[] {
   return questions;
 }
 
-function readToolResultAnswers(entry: PiMessageEntry): RawAnswer[] | null {
+function readToolResultAnswers(entry: TranscriptEntry): RawAnswer[] | null {
   const details = entry.details as { answers?: unknown } | null | undefined;
   if (!details || !Array.isArray(details.answers)) return null;
   const answers: RawAnswer[] = [];

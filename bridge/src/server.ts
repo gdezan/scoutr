@@ -3,7 +3,7 @@ import { WebSocketServer, WebSocket } from "ws";
 import { HerdrClient } from "./herdr/client.js";
 import { HerdrEventFeed, type FeedMessage } from "./herdr/feed.js";
 import type { SessionSnapshot } from "./herdr/types.js";
-import { readPiSessionFile, entryText, inspectSessionFile, type PiMessageEntry } from "./pi/session.js";
+import { readTranscript, entryText, inspectSessionFile, type TranscriptEntry } from "./transcript.js";
 import { extractQuestions, sanitizeAnswerText, type QuestionEntry } from "./questions.js";
 import { UsageService, type UsageSnapshot } from "./usage/providers.js";
 import { loadOrCreateConfig, type BridgeConfig } from "./config.js";
@@ -720,7 +720,7 @@ interface SessionReadResult {
   name: string;
   exists: boolean;
   since: string | null;
-  entries: PiMessageEntry[];
+  entries: TranscriptEntry[];
   /** Structured ask_user_question cards, derived from the same entries. */
   questions: QuestionEntry[];
   model: string | null;
@@ -742,7 +742,7 @@ export async function readSession(pathParam: string, since: string | null): Prom
   if (!info.exists) {
     return { path: target, name: basename(target), exists: false, since, entries: [], questions: [], model: null, thinkingLevel: null, lastEntryId: null, mtimeMs: 0 };
   }
-  const session = await readPiSessionFile(target);
+  const session = await readTranscript(target);
   let entries = session.entries;
   let cursor: string | null = since;
   if (since) {

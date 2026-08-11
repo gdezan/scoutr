@@ -4,9 +4,18 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it, beforeEach, afterEach } from "node:test";
 import { BoardDetailCache, deriveBoardDetail, cleanActivity } from "../src/board-detail.js";
+import { parseTranscript } from "../src/transcript.js";
+
+let nextId = 0;
 
 function sessionLine(type: string, fields: Record<string, unknown>, ts: string): string {
-  return JSON.stringify({ type, timestamp: ts, ...fields });
+  nextId += 1;
+  return JSON.stringify({ type, id: `r${nextId}`, timestamp: ts, ...fields });
+}
+
+/** Board detail as the cache computes it: a parsed tail plus the file mtime. */
+function detailOf(text: string, mtimeMs: number) {
+  return deriveBoardDetail(parseTranscript(text, { tail: 40 }), mtimeMs);
 }
 
 describe("deriveBoardDetail", () => {
@@ -15,8 +24,7 @@ describe("deriveBoardDetail", () => {
       sessionLine("model_change", { provider: "openai-codex", modelId: "gpt-5.4" }, "2026-08-10T00:00:00Z"),
       sessionLine("model_change", { provider: "anthropic", modelId: "claude-sonnet-4-6" }, "2026-08-10T01:00:00Z"),
     ].join("\n");
-    const detail = deriveBoardDetail(text, 1);
-    assert.equal(detail.model, "anthropic/claude-sonnet-4-6");
+    assert.equal(detailOf(text, 1).model, "anthropic/claude-sonnet-4-6");
   });
 
   it("picks the latest meaningful user/assistant text, skipping one-char echoes", () => {
@@ -25,7 +33,7 @@ describe("deriveBoardDetail", () => {
       sessionLine("message", { message: { role: "assistant", content: "I found the rounding error." } }, "2026-08-10T00:00:10Z"),
       sessionLine("message", { message: { role: "user", content: "ok" } }, "2026-08-10T00:00:20Z"),
     ].join("\n");
-    const detail = deriveBoardDetail(text, 1);
+    const detail = detailOf(text, 1);
     assert.equal(detail.latestActivity, "I found the rounding error.");
     assert.equal(detail.latestActivityAtMs, Date.parse("2026-08-10T00:00:10Z"));
   });
@@ -36,22 +44,34 @@ describe("deriveBoardDetail", () => {
       sessionLine("message", { message: { role: "user", content: "  " } }, "2026-08-10T00:00:05Z"),
     ].join("\n");
     const mtime = Date.parse("2026-08-10T02:00:00Z");
-    const detail = deriveBoardDetail(text, mtime);
+    const detail = detailOf(text, mtime);
     assert.equal(detail.latestActivity, "");
     assert.equal(detail.latestActivityAtMs, mtime);
   });
 
-  it("records tool use as activity", () => {
+  it("records a tool call as activity", () => {
     const text = [
-      sessionLine("tool_use", { name: "bash" }, "2026-08-10T00:00:00Z"),
-      sessionLine("tool_result", { name: "read" }, "2026-08-10T00:00:05Z"),
+      sessionLine("message", { message: { role: "assistant", content: [{ type: "text", text: "Looking now" }] } }, "2026-08-10T00:00:00Z"),
+      sessionLine(
+        "message",
+        { message: { role: "assistant", content: [{ type: "toolCall", id: "c1", name: "read", arguments: {} }] } },
+        "2026-08-10T00:00:05Z",
+      ),
     ].join("\n");
-    const detail = deriveBoardDetail(text, 1);
-    assert.match(detail.latestActivity, /tool: read/);
+    assert.equal(detailOf(text, 1).latestActivity, "[read]");
+  });
+
+  it("keeps a tool call whose name is shorter than the noise threshold", () => {
+    const text = sessionLine(
+      "message",
+      { message: { role: "assistant", content: [{ type: "toolCall", id: "c1", name: "ls", arguments: {} }] } },
+      "2026-08-10T00:00:05Z",
+    );
+    assert.equal(detailOf(text, 1).latestActivity, "[ls]");
   });
 
   it("is robust to malformed lines", () => {
-    const detail = deriveBoardDetail("not json\n{}\n", 1);
+    const detail = detailOf("not json\n{}\n", 1);
     assert.equal(detail.model, null);
     assert.equal(detail.latestActivity, "");
   });
@@ -75,7 +95,7 @@ describe("BoardDetailCache", () => {
     const first = await cache.detailFor(path);
     const second = await cache.detailFor(path);
     assert.equal(first?.latestActivity, "Hello there");
-    assert.equal(first?.latestActivity, second?.latestActivity);
+    assert.equal(first, second, "a memo hit returns the same detail object");
     assert.equal(cache.size, 1);
   });
 

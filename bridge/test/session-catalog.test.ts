@@ -29,8 +29,16 @@ function sessionLine(id: string, cwd: string, timestamp: string): Record<string,
   return { type: "session", version: 3, id, cwd, timestamp };
 }
 
+let nextEntryId = 0;
+
 function userLine(text: string): Record<string, unknown> {
-  return { type: "message", message: { role: "user", content: [{ type: "text", text }] } };
+  nextEntryId += 1;
+  return {
+    type: "message",
+    id: `e${nextEntryId}`,
+    timestamp: "2026-01-01T00:00:00.000Z",
+    message: { role: "user", content: [{ type: "text", text }] },
+  };
 }
 
 describe("session catalog", () => {

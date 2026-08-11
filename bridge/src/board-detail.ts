@@ -1,22 +1,23 @@
 import { basename } from "node:path";
-import { open } from "node:fs/promises";
+import { entryText, inspectSessionFile, readTranscript, type Transcript } from "./transcript.js";
 
 /**
  * Bounded per-agent board detail: the active model and the latest meaningful
- * transcript line. Reads only the tail of each session file (capped bytes),
- * never the full transcript, and is memoized by (path, mtime) so the 3s board
- * poll does not re-read unchanged files.
+ * transcript line. Reads through [readTranscript]'s tail mode so only the end
+ * of each session file is touched, never the full transcript, and is memoized
+ * by (path, mtime, size) so the 3s board poll does not re-read unchanged files.
  */
 
-const MAX_TAIL_BYTES = 64 * 1024;
+/** Entries kept from the tail window — the card shows one, with room to skip noise. */
+const TAIL_ENTRIES = 40;
 const MAX_ACTIVITY_LENGTH = 160;
 const MEMO_CAP = 128;
 
 export interface BoardDetail {
   model: string | null;
-  /** Latest meaningful line (user/agent text, tool use, or status). */
+  /** Latest meaningful line (user/agent text or tool call). */
   latestActivity: string;
-  /** Epoch ms of the record that produced [latestActivity]. */
+  /** Epoch ms of the entry that produced [latestActivity]. */
   latestActivityAtMs: number | null;
 }
 
@@ -25,14 +26,16 @@ export class BoardDetailCache {
 
   /** Read the bounded tail of [path]; unknown or unreadable files return null. */
   async detailFor(path: string): Promise<BoardDetail | null> {
-    const entry = await readBoundedTail(path).catch(() => null);
-    if (!entry) return null;
+    const info = await inspectSessionFile(path);
+    if (!info.exists) return null;
     const cached = this.memo.get(path);
-    if (cached && cached.mtimeMs === entry.mtimeMs && cached.size === entry.size) {
+    if (cached && cached.mtimeMs === info.mtimeMs && cached.size === info.size) {
       return cached.detail;
     }
-    const detail = deriveBoardDetail(entry.text, entry.mtimeMs);
-    this.memo.set(path, { mtimeMs: entry.mtimeMs, size: entry.size, detail });
+    const transcript = await readTranscript(path, { tail: TAIL_ENTRIES }).catch(() => null);
+    if (!transcript) return null;
+    const detail = deriveBoardDetail(transcript, info.mtimeMs);
+    this.memo.set(path, { mtimeMs: info.mtimeMs, size: info.size, detail });
     if (this.memo.size > MEMO_CAP) {
       const oldest = this.memo.keys().next().value;
       if (oldest !== undefined) this.memo.delete(oldest);
@@ -52,111 +55,33 @@ export class BoardDetailCache {
   }
 }
 
-interface TailEntry {
-  path: string;
-  mtimeMs: number;
-  size: number;
-  text: string;
-}
-
-async function readBoundedTail(path: string): Promise<TailEntry> {
-  const handle = await open(path, "r");
-  try {
-    const info = await handle.stat();
-    const size = Math.max(0, Number(info.size));
-    const start = Math.max(0, size - MAX_TAIL_BYTES);
-    const length = size - start;
-    const buffer = Buffer.alloc(length);
-    if (length > 0) await handle.read(buffer, 0, length, start);
-    return { path, mtimeMs: info.mtimeMs, size, text: buffer.toString("utf8") };
-  } finally {
-    await handle.close();
+/** Model + latest meaningful line from a transcript tail. */
+export function deriveBoardDetail(transcript: Transcript, mtimeMs: number): BoardDetail {
+  for (const entry of [...transcript.entries].reverse()) {
+    // entryText's own cap is well above MAX_ACTIVITY_LENGTH, so cleanActivity
+    // is what actually bounds the card line.
+    const text = cleanActivity(entryText(entry));
+    if (!isMeaningful(text)) continue;
+    const at = Date.parse(entry.timestamp);
+    return {
+      model: transcript.model,
+      latestActivity: text,
+      latestActivityAtMs: Number.isFinite(at) ? at : null,
+    };
   }
-}
-
-/** Extract model + latest meaningful line from a bounded session tail. */
-export function deriveBoardDetail(text: string, mtimeMs: number): BoardDetail {
-  let model: string | null = null;
-  let latestActivity = "";
-  let latestActivityAtMs: number | null = null;
-
-  for (const rawLine of text.split("\n")) {
-    let record: Record<string, unknown>;
-    try {
-      record = JSON.parse(rawLine) as Record<string, unknown>;
-    } catch {
-      continue;
-    }
-    const timestamp = typeof record.timestamp === "string" ? Date.parse(record.timestamp) : Number.NaN;
-    const at = Number.isFinite(timestamp) ? timestamp : null;
-
-    if (record.type === "model_change") {
-      const provider = typeof record.provider === "string" ? record.provider : "";
-      const modelId = typeof record.modelId === "string" ? record.modelId : "";
-      if (provider && modelId) model = `${provider}/${modelId}`;
-      continue;
-    }
-    if (record.type === "message") {
-      const text = messageText(record.message);
-      if (text && isMeaningful(text)) {
-        latestActivity = cleanActivity(text);
-        latestActivityAtMs = at;
-      }
-      continue;
-    }
-    if (record.type === "tool_use" || record.type === "tool_result") {
-      const text = toolText(record);
-      if (text && isMeaningful(text)) {
-        latestActivity = cleanActivity(text);
-        latestActivityAtMs = at;
-      }
-    }
-  }
-
-  if (!latestActivity) {
-    // Fall back to the file mtime so cards still show recency.
-    latestActivityAtMs = mtimeMs;
-  }
-  return { model, latestActivity, latestActivityAtMs };
-}
-
-function messageText(message: unknown): string {
-  if (!message || typeof message !== "object" || Array.isArray(message)) return "";
-  const value = message as Record<string, unknown>;
-  const role = typeof value.role === "string" ? value.role : "";
-  if (role === "user" && typeof value.content === "string") return value.content;
-  if (role === "assistant" && typeof value.content === "string") return value.content;
-  if (!Array.isArray(value.content)) return "";
-  const parts: string[] = [];
-  for (const block of value.content) {
-    if (!block || typeof block !== "object" || Array.isArray(block)) continue;
-    const b = block as Record<string, unknown>;
-    if (b.type === "text" && typeof b.text === "string") parts.push(b.text);
-    if (b.type === "tool_use" && typeof b.name === "string") {
-      parts.push(`[tool: ${b.name}]`);
-    }
-  }
-  return parts.join(" ");
-}
-
-function toolText(record: Record<string, unknown>): string {
-  const name = typeof record.name === "string" ? record.name : "";
-  const input = record.input;
-  if (name) return `[tool: ${name}]`;
-  if (input && typeof input === "string") return input;
-  return "";
+  // No meaningful entry in the window: fall back to the file mtime so cards
+  // still show recency.
+  return { model: transcript.model, latestActivity: "", latestActivityAtMs: mtimeMs };
 }
 
 /** Skip control/streaming noise like bare "Enter" or single-char echoes. */
 function isMeaningful(text: string): boolean {
-  const trimmed = text.replace(/\s+/g, " ").trim();
-  if (!trimmed) return false;
-  if (trimmed.length < 4 && !trimmed.startsWith("[tool")) return false;
-  // pi often appends "…" while streaming; still useful as activity.
-  return true;
+  if (!text) return false;
+  // Tool calls render as "[name]" and are meaningful however short.
+  return text.length >= 4 || text.startsWith("[");
 }
 
-/** Clean single-line preview of the activity (also used by tests). */
+/** Clean single-line preview of the activity (also used by the board endpoint). */
 export function cleanActivity(text: string, limit = MAX_ACTIVITY_LENGTH): string {
   const cleaned = text.replace(/\s+/g, " ").trim();
   return cleaned.length > limit ? `${cleaned.slice(0, limit - 1)}…` : cleaned;

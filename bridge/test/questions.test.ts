@@ -1,11 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { extractQuestions, sanitizeAnswerText } from "../src/questions.js";
-import type { PiMessageEntry } from "../src/pi/session.js";
+import type { TranscriptEntry } from "../src/transcript.js";
 
 const TOOL_CALL_ID = "call_abc123|fc_xyz789";
 
-function assistantWithQuestion(callId: string = TOOL_CALL_ID, args: unknown): PiMessageEntry {
+function assistantWithQuestion(callId: string = TOOL_CALL_ID, args: unknown): TranscriptEntry {
   return {
     entryId: "msg_ask",
     parentId: null,
@@ -16,7 +16,7 @@ function assistantWithQuestion(callId: string = TOOL_CALL_ID, args: unknown): Pi
   };
 }
 
-function toolResultWithAnswers(callId: string, answers: unknown[]): PiMessageEntry {
+function toolResultWithAnswers(callId: string, answers: unknown[]): TranscriptEntry {
   return {
     entryId: "msg_answer",
     parentId: null,

@@ -49,7 +49,7 @@ describe("cockpit bridge HTTP/WS API", { skip }, () => {
       join(projectDir, "session.jsonl"),
       [
         JSON.stringify({ type: "session", version: 3, id: "catalog-session", timestamp: "2026-01-01T00:00:00.000Z", cwd: "/work/catalog" }),
-        JSON.stringify({ type: "message", message: { role: "user", content: [{ type: "text", text: "Catalog route prompt" }] } }),
+        JSON.stringify({ type: "message", id: "e1", timestamp: "2026-01-01T00:00:01.000Z", message: { role: "user", content: [{ type: "text", text: "Catalog route prompt" }] } }),
       ].join("\n"),
     );
     server = createCockpitServer({
@@ -179,7 +179,7 @@ describe("cockpit bridge HTTP/WS API", { skip }, () => {
       join(sessionDir, "session.jsonl"),
       [
         JSON.stringify({ type: "session", version: 3, id: "completed-session", timestamp: "2026-01-02T00:00:00.000Z", cwd: repo }),
-        JSON.stringify({ type: "message", message: { role: "user", content: [{ type: "text", text: "work in the repo" }] } }),
+        JSON.stringify({ type: "message", id: "e1", timestamp: "2026-01-01T00:00:01.000Z", message: { role: "user", content: [{ type: "text", text: "work in the repo" }] } }),
       ].join("\n"),
     );
     const { status, body } = await getJson(`/api/repo?path=${encodeURIComponent(repo)}`);

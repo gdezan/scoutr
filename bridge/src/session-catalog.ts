@@ -1,16 +1,12 @@
 import { basename, isAbsolute, relative, resolve } from "node:path";
-import { appendFile, open, readdir, realpath, stat, unlink } from "node:fs/promises";
-import { randomBytes } from "node:crypto";
+import { readdir, realpath, stat, unlink } from "node:fs/promises";
+import { MAX_SESSION_TITLE_LENGTH, readTranscript, writeSessionTitle } from "./transcript.js";
 
 const MAX_CANDIDATES = 2_000;
 const MAX_SCANNED_FILES = 500;
-const MAX_HEAD_BYTES = 128 * 1024;
-const MAX_TAIL_BYTES = 64 * 1024;
 const MAX_LIMIT = 200;
 const DEFAULT_LIMIT = 100;
 const MAX_QUERY_LENGTH = 200;
-const MAX_TITLE_LENGTH = 100;
-const MAX_PREVIEW_LENGTH = 240;
 
 export interface ActiveSessionRef {
   path: string;
@@ -50,7 +46,6 @@ export interface ListSessionCatalogOptions {
 interface SessionFile {
   path: string;
   mtimeMs: number;
-  size: number;
 }
 
 interface ParsedCatalogFile {
@@ -90,18 +85,10 @@ export async function resolveCatalogSessionPath(path: string, requestedRoot?: st
 
 export async function renameStoredSession(path: string, name: string, root?: string): Promise<void> {
   const cleanName = name.trim();
-  if (!cleanName || cleanName.length > MAX_TITLE_LENGTH || /[\u0000-\u001f\u007f]/.test(cleanName)) {
-    throw new SessionCatalogError(`name must be 1 to ${MAX_TITLE_LENGTH} printable characters`);
+  if (!cleanName || cleanName.length > MAX_SESSION_TITLE_LENGTH || /[\u0000-\u001f\u007f]/.test(cleanName)) {
+    throw new SessionCatalogError(`name must be 1 to ${MAX_SESSION_TITLE_LENGTH} printable characters`);
   }
-  const target = await resolveCatalogSessionPath(path, root);
-  const record = {
-    type: "session_info",
-    id: randomBytes(4).toString("hex"),
-    parentId: null,
-    timestamp: new Date().toISOString(),
-    name: cleanName,
-  };
-  await appendFile(target, `${JSON.stringify(record)}\n`, "utf8");
+  await writeSessionTitle(await resolveCatalogSessionPath(path, root), cleanName);
 }
 
 export async function deleteStoredSession(path: string, root?: string): Promise<void> {
@@ -141,7 +128,7 @@ export async function listSessionCatalog(options: ListSessionCatalogOptions = {}
   for (const path of activeByPath.keys()) {
     if (paths.has(path)) continue;
     const info = await stat(path);
-    if (info.isFile()) paths.set(path, { path, mtimeMs: info.mtimeMs, size: info.size });
+    if (info.isFile()) paths.set(path, { path, mtimeMs: info.mtimeMs });
   }
 
   const files = [...paths.values()].sort((a, b) => b.mtimeMs - a.mtimeMs);
@@ -157,7 +144,7 @@ export async function listSessionCatalog(options: ListSessionCatalogOptions = {}
       id: parsed.id,
       path: file.path,
       cwd: parsed.cwd,
-      title: active?.title?.trim().slice(0, MAX_TITLE_LENGTH) || parsed.title,
+      title: active?.title?.trim().slice(0, MAX_SESSION_TITLE_LENGTH) || parsed.title,
       preview: parsed.preview,
       createdAt: parsed.createdAt,
       updatedAt: file.mtimeMs,
@@ -203,80 +190,31 @@ async function addSessionFile(root: string, path: string, files: SessionFile[]):
   const canonical = await realpath(path);
   if (!isInside(root, canonical)) return;
   const info = await stat(canonical);
-  if (info.isFile()) files.push({ path: canonical, mtimeMs: info.mtimeMs, size: info.size });
+  if (info.isFile()) files.push({ path: canonical, mtimeMs: info.mtimeMs });
 }
 
+/**
+ * List metadata for one session file. The transcript module does the reading —
+ * bounded to a window at each end of the file — so the catalog understands the
+ * JSONL vocabulary exactly as the chat and board views do.
+ */
 async function readCatalogFile(file: SessionFile): Promise<ParsedCatalogFile | null> {
-  const handle = await open(file.path, "r");
-  try {
-    const headSize = Math.min(file.size, MAX_HEAD_BYTES);
-    const head = Buffer.alloc(headSize);
-    await handle.read(head, 0, headSize, 0);
-
-    const tailStart = Math.max(headSize, file.size - MAX_TAIL_BYTES);
-    const tailSize = Math.max(0, file.size - tailStart);
-    const tail = Buffer.alloc(tailSize);
-    if (tailSize > 0) await handle.read(tail, 0, tailSize, tailStart);
-
-    return parseCatalogText(`${head.toString("utf8")}\n${tail.toString("utf8")}`, file.mtimeMs);
-  } finally {
-    await handle.close();
-  }
-}
-
-function parseCatalogText(text: string, mtimeMs: number): ParsedCatalogFile | null {
-  let id = "";
-  let cwd = "";
-  let createdAt = mtimeMs;
-  let name = "";
-  let preview = "";
-  let model: string | null = null;
-
-  for (const rawLine of text.split("\n")) {
-    let record: Record<string, unknown>;
-    try {
-      record = JSON.parse(rawLine) as Record<string, unknown>;
-    } catch {
-      continue;
-    }
-    if (record.type === "session") {
-      id = typeof record.id === "string" ? record.id : id;
-      cwd = typeof record.cwd === "string" ? record.cwd : cwd;
-      const timestamp = typeof record.timestamp === "string" ? Date.parse(record.timestamp) : Number.NaN;
-      if (Number.isFinite(timestamp)) createdAt = timestamp;
-    } else if (record.type === "session_info" && typeof record.name === "string") {
-      name = cleanText(record.name, MAX_TITLE_LENGTH);
-    } else if (record.type === "model_change") {
-      const provider = typeof record.provider === "string" ? record.provider : "";
-      const modelId = typeof record.modelId === "string" ? record.modelId : "";
-      if (provider && modelId) model = `${provider}/${modelId}`;
-    } else if (!preview && record.type === "message") {
-      preview = firstUserText(record);
-    }
-  }
-
-  if (!id || !cwd) return null;
-  const title = name || cleanText(preview, MAX_TITLE_LENGTH) || basename(cwd) || "Untitled session";
-  return { id, cwd, title, preview, createdAt, model };
-}
-
-function firstUserText(record: Record<string, unknown>): string {
-  const message = record.message;
-  if (!message || typeof message !== "object" || Array.isArray(message)) return "";
-  const value = message as Record<string, unknown>;
-  if (value.role !== "user") return "";
-  if (typeof value.content === "string") return cleanText(value.content, MAX_PREVIEW_LENGTH);
-  if (!Array.isArray(value.content)) return "";
-  const text = value.content
-    .filter((block): block is Record<string, unknown> => Boolean(block) && typeof block === "object" && !Array.isArray(block))
-    .filter((block) => block.type === "text" && typeof block.text === "string")
-    .map((block) => block.text as string)
-    .join(" ");
-  return cleanText(text, MAX_PREVIEW_LENGTH);
-}
-
-function cleanText(value: string, limit: number): string {
-  return value.replace(/\s+/g, " ").trim().slice(0, limit);
+  const transcript = await readTranscript(file.path, { metadataOnly: true });
+  if (!transcript.id || !transcript.cwd) return null;
+  const createdAt = Date.parse(transcript.timestamp);
+  const preview = transcript.preview;
+  return {
+    id: transcript.id,
+    cwd: transcript.cwd,
+    title:
+      transcript.title
+      || preview.slice(0, MAX_SESSION_TITLE_LENGTH)
+      || basename(transcript.cwd)
+      || "Untitled session",
+    preview,
+    createdAt: Number.isFinite(createdAt) ? createdAt : file.mtimeMs,
+    model: transcript.model,
+  };
 }
 
 function catalogSearchText(session: CatalogSession): string {

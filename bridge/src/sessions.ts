@@ -1,7 +1,7 @@
 import type { HerdrClient } from "./herdr/client.js";
 import { resolveAllowedDir } from "./dirs.js";
 import { readModelsCatalog, type ModelsCatalog } from "./pi/models.js";
-import { readPiSessionFile, type PiSession } from "./pi/session.js";
+import { readTranscript, type Transcript } from "./transcript.js";
 import { resolveCatalogSessionPath } from "./session-catalog.js";
 import { realpathSync, statSync } from "node:fs";
 import { basename, dirname, resolve } from "node:path";
@@ -50,7 +50,7 @@ export interface ControlParams {
 
 export interface SessionControlDeps {
   readCatalog?: () => ModelsCatalog;
-  readSession?: (path: string) => Promise<Pick<PiSession, "model" | "thinkingLevel">>;
+  readSession?: (path: string) => Promise<Pick<Transcript, "model" | "thinkingLevel">>;
 }
 
 export class SessionsError extends Error {
@@ -168,7 +168,7 @@ export async function launchStoredSession(
   params: LaunchStoredSessionParams,
 ): Promise<CreatedSession> {
   const path = await resolveCatalogSessionPath(params.path, params.sessionRoot);
-  const session = await readPiSessionFile(path);
+  const session = await readTranscript(path);
   if (!session.cwd) throw new SessionsError("session working directory is unavailable", 409);
   const cwd = resolveSessionWorkspace(session.cwd, path, params.sessionRoot);
   return launchWorkspace(
@@ -315,7 +315,7 @@ export async function controlSession(
       }
       const path = await findPaneSessionPath(herdr, paneId);
       if (!path) throw new SessionsError("active pi session path is unavailable", 409);
-      const session = await (deps.readSession?.(path) ?? readPiSessionFile(path));
+      const session = await (deps.readSession?.(path) ?? readTranscript(path));
       if (!session.model || !session.thinkingLevel) {
         throw new SessionsError("active model or thinking level is unavailable", 409);
       }
