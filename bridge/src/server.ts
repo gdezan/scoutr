@@ -136,7 +136,12 @@ export function createCockpitServer(deps: ServerDeps, options: CreateServerOptio
         sendJson(response, 401, { ok: false, error: "unauthorized" });
         return;
       }
-      if (request.method === "POST") {
+      // Attachment uploads carry a raw binary body; skip the JSON pre-parse
+      // (and leave the request stream unread) so the attachments route can
+      // consume it itself.
+      const isAttachmentUpload =
+        request.method === "POST" && url.pathname === "/api/attachments";
+      if (request.method === "POST" && !isAttachmentUpload) {
         const chunks: Buffer[] = [];
         let size = 0;
         for await (const chunk of request) {

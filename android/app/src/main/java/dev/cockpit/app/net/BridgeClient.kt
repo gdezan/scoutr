@@ -167,7 +167,7 @@ class BridgeClient(
                 .build()
             val request = Request.Builder()
                 .url(httpUrl)
-                .header("Authorization", "Bearer ${'$'}{token()}")
+                .header("Authorization", "Bearer ${token()}")
                 .post(bytes.toRequestBody(mime.toMediaType()))
                 .build()
             val call = okHttp.newCall(request)

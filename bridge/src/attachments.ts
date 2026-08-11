@@ -1,4 +1,4 @@
-import { readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { basename, extname, join } from "node:path";
 
 /**
@@ -65,6 +65,7 @@ export function storeAttachment(
   const safe = sanitizeName(name);
   const filePath = join(dir, `${Date.now()}_${Math.random().toString(36).slice(2, 8)}_${safe}`);
   try {
+    mkdirSync(dir, { recursive: true });
     writeFileSync(filePath, body);
   } catch {
     throw new AttachmentError("could not store attachment", 500);
