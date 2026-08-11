@@ -81,7 +81,7 @@ export async function deriveAgentCardsWithDetail(
     if (!sessionPath && agentInfo?.agent_session) {
       const backend = backendForAgentSessionInfo(agentInfo.agent_session);
       if (backend) {
-        sessionPath = (await backend.resolveSessionPath(agentInfo.agent_session).catch(() => null)) ?? undefined;
+        sessionPath = (await backend.resolveSessionPath(agentInfo.agent_session, agentInfo.cwd ?? undefined).catch(() => null)) ?? undefined;
         if (sessionPath) card.sessionPath = sessionPath;
       }
     }

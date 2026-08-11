@@ -8,6 +8,7 @@ import {
   claudeControl,
   claudeLaunchCommand,
   claudeOwnsSessionPath,
+  claudeProjectDir,
   claudeResolveSessionPath,
   claudeResumeCommand,
 } from "../src/agents/claude/index.js";
@@ -127,10 +128,25 @@ describe("claude adapter", () => {
       const ref = { source: "herdr:claude", agent: "claude", kind: "id" as const, value: id };
       assert.equal(await claudeResolveSessionPath(ref), join(dir, `${id}.jsonl`));
     });
-    it("returns null for an unknown id", async () => {
+    it("returns null for an unknown id without a cwd", async () => {
       const config = await claudeStore();
       const ref = { source: "herdr:claude", agent: "claude", kind: "id" as const, value: "nope" };
       assert.equal(await claudeResolveSessionPath(ref), null);
+    });
+    it("predicts the not-yet-written transcript path from the pane cwd", async () => {
+      const config = await claudeStore();
+      const ref = { source: "herdr:claude", agent: "claude", kind: "id" as const, value: "fresh-session" };
+      // Claude 2.1.228 writes the JSONL only after the first exchange, so a
+      // fresh idle session must resolve to its deterministic location.
+      assert.equal(
+        await claudeResolveSessionPath(ref, "/home/gdezan/Dev/agents-mobile"),
+        join(config, "projects", "-home-gdezan-Dev-agents-mobile", "fresh-session.jsonl"),
+      );
+    });
+    it("matches claude's project-dir encoding for special characters", () => {
+      assert.equal(claudeProjectDir("/tmp/claude enc.dir/α space"), "-tmp-claude-enc-dir---space");
+      assert.equal(claudeProjectDir("/home/gdezan"), "-home-gdezan");
+      assert.equal(claudeProjectDir("/home/gdezan/Dev/chronica"), "-home-gdezan-Dev-chronica");
     });
   });
 

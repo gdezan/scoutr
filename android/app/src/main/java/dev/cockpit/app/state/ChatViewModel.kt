@@ -335,7 +335,11 @@ class ChatViewModel(
                 refreshCommands(_ui.value.cwd)
             }
             if (path == null) {
-                _ui.update { it.copy(loading = false, exists = false, error = "No session transcript on this agent yet") }
+                // No transcript path yet (fresh backend session: claude writes
+                // its JSONL only after the first exchange). That is a pending
+                // state, not an error — the composer still steers the agent
+                // and the next poll picks the transcript up once it lands.
+                _ui.update { it.copy(loading = false, exists = false, error = null) }
                 return
             }
             val response = bridge.session(path, since = _ui.value.entries.lastOrNull()?.entryId)

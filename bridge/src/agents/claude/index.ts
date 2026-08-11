@@ -64,11 +64,25 @@ const MAX_SCAN_FILES = 5_000;
 const MAX_SCAN_DEPTH = 3;
 
 /**
- * Resolve a herdr agent_session reference to a transcript path. Claude reports
- * `kind: "id"` (the hook sends agent_session_id, not a path), so an id must be
- * matched against `~/.claude/projects/<project>/<uuid>.jsonl` filenames.
+ * Claude's on-disk project directory name for a cwd: every character outside
+ * [a-zA-Z0-9] becomes "-" (verified empirically against 2.1.228: `/tmp/claude
+ * enc.dir/α space` -> `-tmp-claude-enc-dir---space`). The bridge must derive
+ * it because Claude Code 2.1.228 writes the transcript JSONL lazily — only
+ * after the first exchange — so a fresh idle session has no file to walk to.
  */
-export async function claudeResolveSessionPath(ref: AgentSessionInfo): Promise<string | null> {
+export function claudeProjectDir(cwd: string): string {
+  return cwd.replace(/[^a-zA-Z0-9]/g, "-");
+}
+
+/**
+ * Resolve a herdr agent_session reference to a transcript path. Claude reports
+ * `kind: "id"` (the hook sends agent_session_id, not a path), so an id is
+ * matched against `~/.claude/projects/<project>/<uuid>.jsonl` filenames. When
+ * the file does not exist yet (fresh session, transcript written lazily on
+ * the first exchange), the deterministic path is derived from the pane's cwd
+ * so live cards still carry a sessionPath.
+ */
+export async function claudeResolveSessionPath(ref: AgentSessionInfo, cwd?: string): Promise<string | null> {
   if (ref.kind === "path") return ref.value;
   const root = claudeSessionRoot();
   const wanted = `${ref.value}.jsonl`;
@@ -93,7 +107,10 @@ export async function claudeResolveSessionPath(ref: AgentSessionInfo): Promise<s
     }
     return null;
   };
-  return walk(root, 0);
+  const found = await walk(root, 0);
+  if (found) return found;
+  if (!cwd) return null;
+  return join(root, claudeProjectDir(cwd), wanted);
 }
 
 export async function claudeReadTranscript(path: string, opts?: TranscriptReadOpts): Promise<Transcript> {

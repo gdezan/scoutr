@@ -99,7 +99,7 @@ async function resolveCardSessionPath(card: AgentCard, snapshot: SessionSnapshot
   const agent = snapshot.agents.find((candidate) => candidate.pane_id === card.paneId);
   const backend = agent ? backendForAgentSessionInfo(agent.agent_session) : null;
   if (!backend || !agent?.agent_session) return undefined;
-  return (await backend.resolveSessionPath(agent.agent_session).catch(() => null)) ?? undefined;
+  return (await backend.resolveSessionPath(agent.agent_session, agent.cwd ?? undefined).catch(() => null)) ?? undefined;
 }
 
 /** The live card whose resolved transcript path equals `target`, if any. */

@@ -71,7 +71,8 @@ export interface AgentBackend {
 
   sessionRoot(): string;
   ownsSessionPath(path: string): boolean;
-  resolveSessionPath(ref: AgentSessionInfo): Promise<string | null>;
+  /** Resolve a herdr agent_session ref to a transcript path; `cwd` lets id-kind backends predict not-yet-written paths. */
+  resolveSessionPath(ref: AgentSessionInfo, cwd?: string): Promise<string | null>;
   readTranscript(path: string, opts?: TranscriptReadOpts): Promise<Transcript>;
   renameStoredSession?(path: string, title: string): Promise<void>;
 
