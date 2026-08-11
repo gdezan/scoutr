@@ -11,6 +11,8 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeLeft
+import android.content.ClipboardManager
+import androidx.test.platform.app.InstrumentationRegistry
 import dev.cockpit.app.data.AgentCard
 import dev.cockpit.app.data.BoardState
 import dev.cockpit.app.data.ConnectionStore
@@ -19,6 +21,7 @@ import dev.cockpit.app.state.BoardViewModel
 import dev.cockpit.app.ui.screens.BoardScreen
 import dev.cockpit.app.ui.theme.CockpitTheme
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
 import kotlin.math.abs
@@ -126,6 +129,33 @@ class BoardScreenTest {
         compose.waitForIdle()
         assertTrue("review callback should carry the agent cwd", reviewedCwd == "/repo/a")
         assertTrue("review must not also open the card", opened == null)
+    }
+
+    @Test
+    fun swipeLeftRevealsCopyAndCopiesPath() {
+        var opened: String? = null
+        compose.setContent {
+            CockpitTheme {
+                BoardScreen(
+                    onOpenAgent = { opened = it.paneId },
+                    viewModel = staticBoardViewModel(
+                        BoardUiState(
+                            board = BoardState.group(listOf(blockedAgent("p1", "Fix billing bug", "/repo/a", "openai-codex/gpt-5.4", "Found it"))),
+                            connected = true,
+                        ),
+                    ),
+                )
+            }
+        }
+        compose.onNodeWithTag("agent_card_p1").performTouchInput { swipeLeft() }
+        compose.onNodeWithTag("board_action_copy_p1").assertIsDisplayed()
+        compose.onNodeWithTag("board_action_copy_p1").performClick()
+        compose.waitForIdle()
+        assertTrue("copy must not also open the card", opened == null)
+        val clip = InstrumentationRegistry.getInstrumentation().targetContext
+            .getSystemService(ClipboardManager::class.java)
+            .primaryClip?.getItemAt(0)?.text?.toString()
+        assertEquals("clipboard should hold the agent cwd", "/repo/a", clip)
     }
 
     @Test

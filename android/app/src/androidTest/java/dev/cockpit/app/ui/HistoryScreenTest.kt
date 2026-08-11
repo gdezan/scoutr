@@ -9,6 +9,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeLeft
+import android.content.ClipboardManager
 import androidx.test.platform.app.InstrumentationRegistry
 import dev.cockpit.app.data.ConnectionStore
 import dev.cockpit.app.data.SessionCatalogStore
@@ -24,6 +25,7 @@ import okhttp3.mockwebserver.RecordedRequest
 import org.junit.After
 import org.junit.Before
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
 import java.util.concurrent.TimeUnit
@@ -138,6 +140,22 @@ class HistoryScreenTest {
         compose.onNodeWithText("Delete").performClick()
         compose.onNodeWithText("Delete session?").assertIsDisplayed()
         compose.onNodeWithText("Delete").performClick()
+    }
+
+    @Test
+    fun copyPathMenuItemCopiesPath() {
+        stubCatalog()
+        setContent(viewModel())
+        compose.waitUntil(5_000) {
+            compose.onAllNodes(androidx.compose.ui.test.hasTestTag("history_row_abc")).fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithTag("history_row_menu_abc").performClick()
+        compose.onNodeWithText("Copy path").performClick()
+        compose.waitForIdle()
+        val clip = InstrumentationRegistry.getInstrumentation().targetContext
+            .getSystemService(ClipboardManager::class.java)
+            .primaryClip?.getItemAt(0)?.text?.toString()
+        assertEquals("clipboard should hold the session cwd", "/repo/a", clip)
     }
 
     @Test

@@ -1,5 +1,7 @@
 package dev.cockpit.app.ui.screens
 
+import android.widget.Toast
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.AnchoredDraggableState
@@ -27,6 +29,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.WifiOff
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Code
+import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
@@ -46,6 +49,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
@@ -258,6 +265,14 @@ private fun AgentCardRow(
     val isNeedsYou = status == AgentStatus.NeedsYou
     val accent = statusColor(status)
     val scheme = MaterialTheme.colorScheme
+    val clipboard = LocalClipboardManager.current
+    val haptic = LocalHapticFeedback.current
+    val context = LocalContext.current
+    val copyPath = {
+        clipboard.setText(AnnotatedString(agent.cwd ?: agent.workspaceId))
+        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+        Toast.makeText(context, "Copied path", Toast.LENGTH_SHORT).show()
+    }
 
     // Swipe-to-reveal action bar: review the agent's workspace + close the
     // agent's pane. Same anchored-draggable pattern as the Sessions rows so a
@@ -267,6 +282,7 @@ private fun AgentCardRow(
     val actions = buildList {
         add(BoardAction("review", "Review", Icons.Outlined.Code, scheme.onSurfaceVariant, onReview))
         add(BoardAction("close", "Close", Icons.Outlined.Close, scheme.onSurfaceVariant, onClose))
+        add(BoardAction("copy", "Copy", Icons.Outlined.ContentCopy, scheme.onSurfaceVariant, copyPath))
     }
     val density = LocalDensity.current
     val revealWidthPx = with(density) { (actions.size * 52).dp.toPx() }

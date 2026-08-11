@@ -6,6 +6,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.longClick
+import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -21,6 +24,7 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import org.junit.Rule
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -159,6 +163,86 @@ class ChatListTest {
         composeRule.waitForIdle()
         composeRule.onNodeWithTag("pending_message_failed").assertIsDisplayed().performClick()
         assertTrue(retried)
+    }
+
+    /**
+     * Compose puts a start and an end selection handle on screen (each in its own
+     * popup) once text inside a SelectionContainer is selected. Counting them is a
+     * real check on the affordance: a plain, unwrapped Text yields zero no matter
+     * how long you press it. Copy itself is the platform toolbar's job from there.
+     */
+    private fun selectionHandleCount(): Int =
+        composeRule.onAllNodes(isSelectionHandle(), useUnmergedTree = true)
+            .fetchSemanticsNodes()
+            .size
+
+    /**
+     * Each handle popup carries Compose's SelectionHandleInfo semantics. The key
+     * itself is internal to the foundation module, so match it by name.
+     */
+    private fun isSelectionHandle() = SemanticsMatcher("is a selection handle") { node ->
+        node.config.any { it.key.name == "SelectionHandleInfo" }
+    }
+
+    private fun longPressText(entry: SessionEntry, message: String) {
+        composeRule.setContent {
+            CockpitTheme { ChatList(entries = listOf(entry), detailsVisible = false) }
+        }
+        val text = composeRule.onNodeWithText(message)
+        text.assertIsDisplayed()
+        text.performTouchInput { longClick() }
+        composeRule.waitForIdle()
+    }
+
+    @Test
+    fun longPressSelectsAssistantTextForCopy() {
+        val entry = SessionEntry(
+            entryId = "copy-a",
+            role = "assistant",
+            content = listOf(ContentBlock(type = "text", text = "a paragraph worth copying")),
+        )
+        longPressText(entry, "a paragraph worth copying")
+        assertEquals("long press should raise both selection handles", 2, selectionHandleCount())
+    }
+
+    @Test
+    fun longPressSelectsUserBubbleTextForCopy() {
+        val entry = SessionEntry(
+            entryId = "copy-u",
+            role = "user",
+            content = listOf(ContentBlock(type = "text", text = "my side of the conversation")),
+        )
+        longPressText(entry, "my side of the conversation")
+        assertEquals("long press should raise both selection handles", 2, selectionHandleCount())
+    }
+
+    /**
+     * The tool-call chip keeps its tap-to-expand gesture and is deliberately not
+     * selectable, so a long press there must not start a selection. This is the
+     * guard against someone "helpfully" wrapping the whole assistant bubble.
+     */
+    @Test
+    fun longPressOnToolChipStartsNoSelection() {
+        val entry = SessionEntry(
+            entryId = "copy-t",
+            role = "assistant",
+            content = listOf(
+                ContentBlock(
+                    type = "toolCall",
+                    id = "t1",
+                    name = "bash",
+                    arguments = buildJsonObject { put("command", JsonPrimitive("ls /tmp")) },
+                ),
+            ),
+        )
+        composeRule.setContent {
+            CockpitTheme { ChatList(entries = listOf(entry), detailsVisible = false) }
+        }
+        val chip = composeRule.onNodeWithTag("tool_chip")
+        chip.assertIsDisplayed()
+        chip.performTouchInput { longClick() }
+        composeRule.waitForIdle()
+        assertEquals("tool chips must stay unselectable", 0, selectionHandleCount())
     }
 
     private fun tallList(n: Int = 40): List<SessionEntry> = entries(n)

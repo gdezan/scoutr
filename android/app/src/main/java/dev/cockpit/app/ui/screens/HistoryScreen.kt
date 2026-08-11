@@ -1,5 +1,7 @@
 package dev.cockpit.app.ui.screens
 
+import android.widget.Toast
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.AnchoredDraggableState
@@ -38,6 +40,7 @@ import androidx.compose.material.icons.filled.WifiOff
 import androidx.compose.material.icons.outlined.Archive
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Code
+import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.DriveFileRenameOutline
 import androidx.compose.material.icons.outlined.PushPin
@@ -66,6 +69,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
@@ -331,6 +338,14 @@ private fun HistoryRow(
     val session = item.session
     var menuOpen by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
+    val clipboard = LocalClipboardManager.current
+    val haptic = LocalHapticFeedback.current
+    val context = LocalContext.current
+    val copyPath = {
+        clipboard.setText(AnnotatedString(session.cwd))
+        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+        Toast.makeText(context, "Copied path", Toast.LENGTH_SHORT).show()
+    }
 
     // Swipe-to-reveal action bar: rename, pin, archive, plus close for active
     // sessions (delete for stored ones). Anchored so a half-swiped row settles
@@ -493,6 +508,11 @@ private fun HistoryRow(
                                     onClick = { menuOpen = false; onClose() },
                                 )
                             }
+                            DropdownMenuItem(
+                                text = { Text("Copy path") },
+                                leadingIcon = { Icon(Icons.Outlined.ContentCopy, contentDescription = null) },
+                                onClick = { menuOpen = false; copyPath() },
+                            )
                             DropdownMenuItem(
                                 text = { Text("Delete") },
                                 leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null) },

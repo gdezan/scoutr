@@ -33,6 +33,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Close
@@ -648,7 +649,9 @@ private fun UserBubble(entry: SessionEntry, modifier: Modifier = Modifier) {
                 .padding(horizontal = 14.dp, vertical = 10.dp)
                 .testTag("user_bubble"),
         ) {
-            Text(text, color = MaterialTheme.colorScheme.onSurface)
+            SelectionContainer {
+                Text(text, color = MaterialTheme.colorScheme.onSurface)
+            }
         }
     }
 }
@@ -734,10 +737,12 @@ private fun AssistantBubble(
                 "text" -> {
                     val text = block.text?.trim()
                     if (!text.isNullOrBlank()) {
-                        AssistantMarkdown(
-                            content = text,
-                            modifier = Modifier.padding(bottom = 4.dp),
-                        )
+                        // Long-press selects, then the system toolbar offers Copy.
+                        // Only the prose is selectable — tool chips keep their
+                        // tap-to-expand gesture without selection fighting it.
+                        SelectionContainer(modifier = Modifier.padding(bottom = 4.dp)) {
+                            AssistantMarkdown(content = text)
+                        }
                     }
                 }
 
