@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
@@ -299,6 +300,7 @@ private fun CockpitAppNav(
                 )
                 var showNewSession by remember { mutableStateOf(false) }
                 Scaffold(
+                    contentWindowInsets = WindowInsets(0.dp),
                     topBar = { AppTopBar("Board", onSearch = openPalette, onSettings = openSettings) },
                     floatingActionButton = {
                         FloatingActionButton(
@@ -345,7 +347,10 @@ private fun CockpitAppNav(
                         container.sessionCatalogStore,
                     ),
                 )
-                Scaffold(topBar = { AppTopBar("Sessions", onSearch = openPalette, onSettings = openSettings) }) { innerSessions ->
+                Scaffold(
+                    contentWindowInsets = WindowInsets(0.dp),
+                    topBar = { AppTopBar("Sessions", onSearch = openPalette, onSettings = openSettings) },
+                ) { innerSessions ->
                     HistoryScreen(
                         onOpenSession = { resumed ->
                             navController.navigate(Routes.chat(resumed.paneId, null, "working"))
@@ -389,7 +394,10 @@ private fun CockpitAppNav(
                 val usageViewModel: UsageViewModel = viewModel(
                     factory = UsageViewModel.factory(container.bridge),
                 )
-                Scaffold(topBar = { AppTopBar("Usage", onSearch = openPalette, onSettings = openSettings) }) { innerUsage ->
+                Scaffold(
+                    contentWindowInsets = WindowInsets(0.dp),
+                    topBar = { AppTopBar("Usage", onSearch = openPalette, onSettings = openSettings) },
+                ) { innerUsage ->
                     UsageScreen(
                         viewModel = usageViewModel,
                         modifier = Modifier.padding(innerUsage),
@@ -398,7 +406,10 @@ private fun CockpitAppNav(
             }
             composable(Routes.REVIEW) {
                 // Shared with the Sessions swipe action; see the hoisted instance above.
-                Scaffold(topBar = { AppTopBar("Review", onSearch = openPalette, onSettings = openSettings) }) { innerReview ->
+                Scaffold(
+                    contentWindowInsets = WindowInsets(0.dp),
+                    topBar = { AppTopBar("Review", onSearch = openPalette, onSettings = openSettings) },
+                ) { innerReview ->
                     ReviewScreen(
                         viewModel = reviewViewModel,
                         modifier = Modifier.padding(innerReview),

@@ -1,5 +1,9 @@
 package dev.cockpit.app.ui
 
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.width
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -26,6 +30,7 @@ import org.junit.After
 import org.junit.Before
 import org.junit.Assert.assertTrue
 import org.junit.Assert.assertEquals
+import kotlin.math.abs
 import org.junit.Rule
 import org.junit.Test
 import java.util.concurrent.TimeUnit
@@ -140,6 +145,35 @@ class HistoryScreenTest {
         compose.onNodeWithText("Delete").performClick()
         compose.onNodeWithText("Delete session?").assertIsDisplayed()
         compose.onNodeWithText("Delete").performClick()
+    }
+
+
+    @Test
+    fun filterChipsStaySingleLineAtNarrowWidth() {
+        stubCatalog()
+        val vm = viewModel() // build before composition: MockWebServer.url() reverse-DNS
+        compose.setContent {
+            CockpitTheme {
+                // 320dp forces the four chips to overflow a fixed row: the old
+                // code wrapped "Archived" onto two lines here, doubling its
+                // height; the scrollable row keeps every chip single-line.
+                Box(Modifier.width(320.dp)) {
+                    HistoryScreen(onOpenSession = {}, viewModel = vm)
+                }
+            }
+        }
+        compose.waitUntil(5_000) {
+            compose.onAllNodes(androidx.compose.ui.test.hasTestTag("history_row_abc")).fetchSemanticsNodes().isNotEmpty()
+        }
+        val heights = listOf("Active", "Completed", "Pinned", "Archived").map { name ->
+            compose.onNodeWithTag("history_view_$name")
+                .getUnclippedBoundsInRoot()
+                .let { (it.bottom - it.top).value }
+        }
+        val max = heights.max()
+        heights.forEach { h ->
+            assertTrue("chips must be equal height (wrapped chip is ~2x): $heights", abs(h - max) < 1f)
+        }
     }
 
     @Test

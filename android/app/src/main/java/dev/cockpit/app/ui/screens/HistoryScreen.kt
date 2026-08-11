@@ -14,7 +14,9 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -217,9 +219,13 @@ private fun SearchField(query: String, onQuery: (String) -> Unit) {
 
 @Composable
 private fun ViewTabs(view: HistoryView, onSelect: (HistoryView) -> Unit) {
+    // Horizontally scrollable so the four chips keep their intrinsic width:
+    // in a fixed Row the longest label ("Archived") gets squeezed and wraps
+    // onto two lines on narrow screens. Overflow scrolls instead of crushing.
     Row(
         Modifier
             .fillMaxWidth()
+            .horizontalScroll(rememberScrollState())
             .padding(horizontal = 16.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
@@ -227,7 +233,7 @@ private fun ViewTabs(view: HistoryView, onSelect: (HistoryView) -> Unit) {
             FilterChip(
                 selected = view == candidate,
                 onClick = { onSelect(candidate) },
-                label = { Text(candidate.label) },
+                label = { Text(candidate.label, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                 modifier = Modifier.testTag("history_view_${candidate.name}"),
             )
         }
