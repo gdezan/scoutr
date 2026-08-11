@@ -12,7 +12,13 @@ import type { SessionSnapshot } from "../src/herdr/types.js";
 /**
  * Integration tests against the live herdr socket (herdr 0.8.0, protocol 19).
  * Skipped with a clear message when no herdr server is reachable.
+ *
+ * Every live-socket suite carries LIVE_SOCKET_TIMEOUT_MS. A real herdr under
+ * load can leave `snapshot()`/`subscribe()` pending indefinitely, and without a
+ * bound that stalls the whole run rather than failing one suite. `npm test`
+ * also sets --test-timeout as a backstop.
  */
+const LIVE_SOCKET_TIMEOUT_MS = 20_000;
 
 function liveSocketPath(): string | null {
   const path = process.env.HERDR_SOCKET_PATH ?? defaultSocketPath();
@@ -47,7 +53,7 @@ test("a per-call timeout closes a stalled Herdr socket", { timeout: 1_000 }, asy
   }
 });
 
-describe("herdr client (live socket)", { skip }, () => {
+describe("herdr client (live socket)", { skip, timeout: LIVE_SOCKET_TIMEOUT_MS }, () => {
   test("ping returns server version and protocol", async () => {
     const pong = await client!.ping();
     assert.equal(pong.type, "pong");
@@ -101,7 +107,7 @@ describe("herdr client (live socket)", { skip }, () => {
   });
 });
 
-describe("herdr event feed (live socket)", { skip }, () => {
+describe("herdr event feed (live socket)", { skip, timeout: LIVE_SOCKET_TIMEOUT_MS }, () => {
   const feeds: HerdrEventFeed[] = [];
 
   after(async () => {

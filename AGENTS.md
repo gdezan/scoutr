@@ -6,7 +6,7 @@
 
 Cockpit is a self-hosted mobile cockpit for herdr panes and pi agents: a Node/TS bridge daemon owns the herdr Unix socket and exposes a private HTTP/WS API; the Android app (Kotlin + Jetpack Compose Material 3, package `dev.cockpit.app`) talks only to that API.
 
-- `bridge/` — Node/TS daemon. Entry: `src/cli.ts serve` (server.ts only exports `createCockpitServer`). Per-feature modules: `herdr/` (socket client + feed), `sessions.ts`, `session-catalog.ts`, `questions.ts`, `pi/commands.ts`, `live-output.ts`, `review.ts`, `attachments.ts`, `notify.ts`, `board-detail.ts`, `usage/`. Tests live in `bridge/test/` and run with `npm run typecheck && npm test` (`node --import tsx --test`).
+- `bridge/` — Node/TS daemon. Entry: `src/cli.ts serve` (server.ts only exports `createCockpitServer`). Per-feature modules: `herdr/` (socket client + feed), `transcript.ts` (the one JSONL parser — chat, catalog, and board all read through it), `sessions.ts`, `session-catalog.ts`, `questions.ts`, `pi/commands.ts`, `live-output.ts`, `review.ts`, `attachments.ts`, `notify.ts`, `board-detail.ts`, `usage/`. Tests live in `bridge/test/` and run with `npm run typecheck && npm test` (`node --import tsx --test`).
 - `android/` — Compose app, manual DI via `CockpitApp.AppContainer` (no Hilt/Room). Source dirs under `app/src/main/java/dev/cockpit/app/`: `data/` (DTOs + SharedPreferences stores), `net/` (BridgeClient, NtfyClient — BridgeClient is `final`), `state/` (ViewModels), `service/` (monitor service, deep links, reply receiver), `ui/components/`, `ui/screens/`, `ui/theme/` (Theme.kt + DiffPalette.kt), `ui/motion/` (motion vocabulary + haptics).
 - Design contract: always-dark Material 3, one accent `#5B8CFF` reserved for AI-owned states, calm surface cards, mono only for paths/commands/tool output, state is the color. See `ui/theme/Theme.kt` and `docs/DESIGN.md`.
 - Long-running goal contract: `docs/production-goal-checklist.md` (live item map) with `docs/COMPLETION-REPORT.md` and `docs/AUDIT.md`.
@@ -18,7 +18,7 @@ Cockpit is a self-hosted mobile cockpit for herdr panes and pi agents: a Node/TS
 Run these before committing UI/bridge work, and treat them as the acceptance gates:
 
 ```bash
-cd bridge && npm run typecheck && npm test                       # ~147 tests
+cd bridge && npm run typecheck && npm test                       # ~172 tests, ~90s
 cd android && ANDROID_HOME=$HOME/Android/sdk ./gradlew testDebugUnitTest --rerun-tasks
 cd android && ANDROID_HOME=$HOME/Android/sdk ./gradlew pixel2api36DebugAndroidTest   # Gradle Managed Device, ~2 min
 cd android && ANDROID_HOME=$HOME/Android/sdk ./gradlew assembleDebug
@@ -26,11 +26,36 @@ cd android && ANDROID_HOME=$HOME/Android/sdk ./gradlew assembleDebug
 
 For runtime/UI evidence, install the APK on the running emulator (`adb install -r .../app-debug.apk`), drive it with `adb shell input tap/text/keyevent`, capture with `adb exec-out screencap -p`, and inspect screenshots with the vision-pane workflow below. The full emulator recipe (scratch bridge, adb prefs injection, uiautomator bounds, taste reviews) is in `docs/dev-workflow.md`.
 
+## Never wait on an unbounded command
+
+A hung command produces no output, so waiting on it is indistinguishable from progress —
+that is what makes it expensive. Bound it up front instead of discovering it afterwards.
+
+1. **Bound before you run, not after it hangs.** Anything touching a socket, device,
+   emulator, or network gets an explicit limit: `timeout 120 <cmd>`, `--test-timeout` for
+   `node --test`, `--timeout` for `herdr pane wait-output`, `-timeout` for gradle. A
+   command with no natural end (`tail -f`, `adb logcat`) needs one every time.
+2. **Decide the expected duration first, then hold it to ~2x.** `cd bridge && npm test` is
+   ~90s; gradle managed-device tests are ~2 min. Past twice that, kill it and diagnose —
+   never re-run the same unbounded command hoping it finishes.
+3. **Never poll with a pattern that matches your own shell.** `pgrep -f 'import tsx test/'`
+   in an `until` loop matches the loop's own command line and so never exits. Bracket the
+   pattern (`'impor[t] tsx'`), or wait on a pidfile or sentinel file instead.
+4. **Fix a hang at its source.** Add the bound to `package.json`, the test file, or the
+   script so the next session inherits it, then record it below. A bound you applied only
+   at the call site is a bound the next agent will not have.
+
+Known unbounded spots, already bounded — keep them that way: the live-socket suites in
+`bridge/test/herdr-client.test.ts` (a real herdr under load leaves `snapshot()`/`subscribe()`
+pending forever, which used to hang the whole run silently), `npm test` overall, gradle
+managed-device tasks, and every `herdr pane wait-output` in the Vision and Code review
+workflows below.
+
 ## Gotchas (read before touching)
 
 - `BridgeClient` is `final` and cannot be stubbed. Emulator tests use a real BridgeClient + a fresh **unsaved** ConnectionStore so ViewModels never start polling.
 - `MockWebServer.url()` does a reverse-DNS lookup — never call it on the main thread (build ViewModels before `setContent` in tests).
-- `pkill -f` matches your own command line if it contains the pattern — use `pkill -f 'cli[.]ts'` style brackets.
+- `pkill -f` matches your own command line if it contains the pattern — use `pkill -f 'cli[.]ts'` style brackets (see "Never wait on an unbounded command").
 - Robolectric shares SharedPreferences across tests — save/clear connections explicitly (savedConnection helper pattern).
 - readSeek tools demand fresh anchors after every edit to the same file; re-grep/re-digest first, or use the plain `edit` tool for small changes.
 - Bridge envs: `XDG_CONFIG_HOME` picks the config dir; `COCKPIT_REPO_ROOTS` allow-lists review repos; config tokens must be ≥16 chars.
