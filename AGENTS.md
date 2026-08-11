@@ -63,6 +63,16 @@ When a task involves an image — a screenshot, mockup, rendered UI, or diagram 
 
 Done when the description answers the specific question you had about the image. An empty file means a bad image path or a failed model call — fix and re-run. If `opencode-go/gpt-5.6-luna` no longer works, pick a model with `images: yes` from `pi --list-models`.
 
+## Code review
+
+Before committing, review the current work with a fresh pi in a sibling herdr pane (`HERDR_ENV=1`), using `openai-codex/gpt-5.6-sol` at low reasoning. Use the same pane workflow as Vision (split, run, wait, close), with this command in step 2:
+
+```bash
+herdr pane run <pane-id> 'pi -p --model openai-codex/gpt-5.6-sol --thinking low "Review the current uncommitted work (git status, git diff, git diff --cached). Report concrete correctness bugs, spec mismatches, and violations of the conventions in AGENTS.md, each with file and line; skip style nits." > /tmp/code-review.md 2>&1; echo REVIEW_DONE'
+```
+
+Wait for `REVIEW_DONE` (`--timeout 300000`), read `/tmp/code-review.md`, then close the pane. Fix every issue it raises, or consciously dismiss it, before committing. An empty file means a failed model call — fix and re-run. If `openai-codex/gpt-5.6-sol` no longer works, pick another model from `pi --list-models`.
+
 ## Communication principles
 
 - When speaking with the user, use reader-centred plain language adapted to an experienced software engineer.
