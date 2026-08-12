@@ -90,6 +90,3 @@ export function cleanActivity(text: string, limit = MAX_ACTIVITY_LENGTH): string
   return cleaned.length > limit ? `${cleaned.slice(0, limit - 1)}…` : cleaned;
 }
 
-export function fileName(path: string): string {
-  return basename(path);
-}

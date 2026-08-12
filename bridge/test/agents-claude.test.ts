@@ -182,8 +182,38 @@ describe("claude adapter", () => {
       };
       await claudeDeliverInitialPrompt(herdr as never, "p1", "Reply with exactly: HI there", [1, 1]);
       const prompts = base.sent.filter((c) => c.method === "agentPrompt");
-      assert.equal(prompts.length, 3, "one prompt per attempt until the marker is visible");
-      assert.equal(reads, 3);
+      assert.equal(prompts.length, 2, "attempt 1 re-reads before re-sending, so the drop is recovered with one retry");
+      assert.equal(reads, 3, "pre-send check + post-send verification per attempt");
+    });
+    it("does not re-send when the pre-check already shows the marker", async () => {
+      // A prompt that landed but whose echo scrolled away must never be sent
+      // twice: the pre-send read on attempt 1 sees the marker and returns.
+      let reads = 0;
+      const base = fakeHerdr();
+      const herdr = {
+        ...base,
+        agentRead: async () => {
+          reads += 1;
+          // First read (post-send verification) misses the echo; the pre-send
+          // read on the next attempt sees it in a wider window.
+          return { read: { text: reads >= 2 ? "\u276f Hello there" : "" } } as never;
+        },
+      };
+      await claudeDeliverInitialPrompt(herdr as never, "p1", "Hello there", [1, 1]);
+      const prompts = base.sent.filter((c) => c.method === "agentPrompt");
+      assert.equal(prompts.length, 1, "marker visible pre-send → no second agentPrompt");
+    });
+    it("gives up rather than blind-resend when the pane is unreadable", async () => {
+      const base = fakeHerdr();
+      const herdr = {
+        ...base,
+        agentRead: async () => {
+          throw new Error("pane gone");
+        },
+      };
+      await claudeDeliverInitialPrompt(herdr as never, "p1", "Hello there", [1, 1]);
+      const prompts = base.sent.filter((c) => c.method === "agentPrompt");
+      assert.equal(prompts.length, 1, "unverifiable pane → never blind-resend");
     });
     it("stops after the first prompt when delivery succeeds", async () => {
       const base = fakeHerdr();

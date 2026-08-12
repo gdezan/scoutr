@@ -76,6 +76,7 @@ export function createCockpitServer(deps: ServerDeps, options: CreateServerOptio
       const livePanes = new Set((feed.snapshot?.panes ?? []).map((pane) => pane.pane_id));
       tracker.prune(livePanes);
       boardDetail.prune(snapshotPaths(feed.snapshot));
+      publisher?.prune(livePanes);
     }
   });
 

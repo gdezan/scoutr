@@ -66,10 +66,19 @@ export class NtfyPublisher {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ topic: this.config.topic, title, message, priority, paneId, click }),
+        // A hung ntfy server must not pin a socket forever.
+        signal: AbortSignal.timeout(10_000),
       });
     } catch (error) {
       // Push is best-effort; never let a notification failure break the bridge.
       console.error(`[ntfy] publish failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  /** Forget panes that no longer exist (called on pane close events). */
+  prune(paneIds: ReadonlySet<string>): void {
+    for (const id of this.lastPublishedAt.keys()) {
+      if (!paneIds.has(id)) this.lastPublishedAt.delete(id);
     }
   }
 }

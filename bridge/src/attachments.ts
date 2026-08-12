@@ -36,6 +36,29 @@ function sanitizeName(name: string): string {
   return base;
 }
 
+/**
+ * Sniff the leading bytes and require a match with the extension family, so a
+ * client-declared image type cannot smuggle arbitrary bytes to the agent.
+ * Keep this table in sync with ALLOWED_EXTENSIONS above.
+ */
+function matchesImageBytes(body: Buffer, ext: string): boolean {
+  switch (ext) {
+    case ".png":
+      return body.length >= 8 && body.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+    case ".jpg":
+    case ".jpeg":
+      return body.length >= 3 && body[0] === 0xff && body[1] === 0xd8 && body[2] === 0xff;
+    case ".gif": {
+      const head = body.subarray(0, 6).toString("ascii");
+      return head === "GIF87a" || head === "GIF89a";
+    }
+    case ".webp":
+      return body.length >= 12 && body.subarray(0, 4).toString("ascii") === "RIFF" && body.subarray(8, 12).toString("ascii") === "WEBP";
+    default:
+      return false;
+  }
+}
+
 /** Collect the request body up to the cap; rejects with 413 when exceeded. */
 export async function readAttachmentBody(
   chunks: AsyncIterable<Buffer>,
@@ -61,6 +84,9 @@ export function storeAttachment(
 ): string {
   if (!contentType.startsWith("image/")) throw new AttachmentError("not an image", 400);
   const safe = sanitizeName(name);
+  if (!matchesImageBytes(body, extname(safe).toLowerCase())) {
+    throw new AttachmentError("attachment bytes do not match the declared image type", 400);
+  }
   const filePath = join(dir, `${Date.now()}_${Math.random().toString(36).slice(2, 8)}_${safe}`);
   try {
     mkdirSync(dir, { recursive: true });

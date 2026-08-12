@@ -282,13 +282,12 @@ export async function reviewOverview(requestedPath: string, extraRoots: string[]
   };
 }
 
-function capUtf8(text: string, maxBytes: number): { text: string; truncated: boolean } {
-  if (Buffer.byteLength(text, "utf8") <= maxBytes) return { text, truncated: false };
-  let truncated = text;
-  while (Buffer.byteLength(truncated, "utf8") > maxBytes) {
-    truncated = truncated.slice(0, Math.floor(truncated.length / 2));
-  }
-  return { text: truncated, truncated: true };
+export function capUtf8(text: string, maxBytes: number): { text: string; truncated: boolean } {
+  const bytes = Buffer.from(text, "utf8");
+  if (bytes.length <= maxBytes) return { text, truncated: false };
+  // Keep the HEAD (review diffs are newest-first); strip a trailing partial
+  // code point, mirroring live-output.ts's tail-side pattern.
+  return { text: bytes.subarray(0, maxBytes).toString("utf8").replace(/\uFFFD$/, ""), truncated: true };
 }
 
 function capLines(text: string, maxLines: number): { text: string; truncated: boolean } {

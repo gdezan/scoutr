@@ -13,6 +13,7 @@ import {
   ReviewError,
   REVIEW_STATUS_MAX_ENTRIES,
   REVIEW_DIFF_MAX_BYTES,
+  capUtf8,
   REVIEW_LOG_MAX,
   reviewArtifacts,
   gitRepoRoot,
@@ -234,6 +235,19 @@ test("caps bound status entries, log size, and diff bytes", async () => {
   assert.ok(REVIEW_LOG_MAX >= 1);
   const result = await reviewDiff(repoRoot, "HEAD");
   assert.ok(Buffer.byteLength(result.diff, "utf8") <= REVIEW_DIFF_MAX_BYTES);
+});
+
+test("capUtf8 cuts exactly at the byte cap and drops a straddling code point", () => {
+  const ascii = "a".repeat(1025);
+  const cut = capUtf8(ascii, 1024);
+  assert.equal(Buffer.byteLength(cut.text, "utf8"), 1024);
+  assert.equal(cut.truncated, true);
+
+  // A 3-byte char straddling the cut must not leave a half code point.
+  const straddle = "a".repeat(1022) + "€"; // 1022 + 3 = 1025 bytes
+  const cutStraddle = capUtf8(straddle, 1024);
+  assert.equal(Buffer.byteLength(cutStraddle.text, "utf8"), 1022);
+  assert.ok(!cutStraddle.text.endsWith("\uFFFD"), "no replacement char in the output");
 });
 
 describe("review roots TTL", () => {

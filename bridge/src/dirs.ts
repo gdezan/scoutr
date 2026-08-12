@@ -52,15 +52,6 @@ export function listDirs(requested: string, baseRoot = homedir()): DirListing {
   return { path: target, dirs: entries };
 }
 
-export function rootWithTrailingSep(root = homedir()): string {
-  const r = resolve(root);
-  return r.endsWith(sep) ? r : r + sep;
-}
-
-/** Convenience for callers that want a path joined to the home root. */
-export function homeJoin(...parts: string[]): string {
-  return join(homedir(), ...parts);
-}
 
 /** realpath when the path exists, otherwise its resolved form. */
 export function canonicalPath(path: string): string {

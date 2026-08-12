@@ -64,6 +64,30 @@ test("ignores non-blocked and non-status events", async () => {
   }
 });
 
+test("prune lets a previously-throttled pane publish again immediately", async () => {
+  const { server, requests } = captureServer();
+  await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
+  const port = (server.address() as { port: number }).port;
+
+  const publisher = new NtfyPublisher({ baseUrl: `http://127.0.0.1:${port}`, topic: "t" });
+  try {
+    await publisher.handleEvent(blockedEvent("w1:p1"));
+    await publisher.handleEvent(blockedEvent("w1:p1"));
+    assert.equal(requests.length, 1, "second event is throttled");
+    publisher.prune(new Set());
+    await publisher.handleEvent(blockedEvent("w1:p1"));
+    assert.equal(requests.length, 2, "prune clears the throttle; pane publishes again");
+    // Pruning a pane that is still alive keeps its throttle.
+    await publisher.handleEvent(blockedEvent("w1:p2"));
+    assert.equal(requests.length, 3);
+    publisher.prune(new Set(["w1:p2"]));
+    await publisher.handleEvent(blockedEvent("w1:p2"));
+    assert.equal(requests.length, 3, "alive panes keep their throttle after prune");
+  } finally {
+    await new Promise((done) => server.close(done));
+  }
+});
+
 test("throttles repeat blocked events for the same pane", async () => {
   const { server, requests } = captureServer();
   await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));

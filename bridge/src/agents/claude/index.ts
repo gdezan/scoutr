@@ -150,6 +150,20 @@ export async function claudeDeliverInitialPrompt(
   // delivery marker (long prompts may wrap, so only the head is matched).
   const marker = (text.split(/\r?\n/, 1)[0] ?? "").slice(0, 24);
   for (let attempt = 0; ; attempt += 1) {
+    // Every attempt after the first re-reads the pane BEFORE re-sending: a
+    // prompt that already landed (its echo scrolled off the 80-line window or
+    // the post-send verification read failed) must not be delivered twice.
+    if (attempt > 0) {
+      const check = await herdr
+        .agentRead(paneId, "recent_unwrapped", {
+          lines: 200, // wider read: resistant to the echo scrolling away
+          stripAnsi: true,
+          requestTimeoutMs: 4_000,
+        })
+        .catch(() => null);
+      if (check?.read?.text?.includes(marker)) return; // already delivered; do not double-send
+      if (check === null) return; // cannot verify — never blind-resend
+    }
     await herdr.agentPrompt(paneId, text);
     await sleep(2_500);
     const read = await herdr
