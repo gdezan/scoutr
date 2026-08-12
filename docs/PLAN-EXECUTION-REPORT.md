@@ -30,11 +30,11 @@ kept truthful as work lands. The final column of each row carries commit hashes.
 | 03 | Route table + dispatcher; feature-grouped `routes/` handlers; auth/body/404 in dispatcher | PENDING AUDIT | | | | | |
 | 03 | No skip gate; live-socket cases gated explicitly | PENDING AUDIT | | | | | |
 | 03 | Offline tests for cards/paths/workspace roots/WS commands; config/status tests | PENDING AUDIT | | | | | |
-| 04 | `CockpitApi` interface; `BridgeClient : CockpitApi` | PENDING AUDIT | | | | | |
-| 04 | ViewModels/container/ReplyReceiver consume `CockpitApi` | PENDING AUDIT | | | | | |
-| 04 | `FakeCockpitApi` shared by test source sets; MockWebServer tests migrated | PENDING AUDIT | | | | | |
-| 04 | WS path tests; `BridgeException`; auth folded; `call`/`post` private | PENDING AUDIT | | | | | |
-| 04 | AGENTS.md gotcha deleted | PENDING AUDIT | | | | | |
+| 04 | `CockpitApi` interface; `BridgeClient : CockpitApi` | SHIPPED | net/CockpitApi.kt: 22 suspend funs + connectedHost, defaults on interface only | net/BridgeClient.kt implements it; `BridgeException(status, reason)`; `call()` private with body; `post()` deleted; upload folded into `call()` | 491e50c | | |
+| 04 | ViewModels/container/ReplyReceiver consume `CockpitApi` | SHIPPED | all 9 state ViewModels take CockpitApi; AppContainer.bridge: CockpitApi; ReplyReceiver steers via container | grep-verified clean | 491e50c | | |
+| 04 | `FakeCockpitApi` shared by test source sets; MockWebServer tests migrated | SHIPPED | app/src/commonTest/.../FakeCockpitApi.kt wired into test+androidTest in build.gradle.kts; 8 state/ test files migrated | 137 unit tests pass | 491e50c | | |
+| 04 | WS path tests; `BridgeException`; auth folded; `call`/`post` private | SHIPPED | BridgeClientWsTest: steer/runSlashCommand/answerQuestion frames, error frame → IOException, feed skipping, empty-key omission; BridgeClientUploadTest kept as HTTP contract test | 137 unit tests pass | 491e50c | | |
+| 04 | AGENTS.md gotcha deleted | SHIPPED | AGENTS.md net/ map reads 'BridgeClient behind the CockpitApi interface'; fake noted | | 491e50c | | |
 | 05 | `SessionAction` enum both sides; call sites converted | PENDING AUDIT | | | | | |
 | 05 | `CatalogAction` for resume/fork/rename | PENDING AUDIT | | | | | |
 | 05 | Capabilities decoded into UI state; menu rendered from set | PENDING AUDIT | | | | | |
