@@ -30,8 +30,11 @@ import androidx.compose.material.icons.filled.WifiOff
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Code
 import androidx.compose.material.icons.outlined.ContentCopy
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -51,6 +54,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.AnnotatedString
@@ -128,7 +133,7 @@ fun BoardScreen(
     }
 
     LazyColumn(
-        modifier = modifier.fillMaxSize().padding(horizontal = 16.dp),
+        modifier = modifier.fillMaxSize().padding(horizontal = 16.dp).testTag("board_capture_root"),
         verticalArrangement = Arrangement.spacedBy(10.dp),
         // Clear the board's FAB so it never covers the last card, even at
         // large font scales.
@@ -276,6 +281,7 @@ private fun AgentCardRow(
     val clipboard = LocalClipboardManager.current
     val haptic = LocalHapticFeedback.current
     val context = LocalContext.current
+    var menuOpen by remember { mutableStateOf(false) }
     val copyPath = {
         clipboard.setText(AnnotatedString(agent.cwd ?: agent.workspaceId))
         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
@@ -289,8 +295,8 @@ private fun AgentCardRow(
     // action; tapping the card while open just closes the reveal.
     val actions = buildList {
         add(BoardAction("review", "Review", Icons.Outlined.Code, scheme.onSurfaceVariant, onReview))
+        add(BoardAction("copy", "Copy path", Icons.Outlined.ContentCopy, scheme.onSurfaceVariant, copyPath))
         add(BoardAction("close", "Close", Icons.Outlined.Close, scheme.onSurfaceVariant, onClose))
-        add(BoardAction("copy", "Copy", Icons.Outlined.ContentCopy, scheme.onSurfaceVariant, copyPath))
     }
     val density = LocalDensity.current
     val revealWidthPx = with(density) { (actions.size * 52).dp.toPx() }
@@ -412,6 +418,32 @@ private fun AgentCardRow(
                     }
                     Spacer(Modifier.width(12.dp))
                     StatusPill(status, agent.statusSinceMs)
+                    Box {
+                        androidx.compose.material3.IconButton(
+                            onClick = { menuOpen = true },
+                            modifier = Modifier
+                                .testTag("agent_actions_${agent.paneId}")
+                                .semantics { contentDescription = "Agent actions for ${agent.cardTitle()}" },
+                        ) {
+                            Icon(Icons.Default.MoreVert, contentDescription = null, tint = scheme.onSurfaceVariant)
+                        }
+                        DropdownMenu(
+                            expanded = menuOpen,
+                            onDismissRequest = { menuOpen = false },
+                        ) {
+                            actions.forEach { action ->
+                                DropdownMenuItem(
+                                    text = { Text(action.label) },
+                                    onClick = {
+                                        menuOpen = false
+                                        action.onClick()
+                                    },
+                                    leadingIcon = { Icon(action.icon, contentDescription = null) },
+                                    modifier = Modifier.testTag("board_menu_${action.key}_${agent.paneId}"),
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }

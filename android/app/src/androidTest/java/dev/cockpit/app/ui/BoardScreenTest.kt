@@ -1,12 +1,17 @@
 package dev.cockpit.app.ui
 
+import android.graphics.Bitmap
+import androidx.compose.ui.graphics.asAndroidBitmap
+
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.filterToOne
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.junit4.createComposeRule
-import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.assertContentDescriptionContains
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
@@ -25,12 +30,27 @@ import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
 import kotlin.math.abs
-
+import java.io.FileOutputStream
 /** Board card composition: phase, model, latest activity, and needs-you emphasis. */
 class BoardScreenTest {
 
     @get:Rule
     val compose = createComposeRule()
+
+    private fun capture(name: String, overlay: Boolean = false) {
+        val file = InstrumentationRegistry.getInstrumentation().targetContext
+            .getExternalFilesDir(null)!!.resolve("$name.png")
+        FileOutputStream(file).use { output ->
+            if (overlay) {
+                InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot()
+                    .compress(Bitmap.CompressFormat.PNG, 100, output)
+            } else {
+                compose.onNodeWithTag("board_capture_root").captureToImage().asAndroidBitmap()
+                    .compress(Bitmap.CompressFormat.PNG, 100, output)
+            }
+        }
+        println("BOARD_SCREENSHOT=${file.absolutePath}")
+    }
 
     private fun blockedAgent(
         paneId: String,
@@ -82,6 +102,49 @@ class BoardScreenTest {
         compose.onNodeWithText("Found the rounding error in the tax module").assertIsDisplayed()
         compose.onNodeWithText("gpt-5.4").assertIsDisplayed()
         compose.onNodeWithText("needs you").assertIsDisplayed()
+        capture("board-card", overlay = true)
+    }
+
+    @Test
+    fun visibleOverflowMenuExposesSharedActions() {
+        var reviewed = false
+        var closed: String? = null
+        compose.setContent {
+            CockpitTheme {
+                BoardScreen(
+                    onReviewAgent = { reviewed = true },
+                    onCloseAgent = { closed = it.paneId },
+                    viewModel = staticBoardViewModel(
+                        BoardUiState(
+                            board = BoardState.group(listOf(blockedAgent("p1", "Fix billing bug", "/repo/a", "openai-codex/gpt-5.4", "Found it"))),
+                            connected = true,
+                        ),
+                    ),
+                )
+            }
+        }
+        compose.onNodeWithTag("agent_actions_p1").assertIsDisplayed()
+        compose.onNodeWithTag("agent_actions_p1").assertContentDescriptionContains("Agent actions for Fix billing bug")
+        compose.onNodeWithTag("agent_actions_p1").performClick()
+        compose.onNodeWithTag("board_menu_review_p1").assertIsDisplayed()
+        compose.onNodeWithTag("board_menu_copy_p1").assertIsDisplayed()
+        compose.onNodeWithTag("board_menu_close_p1").assertIsDisplayed()
+        capture("board-menu", overlay = true)
+        compose.onNodeWithTag("board_menu_review_p1").performClick()
+        assertTrue("menu review should use the shared callback", reviewed)
+        compose.onNodeWithTag("agent_actions_p1").performClick()
+        compose.onNodeWithTag("board_menu_copy_p1").performClick()
+        val clip = InstrumentationRegistry.getInstrumentation().targetContext
+            .getSystemService(ClipboardManager::class.java)
+            .primaryClip?.getItemAt(0)?.text?.toString()
+        assertEquals("menu copy should use the shared callback", "/repo/a", clip)
+        compose.onNodeWithTag("agent_actions_p1").performClick()
+        compose.onNodeWithTag("board_menu_close_p1").performClick()
+        compose.onNodeWithText("Close agent?").assertIsDisplayed()
+        capture("board-close-confirm", overlay = true)
+        assertEquals("close remains confirmation-gated", null, closed)
+        compose.onAllNodesWithText("Close").filterToOne(hasClickAction()).performClick()
+        assertEquals("confirmed menu close should use the shared callback", "p1", closed)
     }
 
     @Test
@@ -180,6 +243,7 @@ class BoardScreenTest {
         // Close stops a live pane, so it asks first — same gate as Sessions.
         assertTrue("close must not fire before the confirm", closed == null)
         compose.onNodeWithText("Close agent?").assertIsDisplayed()
+        capture("board-close-confirm", overlay = true)
         compose.onAllNodesWithText("Close").filterToOne(hasClickAction()).performClick()
         compose.waitForIdle()
         assertTrue("close callback should carry the pane id", closed == "p1")
