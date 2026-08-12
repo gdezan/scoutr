@@ -132,6 +132,10 @@ export function createCockpitServer(deps: ServerDeps, options: CreateServerOptio
         authorization: request.headers.authorization,
       },
       token,
+      // The WS upgrade is the one place the app passes the token as a query
+      // param (BridgeClient.kt documents why); every HTTP route must use the
+      // Authorization header so the token never lands in URL logs.
+      { allowQueryToken: true },
     );
     if (url.pathname !== "/ws" || !authorized) {
       socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");

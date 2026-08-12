@@ -77,14 +77,24 @@ export class RouteTable {
 /** Max size of a parsed JSON request body (413 beyond it). */
 export const JSON_BODY_MAX_BYTES = 1_000_000;
 
-/** Constant-time token check against the Authorization header or ?token=. */
-export function isAuthorized(request: DispatchRequest, token: string): boolean {
+/**
+ * Constant-time token check against the Authorization header or ?token=.
+ * Only the WS upgrade path may pass `allowQueryToken` — URL query strings
+ * end up in logs; header auth is the only form for HTTP routes.
+ */
+export function isAuthorized(
+  request: DispatchRequest,
+  token: string,
+  opts: { allowQueryToken?: boolean } = {},
+): boolean {
   const header = request.authorization;
   if (typeof header === "string" && header.startsWith("Bearer ")) {
     return timingSafeEqual(header.slice(7), token);
   }
-  const queryToken = request.search.get("token");
-  if (queryToken) return timingSafeEqual(queryToken, token);
+  if (opts.allowQueryToken === true) {
+    const queryToken = request.search.get("token");
+    if (queryToken) return timingSafeEqual(queryToken, token);
+  }
   return false;
 }
 

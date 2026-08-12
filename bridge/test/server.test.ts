@@ -343,6 +343,15 @@ describe("cockpit bridge HTTP/WS API (offline)", () => {
     assert.equal(response.status, 401);
   });
 
+  test("?token= is rejected on HTTP routes — only the WS upgrade accepts the query form", async () => {
+    // Plan 002 step 3: the query-param token is WS-upgrade-only (the app's
+    // WS connect uses it); HTTP routes must use the Authorization header so
+    // the credential never lands in URL logs. The WS-upgrade query-token
+    // success case is covered by the ws test below.
+    const response = await fetch(`http://127.0.0.1:${PORT}/api/health?token=${TOKEN}`);
+    assert.equal(response.status, 401);
+  });
+
   test("ws streams feed messages, answers ping, and applies filters", async () => {
     const ws = new WebSocket(`ws://127.0.0.1:${PORT}/ws?token=${TOKEN}`);
     const messages: unknown[] = [];

@@ -1,6 +1,6 @@
 import { test, describe, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, rmSync, statSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, statSync, chmodSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -77,5 +77,26 @@ describe("loadOrCreateConfig", () => {
     const config = await loadOrCreateConfig(path);
     assert.equal(config.ntfyUrl, "https://ntfy.example");
     assert.ok(config.ntfyTopic?.startsWith("cockpit_"));
+  });
+
+  test("keeps the token when the parsed config cannot be re-persisted", { skip: process.getuid?.() === 0 }, async () => {
+    // Plan 002 step 1: only "file missing or unparseable" may mint a token.
+    // A valid config whose write fails (read-only directory) must be kept
+    // and returned — silently regenerating it would 401 every paired phone.
+    const roDir = join(dir, "readonly");
+    mkdirSync(roDir, { recursive: true });
+    const path = join(roDir, "config.json");
+    const token = "0123456789abcdef";
+    await writeFile(path, JSON.stringify({ token, port: 8737 }));
+    // Directory permissions do not stop a write to an existing file — the
+    // file itself must lose its write bit for writeFile to fail (EACCES).
+    chmodSync(path, 0o400);
+    try {
+      const config = await loadOrCreateConfig(path);
+      assert.equal(config.token, token, "token must survive a failed re-persist");
+      assert.equal(config.port, 8737);
+    } finally {
+      chmodSync(path, 0o600);
+    }
   });
 });

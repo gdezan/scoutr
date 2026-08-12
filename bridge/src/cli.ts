@@ -103,7 +103,7 @@ async function main(): Promise<void> {
       }
       case "serve": {
         const { createCockpitServer } = await import("./server.js");
-        const { loadOrCreateConfig } = await import("./config.js");
+        const { loadOrCreateConfig, defaultConfigPath } = await import("./config.js");
         const { UsageService } = await import("./usage/providers.js");
         const { NtfyPublisher } = await import("./notify.js");
 
@@ -123,7 +123,8 @@ async function main(): Promise<void> {
               : undefined,
         });
         console.error(`cockpit bridge listening on ${server.url}`);
-        console.error(`token: ${config.token}`);
+        // Never print the token: the credential would persist in journald.
+        console.error(`token: run 'cockpit-bridge pair' or read ${defaultConfigPath()}`);
         if (config.ntfyUrl && config.ntfyTopic) {
           console.error(`push: ntfy at ${config.ntfyUrl}/topic/${config.ntfyTopic}`);
         }

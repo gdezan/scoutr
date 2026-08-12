@@ -30,30 +30,46 @@ export function generateToken(): string {
 }
 
 export async function loadOrCreateConfig(path = defaultConfigPath()): Promise<BridgeConfig> {
+  let config: BridgeConfig | null = null;
+  let readOk = false;
   try {
     const raw = await readFile(path, "utf8");
     const parsed = JSON.parse(raw) as Partial<BridgeConfig>;
     if (typeof parsed.token !== "string" || parsed.token.length < 16 || typeof parsed.port !== "number") {
       throw new Error("invalid cockpit config (token or port missing)");
     }
-    const config: BridgeConfig = {
+    readOk = true;
+    config = {
       token: parsed.token,
       port: parsed.port,
       ntfyUrl: typeof parsed.ntfyUrl === "string" ? parsed.ntfyUrl : undefined,
       ntfyTopic: typeof parsed.ntfyTopic === "string" ? parsed.ntfyTopic : `cockpit_${randomBytes(12).toString("base64url")}`,
       publicHost: typeof parsed.publicHost === "string" ? parsed.publicHost : undefined,
     };
-    // Persist the topic (and any other missing fields) so subsequent runs are stable.
-    await writeFile(path, `${JSON.stringify(config, null, 2)}\n`, { mode: 0o600 });
-    return config;
   } catch {
-    const config: BridgeConfig = {
+    // Unreadable, missing, or invalid file: mint a fresh config below.
+    config = null;
+  }
+  if (!config) {
+    config = {
       token: generateToken(),
       port: 8737,
       ntfyTopic: `cockpit_${randomBytes(12).toString("base64url")}`,
     };
     await mkdir(join(path, ".."), { recursive: true });
-    await writeFile(path, `${JSON.stringify(config, null, 2)}\n`, { mode: 0o600 });
-    return config;
   }
+  try {
+    // Persist the topic (and any other missing fields) so subsequent runs are stable.
+    await writeFile(path, `${JSON.stringify(config, null, 2)}\n`, { mode: 0o600 });
+  } catch (error) {
+    if (readOk) {
+      // A parsed config that cannot be re-persisted is still valid; never
+      // silently mint a new token over it (that would 401 every paired phone).
+      console.error(`cockpit config could not be persisted: ${error instanceof Error ? error.message : String(error)}`);
+    } else {
+      // A fresh config that cannot be persisted is fatal: nothing to pair against.
+      throw error;
+    }
+  }
+  return config;
 }
