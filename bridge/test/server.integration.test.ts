@@ -1,4 +1,5 @@
 import { test, describe, before, after } from "node:test";
+import { existsSync } from "node:fs";
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -15,7 +16,11 @@ import { UsageService } from "../src/usage/providers.js";
 // lives in server.test.ts and runs on every machine.
 
 const socketPath = process.env.HERDR_SOCKET_PATH;
-const skip = !socketPath;
+// A set-but-nonexistent path skips too: plan 008 requires npm test to stay
+// green (with the skip notice) for a bogus HERDR_SOCKET_PATH, so the opt-in
+// must verify the socket actually exists, not just that the var is nonempty.
+const skip = !socketPath || !existsSync(socketPath);
+if (skip) console.error("server.integration live suite skipped: set HERDR_SOCKET_PATH to an existing socket to run it");
 
 const PORT = 8791;
 const TOKEN = "test_token_for_live_run_0001";

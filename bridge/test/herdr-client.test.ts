@@ -21,13 +21,17 @@ import type { SessionSnapshot } from "../src/herdr/types.js";
 const LIVE_SOCKET_TIMEOUT_MS = 20_000;
 
 function liveSocketPath(): string | null {
-  const path = process.env.HERDR_SOCKET_PATH ?? defaultSocketPath();
+  // Opt-in like server.integration.test.ts: no silent default-path probing —
+  // an absent env var must be visible, not a quietly smaller suite.
+  const path = process.env.HERDR_SOCKET_PATH;
+  if (!path) return null;
   return existsSync(path) ? path : null;
 }
 
 const socketPath = liveSocketPath();
 const client = socketPath ? new HerdrClient({ socketPath }) : null;
 const skip = socketPath === null;
+if (skip) console.error("herdr-client live suite skipped: set HERDR_SOCKET_PATH to run it");
 
 test("a per-call timeout closes a stalled Herdr socket", { timeout: 1_000 }, async () => {
   const directory = await mkdtemp(join(tmpdir(), "cockpit-herdr-timeout-"));

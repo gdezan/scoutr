@@ -18,10 +18,11 @@ Cockpit is a self-hosted mobile cockpit for herdr panes and pi agents: a Node/TS
 
 ## Verification workflow
 
-Run these before committing UI/bridge work, and treat them as the acceptance gates:
+Run these before committing UI/bridge work, and treat them as the acceptance gates —
+or run them all at once with `scripts/verify.sh` (add `--no-emulator` to skip the GMD suite):
 
 ```bash
-cd bridge && npm run typecheck && npm test                       # 286 tests / 43 suites, ~10s
+cd bridge && npm run typecheck && npm test                       # 290 tests / 43 suites, ~10s
 cd android && ANDROID_HOME=$HOME/Android/sdk ./gradlew testDebugUnitTest --rerun-tasks
 cd android && ANDROID_HOME=$HOME/Android/sdk ./gradlew pixel2api36DebugAndroidTest   # Gradle Managed Device, ~2 min
 cd android && ANDROID_HOME=$HOME/Android/sdk ./gradlew assembleDebug

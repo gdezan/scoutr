@@ -1,8 +1,8 @@
 import { test, describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import WebSocket from "ws";
 import { createCockpitServer, type CockpitServer } from "../src/server.js";
@@ -77,6 +77,12 @@ describe("cockpit bridge HTTP/WS API (offline)", () => {
     // real ~/.pi/agent resource tree).
     const agentDir = await mkdtemp(join(tmpdir(), "cockpit-agent-dir-"));
     process.env.PI_CODING_AGENT_DIR = agentDir;
+    // Seed a minimal model catalog so /api/models serves 200 offline (the
+    // empty dir would otherwise make readModelsCatalog throw → 404).
+    await writeFile(
+      join(agentDir, "models-store.json"),
+      JSON.stringify({ opencode: { models: [{ id: "test-model", name: "Test Model" }] } }),
+    );
     const herdr = fakeHerdr();
     feed = fakeFeed();
     const usage = { all: async () => ({}) };
@@ -401,6 +407,70 @@ describe("cockpit bridge HTTP/WS API (offline)", () => {
     assert.deepEqual(feedFrames.map((f) => f.kind), ["pane_agent_status_changed"]);
     ws.close();
   });
+describe("unpinned routes (plan 008)", () => {
+  it("GET /api/models serves a catalog for the default agent (pi)", async () => {
+    const { status, body } = await getJson("/api/models");
+    assert.equal(status, 200);
+    const parsed = body as { ok: boolean; catalog: { providers: unknown[] } };
+    assert.equal(parsed.ok, true);
+    assert.ok(Array.isArray(parsed.catalog.providers) && parsed.catalog.providers.length >= 1);
+  });
+
+  it("GET /api/models?agent=nonsense is a 404, never a 502", async () => {
+    const { status, body } = await getJson("/api/models?agent=nonsense");
+    assert.equal(status, 404);
+    assert.deepEqual(body, { ok: false, error: "unknown agent: nonsense" });
+  });
+
+  it("GET /api/commands?agent=nonsense is a 404, never a 502", async () => {
+    const { status, body } = await getJson("/api/commands?agent=nonsense");
+    assert.equal(status, 404);
+    assert.deepEqual(body, { ok: false, error: "unknown agent: nonsense" });
+  });
+
+  it("GET /api/agents/kinds pins the Android picker wire contract", async () => {
+    const { status, body } = await getJson("/api/agents/kinds");
+    assert.equal(status, 200);
+    const kinds = (body as { ok: boolean; kinds: unknown[] }).kinds;
+    assert.ok(Array.isArray(kinds) && kinds.length >= 2);
+    const WIRE_FIELDS = ["id", "displayName", "capabilities", "hasModelCatalog", "hasSlashCommands"];
+    const ids = new Set<string>();
+    for (const kind of kinds as Record<string, unknown>[]) {
+      ids.add(String(kind.id));
+      // Exact field set: NewSessionSheet.kt consumes these names, so any
+      // addition or rename must be a deliberate two-sided contract change.
+      assert.deepEqual(Object.keys(kind).sort(), [...WIRE_FIELDS].sort(), `kind ${kind.id} field set`);
+      assert.ok(Array.isArray(kind.capabilities), "kind.capabilities must be an array");
+    }
+    // NewSessionSheet.kt gates the agent choice on exactly these two kinds.
+    assert.ok(ids.has("pi"), "pi kind missing");
+    assert.ok(ids.has("claude"), "claude kind missing");
+  });
+
+  it("GET /api/dirs lists a directory and 400s on a missing one", async () => {
+    // listDirs only serves paths inside the user's home, so the fixture must
+    // live under homedir(), not /tmp. Removed afterwards so test runs do not
+    // litter the developer's home.
+    const dir = await mkdtemp(join(homedir(), "cockpit-dirs-"));
+    try {
+    const { status, body } = await getJson(`/api/dirs?path=${encodeURIComponent(dir)}`);
+    assert.equal(status, 200);
+    const listing = (body as { ok: boolean; listing: { path: string; dirs: string[] } }).listing;
+    assert.deepEqual(listing, { path: dir, dirs: [] });
+
+      const missing = await getJson("/api/dirs?path=/definitely/not/a/real/cockpit-dir");
+      assert.equal(missing.status, 400);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("GET /api/usage returns the usage payload shape", async () => {
+    const { status, body } = await getJson("/api/usage");
+    assert.equal(status, 200);
+    assert.deepEqual(body, { ok: true, usage: {} });
+  });
+});
 });
 
 type HerdrEventFeedLike = ReturnType<typeof fakeFeed>;

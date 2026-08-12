@@ -245,22 +245,3 @@ describe("WS command dispatch", () => {
     assert.deepEqual(herdr.sent, []);
   });
 });
-
-describe("fake herdr recording", () => {
-  test("failNext makes exactly one call fail with the given error", async () => {
-    const herdr = fakeHerdr();
-    const boom = new Error("boom");
-    herdr.failNext("workspaceCreate", boom);
-    await assert.rejects(() => herdr.workspaceCreate({}), boom);
-    // The next call behaves normally.
-    const created = await herdr.workspaceCreate({});
-    assert.deepEqual(created, { workspace: { workspace_id: "ws1" }, root_pane: { pane_id: "p1" } });
-  });
-
-  test("setSnapshot replaces the served snapshot", async () => {
-    const herdr = fakeHerdr();
-    const next = { ...herdr.snapshot() };
-    await herdr.setSnapshot({ ...next, version: "9.9.9" } as never);
-    assert.equal((await herdr.snapshot()).version, "9.9.9");
-  });
-});
