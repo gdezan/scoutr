@@ -16,8 +16,21 @@ traps. AGENTS.md points here for the details.
 
 ## Emulator runtime loop
 
-There is usually an emulator already running (`adb devices`). The app on it
-is a real build with a saved connection.
+There is usually an emulator already running (`adb devices`). If not, boot
+the `cockpit` AVD (the only one installed):
+
+```bash
+$ANDROID_HOME/emulator/emulator -avd cockpit &
+# boot takes ~25-60s; confirm with:
+adb devices && adb shell getprop sys.boot_completed   # prints 1 when done
+```
+
+Instrumentation suites and test APKs go ONLY on this emulator (or the
+pixel2api36 managed device) — never on the physical Pixel phone
+(`adb-RQCX308702X-...`): running the suite there spazzes its screen. Use
+the phone sparingly, for sparse key-integration walks only.
+
+The app on it is a real build with a saved connection.
 
 1. **Build + install**:
    ```bash
@@ -111,6 +124,49 @@ app in your hand talks to that process, not to `tsx`.
   `delay(25)` in a `waitFor` loop; first poll is immediate.
 - The full emulator suite runs ~47 tests in ~2 min; run a single class with
   `-Pandroid.testInstrumentationRunnerArguments.class=dev.cockpit.app.ui.X`.
+
+### Gradle Managed Device (pixel2api36) diagnostics
+
+`pixel2api36DebugAndroidTest` runs on a separate managed emulator instance
+that your adb never sees — `adb logcat` on the phone or `emulator-5554`
+shows nothing from it. When a managed-device test fails:
+
+- Per-test logcat: `app/build/outputs/androidTest-results/managedDevice/debug/pixel2api36/logcat-dev.cockpit.app.ui.<Class>-<method>.txt`.
+- Results XML (test names + counts): `app/build/outputs/androidTest-results/managedDevice/debug/pixel2api36/TEST-pixel2api36-_app-.xml` — written only when the run completes.
+- A very fast BUILD FAILED with no XML usually means the managed device
+  failed to come up (cold start) — rerun once before debugging the test.
+- Re-running after a successful compile goes UP-TO-DATE and skips
+  execution; force with `--rerun-tasks`.
+- To see in-test state, dump the semantics tree from the test itself:
+  `onRoot(useUnmergedTree = true).printToLog("DIAG")` (or `Thread.sleep`
+  + printToLog) and read it from the per-test logcat file above.
+
+### ChatList / LazyColumn test traps
+
+Hard-won rules for scroll and placement assertions in Compose tests:
+
+- **Memoize the rows list.** A LazyColumn `items(rows)` block whose list is
+  rebuilt per recomposition oscillates the layout: the scroll position
+  resets to 0 every other frame and never converges. Build the list with
+  `remember(entries, questions, ...)` so it is stable between polls.
+- **`canScrollForward` is estimate-based.** Off-viewport items are measured
+  lazily (~90px estimated each), so `canScrollForward` and the scroll range
+  can read false/stale mid-list — a retry loop can bail ~100px short of the
+  true bottom with a tall last item still clipped. For "at the true
+  bottom" checks combine it with the last visible row index
+  (`canScrollForward || lastVisible < totalItemsCount - 1`), and let each
+  scroll retry include a frame delay (`delay(16)`) so the last item
+  measures at its real height before the next step.
+- **`performScrollToNode(hasText(...))` needs `substring = true`.**
+  Markdown renders a whole paragraph as one merged text node, and `hasText`
+  defaults to exact match — substring search is required to find anything
+  inside a long assistant bubble.
+- **The list opens auto-scrolled to the bottom.** Top-anchored content
+  (question bubbles, first entries) is never composed until scrolled up.
+  Scroll deterministically with
+  `performScrollToNode(hasText("message 0", substring = true))`, not with
+  `swipeDown` — a touch swipe drags only ~1400px (~9 rows), which may not
+  reach the top of a long list.
 
 ## Live notification / deep-link validation
 

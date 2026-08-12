@@ -54,6 +54,7 @@ review workflows below.
 ## Gotchas (read before touching)
 
 - `BridgeClient` is `final` and cannot be stubbed. Emulator tests use a real BridgeClient + a fresh **unsaved** ConnectionStore so ViewModels never start polling.
+- Tests run ONLY on the emulator — never install the APK or run instrumentation suites on the physical Pixel phone (it spazzes its screen). If `emulator-5554` is absent, boot the `cockpit` AVD: `$ANDROID_HOME/emulator/emulator -avd cockpit &` (only AVD, ~25-60s to boot; confirm via `adb devices`). Use the phone sparingly, for key integration walks only.
 - `MockWebServer.url()` does a reverse-DNS lookup — never call it on the main thread (build ViewModels before `setContent` in tests).
 - `pkill -f` matches your own command line if it contains the pattern — use `pkill -f 'cli[.]ts'` style brackets (see "Never wait on an unbounded command").
 - Robolectric shares SharedPreferences across tests — save/clear connections explicitly (savedConnection helper pattern).
