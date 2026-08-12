@@ -33,7 +33,9 @@ class NtfyClient(
      */
     fun messages(baseUrl: String, topic: String, initialSince: String? = null): Flow<NtfyMessage> =
         callbackFlow {
-            var since = initialSince
+            // The caller owns the cursor (it loops to pick up future
+            // messages), so this value is fixed for the call's lifetime.
+            val since = initialSince
             val url = "${baseUrl.trimEnd('/')}/$topic/json?poll=1" +
                 (if (since != null) "&since=$since" else "")
             val call = okHttp.newCall(
@@ -57,7 +59,6 @@ class NtfyClient(
                                 val message = json.decodeFromString(NtfyMessage.serializer(), line)
                                 if (message.event == "message") {
                                     trySend(message)
-                                    since = message.id
                                 }
                             } catch (_: Exception) {
                                 // ntfy may interleave keepalives; skip unparseable lines.

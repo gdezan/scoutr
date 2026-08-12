@@ -8,6 +8,7 @@ import android.content.Intent
 import androidx.core.app.NotificationCompat
 import dev.cockpit.app.CockpitApp
 import dev.cockpit.app.MainActivity
+import dev.cockpit.app.net.CockpitApi
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -29,14 +30,16 @@ class NotificationReplyReceiver : BroadcastReceiver() {
         if (text.isNullOrBlank()) return
 
         val result = goAsync()
+        pendingResultSignal?.complete(result)
         CoroutineScope(Dispatchers.IO).launch {
             try {
-                // The container's client: same OkHttp pool, same stored
-                // connection the app is paired with.
-                val app = context.applicationContext as CockpitApp
-                app.container.bridge.steer(paneId, text)
-            } catch (_: Exception) {
-                // Reply is best-effort from the notification shade.
+                bridgeProvider(context).steer(paneId, text)
+            } catch (c: kotlinx.coroutines.CancellationException) {
+                throw c
+            } catch (e: Exception) {
+                // Reply is best-effort from the notification shade, but a
+                // swallowed failure hides a broken chain — leave a logcat trail.
+                android.util.Log.w(TAG, "notification reply to $paneId failed", e)
             } finally {
                 result.finish()
             }
@@ -46,6 +49,17 @@ class NotificationReplyReceiver : BroadcastReceiver() {
     companion object {
         const val EXTRA_PANE_ID = "cockpit.paneId"
         const val KEY_REPLY = "reply"
+        private const val TAG = "CockpitReply"
+
+        /** Test seam: the container's client by default (one HTTP stack). */
+        internal var bridgeProvider: (Context) -> CockpitApi =
+            { CockpitApp.container(it).bridge }
+
+        /** Test hook: completed with the goAsync() result of the next onReceive,
+         *  so tests can await finish() through the Robolectric shadow. Null in
+         *  production, so no framework state is ever retained. */
+        internal var pendingResultSignal:
+            kotlinx.coroutines.CompletableDeferred<android.content.BroadcastReceiver.PendingResult>? = null
 
         fun replyAction(context: Context, paneId: String): NotificationCompat.Action {
             val intent = Intent(context, NotificationReplyReceiver::class.java)

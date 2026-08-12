@@ -31,6 +31,13 @@ class CockpitApp : Application() {
         super.onCreate()
         container = AppContainer(this)
     }
+
+    companion object {
+        /** Container access for services/receivers; safe on cold start because
+         *  Application.onCreate always runs before any component. */
+        fun container(context: Context): AppContainer =
+            (context.applicationContext as CockpitApp).container
+    }
 }
 
 class AppContainer(application: Application) {

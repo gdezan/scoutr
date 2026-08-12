@@ -10,11 +10,14 @@ import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
+import android.content.Context
+import dev.cockpit.app.CockpitApp
 import dev.cockpit.app.MainActivity
 import dev.cockpit.app.data.ConnectionStore
 import dev.cockpit.app.data.NtfyMessage
 import dev.cockpit.app.net.NtfyClient
 import dev.cockpit.app.state.MonitoringStore
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -39,6 +42,9 @@ class CockpitMonitorService : Service() {
     private lateinit var store: MonitoringStore
     private var pollJob: Job? = null
 
+    /** Test seam: the shared container's client by default (one HTTP stack). */
+    internal var ntfyClientFactory: (Context) -> NtfyClient = { CockpitApp.container(it).ntfy }
+
     override fun onCreate() {
         super.onCreate()
         store = MonitoringStore(this)
@@ -54,20 +60,16 @@ class CockpitMonitorService : Service() {
         }
         if (pollJob == null) {
             pollJob = scope.launch {
-                val client = NtfyClient(
-                    OkHttpClient.Builder()
-                        .connectTimeout(10, TimeUnit.SECONDS)
-                        .readTimeout(30, TimeUnit.SECONDS)
-                        .build(),
-                )
-                var lastId = store.ntfyCursor
+                val client = ntfyClientFactory(this@CockpitMonitorService)
                 while (isActive) {
                     try {
-                        client.messages(saved.ntfyUrl, saved.ntfyTopic, initialSince = lastId)
-                            .collect { message ->
-                                store.ntfyCursor = message.id
-                                if (message.paneId != null) showEventNotification(message)
-                            }
+                        // The null-guard above smart-casts saved/ntfyUrl/ntfyTopic
+                        // into this lambda, so the non-null overload is safe.
+                        pollOnce(client, store, saved.ntfyUrl, saved.ntfyTopic) { message ->
+                            showEventNotification(message)
+                        }
+                    } catch (c: CancellationException) {
+                        throw c
                     } catch (_: Exception) {
                         // ntfy may be briefly unreachable; retry on the next loop.
                     }
@@ -171,5 +173,23 @@ class CockpitMonitorService : Service() {
         private const val CHANNEL_MONITOR = "cockpit_monitor"
         private const val CHANNEL_AGENTS = "agents"
         private const val NOTIF_ID_MONITOR = 1
+
+        /** One poll cycle: read the persisted cursor, fetch, and advance it.
+         *  The cursor is read at the top of every call, so a retried loop
+         *  never re-fetches (and re-notifies) from a stale snapshot — the
+         *  original bug read it once before the loop and froze it forever. */
+        internal suspend fun pollOnce(
+            client: NtfyClient,
+            store: MonitoringStore,
+            ntfyUrl: String,
+            ntfyTopic: String,
+            notify: (NtfyMessage) -> Unit,
+        ) {
+            val lastId = store.ntfyCursor
+            client.messages(ntfyUrl, ntfyTopic, initialSince = lastId).collect { message ->
+                store.ntfyCursor = message.id
+                if (message.paneId != null) notify(message)
+            }
+        }
     }
 }
