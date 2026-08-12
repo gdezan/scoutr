@@ -609,8 +609,8 @@ internal fun shortModel(model: String): String {
 }
 
 /** Compact relative time for epoch-millisecond stamps ("now", "5m", "3h", "2d", else date). */
-internal fun relativeTime(epochMs: Double): String =
-    dev.cockpit.app.ui.relativeTime(epochMs, dateAfterDays = 7)
+internal fun relativeTime(epochMs: Double, nowMs: Long = System.currentTimeMillis()): String =
+    dev.cockpit.app.ui.relativeTime(epochMs, nowMs = nowMs, dateAfterDays = 7)
 
 @Composable
 private fun RenameDialog(

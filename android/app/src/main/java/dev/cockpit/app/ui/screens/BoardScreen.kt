@@ -464,8 +464,8 @@ private fun statusLabel(status: AgentStatus) = when (status) {
 }
 
 /** Compact "time in state" from the bridge-stamped entry time. */
-internal fun timeInState(sinceMs: Double?): String? =
-    sinceMs?.let { dev.cockpit.app.ui.relativeTime(it) }
+internal fun timeInState(sinceMs: Double?, nowMs: Long = System.currentTimeMillis()): String? =
+    sinceMs?.let { dev.cockpit.app.ui.relativeTime(it, nowMs = nowMs) }
 
 /** Stable skeleton rows (fixed geometry, no spinner flash) while first load runs. */
 @Composable
