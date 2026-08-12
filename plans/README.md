@@ -6,14 +6,13 @@ plan fully before starting, honor its STOP conditions, and update your row
 when done.
 
 These plans complement (and never duplicate) the architecture plans in
-`docs/architecture/` — plans 01–03 there have shipped; 04–07 remain pending
-and are referenced below where they interact.
+`docs/architecture/` — all of plans 01–07 there have shipped.
 
 ## Execution order & status
 
 | Plan | Title | Priority | Effort | Depends on | Status |
 |------|-------|----------|--------|------------|--------|
-| 001 | Make the bridge survive herdr restarts and client disconnects | P1 | M | — | TODO |
+| 001 | Make the bridge survive herdr restarts and client disconnects | P1 | M | — | DONE |
 | 002 | Stop leaking and silently rotating the pairing token | P1 | S | — | TODO |
 | 003 | Stop re-reading whole transcript stores on every poll | P1 | M | — | TODO |
 | 004 | Harden the WS/control surface and test real question answering | P1 | M | 003 | TODO |

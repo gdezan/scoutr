@@ -52,7 +52,12 @@ kept truthful as work lands. The final column of each row carries commit hashes.
 
 | Plan | Requirement | Status | Source evidence | Changes | Tests | Review | Commit |
 |------|-------------|--------|-----------------|---------|-------|--------|--------|
-| 001 | — (pending phase 2) | PENDING | | | | | |
+| 001 | Step 1: `herdrSubscribe` settles on every failure path (error/close-before-ack/ack-timeout/error-ack) instead of wedging | SHIPPED | client.ts `settled` flag + `fail()` (clears ackTimeout, sets `closed` to suppress onClose, destroys, rejects); post-resolve errors still call `callbacks.onError` | **Deviation:** resolve happens on a *parsed ack* inside the data handler, not the plan's literal `sock.once("data")` — the plan's done criterion says to confirm the resolve path coexists with the reject paths; intent satisfied | 6 offline subscribe tests (missing path, close-before-ack, stall→3s reject, bad ack, late-ack-after-stop, feed retry) + live suite (0 skipped) | fresh-agent review: strict ack validation (id echo + `subscription_started`, live-probed) | a844b69 |
+| 001 | Step 2: `herdrRequest` rejects on empty close | SHIPPED | client.ts `finish()`: `first === undefined` guard rejects with "herdr closed the connection without responding" (was: parse `"{}"` → resolve `undefined`) | | offline test: close-with-no-bytes rejects | | a844b69 |
+| 001 | Step 3: feed retries failed rebuild with backoff; retry handle stored and cleared in `stop()` | SHIPPED | feed.ts `SUBSCRIBE_RETRY_MS = 1000`; `retryTimer` field; subscribe wrapped in try/catch emitting `feed_error` + scheduling retry guarded by `stopped`; **review hardening:** `rebuildTimer` + `reconnectTimer` also tracked and cleared in `stop()` (stale timers cannot rebuild a restarted feed) | | offline test: restart after socket death → exactly 2 subscribes, no spurious rebuild | fresh-agent review finding 3 fixed | a844b69 |
+| 001 | Step 4: snapshot re-synced at top of `doBuildSubscription` | SHIPPED | feed.ts `try { await this.refreshSnapshot(true) } catch {}` then re-check `stopped`; **review hardening:** `refreshSeq` generation guard so an older in-flight refresh cannot overwrite a newer snapshot | | | fresh-agent review finding 4 fixed | a844b69 |
+| 001 | Step 5: crash-proof HTTP/WS handlers | SHIPPED | server.ts: async `createServer` callback wrapped (500 JSON only if `!response.writableEnded`, secondary write failures swallowed); `wss.on("error")` + `ws.on("error")` (log + same cleanup as close); `handleFeed` guards `ws.send` with `readyState === OPEN` | | server.test.ts offline HTTP suite exercises the path | | a844b69 |
+| 001 | Step 6: pane-close kind sets + tracker prune | SHIPPED | server.ts `STATUS_KINDS`/`CLOSE_KINDS` explicit snake+dot sets (no blind `replace(/_/g,'.')`); close branch runs `tracker.prune(live pane ids)` + `boardDetail.prune(snapshotPaths(...))`; `grep -n tracker.prune src/server.ts` → exactly 1 match | **Deviation:** server-level prune assertion in `server.test.ts` per the plan's explicit alternative (test-plan item 5), instead of `status.test.ts` | server.test.ts: pane_exited + pane_agent_status_changed prune tests | reviewer instructed not to flag server.test.ts (plan permits it) | a844b69 |
 | 002 | — (pending phase 2) | PENDING | | | | | |
 | 003 | — (pending phase 2) | PENDING | | | | | |
 | 004 | — (pending phase 2, after 003) | PENDING | | | | | |
@@ -66,7 +71,7 @@ kept truthful as work lands. The final column of each row carries commit hashes.
 
 | Gate | Command | Last run | Result |
 |------|---------|----------|--------|
-| Bridge typecheck+tests | `cd bridge && npm run typecheck && npm test` | — | PENDING |
+| Bridge typecheck+tests | `cd bridge && npm run typecheck && npm test` | 2026-08-12 (plan 001) | 265 tests / 42 suites, 0 fail, 0 skipped (live herdr socket ran); typecheck exit 0 |
 | Android unit tests | `cd android && ANDROID_HOME=$HOME/Android/sdk ./gradlew testDebugUnitTest --rerun-tasks` | — | PENDING |
 | Emulator instrumentation | `cd android && ANDROID_HOME=$HOME/Android/sdk ./gradlew pixel2api36DebugAndroidTest` | — | PENDING |
 | APK assemble | `cd android && ANDROID_HOME=$HOME/Android/sdk ./gradlew assembleDebug` | — | PENDING |
@@ -74,3 +79,9 @@ kept truthful as work lands. The final column of each row carries commit hashes.
 ## Assumptions and blockers
 
 - (none yet)
+
+## Deferred notes
+
+- `void line;` in `client.ts`'s subscribe data handler (line ends with `\r` branch)
+  is a pre-existing dead statement; plan 009 candidate, deliberately not in 001
+  scope.
