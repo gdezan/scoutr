@@ -149,6 +149,10 @@ data class SessionReadResponse(
 @Serializable
 data class QuestionEntry(
     val id: String,
+    /** Tool call id this question came from; groups a multi-question ask. */
+    val callId: String = "",
+    /** Transcript entry id that made the call; the card's list position. */
+    val entryId: String = "",
     val question: String = "",
     val header: String = "",
     val options: List<QuestionOption> = emptyList(),

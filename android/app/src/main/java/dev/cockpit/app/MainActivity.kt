@@ -565,6 +565,11 @@ private fun AppTopBar(
 ) {
     TopAppBar(
         title = { Text(title) },
+        // The outer Scaffold already consumes the status-bar inset for the whole
+        // NavHost, so the bar must not add its own or the two stack into a ~48dp
+        // dead band under the clock — the top-edge twin of the bottom-nav band
+        // that contentWindowInsets = WindowInsets(0.dp) removed below.
+        windowInsets = WindowInsets(0.dp),
         colors = TopAppBarDefaults.topAppBarColors(
             containerColor = MaterialTheme.colorScheme.background,
         ),

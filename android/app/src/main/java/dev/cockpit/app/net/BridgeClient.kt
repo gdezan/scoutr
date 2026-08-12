@@ -20,6 +20,7 @@ import dev.cockpit.app.data.UsageResponse
 import dev.cockpit.app.data.WsFrame
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -331,7 +332,12 @@ class BridgeClient(
      * Opens a short-lived WS, sends one command, and waits for the first ack frame.
      * Used for steering / answering questions where the app needs confirmation.
      */
-    suspend fun sendCommand(command: Map<String, String>): WsFrame = suspendCancellableCoroutine { continuation ->
+    suspend fun sendCommand(command: Map<String, String>): WsFrame = sendCommandJson(
+        buildJsonObject { for ((k, v) in command) put(k, JsonPrimitive(v)) },
+    )
+
+    /** sendCommand with structured values (e.g. key arrays); see sendCommand. */
+    suspend fun sendCommandJson(command: JsonObject): WsFrame = suspendCancellableCoroutine { continuation ->
         val saved = connectionStore.saved
         if (saved == null) {
             continuation.resumeWithException(IOException("no connection configured"))
@@ -340,9 +346,7 @@ class BridgeClient(
         val base = saved.host.trimEnd('/')
         val wsUrl = base.replaceFirst("https://", "wss://").replaceFirst("http://", "ws://") + "/ws?token=" +
             java.net.URLEncoder.encode(saved.token, "UTF-8")
-        val payload = json.encodeToString(kotlinx.serialization.json.buildJsonObject {
-            for ((k, v) in command) put(k, kotlinx.serialization.json.JsonPrimitive(v))
-        })
+        val payload = json.encodeToString(command)
         val settled = AtomicBoolean(false)
 
         val listener = object : WebSocketListener() {
@@ -382,6 +386,18 @@ class BridgeClient(
     suspend fun runSlashCommand(paneId: String, text: String): WsFrame =
         sendCommand(mapOf("type" to "slash_command", "paneId" to paneId, "text" to text))
 
-    suspend fun answerQuestion(paneId: String, text: String): WsFrame =
-        sendCommand(mapOf("type" to "answer_question", "paneId" to paneId, "text" to text))
+    suspend fun answerQuestion(
+        paneId: String,
+        text: String,
+        keys: List<String> = emptyList(),
+        trailingKeys: List<String> = emptyList(),
+    ): WsFrame = sendCommandJson(
+        buildJsonObject {
+            put("type", "answer_question")
+            put("paneId", paneId)
+            put("text", text)
+            if (keys.isNotEmpty()) put("keys", JsonArray(keys.map { JsonPrimitive(it) }))
+            if (trailingKeys.isNotEmpty()) put("trailingKeys", JsonArray(trailingKeys.map { JsonPrimitive(it) }))
+        },
+    )
 }

@@ -12,10 +12,10 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material3.Card
@@ -58,17 +58,23 @@ import dev.cockpit.app.data.QuestionEntry
 fun QuestionCard(
     question: QuestionEntry,
     sending: Boolean,
-    onAnswer: (String) -> Unit,
+    onAnswer: (text: String, selectedLabels: List<String>) -> Unit,
     modifier: Modifier = Modifier,
     /** When this question is part of a multi-question ask, its 1-based position. */
     position: Pair<Int, Int>? = null,
 ) {
-    val pending = !question.answered
+    // Answered questions never render as a card — the answer shows as a
+    // user bubble so the card is dismissed and the answer lands in the
+    // transcript (recovered from the toolResult on the next poll).
+    if (question.answered) {
+        QuestionAnswerBubble(question, modifier)
+        return
+    }
     val accent = MaterialTheme.colorScheme.primary
     Card(
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         shape = RoundedCornerShape(16.dp),
-        border = if (pending) BorderStroke(1.dp, accent.copy(alpha = 0.6f)) else null,
+        border = BorderStroke(1.dp, accent.copy(alpha = 0.6f)),
         modifier = modifier.fillMaxWidth().testTag("question_card_${question.id}"),
     ) {
         Column(Modifier.padding(14.dp)) {
@@ -100,13 +106,11 @@ fun QuestionCard(
                 text = question.question,
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold,
-                color = if (pending) MaterialTheme.colorScheme.onSurface else
-                    MaterialTheme.colorScheme.onSurfaceVariant,
+                color = MaterialTheme.colorScheme.onSurface,
             )
             Spacer(Modifier.height(10.dp))
 
             when {
-                question.answered -> AnsweredSummary(question)
                 question.multiSelect -> MultiSelectBody(question, sending, onAnswer)
                 question.options.size == 2 -> ConfirmBody(question, sending, onAnswer)
                 question.options.isEmpty() -> FreeTextBody(question, sending, onAnswer)
@@ -116,40 +120,18 @@ fun QuestionCard(
     }
 }
 
-@Composable
-private fun AnsweredSummary(question: QuestionEntry) {
-    val summary = when {
-        question.selected.isNotEmpty() -> question.selected.joinToString(", ")
-        !question.answerText.isNullOrBlank() -> question.answerText
-        else -> "skipped"
-    }
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Icon(
-            Icons.Default.Check,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.secondary,
-            modifier = Modifier.width(16.dp).height(16.dp),
-        )
-        Spacer(Modifier.width(8.dp))
-        Text(
-            text = "Answered: $summary",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-    }
-}
 
 @Composable
 private fun SingleChoiceBody(
     question: QuestionEntry,
     sending: Boolean,
-    onAnswer: (String) -> Unit,
+    onAnswer: (text: String, selectedLabels: List<String>) -> Unit,
 ) {
     var typingSomething by rememberSaveable(question.id) { mutableStateOf(false) }
     OptionList(
         question = question,
         sending = sending,
-        onPick = { onAnswer(it) },
+        onPick = { onAnswer(it, listOf(it)) },
         onTypeSomething = { typingSomething = true },
     )
     if (typingSomething) {
@@ -162,21 +144,23 @@ private fun SingleChoiceBody(
 private fun ConfirmBody(
     question: QuestionEntry,
     sending: Boolean,
-    onAnswer: (String) -> Unit,
+    onAnswer: (text: String, selectedLabels: List<String>) -> Unit,
 ) {
     var typingSomething by rememberSaveable(question.id) { mutableStateOf(false) }
     val labels = question.options.map { it.label }
+    val first = labels.first()
+    val second = labels.getOrElse(1) { "No" }
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         OutlinedButton(
-            onClick = { onAnswer(labels.first()) },
+            onClick = { onAnswer(first, listOf(first)) },
             enabled = !sending,
             modifier = Modifier.weight(1f).testTag("question_confirm_${question.id}"),
-        ) { Text(labels.first()) }
+        ) { Text(first) }
         OutlinedButton(
-            onClick = { onAnswer(labels.getOrElse(1) { "No" }) },
+            onClick = { onAnswer(second, listOf(second)) },
             enabled = !sending,
             modifier = Modifier.weight(1f),
-        ) { Text(labels.getOrElse(1) { "No" }) }
+        ) { Text(second) }
     }
     TextButton(
         onClick = { typingSomething = true },
@@ -197,7 +181,7 @@ private fun ConfirmBody(
 private fun MultiSelectBody(
     question: QuestionEntry,
     sending: Boolean,
-    onAnswer: (String) -> Unit,
+    onAnswer: (text: String, selectedLabels: List<String>) -> Unit,
 ) {
     var selected by rememberSaveable(question.id) { mutableStateOf(emptySet<String>()) }
     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -223,7 +207,7 @@ private fun MultiSelectBody(
         }
         Spacer(Modifier.height(4.dp))
         OutlinedButton(
-            onClick = { onAnswer(selected.toList().joinToString(", ")) },
+            onClick = { onAnswer(selected.toList().joinToString(", "), selected.toList()) },
             enabled = !sending && selected.isNotEmpty(),
             modifier = Modifier.testTag("question_submit_${question.id}"),
         ) {
@@ -236,16 +220,17 @@ private fun MultiSelectBody(
 private fun FreeTextBody(
     question: QuestionEntry,
     sending: Boolean,
-    onAnswer: (String) -> Unit,
+    onAnswer: (text: String, selectedLabels: List<String>) -> Unit,
 ) {
     FreeTextInput(question, sending, onAnswer)
 }
 
 @Composable
+
 private fun FreeTextInput(
     question: QuestionEntry,
     sending: Boolean,
-    onAnswer: (String) -> Unit,
+    onAnswer: (text: String, selectedLabels: List<String>) -> Unit,
 ) {
     var text by rememberSaveable(question.id, "input") { mutableStateOf("") }
     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -259,7 +244,7 @@ private fun FreeTextInput(
         )
         Spacer(Modifier.width(8.dp))
         IconButton(
-            onClick = { onAnswer(text) },
+            onClick = { onAnswer(text, emptyList()) },
             enabled = !sending && text.isNotBlank(),
             modifier = Modifier.testTag("question_send_${question.id}"),
         ) {
@@ -314,6 +299,40 @@ private fun OptionList(
             Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.width(14.dp).height(14.dp))
             Spacer(Modifier.width(4.dp))
             Text("Type something")
+        }
+    }
+}
+
+/**
+ * The answer to an ask_user_question, shown as a user bubble once the
+ * toolResult lands. Dismisses the card and lands the answer in the transcript;
+ * derived from the toolResult's details.answers on every poll, so it survives
+ * reloads. Text is the option label, the typed free-text answer, or the
+ * selected labels joined for multi-select.
+ */
+@Composable
+fun QuestionAnswerBubble(
+    question: QuestionEntry,
+    modifier: Modifier = Modifier,
+) {
+    val summary = when {
+        question.selected.isNotEmpty() -> question.selected.joinToString(", ")
+        !question.answerText.isNullOrBlank() -> question.answerText!!
+        else -> return
+    }
+    Row(modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+        Box(
+            Modifier
+                .padding(end = 4.dp)
+                .widthIn(max = 288.dp)
+                .background(
+                    MaterialTheme.colorScheme.surfaceContainerHighest,
+                    RoundedCornerShape(18.dp),
+                )
+                .padding(horizontal = 14.dp, vertical = 10.dp)
+                .testTag("question_answer_${question.id}"),
+        ) {
+            Text(summary, color = MaterialTheme.colorScheme.onSurface)
         }
     }
 }

@@ -99,9 +99,30 @@ export function piExtractQuestions(transcript: Transcript): QuestionEntry[] {
   return extractQuestions(transcript.entries);
 }
 
-export async function piAnswerQuestion(herdr: HerdrPort, paneId: string, answer: string): Promise<void> {
+export async function piAnswerQuestion(
+  herdr: HerdrPort,
+  paneId: string,
+  answer: string,
+  keys: string[] = [],
+  trailingKeys?: string[],
+): Promise<void> {
   const safe = sanitizeAnswerText(answer);
-  if (!safe) throw new Error("answer text is empty after sanitization");
+  if (keys.length > 0) {
+    // pi's questionnaire is keyboard-only: arrows move, space toggles,
+    // enter chooses/submits. Typed text is dropped while an option list is
+    // focused (and enter would pick the first option), so option/skip
+    // answers travel entirely as keys; custom answers open the "Type
+    // something" editor with keys, then type the text and submit it with
+    // the trailing keys (editor enter, plus a review-tab enter for the last
+    // question of a multi-question ask).
+    await herdr.paneSendKeys(paneId, keys);
+    if (safe) {
+      await herdr.paneSendText(paneId, safe);
+      await herdr.paneSendKeys(paneId, trailingKeys ?? ["Enter"]);
+    }
+    return;
+  }
+  // No questionnaire known (e.g. a permission prompt): plain type+enter.
   await herdr.paneSendText(paneId, safe);
   await herdr.paneSendKeys(paneId, ["Enter"]);
 }

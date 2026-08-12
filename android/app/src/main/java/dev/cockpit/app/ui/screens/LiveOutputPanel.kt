@@ -37,7 +37,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
@@ -287,6 +291,25 @@ internal fun InlineLiveOutput(
             maxLines = 5,
             softWrap = false,
             overflow = TextOverflow.Clip,
+            // Terminal lines are wider than the card and must not reflow (a
+            // wrapping tail makes the card's height jump on every poll), so
+            // they are clipped. A hard clip cuts mid-glyph and reads as broken;
+            // fading the last stretch says "the line continues" in the same
+            // quiet register as the rest of the card.
+            modifier = Modifier
+                .graphicsLayer(compositingStrategy = CompositingStrategy.Offscreen)
+                .drawWithContent {
+                    drawContent()
+                    drawRect(
+                        brush = Brush.horizontalGradient(
+                            0f to Color.Black,
+                            1f to Color.Transparent,
+                            startX = size.width - 56.dp.toPx(),
+                            endX = size.width,
+                        ),
+                        blendMode = BlendMode.DstIn,
+                    )
+                },
         )
     }
 }

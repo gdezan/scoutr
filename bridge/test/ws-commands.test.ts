@@ -62,6 +62,48 @@ describe("WS command dispatch", () => {
     assert.equal((herdr.sent[0]?.params as { text: string }).text, "abc");
   });
 
+  test("answer_question with keys sends navigation keys only for option answers", async () => {
+    const { herdr, deps } = makeDeps();
+    const result = await handleCommand(
+      { type: "answer_question", paneId: "p1", text: "", keys: ["down", "down", "enter"] },
+      deps,
+    );
+    assert.equal(result.type, "answered");
+    assert.deepEqual(herdr.sent, [{ method: "paneSendKeys", params: { pane_id: "p1", keys: ["down", "down", "enter"] } }]);
+  });
+
+  test("answer_question with keys and text opens the editor then types and submits", async () => {
+    const { herdr, deps } = makeDeps();
+    await handleCommand(
+      { type: "answer_question", paneId: "p1", text: "Mango", keys: ["down", "enter"], trailingKeys: ["enter", "enter"] },
+      deps,
+    );
+    assert.deepEqual(herdr.sent, [
+      { method: "paneSendKeys", params: { pane_id: "p1", keys: ["down", "enter"] } },
+      { method: "paneSendText", params: { pane_id: "p1", text: "Mango" } },
+      { method: "paneSendKeys", params: { pane_id: "p1", keys: ["enter", "enter"] } },
+    ]);
+  });
+
+  test("answer_question rejects empty text without keys", async () => {
+    const { deps } = makeDeps();
+    await assert.rejects(
+      () => handleCommand({ type: "answer_question", paneId: "p1", text: "" } as never, deps),
+      /text or keys/,
+    );
+  });
+
+  test("answer_question rejects keys outside the navigation allowlist", async () => {
+    const { deps } = makeDeps();
+    await assert.rejects(
+      () => handleCommand({ type: "answer_question", paneId: "p1", text: "", keys: ["down", "a"] } as never, deps),
+      /bounded sequence of navigation keys/,
+    );
+    await assert.rejects(
+      () => handleCommand({ type: "answer_question", paneId: "p1", text: "x", trailingKeys: new Array(33).fill("enter") } as never, deps),
+      /bounded sequence of navigation keys/,
+    );
+  });
   test("slash_command sends the validated command plus Enter", async () => {
     const { herdr, deps } = makeDeps();
     const result = await handleCommand({ type: "slash_command", paneId: "p1", text: "/compact" }, deps);

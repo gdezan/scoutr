@@ -76,7 +76,7 @@ class ChatLiveOutputViewModelTest {
     fun collapsedSummarySkipsTerminalChrome() {
         val state = ChatUiState(
             agentStatus = "working",
-            liveOutputText = "Useful verification result\nTook 0.1s\nElapsed 6.0s\n────────\n.: Working...\n~/repo │ anthropic/claude-sonnet │ high\n7d:39% Pursuing goal cache R/W 63M/0",
+            liveOutputText = "Useful verification result\nTook 0.1s\nElapsed 6.0s\n────────\n.: Working...\n~/repo │ anthropic/claude-sonnet │ high\n7d:39% Pursuing goal cache R/W 63M/0\n~/Dev/agents-mobile (main) │ 101k/1.0M ↑576.",
         )
 
         assertEquals("Useful verification result", state.liveOutputSummary)
