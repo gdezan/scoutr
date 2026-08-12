@@ -59,20 +59,23 @@ export function createCockpitServer(deps: ServerDeps, options: CreateServerOptio
   // Bounded per-agent model/latest-activity detail, memoized by file mtime.
   const boardDetail = new BoardDetailCache();
   const routeDeps: RouteDeps = { ...deps, tracker, boardDetail };
+  // herdr streams some event kinds with underscores and some with dots;
+  // both spellings must be matched, so membership lives in explicit sets.
+  const STATUS_KINDS = new Set(["pane_agent_status_changed", "pane.agent_status_changed"]);
+  const CLOSE_KINDS = new Set(["pane_closed", "pane.closed", "pane_exited", "pane.exited"]);
   feed.onMessage((message) => {
     if (!("kind" in message)) return;
-    if (message.kind === "pane_agent_status_changed" || message.kind === "pane.agent_status_changed") {
+    if (STATUS_KINDS.has(message.kind)) {
       const data = message.data;
       const paneId = typeof data.pane_id === "string" ? data.pane_id : "";
       const status = typeof data.agent_status === "string" ? data.agent_status : "";
       if (paneId && status) tracker.note(paneId, status);
-    } else if (message.kind === "pane_closed" || message.kind === "pane.exited") {
-      const data = message.data;
-      const paneId = typeof data.pane_id === "string" ? data.pane_id : "";
-      if (paneId) {
-        tracker.note(paneId, "closed");
-        boardDetail.prune(new Set(snapshotPaths(feed.snapshot)));
-      }
+    } else if (CLOSE_KINDS.has(message.kind)) {
+      // A closed pane leaves a stale "closed" status entry behind; prune all
+      // entries whose pane is no longer in the live snapshot.
+      const livePanes = new Set((feed.snapshot?.panes ?? []).map((pane) => pane.pane_id));
+      tracker.prune(livePanes);
+      boardDetail.prune(snapshotPaths(feed.snapshot));
     }
   });
 
@@ -88,20 +91,33 @@ export function createCockpitServer(deps: ServerDeps, options: CreateServerOptio
   const routeTable = new RouteTable(buildRoutes());
 
   const server = createServer(async (request, response) => {
-    const url = new URL(request.url ?? "/", "http://localhost");
-    const result = await dispatchRoute(
-      routeTable,
-      {
-        method: request.method ?? "GET",
-        pathname: url.pathname,
-        search: url.searchParams,
-        authorization: request.headers.authorization,
-        body: request,
-        contentType: request.headers["content-type"],
-      },
-      routeDeps,
-    );
-    sendJson(response, result.status, result.body);
+    try {
+      const url = new URL(request.url ?? "/", "http://localhost");
+      const result = await dispatchRoute(
+        routeTable,
+        {
+          method: request.method ?? "GET",
+          pathname: url.pathname,
+          search: url.searchParams,
+          authorization: request.headers.authorization,
+          body: request,
+          contentType: request.headers["content-type"],
+        },
+        routeDeps,
+      );
+      sendJson(response, result.status, result.body);
+    } catch (error) {
+      // A route must never crash the process: log, then answer 500 unless the
+      // client already went away.
+      console.error(`route error: ${error instanceof Error ? error.message : String(error)}`);
+      if (!response.writableEnded) {
+        try {
+          sendJson(response, 500, { ok: false, error: "internal server error" });
+        } catch {
+          // Response already written or aborted; nothing more to send.
+        }
+      }
+    }
   });
 
   const wss = new WebSocketServer({ noServer: true });
@@ -127,6 +143,10 @@ export function createCockpitServer(deps: ServerDeps, options: CreateServerOptio
     });
   });
 
+  wss.on("error", (error) => {
+    console.error(`websocket server error: ${error.message}`);
+  });
+
   wss.on("connection", (ws: WebSocket) => {
     let closed = false;
     const filters: Set<string> = new Set();
@@ -138,7 +158,10 @@ export function createCockpitServer(deps: ServerDeps, options: CreateServerOptio
         const kind = message.kind ?? "";
         if (filters.size > 0 && !filters.has(kind)) return;
       }
-      ws.send(JSON.stringify({ type: "feed", payload: message }));
+      // A torn-down socket throws on send; check state instead of crashing.
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: "feed", payload: message }));
+      }
     };
 
     feed.onMessage(handleFeed);
@@ -165,6 +188,12 @@ export function createCockpitServer(deps: ServerDeps, options: CreateServerOptio
           ws.send(JSON.stringify({ type: "error", error: error instanceof Error ? error.message : String(error) }));
         }
       })();
+    });
+
+    ws.on("error", (error) => {
+      console.error(`websocket error: ${error.message}`);
+      closed = true;
+      feed.removeMessage(handleFeed);
     });
 
     ws.on("close", () => {

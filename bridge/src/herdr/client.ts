@@ -83,7 +83,12 @@ export async function herdrRequest(
       sock.destroy();
       try {
         const lines = splitLines(buffer).filter((line) => line.trim().length > 0);
-        const envelope = JSON.parse(lines[0] ?? "{}") as RpcEnvelope;
+        const first = lines[0];
+        if (first === undefined) {
+          reject(new HerdrError("herdr closed the connection without responding"));
+          return;
+        }
+        const envelope = JSON.parse(first) as RpcEnvelope;
         if (envelope.error) {
           reject(new HerdrError(envelope.error.message ?? "herdr request failed", envelope.error.code));
           return;
@@ -154,6 +159,19 @@ export async function herdrSubscribe(
     let buffer = "";
     let started = false;
     let closed = false;
+    let settled = false;
+    let ackTimeout: NodeJS.Timeout | undefined;
+
+    const fail = (error: Error) => {
+      if (settled) return;
+      settled = true;
+      if (ackTimeout) clearTimeout(ackTimeout);
+      // Intentional teardown: suppress onClose so callers react to the
+      // rejection alone (and never schedule a redundant reconnect).
+      closed = true;
+      sock.destroy();
+      reject(error);
+    };
 
     const handle = {
       close() {
@@ -185,12 +203,22 @@ export async function herdrSubscribe(
         if (!started) {
           const ack = envelope as { id?: string; result?: { type?: string }; error?: { message?: string } };
           if (ack.error) {
-            callbacks.onError?.(new HerdrError(ack.error.message ?? "subscribe failed"));
-            handle.close();
+            fail(new HerdrError(ack.error.message ?? "subscribe failed"));
+            return;
+          }
+          // Resolve only on the matching ack (`id` is echoed by herdr with
+          // `result.type === "subscription_started"`). Anything else on the
+          // wire first — an event envelope, a response for another request,
+          // arbitrary bytes — is a protocol violation; a stale socket must
+          // not be able to look like a live feed.
+          if (ack.id !== id || ack.result?.type !== "subscription_started") {
+            fail(new HerdrError("unexpected response before the subscription ack"));
             return;
           }
           started = true;
           callbacks.onStarted?.();
+          if (ackTimeout) clearTimeout(ackTimeout);
+          resolve(handle);
           continue;
         }
         const event = envelope as SubscriptionEventEnvelope;
@@ -198,26 +226,33 @@ export async function herdrSubscribe(
       }
     });
     sock.on("error", (error) => {
+      if (!started) {
+        fail(new HerdrError(`herdr socket error: ${error.message}`));
+        return;
+      }
       callbacks.onError?.(new HerdrError(`herdr socket error: ${error.message}`));
     });
     sock.on("close", () => {
-      if (!closed) closed = true;
-      callbacks.onClose?.();
+      const unexpected = !closed;
+      closed = true;
+      if (!started) {
+        fail(new HerdrError("herdr closed the connection before the subscription ack"));
+        return;
+      }
+      // Only unexpected closes (peer FIN or error) reach onClose; a close
+      // initiated via handle.close()/fail() must not schedule a reconnect.
+      if (unexpected) callbacks.onClose?.();
     });
 
     // Give the ack a moment to arrive; resolve the handle so the caller can
-    // start using it immediately after subscribing.
-    const ackTimeout = setTimeout(() => {
+    // start using it immediately after subscribing. If no ack arrived, the
+    // subscribe has failed — reject so the feed's rebuild guard never wedges.
+    ackTimeout = setTimeout(() => {
       if (!started) {
-        callbacks.onError?.(new HerdrError("no subscription ack from herdr"));
+        fail(new HerdrError("no subscription ack from herdr"));
       }
     }, 3000);
     ackTimeout.unref?.();
-
-    sock.once("data", () => {
-      clearTimeout(ackTimeout);
-      resolve(handle);
-    });
   });
 }
 

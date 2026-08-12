@@ -139,6 +139,45 @@ describe("cockpit bridge HTTP/WS API (offline)", () => {
     assert.equal(cards[0]?.blocked, true);
   });
 
+  test("a pane close event prunes status entries for panes no longer alive", async () => {
+    const snapshot = snapshotWithAgents([{ agent_status: "done" }]);
+    feed.setSnapshot({
+      ...snapshot,
+      panes: [{
+        pane_id: "p1",
+        workspace_id: "ws1",
+        tab_id: "t1",
+        terminal_id: "term1",
+        focused: true,
+        agent_status: "done",
+        revision: 1,
+        agent: "pi",
+        display_agent: "pi",
+        agent_session: null,
+        cwd: "/work/project",
+        foreground_cwd: "/work/project",
+        label: null,
+        title: null,
+        terminal_title: null,
+        terminal_title_stripped: null,
+        state_labels: {},
+        scroll: null,
+      }],
+    });
+    feed.emit({ kind: "pane_agent_status_changed", data: { pane_id: "p1", agent_status: "done" } } as never);
+    const before = await getJson("/api/agents");
+    const beforeCard = ((before.body as { agents: { paneId: string; statusSinceMs?: number }[] }).agents)[0];
+    assert.equal(beforeCard?.paneId, "p1");
+    assert.equal(typeof beforeCard?.statusSinceMs, "number", "status entry exists before the pane closes");
+
+    feed.setSnapshot({ ...snapshot, panes: [] });
+    feed.emit({ kind: "pane_exited", data: { pane_id: "p1" } } as never);
+    const after = await getJson("/api/agents");
+    const afterCard = ((after.body as { agents: { paneId: string; statusSinceMs?: number }[] }).agents)[0];
+    assert.equal(afterCard?.paneId, "p1");
+    assert.equal(afterCard?.statusSinceMs, undefined, "status entry pruned for the closed pane");
+  });
+
   test("agents enrich cards with bounded model and latest activity", async () => {
     const liveDir = await mkdtemp(join(tmpdir(), "cockpit-agent-session-"));
     const liveSession = join(liveDir, "session.jsonl");
