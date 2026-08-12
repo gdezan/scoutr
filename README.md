@@ -342,5 +342,4 @@ today looks like: `adb pair 100.78.204.15:<port> <code>` then
   on next launch via the `since` cursor. Instant delivery needs FCM or a
   foreground service — out of scope (no cloud).
 - One bridge/host; multi-host pairing is future work.
-- Full details: `docs/shipping-report.md` (evidence vs. approximations) and
-  `docs/decisions.md` (design rationale).
+- Design rationale: `docs/decisions.md`.

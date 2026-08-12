@@ -80,8 +80,8 @@ describe("loadOrCreateConfig", () => {
   });
 
   test("keeps the token when the parsed config cannot be re-persisted", { skip: process.getuid?.() === 0 }, async () => {
-    // Plan 002 step 1: only "file missing or unparseable" may mint a token.
-    // A valid config whose write fails (read-only directory) must be kept
+    // Only a missing or unparseable config may mint a token. A valid config
+    // whose write fails (read-only directory) must be kept
     // and returned — silently regenerating it would 401 every paired phone.
     const roDir = join(dir, "readonly");
     mkdirSync(roDir, { recursive: true });

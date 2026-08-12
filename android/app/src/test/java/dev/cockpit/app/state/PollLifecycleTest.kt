@@ -16,11 +16,11 @@ import org.robolectric.annotation.Config
 import org.robolectric.shadows.ShadowLooper.idleMainLooper
 
 /**
- * Plan 005 lifecycle contract: ChatViewModel's poll runs only while the chat
- * screen is STARTED. startPolling() must be a no-op when already polling
- * (Poller's immediate first tick doubles as the first paint, so there is no
- * init refresh), stopPolling() must halt further requests, and a cancelled
- * refresh must never be rendered as a failure.
+ * ChatViewModel's poll runs only while the chat screen is STARTED.
+ * startPolling() must be a no-op when already polling (Poller's immediate first
+ * tick doubles as the first paint, so there is no init refresh), stopPolling()
+ * must halt further requests, and a cancelled refresh must never be rendered as
+ * a failure.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])

@@ -8,9 +8,8 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
 /**
- * Plan 005 deep-link hardening: pushed ntfy payload is untrusted — the click
- * string must be validated and rebuilt exactly like MainActivity's entry
- * path, never handed to the launcher raw.
+ * Pushed ntfy payload is untrusted — the click string must be validated and
+ * rebuilt exactly like MainActivity's entry path, never handed to the launcher raw.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])

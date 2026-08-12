@@ -171,8 +171,8 @@ class SessionHistoryViewModelTest {
         }
 
     private fun SessionHistoryViewModel.waitForLoaded() = runBlocking {
-        // Polling is lifecycle-scoped now (plan 005): the screen starts the
-        // loop, so these tests must too.
+        // Polling is lifecycle-scoped: the screen starts the loop, so these
+        // tests must too.
         startPolling()
         repeat(100) {
             org.robolectric.shadows.ShadowLooper.idleMainLooper()

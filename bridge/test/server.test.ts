@@ -245,7 +245,7 @@ describe("cockpit bridge HTTP/WS API (offline)", () => {
 
   test("sessions requires an allowed path", async () => {
     const { status } = await getJson("/api/sessions?path=/etc/passwd");
-    assert.equal(status, 403); // path guard rejects (plan 004: deliberate 403, not 500)
+    assert.equal(status, 403); // path guard rejects outside the allow-list
   });
 
   test("session catalog lists persisted sessions and validates limits", async () => {
@@ -320,9 +320,8 @@ describe("cockpit bridge HTTP/WS API (offline)", () => {
     assert.equal(status, 200, JSON.stringify(body));
     assert.equal((body as { ok: boolean }).ok, true);
     // Rewrite the completed session's cwd to a non-repo path ($HOME-like):
-    // the repo must no longer be reachable through it. The implicit-root
-    // allow-list is TTL-cached (plan 003), so the stale root stays allowed
-    // inside the window and revocation lands once the cache expires.
+    // allow-list is TTL-cached, so the stale root stays allowed inside the
+    // window and revocation lands once the cache expires.
     await writeFile(
       join(sessionDir, "session.jsonl"),
       JSON.stringify({ type: "session", version: 3, id: "completed-session", timestamp: "2026-01-02T00:00:00.000Z", cwd: "/home" }),
@@ -356,10 +355,9 @@ describe("cockpit bridge HTTP/WS API (offline)", () => {
   });
 
   test("?token= is rejected on HTTP routes — only the WS upgrade accepts the query form", async () => {
-    // Plan 002 step 3: the query-param token is WS-upgrade-only (the app's
-    // WS connect uses it); HTTP routes must use the Authorization header so
-    // the credential never lands in URL logs. The WS-upgrade query-token
-    // success case is covered by the ws test below.
+    // The app's WS connect uses query auth; HTTP routes must use the
+    // Authorization header so the credential never lands in URL logs. The
+    // WS-upgrade query-token success case is covered by the ws test below.
     const response = await fetch(`http://127.0.0.1:${PORT}/api/health?token=${TOKEN}`);
     assert.equal(response.status, 401);
   });
@@ -407,7 +405,7 @@ describe("cockpit bridge HTTP/WS API (offline)", () => {
     assert.deepEqual(feedFrames.map((f) => f.kind), ["pane_agent_status_changed"]);
     ws.close();
   });
-describe("unpinned routes (plan 008)", () => {
+describe("route contracts", () => {
   it("GET /api/models serves a catalog for the default agent (pi)", async () => {
     const { status, body } = await getJson("/api/models");
     assert.equal(status, 200);

@@ -54,9 +54,9 @@ validation) are in `docs/dev-workflow.md`.
 
 ## 4. Finish
 
-Re-run the four gates after the last code change, commit with evidence cited
-(files, test counts, screenshot paths), and update
-`docs/production-goal-checklist.md` when a checklist item's evidence changed.
+Re-run the four gates after the last code change and commit with evidence cited
+(files, test counts, screenshot paths). If a change came from a design plan, update
+its status in `design-plans/README.md`.
 
 ## Installing this skill outside the repo
 

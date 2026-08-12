@@ -169,7 +169,7 @@ export async function launchStoredSession(
  * session run outside $HOME can still be resumed. When that directory no
  * longer exists, fall back to the backend's session store root, then to the
  * session file's own directory, so the transcript still opens (resume
- * contract, docs/production-goal-checklist.md fix 7).
+ * contract: preserve a usable workspace when the recorded cwd is gone.
  */
 function resolveSessionWorkspace(recorded: string, sessionPath: string, sessionRoot: string): string {
   try {

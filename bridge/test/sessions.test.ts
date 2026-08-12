@@ -324,8 +324,8 @@ describe("controlSession", () => {
         ],
       },
     });
-    // The capability check (plan 004) rejects before the backend switch, with
-    // a 400 carrying the backend id.
+    // The capability check rejects before the backend switch, with a 400
+    // carrying the backend id.
     await assert.rejects(controlSession(herdr, { paneId: "p2", action: "retry", text: "x" }), /claude does not support retry/);
     await assert.rejects(controlSession(herdr, { paneId: "p2", action: "fork" }), /claude does not support fork/);
     await assert.rejects(

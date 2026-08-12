@@ -4,7 +4,7 @@ import dev.cockpit.app.net.BridgeException
 import java.io.IOException
 
 /**
- * Why a load failed, derived once from plan 4's [BridgeException] so each
+ * Why a load failed, derived once from [BridgeException] so each
  * call site can decide explicitly instead of copy-pasting an
  * IOException-vs-Exception split:
  *
