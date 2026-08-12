@@ -15,7 +15,7 @@ These plans complement (and never duplicate) the architecture plans in
 | 001 | Make the bridge survive herdr restarts and client disconnects | P1 | M | — | DONE |
 | 002 | Stop leaking and silently rotating the pairing token | P1 | S | — | DONE |
 | 003 | Stop re-reading whole transcript stores on every poll | P1 | M | — | DONE |
-| 004 | Harden the WS/control surface and test real question answering | P1 | M | 003 | TODO |
+| 004 | Harden the WS/control surface and test real question answering | P1 | M | 003 | DONE |
 | 005 | Lifecycle-scope Android polling; cancellation-safe catches; validate pushed deep links | P2 | M | — | TODO |
 | 006 | Make the agent-facing docs tell the truth again | P2 | S | — | TODO |
 | 007 | One HTTP stack and real tests for the notification chain | P2 | M | 005 | TODO |
