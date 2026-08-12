@@ -17,8 +17,7 @@ Cockpit is a self-hosted mobile cockpit for herdr panes and pi agents: a Node/TS
 
 ## Verification workflow
 
-Run these before committing UI/bridge work, and treat them as the acceptance gates —
-or run them all at once with `scripts/verify.sh` (add `--no-emulator` to skip the GMD suite):
+Run these once as final acceptance gates for materially changed UI/bridge work, after implementation, simplification, and review are complete—or run them all at once with `scripts/verify.sh` (add `--no-emulator` to skip the GMD suite):
 
 ```bash
 cd bridge && npm run typecheck && npm test                       # 296 tests / 43 suites, ~10s
@@ -31,7 +30,7 @@ cd android && timeout 300 env ANDROID_HOME="$HOME/Android/sdk" ./gradlew assembl
 
 Run Android verification as a **tight serial loop**: one Gradle invocation per checkout and one instrumentation run on `emulator-5554` at a time. Gradle shares build and intermediate directories, and instrumentation shares emulator window focus; parallel Gradle jobs can cause AAPT2 exits, missing-dex packaging failures, and false window-focus test failures.
 
-- Run focused classes one after another, then run the broader gates. A screenshot watcher may run beside its test only when it does not start another Gradle process.
+- While iterating, run the narrowest check that covers the change. Run focused classes one after another, then run the broader gates once when materially changed code is final, simplified, and reviewed. Do not rerun full unit, managed-device, assembly, or emulator suites after minor text-only, test-assertion-only, status-only, or similarly low-risk fixes. A screenshot watcher may run beside its test only when it does not start another Gradle process.
 - Prefer incremental builds. Add `--rerun-tasks` only when a relevant source change or stale output requires it; it is not a default speed or correctness flag.
 - Give each Gradle invocation an explicit timeout. If a failure names AAPT2, packaging, missing dex files, or window focus, stop competing jobs, run `timeout 30 ./gradlew --stop`, confirm `adb devices` shows only the intended emulator target, and rerun the narrowest failed check once. Diagnose infrastructure failures before changing production or test behavior.
 - Treat a verification step as complete only after its single process exits and its output has been recorded; never start the next Gradle command while the previous one is still running.
