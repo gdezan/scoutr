@@ -32,6 +32,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import dev.cockpit.app.service.CockpitMonitorService
 import dev.cockpit.app.state.MonitoringStore
@@ -51,6 +53,20 @@ fun SettingsScreen(
     val context = LocalContext.current
     val store = remember { MonitoringStore(context) }
     var monitoring by remember { mutableStateOf(store.enabled) }
+
+    // Enabling monitoring needs POST_NOTIFICATIONS (the foreground service
+    // cannot start without it on 33+); request it before starting the service
+    // so the toggle never crashes into a SecurityException.
+    val requestNotifications = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        if (granted) {
+            ContextCompat.startForegroundService(
+                context,
+                android.content.Intent(context, CockpitMonitorService::class.java),
+            )
+        }
+    }
 
     Column(
         modifier
@@ -109,7 +125,15 @@ fun SettingsScreen(
                     } else {
                         val serviceIntent = android.content.Intent(context, CockpitMonitorService::class.java)
                         if (value) {
-                            ContextCompat.startForegroundService(context, serviceIntent)
+                            val granted = ContextCompat.checkSelfPermission(
+                                context,
+                                android.Manifest.permission.POST_NOTIFICATIONS,
+                            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+                            if (granted) {
+                                ContextCompat.startForegroundService(context, serviceIntent)
+                            } else {
+                                requestNotifications.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                            }
                         } else {
                             context.stopService(serviceIntent)
                         }

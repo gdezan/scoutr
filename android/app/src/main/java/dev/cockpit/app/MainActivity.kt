@@ -96,6 +96,9 @@ import dev.cockpit.app.ui.screens.ReviewScreen
 import dev.cockpit.app.service.parseCockpitUri
 import dev.cockpit.app.ui.screens.SettingsScreen
 
+import dev.cockpit.app.ui.nav.Destination
+import dev.cockpit.app.ui.nav.TabScaffold
+import dev.cockpit.app.ui.components.AppTopBar
 import dev.cockpit.app.ui.motion.CockpitMotion
 import dev.cockpit.app.ui.motion.HapticEvent
 import dev.cockpit.app.ui.motion.OverlayPresence
@@ -103,30 +106,17 @@ import dev.cockpit.app.ui.motion.rememberHaptic
 import dev.cockpit.app.ui.motion.useReduceMotion
 import dev.cockpit.app.ui.theme.CockpitTheme
 
+/** Non-tab routes; the tab routes live in [Destination]. */
 private object Routes {
     const val CONNECT = "connect"
-    const val BOARD = "board"
-    const val SESSIONS = "sessions"
     const val CHAT = "chat/{paneId}?sessionPath={sessionPath}&status={status}"
     const val LIVE_OUTPUT = "chat/{paneId}/live"
-    const val USAGE = "usage"
-
-    const val REVIEW = "review"
-
     const val SETTINGS = "settings"
 
     fun chat(paneId: String, sessionPath: String?, status: String): String =
         "chat/$paneId?sessionPath=${sessionPath?.let { java.net.URLEncoder.encode(it, "UTF-8") } ?: ""}&status=$status"
 
     fun liveOutput(paneId: String): String = "chat/$paneId/live"
-}
-
-/** The three top-level destinations on the phone bar. */
-private enum class Destination(val route: String, val label: String, val icon: ImageVector) {
-    Board(Routes.BOARD, "Board", Icons.Default.GridView),
-    Sessions(Routes.SESSIONS, "Sessions", Icons.Default.History),
-    Usage(Routes.USAGE, "Usage", Icons.Default.BarChart),
-    Review(Routes.REVIEW, "Review", Icons.Default.Code),
 }
 
 class MainActivity : ComponentActivity() {
@@ -150,6 +140,7 @@ class MainActivity : ComponentActivity() {
         }
         if (
             Build.VERSION.SDK_INT >= 33 &&
+            monitor.enabled &&
             checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) {
             requestNotifications.launch(Manifest.permission.POST_NOTIFICATIONS)
@@ -191,7 +182,7 @@ private fun CockpitAppNav(
     val currentRoute = backStack?.destination?.route
 
     var startDestination by remember {
-        mutableStateOf(if (container.connectionStore.saved != null) Routes.BOARD else Routes.CONNECT)
+        mutableStateOf(if (container.connectionStore.saved != null) Destination.Board.route else Routes.CONNECT)
     }
 
     // One activity-scoped board VM: the bottom-bar badge and the Board screen
@@ -211,7 +202,7 @@ private fun CockpitAppNav(
     val onTab = { route: String ->
 
         navController.navigate(route) {
-            popUpTo(Routes.BOARD) { inclusive = false }
+            popUpTo(Destination.Board.route) { inclusive = false }
             launchSingleTop = true
         }
     }
@@ -245,7 +236,7 @@ private fun CockpitAppNav(
     Box {
         Scaffold(
         bottomBar = {
-            if (currentRoute in setOf(Routes.BOARD, Routes.SESSIONS, Routes.USAGE, Routes.REVIEW)) {
+            if (currentRoute in Destination.routes) {
                 CockpitBottomBar(
                     currentRoute = currentRoute,
                     needsYouCount = rememberNeedsYouCount(boardViewModel),
@@ -292,14 +283,14 @@ private fun CockpitAppNav(
             composable(Routes.CONNECT) {
                 ConnectScreen(
                     onConnected = {
-                        startDestination = Routes.BOARD
-                        navController.navigate(Routes.BOARD) {
+                        startDestination = Destination.Board.route
+                        navController.navigate(Destination.Board.route) {
                             popUpTo(Routes.CONNECT) { inclusive = true }
                         }
                     },
                 )
             }
-            composable(Routes.BOARD) {
+            composable(Destination.Board.route) {
                 val newSessionViewModel: NewSessionViewModel = viewModel(
                     factory = NewSessionViewModel.factory(
                         container.bridge,
@@ -307,9 +298,10 @@ private fun CockpitAppNav(
                     ),
                 )
                 var showNewSession by remember { mutableStateOf(false) }
-                Scaffold(
-                    contentWindowInsets = WindowInsets(0.dp),
-                    topBar = { AppTopBar("Board", onSearch = openPalette, onSettings = openSettings) },
+                TabScaffold(
+                    title = "Board",
+                    onSearch = openPalette,
+                    onSettings = openSettings,
                     floatingActionButton = {
                         FloatingActionButton(
                             onClick = { showNewSession = true },
@@ -328,7 +320,7 @@ private fun CockpitAppNav(
                             val cwd = agent.cwd
                             if (cwd != null) {
                                 reviewViewModel.selectRepo(cwd)
-                                onTab(Routes.REVIEW)
+                                onTab(Destination.Review.route)
                             }
                         },
                         onCloseAgent = { agent -> boardViewModel.closeAgent(agent.paneId) },
@@ -347,7 +339,7 @@ private fun CockpitAppNav(
                     )
                 }
             }
-            composable(Routes.SESSIONS) {
+            composable(Destination.Sessions.route) {
                 val historyViewModel: SessionHistoryViewModel = viewModel(
                     factory = viewModelFactory<SessionHistoryViewModel> { app ->
                         SessionHistoryViewModel(
@@ -357,9 +349,10 @@ private fun CockpitAppNav(
                         )
                     },
                 )
-                Scaffold(
-                    contentWindowInsets = WindowInsets(0.dp),
-                    topBar = { AppTopBar("Sessions", onSearch = openPalette, onSettings = openSettings) },
+                TabScaffold(
+                    title = "Sessions",
+                    onSearch = openPalette,
+                    onSettings = openSettings,
                 ) { innerSessions ->
                     HistoryScreen(
                         onOpenSession = { resumed ->
@@ -367,7 +360,7 @@ private fun CockpitAppNav(
                         },
                         onReview = { item ->
                             reviewViewModel.selectRepo(item.session.cwd)
-                            onTab(Routes.REVIEW)
+                            onTab(Destination.Review.route)
                         },
                         viewModel = historyViewModel,
                         modifier = Modifier.padding(innerSessions),
@@ -421,15 +414,16 @@ private fun CockpitAppNav(
                     onBack = { navController.popBackStack() },
                 )
             }
-            composable(Routes.USAGE) {
+            composable(Destination.Usage.route) {
                 val usageViewModel: UsageViewModel = viewModel(
                     factory = viewModelFactory<UsageViewModel> { app ->
                         UsageViewModel(app.container.bridge)
                     },
                 )
-                Scaffold(
-                    contentWindowInsets = WindowInsets(0.dp),
-                    topBar = { AppTopBar("Usage", onSearch = openPalette, onSettings = openSettings) },
+                TabScaffold(
+                    title = "Usage",
+                    onSearch = openPalette,
+                    onSettings = openSettings,
                 ) { innerUsage ->
                     UsageScreen(
                         viewModel = usageViewModel,
@@ -437,11 +431,12 @@ private fun CockpitAppNav(
                     )
                 }
             }
-            composable(Routes.REVIEW) {
+            composable(Destination.Review.route) {
                 // Shared with the Sessions swipe action; see the hoisted instance above.
-                Scaffold(
-                    contentWindowInsets = WindowInsets(0.dp),
-                    topBar = { AppTopBar("Review", onSearch = openPalette, onSettings = openSettings) },
+                TabScaffold(
+                    title = "Review",
+                    onSearch = openPalette,
+                    onSettings = openSettings,
                 ) { innerReview ->
                     ReviewScreen(
                         viewModel = reviewViewModel,
@@ -589,34 +584,3 @@ private fun CockpitTab(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun AppTopBar(
-    title: String,
-    onSearch: (() -> Unit)? = null,
-    onSettings: (() -> Unit)? = null,
-) {
-    TopAppBar(
-        title = { Text(title) },
-        // The outer Scaffold already consumes the status-bar inset for the whole
-        // NavHost, so the bar must not add its own or the two stack into a ~48dp
-        // dead band under the clock — the top-edge twin of the bottom-nav band
-        // that contentWindowInsets = WindowInsets(0.dp) removed below.
-        windowInsets = WindowInsets(0.dp),
-        colors = TopAppBarDefaults.topAppBarColors(
-            containerColor = MaterialTheme.colorScheme.background,
-        ),
-        actions = {
-            if (onSearch != null) {
-                IconButton(onClick = onSearch) {
-                    Icon(Icons.Default.Search, contentDescription = "Search agents and sessions")
-                }
-            }
-            if (onSettings != null) {
-                IconButton(onClick = onSettings) {
-                    Icon(Icons.Default.Settings, contentDescription = "Settings")
-                }
-            }
-        },
-    )
-}

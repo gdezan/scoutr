@@ -42,10 +42,11 @@ kept truthful as work lands. The final column of each row carries commit hashes.
 | 06 | `Poller` + tests; four loops migrated | SHIPPED | fad4d24 | `state/Poller.kt`; Board (3s), SessionHistory (8s), Chat (2.5s), Usage (10s) use it; `PollerTest` (immediate tick, restart cancels, stop, scope death) | | |
 | 06 | `Loadable` + `FailureKind` (from `BridgeException`); VMs migrated; offline rule explicit | SHIPPED | fad4d24 | `state/Loadable.kt`; Usage/Connect/Board/SessionHistory/Chat/Review migrated per-field; Usage chart-never-blanks rule explicit in `UsageViewModel` + test | | |
 | 06 | `viewModelFactory` helper; eight factories collapsed | SHIPPED | fad4d24 | `state/ViewModelFactory.kt`; Board/Chat/Connect/SessionHistory collapsed; CommandPalette/LiveOutput/NewSession/Review retained by decision (blast radius) | | |
-| 07 | `Destination` in `ui/nav/Destination.kt` with `routes`/`forRoute` | PENDING AUDIT | | | | | |
-| 07 | Bottom-bar check derived; `Routes` trimmed | PENDING AUDIT | | | | | |
-| 07 | `TabScaffold` extracted; four tabs use it | PENDING AUDIT | | | | | |
-| 07 | Unit tests (routes/forRoute) + NavHost graph test | PENDING AUDIT | | | | | |
+| 07 | `Destination` in `ui/nav/Destination.kt` with `routes`/`forRoute` | SHIPPED | ui/nav/Destination.kt: enum Board/Sessions/Usage/Review with `routes` set + `forRoute`; Routes in MainActivity trimmed to connect/chat/live/settings | | | | | | |
+| 07 | Bottom-bar check derived; `Routes` trimmed | SHIPPED | CockpitAppNav bar visibility is `currentRoute in Destination.routes`; tab routes flow through `Destination.X.route` everywhere (startDestination, popUpTo, composable(), onTab) | | | | | | |
+| 07 | `TabScaffold` extracted; four tabs use it | SHIPPED | ui/nav/TabScaffold.kt (zero-inset Scaffold + AppTopBar, optional FAB slot); Board/Sessions/Usage/Review blocks all use it; AppTopBar moved to ui/components/AppTopBar.kt (was private in MainActivity) | | | | | | |
+| 07 | Unit tests (routes/forRoute) + NavHost graph test | SHIPPED | DestinationTest (4 unit tests); NavHostGraphTest launches the real MainActivity (seeded connection + monitoring reset), asserts 4 tabs and tap-through; inset contract verified structurally + on-device (GMD 89/89) | | |
+| 07 | POST_NOTIFICATIONS gated on monitoring (test blocker fix) | SHIPPED | MainActivity requests the permission only when MonitoringStore.enabled; Settings toggle requests it before starting the FGS (was: dialog on every cold start, and a FGS SecurityException if granted never arrived); enables real-activity NavHost tests | | | | | |
 
 ## Requirement matrix — implementation plans (plans/)
 
