@@ -1,6 +1,6 @@
 import { basename, isAbsolute, relative, resolve } from "node:path";
 import { canonicalPath } from "../dirs.js";
-import { entryText, inspectSessionFile, type TranscriptEntry } from "../transcript.js";
+import { entryText, inspectSessionFile, type SessionFileInfo, type Transcript, type TranscriptEntry } from "../transcript.js";
 import type { QuestionEntry } from "../questions.js";
 import { backendForSessionPath } from "../agents/registry.js";
 import { createSession, controlSession } from "../sessions.js";
@@ -26,6 +26,40 @@ interface SessionReadResult {
   preview?: string;
   lastEntryId: string | null;
   mtimeMs: number;
+}
+
+/**
+ * Memo of parsed transcripts keyed by (mtimeMs, size) — the same shape as
+ * BoardDetailCache. The chat poll runs every 2.5s while a session is open; in
+ * the steady state (file unchanged) a request now costs one stat instead of
+ * a full read and parse of a multi-MB file. Entries are never mutated by
+ * callers: cursor slicing creates new arrays and extractQuestions only reads.
+ */
+interface TranscriptMemoEntry {
+  mtimeMs: number;
+  size: number;
+  transcript: Transcript;
+}
+
+const TRANSCRIPT_MEMO_CAP = 8;
+const transcriptMemo = new Map<string, TranscriptMemoEntry>();
+
+async function readTranscriptMemoized(
+  target: string,
+  backend: NonNullable<ReturnType<typeof backendForSessionPath>>,
+  info: SessionFileInfo,
+): Promise<Transcript> {
+  const cached = transcriptMemo.get(target);
+  if (cached && cached.mtimeMs === info.mtimeMs && cached.size === info.size) {
+    return cached.transcript;
+  }
+  const transcript = await backend.readTranscript(target);
+  transcriptMemo.set(target, { mtimeMs: info.mtimeMs, size: info.size, transcript });
+  if (transcriptMemo.size > TRANSCRIPT_MEMO_CAP) {
+    const oldest = transcriptMemo.keys().next().value;
+    if (oldest !== undefined) transcriptMemo.delete(oldest);
+  }
+  return transcript;
 }
 
 async function readSessionRoute(ctx: RouteContext): Promise<RouteResult> {
@@ -58,7 +92,7 @@ export async function readSession(pathParam: string, since: string | null): Prom
   if (!info.exists) {
     return { path: target, agentKind: backend.id, name: basename(target), exists: false, since, entries: [], questions: [], model: null, thinkingLevel: null, lastEntryId: null, mtimeMs: 0 };
   }
-  const session = await backend.readTranscript(target);
+  const session = await readTranscriptMemoized(target, backend, info);
   let entries = session.entries;
   let cursor: string | null = since;
   if (since) {

@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import WebSocket from "ws";
 import { createCockpitServer, type CockpitServer } from "../src/server.js";
+import { REVIEW_ROOTS_TTL_MS } from "../src/routes/review.js";
 import type { AgentInfo, SessionSnapshot } from "../src/herdr/types.js";
 import { fakeHerdr } from "./support/fake-herdr.js";
 import { fakeFeed } from "./support/fake-feed.js";
@@ -313,11 +314,16 @@ describe("cockpit bridge HTTP/WS API (offline)", () => {
     assert.equal(status, 200, JSON.stringify(body));
     assert.equal((body as { ok: boolean }).ok, true);
     // Rewrite the completed session's cwd to a non-repo path ($HOME-like):
-    // the repo must no longer be reachable through it.
+    // the repo must no longer be reachable through it. The implicit-root
+    // allow-list is TTL-cached (plan 003), so the stale root stays allowed
+    // inside the window and revocation lands once the cache expires.
     await writeFile(
       join(sessionDir, "session.jsonl"),
       JSON.stringify({ type: "session", version: 3, id: "completed-session", timestamp: "2026-01-02T00:00:00.000Z", cwd: "/home" }),
     );
+    const withinWindow = await getJson(`/api/repo?path=${encodeURIComponent(repo)}`);
+    assert.equal(withinWindow.status, 200, "stale cached roots still allow the repo inside the TTL window");
+    await new Promise((resolve) => setTimeout(resolve, REVIEW_ROOTS_TTL_MS + 250));
     const denied = await getJson(`/api/repo?path=${encodeURIComponent(repo)}`);
     assert.equal(denied.status, 403, JSON.stringify(denied.body));
   });

@@ -11,6 +11,29 @@ export const reviewRoutes: Route[] = [
 ];
 
 /**
+ * A cwd's git repository root does not move while the workspace exists, so
+ * git resolution is memoized per canonical cwd. Each entry is the result of
+ * a git subprocess, which the catalog can otherwise spawn hundreds of times
+ * per scan.
+ */
+const GIT_ROOT_MEMO_CAP = 500;
+const gitRootMemo = new Map<string, string | null>();
+
+function gitRepoRootCached(cwd: string): Promise<string | null> {
+  const canonical = canonicalPath(cwd);
+  const cached = gitRootMemo.get(canonical);
+  if (cached !== undefined) return Promise.resolve(cached);
+  return gitRepoRoot(canonical).then((root) => {
+    gitRootMemo.set(canonical, root);
+    if (gitRootMemo.size > GIT_ROOT_MEMO_CAP) {
+      const oldest = gitRootMemo.keys().next().value;
+      if (oldest !== undefined) gitRootMemo.delete(oldest);
+    }
+    return root;
+  });
+}
+
+/**
  * Distinct realpaths of every agent workspace currently tracked by the
  * bridge. These are the implicit review roots for fix 5: the user already
  * authorizes an agent to run in each, so read-only git review of the same
@@ -26,29 +49,64 @@ export async function sessionWorkspaceRoots(
   snapshot: SessionSnapshot | null,
   catalogCwds: string[] = [],
 ): Promise<string[]> {
-  const seen = new Set<string>();
-  const roots: string[] = [];
-  const add = async (cwd: string | null | undefined) => {
-    if (!cwd) return;
-    const repoRoot = await gitRepoRoot(cwd);
-    if (!repoRoot) return;
-    const canonical = canonicalPath(repoRoot);
-    if (!seen.has(canonical)) {
-      seen.add(canonical);
-      roots.push(canonical);
-    }
-  };
+  // Collect every candidate cwd first, then resolve the repo roots in
+  // parallel — sequential awaits made each cwd wait on the previous git
+  // subprocess, and the review screen can present hundreds of sessions.
+  const cwds: string[] = [];
   if (snapshot) {
     for (const agent of snapshot.agents) {
-      await add(agent.cwd);
-      await add(agent.foreground_cwd);
+      if (agent.cwd) cwds.push(agent.cwd);
+      if (agent.foreground_cwd) cwds.push(agent.foreground_cwd);
     }
   }
-  for (const cwd of catalogCwds) await add(cwd);
-  return roots;
+  cwds.push(...catalogCwds);
+  const roots = await Promise.all(cwds.map((cwd) => gitRepoRootCached(cwd)));
+  const seen = new Set<string>();
+  const deduped: string[] = [];
+  for (const root of roots) {
+    if (!root) continue;
+    const canonical = canonicalPath(root);
+    if (!seen.has(canonical)) {
+      seen.add(canonical);
+      deduped.push(canonical);
+    }
+  }
+  return deduped;
 }
 
+/**
+ * The implicit-root derivation (full catalog scan + per-cwd git resolution)
+ * is cached for a short TTL because the Review screen fires all three routes
+ * on open. The TTL must stay ≤ a few seconds: the root set is a security
+ * allow-list, and a stale entry would keep a closed workspace reviewable.
+ */
+const REVIEW_ROOTS_TTL_MS = 2_000;
+export { REVIEW_ROOTS_TTL_MS };
+let reviewRootsCache: string[] | null = null;
+let reviewRootsCachedAt = 0;
+/** In-flight computation shared by concurrent first-wave requests. */
+let reviewRootsInFlight: Promise<string[]> | null = null;
+
 async function reviewRoots(ctx: RouteContext): Promise<string[]> {
+  const now = Date.now();
+  if (reviewRootsCache && now - reviewRootsCachedAt < REVIEW_ROOTS_TTL_MS) {
+    return reviewRootsCache;
+  }
+  if (!reviewRootsInFlight) {
+    reviewRootsInFlight = computeReviewRoots(ctx)
+      .then((roots) => {
+        reviewRootsCache = roots;
+        reviewRootsCachedAt = Date.now();
+        return roots;
+      })
+      .finally(() => {
+        reviewRootsInFlight = null;
+      });
+  }
+  return reviewRootsInFlight;
+}
+
+async function computeReviewRoots(ctx: RouteContext): Promise<string[]> {
   // Live agent workspaces AND any bridge-known session workspace are
   // implicitly allowed: the user already authorized an agent to run in
   // that cwd (active or historical), so read-only git review adds no

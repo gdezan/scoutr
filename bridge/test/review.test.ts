@@ -1,7 +1,10 @@
-import test from "node:test";
+import test, { describe } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { execFileSync } from "node:child_process";
+import { createCockpitServer, type CockpitServer } from "../src/server.js";
+import { fakeHerdr } from "./support/fake-herdr.js";
+import { REVIEW_ROOTS_TTL_MS } from "../src/routes/review.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -231,4 +234,91 @@ test("caps bound status entries, log size, and diff bytes", async () => {
   assert.ok(REVIEW_LOG_MAX >= 1);
   const result = await reviewDiff(repoRoot, "HEAD");
   assert.ok(Buffer.byteLength(result.diff, "utf8") <= REVIEW_DIFF_MAX_BYTES);
+});
+
+describe("review roots TTL", () => {
+  const PORT = 8793;
+  const TOKEN = "test_token_for_review_ttl_0001";
+  let server: CockpitServer;
+  let sessionRoot: string;
+  let repoDir: string;
+
+  test.before(async () => {
+    // A real repo outside COCKPIT_REPO_ROOTS, allowed only through the
+    // implicit roots derived from a session workspace.
+    repoDir = await mkdtemp(join(tmpdir(), "cockpit-review-ttl-repo-"));
+    execFileSync("git", ["init", "-q", "-b", "main", repoDir]);
+    execFileSync("git", ["config", "user.email", "test@cockpit.dev"], { cwd: repoDir });
+    execFileSync("git", ["config", "user.name", "Cockpit Test"], { cwd: repoDir });
+    await writeFile(join(repoDir, "a.txt"), "hello\n");
+    execFileSync("git", ["add", "."], { cwd: repoDir });
+    execFileSync("git", ["commit", "-q", "-m", "initial"], { cwd: repoDir });
+
+    sessionRoot = await mkdtemp(join(tmpdir(), "cockpit-review-ttl-sessions-"));
+    process.env.PI_CODING_AGENT_SESSION_DIR = sessionRoot;
+    process.env.CLAUDECONFIGDIR = await mkdtemp(join(tmpdir(), "cockpit-review-ttl-claude-"));
+    const project = join(sessionRoot, "project");
+    await mkdir(project, { recursive: true });
+    await writeFile(
+      join(project, "session.jsonl"),
+      `${JSON.stringify({ type: "session", version: 3, id: "ttl-session", timestamp: "2026-01-01T00:00:00.000Z", cwd: repoDir })}\n`,
+    );
+
+    const fake = fakeHerdr();
+    const feed = { onMessage: () => {}, removeMessage: () => {}, stop: async () => {}, start: async () => {} };
+    server = createCockpitServer(
+      {
+        herdr: fake,
+        feed: feed as never,
+        usage: { all: async () => ({}) } as never,
+        config: { token: TOKEN, port: PORT },
+      },
+      { listen: true },
+    );
+  });
+
+  test.after(async () => {
+    await server.close();
+    await rm(sessionRoot, { recursive: true, force: true });
+  });
+
+  async function repoGet(path: string): Promise<{ status: number; data: any }> {
+    const response = await fetch(`http://127.0.0.1:${PORT}${path}`, {
+      headers: { authorization: `Bearer ${TOKEN}` },
+    });
+    return { status: response.status, data: await response.json() };
+  }
+
+  test("cached roots survive a workspace removal within the TTL and expire after it", async () => {
+  test("concurrent review requests share the roots computation", async () => {
+    // The Review screen's open burst (overview + artifacts + diff): all three
+    // requests can arrive while the first is still computing. The in-flight
+    // coalescing must share one catalog scan across the burst, and every
+    // request must see the same result.
+    const [a, b, c] = await Promise.all([
+      repoGet(`/api/repo?path=${encodeURIComponent(repoDir)}`),
+      repoGet(`/api/repo?path=${encodeURIComponent(repoDir)}`),
+      repoGet(`/api/repo?path=${encodeURIComponent(repoDir)}`),
+    ]);
+    assert.equal(a.status, 200, JSON.stringify(a.data));
+    assert.equal(b.status, 200, JSON.stringify(b.data));
+    assert.equal(c.status, 200, JSON.stringify(c.data));
+  });
+
+    // First call derives the implicit root from the catalog (one scan).
+    const first = await repoGet(`/api/repo?path=${encodeURIComponent(repoDir)}`);
+    assert.equal(first.status, 200, "repo must be reviewable while the session exists");
+
+    // Remove the only catalog evidence of the workspace; the cached root set
+    // must still allow the repo within the TTL window.
+    await rm(join(sessionRoot, "project", "session.jsonl"));
+    const withinTtl = await repoGet(`/api/repo?path=${encodeURIComponent(repoDir)}`);
+    assert.equal(withinTtl.status, 200, "cached roots must stay effective inside the TTL");
+
+    // Once the TTL passes, the allow-list must be rebuilt without the
+    // removed workspace.
+    await new Promise((resolve) => setTimeout(resolve, REVIEW_ROOTS_TTL_MS + 250));
+    const expired = await repoGet(`/api/repo?path=${encodeURIComponent(repoDir)}`);
+    assert.equal(expired.status, 403, "expired TTL must drop the removed workspace");
+  });
 });

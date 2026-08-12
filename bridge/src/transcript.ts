@@ -158,8 +158,16 @@ async function readSlice(
 ): Promise<string> {
   if (length <= 0) return "";
   const buffer = Buffer.alloc(length);
-  await handle.read(buffer, 0, length, start);
-  return buffer.toString("utf8");
+  // A read may return fewer bytes than requested (short read); loop until the
+  // window is full or EOF, then slice off any unused tail so no NUL padding
+  // reaches the JSON parser.
+  let total = 0;
+  while (total < length) {
+    const { bytesRead } = await handle.read(buffer, total, length - total, start + total);
+    if (bytesRead === 0) break;
+    total += bytesRead;
+  }
+  return buffer.subarray(0, total).toString("utf8");
 }
 
 function dropPartialFirstLine(text: string): string {

@@ -1,4 +1,5 @@
 import { basename, isAbsolute, relative, resolve } from "node:path";
+import type { Dirent } from "node:fs";
 import { readdir, realpath, stat, unlink } from "node:fs/promises";
 import { BridgeError } from "./errors.js";
 import { MAX_SESSION_TITLE_LENGTH } from "./transcript.js";
@@ -50,6 +51,7 @@ export interface ListSessionCatalogOptions {
 interface SessionFile {
   path: string;
   mtimeMs: number;
+  size: number;
 }
 
 interface ParsedCatalogFile {
@@ -60,6 +62,21 @@ interface ParsedCatalogFile {
   createdAt: number;
   model: string | null;
 }
+
+/**
+ * Memo of parsed catalog metadata keyed by (mtimeMs, size) — an unchanged
+ * store costs 500 stats and zero reads per listSessionCatalog call instead
+ * of up to ~96 MB of window reads. The history screen polls every 8s and the
+ * command palette per debounced keystroke.
+ */
+interface CatalogMemoEntry {
+  mtimeMs: number;
+  size: number;
+  parsed: (ParsedCatalogFile & { agentKind: string }) | null;
+}
+
+const CATALOG_MEMO_CAP = 600; // just above MAX_SCANNED_FILES
+const catalogMemo = new Map<string, CatalogMemoEntry>();
 
 export class SessionCatalogError extends BridgeError {
   constructor(message: string, status = 400) {
@@ -140,8 +157,12 @@ export async function listSessionCatalog(options: ListSessionCatalogOptions = {}
   const paths = new Map(candidates.map((file) => [file.path, file]));
   for (const path of activeByPath.keys()) {
     if (paths.has(path)) continue;
-    const info = await stat(path);
-    if (info.isFile()) paths.set(path, { path, mtimeMs: info.mtimeMs });
+    try {
+      const info = await stat(path);
+      if (info.isFile()) paths.set(path, { path, mtimeMs: info.mtimeMs, size: info.size });
+    } catch {
+      continue; // not on disk yet — treat as inactive
+    }
   }
 
   const files = [...paths.values()].sort((a, b) => b.mtimeMs - a.mtimeMs);
@@ -209,7 +230,12 @@ async function scanRoot(root: string, files: SessionFile[], stopAt: number): Pro
       continue;
     }
     if (!entry.isDirectory()) continue;
-    const children = await readdir(path, { withFileTypes: true });
+    let children: Dirent[];
+    try {
+      children = await readdir(path, { withFileTypes: true });
+    } catch {
+      continue; // unreadable directory — skip it
+    }
     for (const child of children) {
       if (files.length >= stopAt) break;
       if (child.isFile() && child.name.endsWith(".jsonl")) {
@@ -220,10 +246,15 @@ async function scanRoot(root: string, files: SessionFile[], stopAt: number): Pro
 }
 
 async function addSessionFile(root: string, path: string, files: SessionFile[]): Promise<void> {
-  const canonical = await realpath(path);
-  if (!isInside(root, canonical)) return;
-  const info = await stat(canonical);
-  if (info.isFile()) files.push({ path: canonical, mtimeMs: info.mtimeMs });
+  try {
+    const canonical = await realpath(path);
+    if (!isInside(root, canonical)) return;
+    const info = await stat(canonical);
+    if (info.isFile()) files.push({ path: canonical, mtimeMs: info.mtimeMs, size: info.size });
+  } catch {
+    // Vanished file, dangling link, EPERM: a bad entry must never abort the
+    // whole scan (that 500s the Sessions tab).
+  }
 }
 
 /**
@@ -235,23 +266,35 @@ async function addSessionFile(root: string, path: string, files: SessionFile[]):
 async function readCatalogFile(file: SessionFile): Promise<(ParsedCatalogFile & { agentKind: string }) | null> {
   const backend = backendForSessionPath(file.path);
   if (!backend) return null;
+  const cached = catalogMemo.get(file.path);
+  if (cached && cached.mtimeMs === file.mtimeMs && cached.size === file.size) {
+    return cached.parsed;
+  }
   const transcript = await backend.readTranscript(file.path, { metadataOnly: true });
-  if (!transcript.id || !transcript.cwd) return null;
-  const createdAt = Date.parse(transcript.timestamp);
-  const preview = transcript.preview;
-  return {
-    id: transcript.id,
-    agentKind: backend.id,
-    cwd: transcript.cwd,
-    title:
-      transcript.title
-      || preview.slice(0, MAX_SESSION_TITLE_LENGTH)
-      || basename(transcript.cwd)
-      || "Untitled session",
-    preview,
-    createdAt: Number.isFinite(createdAt) ? createdAt : file.mtimeMs,
-    model: transcript.model,
-  };
+  let parsed: (ParsedCatalogFile & { agentKind: string }) | null = null;
+  if (transcript.id && transcript.cwd) {
+    const createdAt = Date.parse(transcript.timestamp);
+    const preview = transcript.preview;
+    parsed = {
+      id: transcript.id,
+      agentKind: backend.id,
+      cwd: transcript.cwd,
+      title:
+        transcript.title
+        || preview.slice(0, MAX_SESSION_TITLE_LENGTH)
+        || basename(transcript.cwd)
+        || "Untitled session",
+      preview,
+      createdAt: Number.isFinite(createdAt) ? createdAt : file.mtimeMs,
+      model: transcript.model,
+    };
+  }
+  catalogMemo.set(file.path, { mtimeMs: file.mtimeMs, size: file.size, parsed });
+  if (catalogMemo.size > CATALOG_MEMO_CAP) {
+    const oldest = catalogMemo.keys().next().value;
+    if (oldest !== undefined) catalogMemo.delete(oldest);
+  }
+  return parsed;
 }
 
 function catalogSearchText(session: CatalogSession): string {

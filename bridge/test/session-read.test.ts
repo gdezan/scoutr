@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync, appendFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { readSession } from "../src/routes/sessions.js";
@@ -89,6 +89,39 @@ test("readSession rejects paths outside the agent root", async () => {
       () => readSession(`${agentDir}-evil/session.jsonl`, null),
       /outside a registered session store/,
     );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("readSession serves an unchanged file from the transcript memo", async () => {
+  const { dir, agentDir, file } = fixtureDir();
+  process.env.PI_CODING_AGENT_DIR = agentDir;
+  try {
+    const first = await readSession(file, null);
+    const second = await readSession(file, null);
+    // The memo reuses the parsed Transcript: entries are the same objects,
+    // not a re-parse (the 2.5s poll steady state must cost one stat, not a
+    // full read + JSON parse).
+    assert.equal(first.entries[0], second.entries[0]);
+    assert.deepEqual(second.entries, first.entries);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("readSession drops the memo when the file grows", async () => {
+  const { dir, agentDir, file } = fixtureDir();
+  process.env.PI_CODING_AGENT_DIR = agentDir;
+  try {
+    await readSession(file, null);
+    appendFileSync(
+      file,
+      `{"type":"message","id":"cafe1234","parentId":null,"timestamp":"2026-08-09T16:39:56Z","message":{"role":"user","content":[{"type":"text","text":"m6"}]}}\n`,
+    );
+    const result = await readSession(file, null);
+    assert.equal(result.entries.length, 6);
+    assert.equal(result.entries[5].entryId, "cafe1234");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

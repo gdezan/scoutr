@@ -199,6 +199,22 @@ describe("readTranscript", () => {
     assert.deepEqual(transcript.entries.map((entry) => entry.entryId), ["e1", "e2", "e3"]);
   });
 
+  it("readTranscriptText returns exactly the file bytes (no NUL padding on short reads)", async () => {
+    // readSlice used to ignore bytesRead: a read that returned fewer bytes
+    // than requested left NUL padding in the buffer, inflating the decoded
+    // length past the file size. The fix loops until the window is full and
+    // slices the buffer to the total actually read.
+    const path = join(dir, "exact.jsonl");
+    await writeFile(path, SAMPLE);
+    const text = await readTranscriptText(path);
+    assert.equal(
+      Buffer.byteLength(text, "utf8"),
+      (await readFile(path)).length,
+      "decoded text must equal the file length byte for byte",
+    );
+    assert.equal(parsePiTranscript(text).entries.length, 3);
+  });
+
   it("tail mode reads only a bounded window from the end", async () => {
     const path = await writeWideFile("wide-tail.jsonl");
     const transcript = await readTranscript(path, { tail: 40 });

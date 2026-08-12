@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, symlink, utimes, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, mkdir, symlink, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
@@ -199,5 +199,69 @@ describe("session catalog", () => {
     const root = await newCatalogRoot();
     await assert.rejects(() => listSessionCatalog({ roots: [root], limit: 0 }), SessionCatalogError);
     await assert.rejects(() => listSessionCatalog({ roots: [root], query: "bad\nquery" }), SessionCatalogError);
+  });
+
+  it("tolerates a dangling symlink inside a root", async () => {
+    const root = await newCatalogRoot();
+    await writeSession(
+      root,
+      "project",
+      "good.jsonl",
+      [sessionLine("good", "/work/good", "2026-01-01T00:00:00.000Z")],
+      "2026-01-01T00:00:00.000Z",
+    );
+    await symlink(join(root, "project", "ghost.jsonl"), join(root, "project", "dangling.jsonl"));
+
+    const result = await listSessionCatalog({ roots: [root] });
+    assert.deepEqual(result.sessions.map((s) => s.id), ["good"], "a bad entry must not fail the whole listing");
+  });
+
+  it("skips an unreadable subdirectory instead of failing the listing", async (t) => {
+    if (typeof process.getuid === "function" && process.getuid() === 0) {
+      t.skip("running as root; chmod 0o000 is not an obstacle");
+      return;
+    }
+    const root = await newCatalogRoot();
+    await writeSession(
+      root,
+      "project",
+      "good.jsonl",
+      [sessionLine("good", "/work/good", "2026-01-01T00:00:00.000Z")],
+      "2026-01-01T00:00:00.000Z",
+    );
+    const locked = join(root, "locked");
+    await mkdir(locked);
+    await chmod(locked, 0o000);
+    try {
+      const result = await listSessionCatalog({ roots: [root] });
+      assert.deepEqual(result.sessions.map((s) => s.id), ["good"], "the locked directory must be skipped");
+    } finally {
+      await chmod(locked, 0o755);
+    }
+  });
+
+  it("serves an unchanged store from the catalog memo", async () => {
+    const root = await newCatalogRoot();
+    await writeSession(
+      root,
+      "project",
+      "one.jsonl",
+      [sessionLine("one", "/work/one", "2026-01-01T00:00:00.000Z"), userLine("First prompt")],
+      "2026-01-02T00:00:00.000Z",
+    );
+    const first = await listSessionCatalog({ roots: [root] });
+    const second = await listSessionCatalog({ roots: [root] });
+    assert.deepEqual(second.sessions, first.sessions, "an unchanged store must return identical metadata");
+
+    // A new file shifts the mtime+size keys, so the memo must be bypassed.
+    await writeSession(
+      root,
+      "project",
+      "two.jsonl",
+      [sessionLine("two", "/work/two", "2026-01-02T00:00:00.000Z"), userLine("Second prompt")],
+      "2026-01-03T00:00:00.000Z",
+    );
+    const third = await listSessionCatalog({ roots: [root] });
+    assert.deepEqual(third.sessions.map((s) => s.id), ["two", "one"]);
   });
 });
