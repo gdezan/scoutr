@@ -13,7 +13,7 @@ These plans complement (and never duplicate) the architecture plans in
 | Plan | Title | Priority | Effort | Depends on | Status |
 |------|-------|----------|--------|------------|--------|
 | 001 | Make the bridge survive herdr restarts and client disconnects | P1 | M | — | DONE |
-| 002 | Stop leaking and silently rotating the pairing token | P1 | S | — | TODO |
+| 002 | Stop leaking and silently rotating the pairing token | P1 | S | — | DONE |
 | 003 | Stop re-reading whole transcript stores on every poll | P1 | M | — | TODO |
 | 004 | Harden the WS/control surface and test real question answering | P1 | M | 003 | TODO |
 | 005 | Lifecycle-scope Android polling; cancellation-safe catches; validate pushed deep links | P2 | M | — | TODO |
