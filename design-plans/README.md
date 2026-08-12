@@ -8,7 +8,7 @@ Execute in the order below unless dependencies say otherwise. Each executor must
 
 | Plan | Title | Priority | Effort | Depends on | Status |
 |------|-------|----------|--------|------------|--------|
-| 001 | Keep folder confirmation visible throughout browsing | P1 | S | — | TODO |
+| 001 | Keep folder confirmation visible throughout browsing | P1 | S | — | DONE |
 | 002 | Make command-palette targets readable and Close safe | P1 | S | — | TODO |
 | 003 | Expose Board card actions without requiring a hidden swipe | P1 | S | — | TODO |
 | 004 | Make negative provider balances unmistakable | P2 | S | — | TODO |

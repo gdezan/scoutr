@@ -140,7 +140,10 @@ internal fun FolderPickerDialog(
     onDismiss: () -> Unit,
 ) {
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Surface(color = MaterialTheme.colorScheme.background, modifier = Modifier.fillMaxSize().navigationBarsPadding()) {
+        Surface(
+            color = MaterialTheme.colorScheme.background,
+            modifier = Modifier.fillMaxSize().navigationBarsPadding().testTag("folder_picker"),
+        ) {
             Column {
                 PickerHeader("Choose a folder", onDismiss)
                 Row(
@@ -160,30 +163,32 @@ internal fun FolderPickerDialog(
                     )
                 }
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                when {
-                    ui.loadingDirs -> PickerLoading()
-                    ui.folderError != null -> PickerError(ui.folderError, viewModel::retryFolders)
-                    ui.dirs.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Text("No subfolders", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                    else -> LazyColumn(
-                        modifier = Modifier.fillMaxSize().testTag("folder_list"),
-                        contentPadding = androidx.compose.foundation.layout.PaddingValues(12.dp),
-                    ) {
-                        items(ui.dirs, key = { it }) { folder ->
-                            Surface(
-                                onClick = { viewModel.enterDir(folder) },
-                                color = Color.Transparent,
-                                shape = RoundedCornerShape(10.dp),
-                                modifier = Modifier.fillMaxWidth().testTag("folder_item_$folder"),
-                            ) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp).padding(horizontal = 12.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
+                Box(Modifier.weight(1f).fillMaxWidth()) {
+                    when {
+                        ui.loadingDirs -> PickerLoading()
+                        ui.folderError != null -> PickerError(ui.folderError, viewModel::retryFolders)
+                        ui.dirs.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Text("No subfolders", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        else -> LazyColumn(
+                            modifier = Modifier.fillMaxSize().testTag("folder_list"),
+                            contentPadding = androidx.compose.foundation.layout.PaddingValues(12.dp),
+                        ) {
+                            items(ui.dirs, key = { it }) { folder ->
+                                Surface(
+                                    onClick = { viewModel.enterDir(folder) },
+                                    color = Color.Transparent,
+                                    shape = RoundedCornerShape(10.dp),
+                                    modifier = Modifier.fillMaxWidth().testTag("folder_item_$folder"),
                                 ) {
-                                    Icon(Icons.Default.Folder, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                                    Spacer(Modifier.width(12.dp))
-                                    Text(folder, fontFamily = FontFamily.Monospace, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp).padding(horizontal = 12.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        Icon(Icons.Default.Folder, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        Spacer(Modifier.width(12.dp))
+                                        Text(folder, fontFamily = FontFamily.Monospace, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    }
                                 }
                             }
                         }

@@ -1,23 +1,27 @@
 package dev.cockpit.app.ui
 
+import android.graphics.Bitmap
+import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
-import androidx.compose.ui.test.assertCountEquals
-import org.junit.Assert.assertTrue
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasTestTag
-import androidx.compose.ui.test.junit4.createComposeRule
+import org.junit.Assert.assertTrue
+import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextInput
+import androidx.test.platform.app.InstrumentationRegistry
 import dev.cockpit.app.data.ConnectionStore
 import dev.cockpit.app.data.SharedPreferencesLauncherSettingsStore
 import dev.cockpit.app.net.BridgeClient
 import dev.cockpit.app.state.NewSessionViewModel
 import dev.cockpit.app.ui.screens.NewSessionSheet
-import androidx.test.platform.app.InstrumentationRegistry
 import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
@@ -25,7 +29,9 @@ import org.junit.After
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
+import java.io.File
 import java.util.concurrent.TimeUnit
+
 
 /**
  * Fast-launch behavior against a local mock bridge: focused pickers, create gating,
@@ -49,19 +55,33 @@ class NewSessionSheetTest {
         server.shutdown()
     }
 
-    private fun stubEndpoints(home: String, dev: String, models: String, create: String? = null) {
+    private fun stubEndpoints(
+        home: String,
+        dev: String,
+        models: String,
+        create: String? = null,
+        devDelayMillis: Long = 0,
+    ) {
         server.dispatcher = object : okhttp3.mockwebserver.Dispatcher() {
             override fun dispatch(request: okhttp3.mockwebserver.RecordedRequest): MockResponse {
                 val path = (request.path ?: "").substringBefore('?')
+                val isDevRequest = path == "/api/dirs" && request.path?.contains("%2FDev") == true
                 val body = when {
-                    path == "/api/dirs" && request.path?.contains("%2FDev") == true -> dev
+                    isDevRequest -> dev
                     path == "/api/dirs" -> home
                     path == "/api/agents/kinds" -> """{"ok":true,"kinds":[{"id":"pi","displayName":"Pi","capabilities":["abort","retry","compact","fork","rename","close","set_model","set_thinking"],"hasModelCatalog":true,"hasSlashCommands":true}]}"""
                     path == "/api/models" -> models
                     path == "/api/sessions" -> create ?: """{"ok":false,"error":"not stubbed"}"""
                     else -> """{"ok":false,"error":"unexpected path $path"}"""
                 }
-                return MockResponse().setHeader("content-type", "application/json").setBody(body)
+                return MockResponse()
+                    .setHeader("content-type", "application/json")
+                    .setBody(body)
+                    .apply {
+                        if (isDevRequest && devDelayMillis > 0) {
+                            setBodyDelay(devDelayMillis, TimeUnit.MILLISECONDS)
+                        }
+                    }
             }
         }
     }
@@ -83,6 +103,104 @@ class NewSessionSheetTest {
         compose.waitUntil(timeoutMillis = 10_000) {
             compose.onAllNodes(hasTestTag(tag)).fetchSemanticsNodes().isNotEmpty()
         }
+    }
+
+    private fun capture(name: String) {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val directory = context.getExternalFilesDir(null) ?: error("External files directory unavailable")
+        val file = File(directory, "$name.png")
+        file.outputStream().use { output ->
+            compose.onNodeWithTag("folder_picker").captureToImage().asAndroidBitmap().compress(Bitmap.CompressFormat.PNG, 100, output)
+        }
+        println("SCREENSHOT[$name]=${file.absolutePath}")
+    }
+
+    @Test
+    fun folderPickerKeepsConfirmationVisibleWhileDirectoryListScrolls() {
+        val directories = (1..24).joinToString(",") { "\"folder-$it\"" }
+        stubEndpoints(
+            home = """{"ok":true,"listing":{"path":"/home/gdezan","dirs":[$directories]}}""",
+            dev = """{"ok":true,"listing":{"path":"/home/gdezan/Dev","dirs":[]}}""",
+            models = """{"ok":true,"catalog":{"providers":[]}}""",
+        )
+        val vm = NewSessionViewModel(bridge(), launcherSettingsStore())
+        compose.setContent {
+            androidx.compose.runtime.CompositionLocalProvider(
+                androidx.compose.ui.platform.LocalDensity provides androidx.compose.ui.unit.Density(1f, 1.3f),
+            ) {
+                NewSessionSheet(viewModel = vm, onDismiss = {}, onCreated = {})
+            }
+        }
+
+        waitFor("open_folder_picker")
+        compose.onNodeWithTag("open_folder_picker").performScrollTo().performClick()
+        waitFor("folder_list")
+        compose.onNodeWithTag("use_folder").assertIsDisplayed().assertIsEnabled()
+        capture("folder-picker-populated")
+
+        compose.onNodeWithTag("folder_list").performScrollToNode(hasTestTag("folder_item_folder-24"))
+        compose.onNodeWithTag("folder_item_folder-24").assertIsDisplayed()
+        compose.onNodeWithTag("use_folder").assertIsDisplayed()
+    }
+
+    @Test
+    fun folderPickerEmptyStateKeepsConfirmationVisible() {
+        stubEndpoints(
+            home = """{"ok":true,"listing":{"path":"/home/gdezan","dirs":[]}}""",
+            dev = """{"ok":true,"listing":{"path":"/home/gdezan/Dev","dirs":[]}}""",
+            models = """{"ok":true,"catalog":{"providers":[]}}""",
+        )
+        val vm = NewSessionViewModel(bridge(), launcherSettingsStore())
+        compose.setContent { NewSessionSheet(viewModel = vm, onDismiss = {}, onCreated = {}) }
+
+        waitFor("open_folder_picker")
+        compose.onNodeWithTag("open_folder_picker").performScrollTo().performClick()
+        compose.waitUntil(timeoutMillis = 10_000) { !vm.ui.value.loadingDirs }
+        compose.onNodeWithText("No subfolders").assertIsDisplayed()
+        compose.onNodeWithTag("use_folder").assertIsDisplayed().assertIsEnabled()
+        capture("folder-picker-empty")
+    }
+
+    @Test
+    fun folderPickerLoadingStateKeepsDisabledConfirmationVisible() {
+        stubEndpoints(
+            home = """{"ok":true,"listing":{"path":"/home/gdezan","dirs":["Dev"]}}""",
+            dev = """{"ok":true,"listing":{"path":"/home/gdezan/Dev","dirs":["agents-mobile"]}}""",
+            models = """{"ok":true,"catalog":{"providers":[]}}""",
+            devDelayMillis = 5_000,
+        )
+        val vm = NewSessionViewModel(bridge(), launcherSettingsStore())
+        compose.setContent { NewSessionSheet(viewModel = vm, onDismiss = {}, onCreated = {}) }
+
+        waitFor("open_folder_picker")
+        compose.onNodeWithTag("open_folder_picker").performScrollTo().performClick()
+        waitFor("folder_item_Dev")
+        compose.onNodeWithTag("folder_item_Dev").performClick()
+        compose.waitUntil(timeoutMillis = 2_000) { vm.ui.value.loadingDirs }
+        compose.onNodeWithTag("use_folder").assertIsDisplayed()
+        compose.onNodeWithTag("use_folder").assertIsNotEnabled()
+        capture("folder-picker-loading")
+    }
+
+    @Test
+    fun folderPickerErrorStateKeepsDisabledConfirmationVisible() {
+        stubEndpoints(
+            home = """{"ok":true,"listing":{"path":"/home/gdezan","dirs":["Dev"]}}""",
+            dev = """{"ok":false,"error":"Folder unavailable"}""",
+            models = """{"ok":true,"catalog":{"providers":[]}}""",
+        )
+        val vm = NewSessionViewModel(bridge(), launcherSettingsStore())
+        compose.setContent { NewSessionSheet(viewModel = vm, onDismiss = {}, onCreated = {}) }
+
+        waitFor("open_folder_picker")
+        compose.onNodeWithTag("open_folder_picker").performScrollTo().performClick()
+        waitFor("folder_item_Dev")
+        compose.onNodeWithTag("folder_item_Dev").performClick()
+        compose.waitUntil(timeoutMillis = 10_000) { vm.ui.value.folderError != null }
+        compose.onNodeWithText("Folder listing failed. Check the bridge and retry.").assertIsDisplayed()
+        compose.onNodeWithTag("use_folder").assertIsDisplayed()
+        compose.onNodeWithTag("use_folder").assertIsNotEnabled()
+        capture("folder-picker-error")
     }
 
     @Test
@@ -108,10 +226,18 @@ class NewSessionSheetTest {
         compose.onNodeWithTag("use_folder").performClick()
 
         compose.onNodeWithTag("create_session").assertIsEnabled()
-        compose.onNodeWithTag("open_model_picker").performScrollTo().performClick()
+        compose.onNodeWithTag("new_session_content").performScrollToNode(hasTestTag("open_model_picker"))
+        compose.onNodeWithTag("open_model_picker").performClick()
         waitFor("model_item_openai-codex/gpt-5.4")
         compose.onNodeWithTag("model_item_openai-codex/gpt-5.4").performClick()
-        compose.onNodeWithTag("new_session_content").performScrollToNode(hasTestTag("thinking_high"))
+        compose.waitUntil(timeoutMillis = 10_000) {
+            vm.ui.value.selectedModel?.model?.thinkingLevels?.contains("high") == true
+        }
+        compose.waitUntil(timeoutMillis = 10_000) {
+            runCatching {
+                compose.onNodeWithTag("new_session_content").performScrollToNode(hasTestTag("thinking_high"))
+            }.isSuccess
+        }
         compose.onNodeWithTag("thinking_high").performClick()
         compose.onNodeWithTag("new_session_content").performScrollToNode(hasTestTag("session_name"))
         compose.onNodeWithTag("session_name").performTextInput("demo")
