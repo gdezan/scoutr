@@ -20,7 +20,7 @@ These plans complement (and never duplicate) the architecture plans in
 | 006 | Make the agent-facing docs tell the truth again | P2 | S | — | DONE |
 | 007 | One HTTP stack and real tests for the notification chain | P2 | M | 005 | DONE |
 | 008 | Visible test gating, the four unpinned routes, one-command verify | P2 | S | — | DONE |
-| 009 | Small-fix batch — verified one-file bugs and dead code | P3 | M | — | TODO |
+| 009 | Small-fix batch — verified one-file bugs and dead code | P3 | M | — | DONE |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with one-line reason) |
 REJECTED (with one-line rationale).
