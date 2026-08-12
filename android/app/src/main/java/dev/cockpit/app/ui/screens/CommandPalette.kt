@@ -33,7 +33,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
@@ -47,6 +49,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import dev.cockpit.app.CockpitApp
+import dev.cockpit.app.ui.components.ConfirmDialog
 import dev.cockpit.app.ui.components.CockpitTextField
 import dev.cockpit.app.data.SessionAction
 import dev.cockpit.app.state.CommandPaletteViewModel
@@ -69,7 +72,7 @@ fun CommandPalette(
 ) {
     val ui by viewModel.ui.collectAsState()
     val focusRequester = remember { FocusRequester() }
-
+    var pendingClose by remember { mutableStateOf<PaletteResult?>(null) }
     LaunchedEffect(Unit) { focusRequester.requestFocus() }
 
     Dialog(
@@ -152,12 +155,25 @@ fun CommandPalette(
                             },
                             onResume = { viewModel.resume(result.sessionPath ?: "") },
                             onAbort = { viewModel.control(result.paneId ?: "", SessionAction.Abort) },
-                            onClose = { viewModel.control(result.paneId ?: "", SessionAction.Close) },
+                            onClose = { pendingClose = result },
                         )
                     }
                 }
             }
         }
+    }
+
+    pendingClose?.let { result ->
+        ConfirmDialog(
+            title = "Close agent?",
+            text = "Closing “${result.title}” stops its live pane. The transcript is preserved and can be resumed from Sessions.",
+            confirmLabel = "Close",
+            onConfirm = {
+                pendingClose = null
+                viewModel.control(result.paneId ?: "", SessionAction.Close)
+            },
+            onDismiss = { pendingClose = null },
+        )
     }
 }
 
@@ -188,6 +204,7 @@ private fun PaletteRow(
         Column(Modifier.weight(1f)) {
             Text(
                 result.title,
+                color = MaterialTheme.colorScheme.onSurface,
                 style = MaterialTheme.typography.bodyLarge,
                 fontWeight = FontWeight.Medium,
                 maxLines = 1,
