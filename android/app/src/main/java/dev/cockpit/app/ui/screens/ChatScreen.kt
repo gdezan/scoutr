@@ -27,6 +27,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
@@ -102,6 +103,7 @@ import dev.cockpit.app.data.entryText
 import dev.cockpit.app.ui.components.AssistantMarkdown
 import dev.cockpit.app.ui.components.QuestionCard
 import dev.cockpit.app.ui.components.WorkingIndicator
+import dev.cockpit.app.ui.components.WorkingIndicatorMode
 import dev.cockpit.app.ui.components.workingIndicatorMode
 
 import dev.cockpit.app.ui.motion.CockpitMotion
@@ -116,6 +118,7 @@ import dev.cockpit.app.state.fillSlashCommand
 import dev.cockpit.app.state.matchSlashCommands
 import dev.cockpit.app.state.slashCommandQuery
 import androidx.lifecycle.compose.LifecycleStartEffect
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonPrimitive
 
@@ -140,7 +143,8 @@ fun ChatScreen(
     LaunchedEffect(ui.sending) {
         if (!ui.sending) attachmentUploading = false
     }
-    var detailsVisible by rememberSaveable { mutableStateOf(false) }
+    var showThinking by rememberSaveable { mutableStateOf(true) }
+    var expandTools by rememberSaveable { mutableStateOf(false) }
     var renameOpen by remember { mutableStateOf(false) }
     var closeOpen by rememberSaveable { mutableStateOf(false) }
     var configurationOpen by rememberSaveable { mutableStateOf(false) }
@@ -154,8 +158,10 @@ fun ChatScreen(
             capabilities = ui.capabilities,
             agentDisplayName = ui.agentDisplayName,
             status = if (viewModel.waitingForAnswer) "needs you" else ui.agentStatus,
-            detailsVisible = detailsVisible,
-            onToggleDetails = { detailsVisible = !detailsVisible },
+            showThinking = showThinking,
+            expandTools = expandTools,
+            onToggleThinking = { showThinking = !showThinking },
+            onToggleTools = { expandTools = !expandTools },
             onOpenConfiguration = { configurationOpen = true },
             onBack = onBack,
             onOpenLiveOutput = onOpenLiveOutput,
@@ -207,15 +213,16 @@ fun ChatScreen(
                         questions = ui.questions,
                         answeringQuestionId = ui.answeringQuestionId,
                         pendingMessages = ui.pendingMessages,
-                        detailsVisible = detailsVisible,
+                        showThinking = showThinking,
+                        expandTools = expandTools,
                         starting = starting,
                         agentStatus = ui.agentStatus,
                         statusSinceMs = ui.statusSinceMs,
-                        hasPendingQuestion = ui.questions.isNotEmpty(),
+                        hasPendingQuestion = ui.hasPendingQuestion,
                         onRetryPending = viewModel::retryPendingMessage,
-                        onAnswerQuestion = { id, answer ->
+                        onAnswerQuestion = { id, answer, labels ->
                             haptic(HapticEvent.Confirm)
-                            viewModel.answerQuestion(id, answer)
+                            viewModel.answerQuestion(id, answer, labels)
                         },
                         modifier = Modifier.fillMaxSize(),
                     )
@@ -338,8 +345,10 @@ private fun ChatHeader(
     capabilities: List<String>?,
     agentDisplayName: String?,
     status: String,
-    detailsVisible: Boolean,
-    onToggleDetails: () -> Unit,
+    showThinking: Boolean,
+    expandTools: Boolean,
+    onToggleThinking: () -> Unit,
+    onToggleTools: () -> Unit,
     onOpenConfiguration: () -> Unit,
     onBack: () -> Unit,
     onOpenLiveOutput: () -> Unit,
@@ -369,13 +378,21 @@ private fun ChatHeader(
                     maxLines = 1,
                 )
             }
-            IconButton(onClick = onToggleDetails) {
+            IconButton(onClick = onToggleThinking, modifier = Modifier.testTag("toggle_thinking")) {
                 Icon(
-                    if (detailsVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                    if (showThinking) Icons.Default.VisibilityOff else Icons.Default.Visibility,
                     modifier = Modifier.size(20.dp),
-                    contentDescription = if (detailsVisible) "Hide thinking and tool details"
-                    else "Show thinking and tool details",
-                    tint = if (detailsVisible) MaterialTheme.colorScheme.primary
+                    contentDescription = if (showThinking) "Hide thinking" else "Show thinking",
+                    tint = if (showThinking) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            IconButton(onClick = onToggleTools, modifier = Modifier.testTag("toggle_tools")) {
+                Icon(
+                    Icons.Default.Terminal,
+                    modifier = Modifier.size(20.dp),
+                    contentDescription = if (expandTools) "Collapse tool details" else "Expand tool details",
+                    tint = if (expandTools) MaterialTheme.colorScheme.primary
                     else MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
@@ -508,10 +525,20 @@ private fun HeaderConfigurationChip(
  * scroll-to-end button. Auto-scroll is guarded against out-of-range indices so
  * concurrent appends can never crash it.
  */
+/** Rows of the chat list in emission order; see ChatList. */
+private sealed interface ChatRow {
+    data class Entry(val entry: SessionEntry) : ChatRow
+    data class Questions(val group: List<QuestionEntry>) : ChatRow
+    data class Pending(val message: PendingUserMessage) : ChatRow
+    /** The tail busy row: starting, working, or waiting on the user. */
+    data class Indicator(val mode: WorkingIndicatorMode) : ChatRow
+}
+
 @Composable
 fun ChatList(
     entries: List<SessionEntry>,
-    detailsVisible: Boolean,
+    showThinking: Boolean = true,
+    expandTools: Boolean = false,
     pendingMessages: List<PendingUserMessage> = emptyList(),
     questions: List<QuestionEntry> = emptyList(),
     answeringQuestionId: String? = null,
@@ -520,7 +547,7 @@ fun ChatList(
     statusSinceMs: Long? = null,
     hasPendingQuestion: Boolean = false,
     onRetryPending: (String) -> Unit = {},
-    onAnswerQuestion: (String, String) -> Unit = { _, _ -> },
+    onAnswerQuestion: (String, String, List<String>) -> Unit = { _, _, _ -> },
     modifier: Modifier = Modifier,
 ) {
     val listState = rememberLazyListState()
@@ -532,29 +559,61 @@ fun ChatList(
     // A new entry only lands while the user is at the bottom; the moment they
     // scroll up, stop following and surface the scroll-to-end button.
     LaunchedEffect(listState) {
-        snapshotFlow {
-            val last = listState.layoutInfo.totalItemsCount - 1
-            (listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0) to last
-        }.collect { (lastVisible, totalLast) ->
-            followNew = lastVisible >= totalLast - 1
+        snapshotFlow { listState.canScrollForward }.collect {
+            followNew = !it
         }
     }
 
     // Follow: initial open + every append while at the bottom. The index is
     // computed the same way the LazyColumn emits items (entries, questions,
-    // pending, working indicator) so follow always lands on the true last
-    // item; bounded + guarded against a race with the poll.
-    val lastItemKey = pendingMessages.lastOrNull()?.localId ?: entries.lastOrNull()?.entryId
-    val lastIndex = entries.size + questions.size + pendingMessages.size +
-        (if (indicatorMode != null) 1 else 0) - 1
-    LaunchedEffect(entries.size, pendingMessages.size, lastItemKey, indicatorMode) {
-        if (followNew && lastIndex >= 0) {
-            try {
-                listState.scrollToItem(lastIndex)
-                listState.scrollBy(Float.MAX_VALUE)
-            } catch (_: Exception) {
-                // Concurrent append raced the scroll; the next state change retries.
+    // pending, working indicator) so follow always lands on the true last item.
+    val questionsByCall = questions.groupBy { it.callId.ifEmpty { it.id.substringBefore('#') } }
+    // One assistant entry can hold several ask_user_question calls, so a
+    // single entry may anchor several groups; groupBy keeps them all.
+    val groupsByAnchorEntry = questionsByCall.values.groupBy { it.first().entryId }
+    val anchoredEntryIds = entries.mapTo(mutableSetOf()) { it.entryId }
+    val rows: List<ChatRow> = remember(entries, pendingMessages, questions, indicatorMode) {
+        buildList {
+            for (entry in entries) {
+                add(ChatRow.Entry(entry))
+                groupsByAnchorEntry[entry.entryId]?.forEach { add(ChatRow.Questions(it)) }
             }
+            questionsByCall.values
+                .filter { it.first().entryId !in anchoredEntryIds }
+                .forEach { add(ChatRow.Questions(it)) }
+            pendingMessages.forEach { add(ChatRow.Pending(it)) }
+            if (indicatorMode != null) add(ChatRow.Indicator(indicatorMode))
+        }
+    }
+    fun keyOf(row: ChatRow): String = when (row) {
+        is ChatRow.Entry -> row.entry.entryId
+        is ChatRow.Questions -> row.group.joinToString("|") { it.id }
+        is ChatRow.Pending -> row.message.localId
+        // Stable across mode changes so the row animates in place rather than
+        // swapping out when working flips to waiting.
+        is ChatRow.Indicator -> "working_indicator"
+    }
+    val lastIndex = rows.lastIndex
+    val hasContent = lastIndex >= 0
+    val lastItemKey = rows.lastOrNull()?.let { keyOf(it) }
+
+    // Open-at-bottom: the moment content first arrives (and whenever the list
+    // goes empty→non-empty again, e.g. a session switch) jump to the very end
+    // unconditionally. Gating this on followNew would race the position
+    // collector below, which briefly reports "not at bottom" while the list is
+    // still laid out at the top — the session would open scrolled up.
+    LaunchedEffect(hasContent) {
+        if (hasContent) {
+            followNew = true
+            scrollChatToEnd(listState, lastIndex)
+        }
+    }
+
+    // Follow appends while the user is at the bottom; scrolling up stops it.
+    LaunchedEffect(rows.size, lastItemKey, indicatorMode) {
+        if (followNew && hasContent) {
+            followNew = true
+            scrollChatToEnd(listState, lastIndex)
         }
     }
 
@@ -565,54 +624,47 @@ fun ChatList(
             contentPadding = PaddingValues(start = 14.dp, end = 14.dp, top = 6.dp, bottom = 14.dp),
             modifier = Modifier.fillMaxSize().testTag("chat_list"),
         ) {
-            items(entries, key = { it.entryId }) { entry ->
-                MessageRow(
-                    entry = entry,
-                    detailsVisible = detailsVisible,
-                    Modifier.padding(top = entrySpacing(entry)).animateItem(
-                        fadeInSpec = CockpitMotion.itemSpec(reduceMotion),
-                        placementSpec = CockpitMotion.itemPlacementSpec(reduceMotion),
-                        fadeOutSpec = CockpitMotion.itemSpec(reduceMotion),
-                    )
-                )
-            }
-            // Questions from one ask_user_question call share a call-id prefix
-            // ("<callId>#<index>"); render them as one questionnaire with
-            // visible positions so multi-question asks read coherently.
-            val groupedQuestions = questions.groupBy { it.id.substringBefore('#') }
-            groupedQuestions.forEach { (_, group) ->
-                val multiple = group.size > 1
-                group.forEachIndexed { index, question ->
-                    items(group, key = { it.id }) { item ->
-                        QuestionCard(
-                            question = item,
-                            sending = answeringQuestionId == item.id,
-                            onAnswer = { answer -> onAnswerQuestion(item.id, answer) },
-                            position = if (multiple) (index + 1) to group.size else null,
-                            modifier = Modifier.animateItem(
-                                fadeInSpec = CockpitMotion.itemSpec(reduceMotion),
-                                placementSpec = CockpitMotion.itemPlacementSpec(reduceMotion),
-                                fadeOutSpec = CockpitMotion.itemSpec(reduceMotion),
-                            ),
+            items(rows, key = { keyOf(it) }) { row ->
+                when (row) {
+                    is ChatRow.Entry -> MessageRow(
+                        entry = row.entry,
+                        showThinking = showThinking,
+                        expandTools = expandTools,
+                        Modifier.padding(top = entrySpacing(row.entry)).animateItem(
+                            fadeInSpec = CockpitMotion.itemSpec(reduceMotion),
+                            placementSpec = CockpitMotion.itemPlacementSpec(reduceMotion),
+                            fadeOutSpec = CockpitMotion.itemSpec(reduceMotion),
                         )
-                    }
-                }
-            }
-            items(pendingMessages, key = { it.localId }) { message ->
-                PendingUserBubble(
-                    message = message,
-                    onRetry = { onRetryPending(message.localId) },
-                    Modifier.animateItem(
-                        fadeInSpec = CockpitMotion.itemSpec(reduceMotion),
-                        placementSpec = CockpitMotion.itemPlacementSpec(reduceMotion),
-                        fadeOutSpec = CockpitMotion.itemSpec(reduceMotion),
                     )
-                )
-            }
-            if (indicatorMode != null) {
-                item(key = "working_indicator") {
-                    WorkingIndicator(
-                        mode = indicatorMode,
+                    is ChatRow.Questions -> {
+                        val multiple = row.group.size > 1
+                        Column {
+                            row.group.forEachIndexed { index, question ->
+                                QuestionCard(
+                                    question = question,
+                                    sending = answeringQuestionId == question.id,
+                                    onAnswer = { answer, labels -> onAnswerQuestion(question.id, answer, labels) },
+                                    position = if (multiple) (index + 1) to row.group.size else null,
+                                    modifier = Modifier.animateItem(
+                                        fadeInSpec = CockpitMotion.itemSpec(reduceMotion),
+                                        placementSpec = CockpitMotion.itemPlacementSpec(reduceMotion),
+                                        fadeOutSpec = CockpitMotion.itemSpec(reduceMotion),
+                                    ),
+                                )
+                            }
+                        }
+                    }
+                    is ChatRow.Pending -> PendingUserBubble(
+                        message = row.message,
+                        onRetry = { onRetryPending(row.message.localId) },
+                        Modifier.animateItem(
+                            fadeInSpec = CockpitMotion.itemSpec(reduceMotion),
+                            placementSpec = CockpitMotion.itemPlacementSpec(reduceMotion),
+                            fadeOutSpec = CockpitMotion.itemSpec(reduceMotion),
+                        )
+                    )
+                    is ChatRow.Indicator -> WorkingIndicator(
+                        mode = row.mode,
                         statusSinceMs = statusSinceMs,
                         modifier = Modifier.animateItem(
                             fadeInSpec = CockpitMotion.itemSpec(reduceMotion),
@@ -623,12 +675,15 @@ fun ChatList(
                 }
             }
         }
-
+        // canScrollForward is computed against LazyColumn's estimated extent,
+        // so it can read false mid-list while a tall unmeasured tail item sits
+        // below the viewport. Combine it with the last-visible-row check: the
+        // FAB must show whenever the last row is anywhere off-screen.
         val notAtBottom by remember(listState) {
             derivedStateOf {
                 val info = listState.layoutInfo
                 val lastVisible = info.visibleItemsInfo.lastOrNull()?.index ?: 0
-                lastVisible < info.totalItemsCount - 1
+                listState.canScrollForward || lastVisible < info.totalItemsCount - 1
             }
         }
         AnimatedVisibility(
@@ -641,12 +696,7 @@ fun ChatList(
                 onClick = {
                     followNew = true
                     scope.launch {
-                        try {
-                            listState.scrollToItem(lastIndex.coerceAtLeast(0))
-                            listState.scrollBy(Float.MAX_VALUE)
-                        } catch (_: Exception) {
-                            // List changed between the tap and the scroll; retry next frame.
-                        }
+                        scrollChatToEnd(listState, lastIndex.coerceAtLeast(0))
                     }
                 },
                 containerColor = MaterialTheme.colorScheme.surfaceVariant,
@@ -662,16 +712,50 @@ fun ChatList(
     }
 }
 
+/**
+ * Jump to the true end of the chat list: the last item, then the maximum
+ * remaining scroll. Shared by the open-at-bottom effect, the append-follow
+ * effect, and the scroll-to-end button so all three land on the same spot.
+ *
+ * LazyColumn measures items lazily and estimates the height of items that
+ * sit outside the viewport, so maxValue can understate the real content and
+ * cap a single scroll below the true end. Each iteration therefore lets the
+ * layout apply one step (position request, then scroll) before judging the
+ * position: exposing the last item makes it measure at its real height, the
+ * extent corrects, and the next scroll reaches the true bottom.
+ */
+
+
+private suspend fun scrollChatToEnd(listState: LazyListState, lastIndex: Int) {
+    repeat(10) {
+        try {
+            listState.scrollToItem(lastIndex)
+            // Let the layout apply the position request and measure the last
+            // item at its real height before scrolling further.
+            delay(16)
+            listState.scrollBy(Float.MAX_VALUE)
+            // Let the layout consume the scroll before judging the position.
+            delay(16)
+        } catch (_: Exception) {
+            // Concurrent append raced the scroll; retry.
+        }
+        // Only trust "cannot scroll further" once the list has laid out;
+        // before that, totalItemsCount is 0 and canScrollForward is false.
+        if (listState.layoutInfo.totalItemsCount > 0 && !listState.canScrollForward) return
+    }
+}
+
 @Composable
 private fun MessageRow(
     entry: SessionEntry,
-    detailsVisible: Boolean,
+    showThinking: Boolean,
+    expandTools: Boolean,
     modifier: Modifier = Modifier,
 ) {
     when (entry.role) {
         "user" -> UserBubble(entry, modifier)
-        "assistant" -> AssistantBubble(entry, detailsVisible, modifier)
-        "toolResult" -> ToolResultChip(entry, forceExpanded = detailsVisible, modifier)
+        "assistant" -> AssistantBubble(entry, showThinking, expandTools, modifier)
+        "toolResult" -> ToolResultChip(entry, forceExpanded = expandTools, modifier)
         else -> {}
     }
 }
@@ -743,7 +827,8 @@ private fun PendingUserBubble(
 @Composable
 private fun AssistantBubble(
     entry: SessionEntry,
-    detailsVisible: Boolean,
+    showThinking: Boolean,
+    expandTools: Boolean,
     modifier: Modifier = Modifier,
 ) {
     Column(modifier.fillMaxWidth().testTag("assistant_bubble")) {
@@ -763,17 +848,17 @@ private fun AssistantBubble(
 
                 "thinking" -> {
                     val thinking = block.thinking
-                    if (!thinking.isNullOrBlank() && detailsVisible) {
+                    if (!thinking.isNullOrBlank() && showThinking) {
                         ThinkingBlock(thinking, Modifier.padding(top = 4.dp))
                     }
                 }
 
                 "toolCall" -> {
                     // Quiet collapsed chip by default — a one-line dim summary;
-                    // the details toggle (or a tap) reveals the full command.
+                    // the tools toggle (or a tap) reveals the full command.
                     ToolCallChip(
                         block = block,
-                        forceExpanded = detailsVisible,
+                        forceExpanded = expandTools,
                         modifier = Modifier.padding(top = 4.dp),
                     )
                 }

@@ -44,6 +44,8 @@ class ChatControlsTest {
     private val controlBodies = CopyOnWriteArrayList<String>()
     @Volatile private var agentStatus = "working"
     @Volatile private var agentCardJson: String? = null
+    /** Serve entries with a thinking block + tool call so the header toggles have an observable effect. */
+    @Volatile private var richEntries = false
 
     @Before
     fun setUp() {
@@ -57,8 +59,13 @@ class ChatControlsTest {
             override fun dispatch(request: okhttp3.mockwebserver.RecordedRequest): MockResponse {
                 val path = (request.path ?: "").substringBefore('?')
                 val body = when {
-                    path == "/api/sessions" ->
-                        """{"ok":true,"entries":[],"since":null,"lastEntryId":null,"preview":"","exists":true,"mtimeMs":0,"model":"openai-codex/gpt-5.4","thinkingLevel":"high"}"""
+                    path == "/api/sessions" -> {
+                        val entries = if (richEntries)
+                            """[{"entryId":"e1","role":"assistant","content":[{"type":"thinking","thinking":"hidden reasoning"},{"type":"toolCall","name":"bash","arguments":{"command":"ls"}},{"type":"text","text":"done"}]}]"""
+                        else
+                            """[]"""
+                        """{"ok":true,"entries":$entries,"since":null,"lastEntryId":null,"preview":"","exists":true,"mtimeMs":0,"model":"openai-codex/gpt-5.4","thinkingLevel":"high"}"""
+                    }
                     path == "/api/models" ->
                         // Catalog-less backends get an empty catalog; the app
                         // must hide the model search instead of looping.
@@ -117,6 +124,67 @@ class ChatControlsTest {
             compose.onAllNodes(androidx.compose.ui.test.hasText("Rename session")).fetchSemanticsNodes().isNotEmpty()
         }
         compose.onNodeWithText("Rename session").assertIsDisplayed()
+    }
+
+    @Test
+    fun headerTogglesIndependentlyControlThinkingAndToolCalls() {
+        richEntries = true
+        val store = ConnectionStore(InstrumentationRegistry.getInstrumentation().targetContext)
+        store.save(server.url("/").toString().trimEnd('/'), "t", null, null)
+        val bridge = BridgeClient(OkHttpClient.Builder().readTimeout(5, TimeUnit.SECONDS).build(), store)
+        val vm = ChatViewModel(bridge, "w1:p1", null, "working")
+
+        compose.setContent {
+            ChatScreen(viewModel = vm, onBack = {})
+        }
+
+        // Thinking blocks are visible by default.
+        compose.waitUntil(timeoutMillis = 10_000) {
+            compose.onAllNodes(hasTestTag("thinking_block")).fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithTag("thinking_block").assertIsDisplayed()
+        // Tool calls start collapsed (one-line chip).
+        compose.waitUntil(timeoutMillis = 5_000) {
+            compose.onAllNodes(androidx.compose.ui.test.hasText("\u25B8 bash", substring = true)).fetchSemanticsNodes().isNotEmpty()
+        }
+
+        // Hiding thinking must not touch the tool-call collapse state.
+        compose.onNodeWithTag("toggle_thinking").performClick()
+        compose.waitUntil(timeoutMillis = 5_000) {
+            compose.onAllNodes(hasTestTag("thinking_block")).fetchSemanticsNodes().isEmpty()
+        }
+        compose.waitUntil(timeoutMillis = 5_000) {
+            compose.onAllNodes(androidx.compose.ui.test.hasText("\u25B8 bash", substring = true)).fetchSemanticsNodes().isNotEmpty()
+        }
+
+        // Expanding tool calls must not bring thinking back.
+        compose.onNodeWithTag("toggle_tools").performClick()
+        compose.waitUntil(timeoutMillis = 5_000) {
+            compose.onAllNodes(androidx.compose.ui.test.hasText("\u25BE bash", substring = true)).fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.waitUntil(timeoutMillis = 5_000) {
+            compose.onAllNodes(hasTestTag("thinking_block")).fetchSemanticsNodes().isEmpty()
+        }
+
+        // Showing thinking again must leave the tool calls expanded.
+        compose.onNodeWithTag("toggle_thinking").performClick()
+        compose.waitUntil(timeoutMillis = 5_000) {
+            compose.onAllNodes(hasTestTag("thinking_block")).fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.waitUntil(timeoutMillis = 5_000) {
+            compose.onAllNodes(androidx.compose.ui.test.hasText("\u25BE bash", substring = true)).fetchSemanticsNodes().isNotEmpty()
+        }
+
+        // Collapsing tool calls must leave thinking visible — every
+        // combination is reachable, so a handler that couples the two
+        // toggles could not pass.
+        compose.onNodeWithTag("toggle_tools").performClick()
+        compose.waitUntil(timeoutMillis = 5_000) {
+            compose.onAllNodes(androidx.compose.ui.test.hasText("\u25B8 bash", substring = true)).fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.waitUntil(timeoutMillis = 5_000) {
+            compose.onAllNodes(hasTestTag("thinking_block")).fetchSemanticsNodes().isNotEmpty()
+        }
     }
 
     @Test

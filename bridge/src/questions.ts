@@ -18,6 +18,10 @@ export interface QuestionOption {
 export interface QuestionEntry {
   /** Stable card id: the model's question id, or `${toolCallId}#${index}`. */
   id: string;
+  /** The tool call id this question came from; groups a multi-question ask. */
+  callId: string;
+  /** The transcript entry id that made the call; the card's list position. */
+  entryId: string;
   question: string;
   header: string;
   options: QuestionOption[];
@@ -81,6 +85,8 @@ export function extractQuestions(entries: TranscriptEntry[]): QuestionEntry[] {
       const answer = match && kindIsAnswer(match.kind) ? match : undefined;
       questions.push({
         id: question.id || `${call.id}#${index}`,
+        callId: call.id,
+        entryId,
         question: question.question,
         header: question.header,
         options: question.options.map((option) => ({

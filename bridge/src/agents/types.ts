@@ -77,7 +77,7 @@ export interface AgentBackend {
   renameStoredSession?(path: string, title: string): Promise<void>;
 
   extractQuestions(transcript: Transcript): QuestionEntry[];
-  answerQuestion(herdr: HerdrPort, paneId: string, answer: string): Promise<void>;
+  answerQuestion(herdr: HerdrPort, paneId: string, answer: string, keys?: string[], trailingKeys?: string[]): Promise<void>;
   control(herdr: HerdrPort, params: ControlParams): Promise<void>;
 
   /**

@@ -3,6 +3,7 @@ package dev.cockpit.app.state
 import dev.cockpit.app.data.ConnectionStore
 import dev.cockpit.app.data.ContentBlock
 import dev.cockpit.app.data.SessionEntry
+import dev.cockpit.app.data.entryText
 import dev.cockpit.app.net.BridgeClient
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.async
@@ -37,6 +38,7 @@ class ChatPendingMessageTest {
     @Volatile private var agentStatus = "working"
     @Volatile private var agentCwd: String? = "/repo"
     @Volatile private var agentPresent = true
+    @Volatile private var answerRecorded = false
 
     @Before
     fun setUp() {
@@ -70,7 +72,11 @@ class ChatPendingMessageTest {
                         val entries = if (confirmMessage) {
                             """[{"entryId":"server-1","role":"user","content":[{"type":"text","text":"Fix it"}]}]"""
                         } else "[]"
-                        json("""{"ok":true,"exists":true,"entries":$entries,"since":null}""")
+                        // pi records an ask_user_question answer only in the
+                        // toolResult's details — never as a user entry — so
+                        // the question flips to answered with no new entry.
+                        val questions = """[{"id":"q1","question":"Proceed?","header":"Confirm","options":[],"multiSelect":false,"answered":$answerRecorded,"answerText":"Proceed","selected":[],"timestamp":"2026-08-10T10:00:00.000Z"}]"""
+                        json("""{"ok":true,"exists":true,"entries":$entries,"since":null,"questions":$questions}""")
                     }
                     "/ws" -> if (failWebSocket) {
                         MockResponse().setResponseCode(503)
@@ -145,6 +151,29 @@ class ChatPendingMessageTest {
         waitUntil("question answer") { commands.isNotEmpty() }
         assertTrue(commands.single().contains("\"type\":\"answer_question\""))
         assertTrue(commands.single().contains("\"text\":\"Proceed\""))
+    }
+
+    @Test
+    fun composerAnswerConfirmsWhenQuestionFlipsToAnswered() = runBlocking {
+        agentStatus = "blocked"
+        val viewModel = viewModel()
+        waitUntil("pending question") {
+            viewModel.ui.value.questions.singleOrNull()?.answered == false
+        }
+
+        viewModel.send("Proceed")
+        assertEquals("Proceed", viewModel.ui.value.pendingMessages.single().text)
+
+        // The agent records the answer — as a toolResult, never as a user
+        // entry. The pending bubble must still confirm once the question is
+        // answered.
+        answerRecorded = true
+        waitUntil("answer confirmed") { viewModel.ui.value.pendingMessages.isEmpty() }
+        assertTrue(viewModel.ui.value.questions.single().answered)
+        // pi records the answer only in the toolResult — no user entry for
+        // "Proceed" appears in the transcript (the harness injects "Fix it"
+        // after a WS send, which is unrelated).
+        assertTrue(viewModel.ui.value.entries.none { entryText(it.content) == "Proceed" })
     }
 
     @Test

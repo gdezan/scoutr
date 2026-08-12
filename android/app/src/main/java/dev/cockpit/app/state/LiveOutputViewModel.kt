@@ -39,6 +39,11 @@ internal fun isLiveOutputChromeLine(line: String): Boolean {
     if (line.startsWith("Took ", ignoreCase = true) && line.drop(5).firstOrNull()?.isDigit() == true) return true
     if (line.endsWith("Working...", ignoreCase = true)) return true
     if (line.contains("cache R/W", ignoreCase = true)) return true
+    // A herdr prompt line ("~/Dev/agents-mobile (main) │ 101k/1.0M ↑576.") has
+    // a single │ so the bar-count rule below misses it and the prompt eats one
+    // of the tail lines. Anchor on the prompt's shape instead: a path-prefixed
+    // line with a │.
+    if ((line.startsWith("~") || line.startsWith("/")) && line.contains('│')) return true
     return line.count { it == '│' } >= 2 && line.contains('/')
 }
 

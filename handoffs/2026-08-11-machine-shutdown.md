@@ -1,5 +1,22 @@
 # Cockpit goal handoff — machine turned off mid-work
 
+> **STATUS: COMPLETE (2026-08-12).** All remaining work below is done: the
+> full emulator suite is green (83/83), taste review for fix 10 + fix 16 ran
+> on the emulator (findings applied: prompt-line chrome filter, fade width
+> density, AppTopBar top-inset twin) and is recorded in
+> `docs/production-goal-checklist.md`, the live streaming walk evidence is at
+> `/tmp/cockpit-10.png` (+ `-a`/`-c`), fix 16 evidence at `/tmp/cockpit-16.png`,
+> the question-card/option-selection/placement fixes are verified on-device
+> and covered by 17 key-navigation unit tests + emulator tests, and the final
+> four-gate audit is green (bridge typecheck + 256/256, unit 119, emulator
+> 83/83, assembleDebug). The code-review gate flagged and fixed four real
+> issues (multi-ask-per-entry grouping, false pending confirmation,
+> unvalidated bridge keys, nested tests); the separate thinking/tools toggles
+> with thinking default-on were kept — the user explicitly requested them.
+> Known follow-up: the drawer's enter animation can leave it unpainted ~2-3s
+> on the software-rendered emulator (taste agent: likely emulator GPU; watch
+> on real hardware).
+
 ## Where things stand (goal: ten-fix round, pi-goal --file /tmp/cockpit-goal-ten-fixes.txt)
 
 ### Committed through: 7ddb48b (deploy gate), e93b15a (fix 9 docs), fed4737 (fix 9 copy), c348514 (fix 15 docs), f4f0cc7 (fix 15 board swipe), 34b1cb2 (fix 13), add5760 (fix 14), 9b81d46 (fix 8), 9215d40 (fix 7), ca601aa+597e8ff (fix 6), 802d9da (fix 5 docs), 8c2c5ea (fix 5), d95d4c1 (fix 4), fa9bd9d (fix 3), 28c71ea+ef99656 (fix 2 + catalog DTO), 61d9403 (fix 1), c2e6151 (startup crash).

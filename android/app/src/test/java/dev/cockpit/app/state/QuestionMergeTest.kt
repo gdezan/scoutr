@@ -48,6 +48,29 @@ class QuestionMergeTest {
     }
 
     @Test
+    fun onlyUnansweredQuestionsCountAsPending() {
+        // The working indicator steps aside for a question card, but only
+        // while one is actually pending: answered questions stay in the list
+        // for the rest of the session as answer bubbles, so treating "any
+        // question at all" as pending would silence the indicator forever.
+        assertEquals(false, ChatUiState().hasPendingQuestion)
+        assertEquals(
+            true,
+            ChatUiState(questions = listOf(question("a"))).hasPendingQuestion,
+        )
+        assertEquals(
+            false,
+            ChatUiState(questions = listOf(question("a", answered = true))).hasPendingQuestion,
+        )
+        assertEquals(
+            true,
+            ChatUiState(
+                questions = listOf(question("a", answered = true), question("b")),
+            ).hasPendingQuestion,
+        )
+    }
+
+    @Test
     fun sanitizeCollapsesNewlinesAndStripsControlChars() {
         assertEquals("yes", sanitizeAnswerText("  yes  "))
         assertEquals("line1 line2", sanitizeAnswerText("line1\nline2"))

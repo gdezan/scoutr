@@ -54,7 +54,7 @@ class QuestionCardTest {
                 QuestionCard(
                     question = question("q1", options = choiceOptions),
                     sending = false,
-                    onAnswer = { sent = it },
+                    onAnswer = { answer, _ -> sent = answer },
                 )
             }
         }
@@ -72,7 +72,7 @@ class QuestionCardTest {
                 QuestionCard(
                     question = question("q2", options = listOf(QuestionOption("Yes"), QuestionOption("No"))),
                     sending = false,
-                    onAnswer = { sent = it },
+                    onAnswer = { answer, _ -> sent = answer },
                 )
             }
         }
@@ -92,7 +92,7 @@ class QuestionCardTest {
                         options = listOf(QuestionOption("Auth"), QuestionOption("Billing"), QuestionOption("Docs")),
                     ),
                     sending = false,
-                    onAnswer = { sent = it },
+                    onAnswer = { answer, _ -> sent = answer },
                 )
             }
         }
@@ -112,7 +112,7 @@ class QuestionCardTest {
                 QuestionCard(
                     question = question("q4"),
                     sending = false,
-                    onAnswer = { sent = it },
+                    onAnswer = { answer, _ -> sent = answer },
                 )
             }
         }
@@ -122,7 +122,7 @@ class QuestionCardTest {
     }
 
     @Test
-    fun answeredCardShowsRecoveredAnswer() {
+    fun answeredQuestionRendersAsUserBubble() {
         compose.setContent {
             CockpitTheme {
                 QuestionCard(
@@ -133,12 +133,37 @@ class QuestionCardTest {
                         answerText = "Other repo",
                     ),
                     sending = false,
-                    onAnswer = {},
+                    onAnswer = { _, _ -> },
                 )
             }
         }
-        compose.onNodeWithText("Answered: Other repo").assertIsDisplayed()
-        // No interactive choices remain.
+        // The card is dismissed: the answer appears as a user-style bubble
+        // (tag question_answer_<id>) and no interactive choices remain.
+        compose.onNodeWithTag("question_answer_q5").assertIsDisplayed()
+        compose.onNodeWithText("Other repo").assertIsDisplayed()
+        compose.onNodeWithTag("question_card_q5").assertDoesNotExist()
         compose.onNodeWithText("Handle it here").assertDoesNotExist()
+    }
+
+    @Test
+    fun answeredMultiSelectJoinsSelectedLabels() {
+        compose.setContent {
+            CockpitTheme {
+                QuestionCard(
+                    question = question(
+                        "q6",
+                        multiSelect = true,
+                        options = choiceOptions,
+                        answered = true,
+                        answerText = null,
+                        selected = listOf("Auth", "Docs"),
+                    ),
+                    sending = false,
+                    onAnswer = { _, _ -> },
+                )
+            }
+        }
+        compose.onNodeWithTag("question_answer_q6").assertIsDisplayed()
+        compose.onNodeWithText("Auth, Docs").assertIsDisplayed()
     }
 }

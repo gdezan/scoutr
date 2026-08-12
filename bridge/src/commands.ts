@@ -5,7 +5,7 @@ import type { ServerDeps } from "./routes/types.js";
 
 export type CommandMessage =
   | { type: "steer"; target: string; text: string }
-  | { type: "answer_question"; paneId: string; text: string }
+  | { type: "answer_question"; paneId: string; text: string; keys?: string[]; trailingKeys?: string[] }
   | { type: "slash_command"; paneId: string; text: string }
   | { type: "send_text"; paneId: string; text: string }
   | { type: "ping" }
@@ -38,19 +38,39 @@ export async function handleCommand(command: CommandMessage, deps: ServerDeps): 
       return { type: "steered", target, result: await deps.herdr.agentPrompt(target, text) };
     }
     case "answer_question": {
-      const { paneId, text } = command;
-      if (!paneId || !text) throw new Error("answer_question requires paneId and text");
+      const { paneId, text, keys, trailingKeys } = command;
+      if (!paneId) throw new Error("answer_question requires paneId");
+      const ALLOWED_KEYS = new Set(["up", "down", "left", "right", "enter", "space", "tab", "esc"]);
+      const checkKeys = (seq: string[] | undefined, name: string) => {
+        if (seq === undefined) return;
+        if (!Array.isArray(seq) || seq.length > 32 || seq.some((k) => !ALLOWED_KEYS.has(k))) {
+          throw new Error(`answer_question ${name} must be a bounded sequence of navigation keys`);
+        }
+      };
+      checkKeys(keys, "keys");
+      checkKeys(trailingKeys, "trailingKeys");
+      const hasKeys = (keys?.length ?? 0) > 0;
       const safe = sanitizeAnswerText(text);
-      if (!safe) throw new Error("answer_question text is empty after sanitization");
+      if (!safe && !hasKeys) throw new Error("answer_question requires text or keys");
       const backend = backendForPane(deps, paneId);
       if (backend) {
         // Each backend knows how an answer is delivered into its own UI
-        // (pi's questionnaire vs claude's input prompt).
-        await backend.answerQuestion(deps.herdr, paneId, safe);
+        // (pi's questionnaire vs claude's input prompt). `keys` is the
+        // navigation sequence into pi's questionnaire (arrow/space/enter);
+        // `trailingKeys` are sent after the text (editor submit + review).
+        await backend.answerQuestion(deps.herdr, paneId, safe, keys ?? [], trailingKeys);
       } else {
         // Unknown agents still get the generic type-then-submit treatment.
-        await deps.herdr.paneSendText(paneId, safe);
-        await deps.herdr.paneSendKeys(paneId, ["Enter"]);
+        if (hasKeys) {
+          await deps.herdr.paneSendKeys(paneId, keys ?? []);
+          if (safe) {
+            await deps.herdr.paneSendText(paneId, safe);
+            await deps.herdr.paneSendKeys(paneId, trailingKeys ?? ["Enter"]);
+          }
+        } else {
+          await deps.herdr.paneSendText(paneId, safe);
+          await deps.herdr.paneSendKeys(paneId, ["Enter"]);
+        }
       }
       return { type: "answered", paneId, text: safe };
     }
