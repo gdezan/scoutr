@@ -18,7 +18,7 @@ These plans complement (and never duplicate) the architecture plans in
 | 004 | Harden the WS/control surface and test real question answering | P1 | M | 003 | DONE |
 | 005 | Lifecycle-scope Android polling; cancellation-safe catches; validate pushed deep links | P2 | M | — | DONE |
 | 006 | Make the agent-facing docs tell the truth again | P2 | S | — | DONE |
-| 007 | One HTTP stack and real tests for the notification chain | P2 | M | 005 | TODO |
+| 007 | One HTTP stack and real tests for the notification chain | P2 | M | 005 | DONE |
 | 008 | Visible test gating, the four unpinned routes, one-command verify | P2 | S | — | TODO |
 | 009 | Small-fix batch — verified one-file bugs and dead code | P3 | M | — | TODO |
 
