@@ -6,12 +6,13 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -20,7 +21,6 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.CircularProgressIndicator
-import dev.cockpit.app.ui.components.SectionLabel
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
@@ -31,6 +31,7 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -40,6 +41,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -48,6 +51,7 @@ import dev.cockpit.app.state.ChatUiState
 import dev.cockpit.app.state.Loadable
 import dev.cockpit.app.state.ModelPickerFilters
 import dev.cockpit.app.state.searchModelCatalog
+import dev.cockpit.app.ui.components.SectionLabel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -68,12 +72,21 @@ internal fun ConversationConfigSheet(
             selectedKey = ui.model,
         )
     }
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        sheetGesturesEnabled = false,
+        dragHandle = null,
         modifier = Modifier.testTag("conversation_config_sheet"),
     ) {
-        Column(Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .fillMaxHeight(0.94f)
+                .navigationBarsPadding(),
+        ) {
             Row(
                 modifier = Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, bottom = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -133,7 +146,6 @@ internal fun ConversationConfigSheet(
             Spacer(Modifier.height(18.dp))
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             Spacer(Modifier.height(14.dp))
-
             SectionLabel("Model", Modifier.padding(horizontal = 20.dp))
             Text(
                 ui.model ?: "Not reported yet",
@@ -143,78 +155,54 @@ internal fun ConversationConfigSheet(
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp),
             )
-            // A catalog-less backend (claude) has no pickable models; the
-            // value line stays informative, the dead search does not render.
-            if (providers.isNotEmpty()) {
-            OutlinedTextField(
-                value = query,
-                onValueChange = { query = it },
-                singleLine = true,
-                placeholder = { Text("Search provider or model") },
-                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp).testTag("conversation_model_search"),
-            )
 
-            when {
-                configuration is Loadable.Failed -> {
-                    Text(
+            if (providers.isNotEmpty()) {
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = { query = it },
+                    singleLine = true,
+                    placeholder = { Text("Provider, model, or ID") },
+                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                        .semantics { contentDescription = "Search models" }
+                        .testTag("conversation_model_search"),
+                )
+            }
+
+            Box(Modifier.weight(1f).fillMaxWidth()) {
+                when {
+                    configuration is Loadable.Loading -> CircularProgressIndicator(Modifier.align(Alignment.Center))
+                    configuration is Loadable.Failed -> Text(
                         configuration.reason,
                         color = MaterialTheme.colorScheme.error,
                         style = MaterialTheme.typography.bodySmall,
-                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
+                        modifier = Modifier.align(Alignment.Center).padding(horizontal = 20.dp),
+                    )
+                    providers.isEmpty() -> Text(
+                        "No models available",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.align(Alignment.Center),
+                    )
+                    models.isEmpty() -> Text(
+                        "No models match",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.align(Alignment.Center),
+                    )
+                    else -> ProviderModelCatalog(
+                        models = models,
+                        selectedKey = ui.model,
+                        onSelect = { match -> onSelectModel(match.key) },
+                        onToggleFavorite = null,
+                        modifier = Modifier.fillMaxWidth().fillMaxHeight(),
+                        testTag = "conversation_model_list",
+                        selectionDescription = "Current model",
+                        modelTagPrefix = "conversation_model_",
+                        enabled = !configBusy,
                     )
                 }
-                models.isEmpty() -> Box(
-                    Modifier.fillMaxWidth().heightIn(min = 120.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text("No models match", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-                else -> LazyColumn(
-                    modifier = Modifier.fillMaxWidth().heightIn(max = 380.dp).testTag("conversation_model_list"),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                    items(models, key = { it.key }) { match ->
-                        val selected = match.key == ui.model
-                        Surface(
-                            onClick = { onSelectModel(match.key) },
-                            enabled = !configBusy,
-                            shape = RoundedCornerShape(12.dp),
-                            color = if (selected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.72f) else Color.Transparent,
-                            modifier = Modifier.fillMaxWidth().testTag("conversation_model_${match.model.id}"),
-                        ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(horizontal = 12.dp, vertical = 8.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Column(Modifier.weight(1f)) {
-                                    Text(
-                                        match.model.name.ifBlank { match.model.id },
-                                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                    )
-                                    Text(
-                                        match.key,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        fontFamily = FontFamily.Monospace,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                    )
-                                }
-                                if (selected) {
-                                    Spacer(Modifier.width(8.dp))
-                                    Icon(Icons.Default.Check, contentDescription = "Current model", tint = MaterialTheme.colorScheme.primary)
-                                }
-                            }
-                        }
-                    }
-                }
             }
-            }
-            Spacer(Modifier.height(24.dp))
         }
     }
 }

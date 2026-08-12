@@ -15,7 +15,7 @@ Execute in the order below unless dependencies say otherwise. Each executor must
 | 005 | Navigate multi-file diffs by file | P2 | M | — | TODO |
 | 006 | Give tablet layouts readable content bounds | P3 | M | 003, 005 | TODO |
 | 007 | Make Chat scrolling predictable under taps, appends, and drags | P1 | M | — | TODO |
-| 008 | Make model selection provider-first and gesture-stable | P1 | M | 001 | TODO |
+| 008 | Make model selection provider-first and gesture-stable | P1 | M | 001 | DONE |
 | 009 | Make search and tab position changes intentional | P2 | M | 002, 006, 008 | TODO |
 | 010 | Keep Sessions anchored while rows reorder | P2 | M | 009 | TODO |
 | 011 | Keep slash-command keyboard selection in view without jumping | P2 | S | 007 | TODO |

@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
@@ -25,12 +24,10 @@ import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Folder
-import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.outlined.StarBorder
 import androidx.compose.material3.Button
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -91,42 +88,26 @@ internal fun ModelPickerDialog(
                     keyboardActions = KeyboardActions(onSearch = {}),
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).semantics { contentDescription = "Search models" }.testTag("model_search"),
                 )
-                ModelFilters(ui, viewModel)
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 when {
                     ui.loadingModels -> PickerLoading()
                     ui.modelError != null -> PickerError(ui.modelError, viewModel::retryModels)
-                    ui.modelMatches.isEmpty() -> ModelPickerEmpty(viewModel::clearModelFilters)
-                    else -> {
-                        // Provider-first structure: models group under one provider
-                        // header each (fix 6). groupBy keeps the ranked encounter
-                        // order, so the top match still leads while every model
-                        // appears under exactly one provider.
-                        val providerGroups = ui.modelMatches.groupBy { it.provider }
-                        LazyColumn(
-                            modifier = Modifier.fillMaxSize().testTag("model_list"),
-                            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-                            verticalArrangement = Arrangement.spacedBy(4.dp),
-                        ) {
-                            providerGroups.forEach { (provider, matches) ->
-                                item(key = "provider:$provider") {
-                                    ProviderHeader(name = provider, count = matches.size)
-                                }
-                                items(matches, key = { it.key }) { match ->
-                                    ModelPickerRow(
-                                        match = match,
-                                        selected = match.key == ui.selectedModelKey,
-                                        onSelect = {
-                                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                            viewModel.selectModel(match.key)
-                                            onDismiss()
-                                        },
-                                        onToggleFavorite = { viewModel.toggleFavorite(match.key) },
-                                    )
-                                }
-                            }
-                        }
-                    }
+                    ui.providers.isEmpty() -> ModelPickerEmpty("No models available")
+                    ui.modelMatches.isEmpty() -> ModelPickerEmpty("No models match")
+                    else -> ProviderModelCatalog(
+                        models = ui.modelMatches,
+                        selectedKey = ui.selectedModelKey,
+                        onSelect = { match ->
+                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            viewModel.selectModel(match.key)
+                            onDismiss()
+                        },
+                        onToggleFavorite = viewModel::toggleFavorite,
+                        modifier = Modifier.fillMaxSize(),
+                        testTag = "model_list",
+                        selectionDescription = "Selected model",
+                        modelTagPrefix = "model_item_",
+                    )
                 }
             }
         }
@@ -207,47 +188,36 @@ internal fun FolderPickerDialog(
 }
 
 @Composable
-private fun ModelFilters(ui: NewSessionUiState, viewModel: NewSessionViewModel) {
-    val thinkingLevels = ui.providers.flatMap { provider -> provider.models.flatMap { it.thinkingLevels } }.distinct()
-    Column(modifier = Modifier.padding(vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        LazyRow(
-            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            item {
-                FilterChip(
-                    selected = ui.modelFilters.reasoningOnly,
-                    onClick = viewModel::toggleReasoningFilter,
-                    label = { Text("Reasoning") },
-                    modifier = Modifier.testTag("filter_reasoning"),
-                )
+internal fun ProviderModelCatalog(
+    models: List<ModelPickerMatch>,
+    selectedKey: String?,
+    onSelect: (ModelPickerMatch) -> Unit,
+    modifier: Modifier = Modifier,
+    testTag: String,
+    selectionDescription: String,
+    modelTagPrefix: String = "model_item_",
+    enabled: Boolean = true,
+    onToggleFavorite: ((String) -> Unit)? = null,
+) {
+    val providerGroups = models.groupBy { it.provider }
+    LazyColumn(
+        modifier = modifier.testTag(testTag),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        providerGroups.forEach { (provider, matches) ->
+            item(key = "provider:$provider") {
+                ProviderHeader(name = provider, count = matches.size)
             }
-            val contexts = listOf(null to "Any context", 64_000L to "64K+", 128_000L to "128K+", 200_000L to "200K+")
-            items(contexts) { (tokens, label) ->
-                FilterChip(
-                    selected = ui.modelFilters.minimumContextTokens == tokens,
-                    onClick = { viewModel.setMinimumContext(tokens) },
-                    label = { Text(label) },
-                )
-            }
-        }
-        LazyRow(
-            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            item {
-                FilterChip(
-                    selected = ui.modelFilters.thinkingLevel == null,
-                    onClick = { viewModel.setThinkingFilter(null) },
-                    label = { Text("Any thinking") },
-                )
-            }
-            items(thinkingLevels) { level ->
-                FilterChip(
-                    selected = ui.modelFilters.thinkingLevel == level,
-                    onClick = { viewModel.setThinkingFilter(level) },
-                    label = { Text(level) },
-                    modifier = Modifier.testTag("filter_thinking_$level"),
+            items(matches, key = { it.key }) { match ->
+                ModelPickerCatalogRow(
+                    match = match,
+                    selected = match.key == selectedKey,
+                    onSelect = { onSelect(match) },
+                    onToggleFavorite = onToggleFavorite?.let { { it(match.key) } },
+                    selectionDescription = selectionDescription,
+                    modelTagPrefix = modelTagPrefix,
+                    enabled = enabled,
                 )
             }
         }
@@ -263,9 +233,6 @@ private fun ProviderHeader(name: String, count: Int) {
             .testTag("provider_header_$name"),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        // Brighter than the mono key line it presides over: same face (a provider
-        // is an identifier) but a clear contrast step up, so the header reads as
-        // structure instead of another key line.
         Text(
             name,
             style = MaterialTheme.typography.labelSmall,
@@ -282,22 +249,37 @@ private fun ProviderHeader(name: String, count: Int) {
             count.toString(),
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+            modifier = Modifier.testTag("provider_count_$name"),
         )
     }
 }
 
 @Composable
-private fun ModelPickerRow(
+private fun ModelPickerCatalogRow(
     match: ModelPickerMatch,
     selected: Boolean,
     onSelect: () -> Unit,
-    onToggleFavorite: () -> Unit,
+    onToggleFavorite: (() -> Unit)?,
+    selectionDescription: String,
+    modelTagPrefix: String,
+    enabled: Boolean,
 ) {
     Surface(
         onClick = onSelect,
+        enabled = enabled,
         color = if (selected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.72f) else Color.Transparent,
         shape = RoundedCornerShape(10.dp),
-        modifier = Modifier.fillMaxWidth().testTag("model_item_${match.key}"),
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("$modelTagPrefix${match.key}")
+            .semantics(mergeDescendants = true) {
+                contentDescription = buildString {
+                    append(match.model.name.ifBlank { match.model.id })
+                    append(", ")
+                    append(match.key)
+                    if (selected) append(", $selectionDescription")
+                }
+            }
     ) {
         Row(
             modifier = Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(start = 12.dp, end = 2.dp, top = 8.dp, bottom = 8.dp),
@@ -331,7 +313,6 @@ private fun ModelPickerRow(
                 val metadata = buildList {
                     if (match.model.reasoning) add("reasoning")
                     match.model.contextWindow?.let { add(formatContextWindow(it)) }
-                    if (match.model.thinkingLevels.isNotEmpty()) add(match.model.thinkingLevels.joinToString(" · "))
                 }.joinToString("  •  ")
                 if (metadata.isNotBlank()) {
                     Text(
@@ -344,14 +325,16 @@ private fun ModelPickerRow(
                 }
             }
             if (selected) {
-                Icon(Icons.Default.Check, contentDescription = "Selected model", tint = MaterialTheme.colorScheme.primary)
+                Icon(Icons.Default.Check, contentDescription = selectionDescription, tint = MaterialTheme.colorScheme.primary)
             }
-            IconButton(onClick = onToggleFavorite) {
-                Icon(
-                    if (match.favorite) Icons.Filled.Star else Icons.Outlined.StarBorder,
-                    contentDescription = if (match.favorite) "Remove ${match.model.name} from favorites" else "Add ${match.model.name} to favorites",
-                    tint = if (match.favorite) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+            onToggleFavorite?.let { toggle ->
+                IconButton(onClick = toggle) {
+                    Icon(
+                        if (match.favorite) Icons.Filled.Star else Icons.Outlined.StarBorder,
+                        contentDescription = if (match.favorite) "Remove ${match.model.name} from favorites" else "Add ${match.model.name} to favorites",
+                        tint = if (match.favorite) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
         }
     }
@@ -383,22 +366,11 @@ private fun PickerError(message: String, onRetry: () -> Unit) {
         }
     }
 }
+
 @Composable
-private fun ModelPickerEmpty(onReset: () -> Unit) {
+private fun ModelPickerEmpty(message: String) {
     Box(Modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text("No models match", style = MaterialTheme.typography.titleMedium)
-            Text(
-                "Try a shorter search or remove a filter.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            TextButton(onClick = onReset) {
-                Icon(Icons.Default.RestartAlt, contentDescription = null)
-                Spacer(Modifier.width(6.dp))
-                Text("Reset filters")
-            }
-        }
+        Text(message, style = MaterialTheme.typography.titleMedium)
     }
 }
 

@@ -47,20 +47,15 @@ class ModelPickerSearchTest {
     }
 
     @Test
-    fun providerQualifiedSearchAndFiltersCompose() {
+    fun providerAndModelSearchMatchesWithoutCapabilityFilters() {
         val results = searchModelCatalog(
             providers = providers,
-            filters = ModelPickerFilters(
-                query = "openai 5.4",
-                reasoningOnly = true,
-                minimumContextTokens = 128_000,
-                thinkingLevel = "high",
-            ),
+            filters = ModelPickerFilters(query = "openai-codex/gpt-5.4"),
         )
 
-        assertEquals(listOf("openai-codex/gpt-5.4"), results.map { it.key })
+        assertEquals("openai-codex/gpt-5.4", results.first().key)
+        assertTrue(results.any { it.key == "openai-codex/gpt-5.4" })
     }
-
     @Test
     fun noQueryRanksDefaultThenFavoriteThenRecents() {
         val results = searchModelCatalog(

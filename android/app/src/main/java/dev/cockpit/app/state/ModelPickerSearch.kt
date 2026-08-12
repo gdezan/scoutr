@@ -3,12 +3,9 @@ package dev.cockpit.app.state
 import dev.cockpit.app.data.ModelInfo
 import dev.cockpit.app.data.ModelProvider
 
-/** Active model-catalog filters; context size is measured in tokens. */
+/** Search text for the model catalog. */
 data class ModelPickerFilters(
     val query: String = "",
-    val reasoningOnly: Boolean = false,
-    val minimumContextTokens: Long? = null,
-    val thinkingLevel: String? = null,
 )
 
 /** One ranked model-picker result with provider and preference metadata. */
@@ -40,13 +37,6 @@ fun searchModelCatalog(
         provider.models.mapNotNull { model ->
             val providerName = model.provider.ifBlank { provider.name }
             val key = modelPickerKey(providerName, model.id)
-            if (filters.reasoningOnly && !model.reasoning) return@mapNotNull null
-            if (filters.minimumContextTokens != null && (model.contextWindow ?: 0) < filters.minimumContextTokens) {
-                return@mapNotNull null
-            }
-            if (filters.thinkingLevel != null && filters.thinkingLevel !in model.thinkingLevels) {
-                return@mapNotNull null
-            }
             val score = if (query.isBlank()) 0 else modelSearchScore(
                 query,
                 listOf(providerName, model.name, model.id, key),

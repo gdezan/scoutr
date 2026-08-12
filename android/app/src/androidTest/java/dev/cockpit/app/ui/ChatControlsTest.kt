@@ -1,9 +1,12 @@
 package dev.cockpit.app.ui
 
+import android.graphics.Bitmap
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onAllNodesWithTag
@@ -11,19 +14,23 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToNode
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipeDown
+import androidx.compose.ui.test.swipeUp
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasTestTag
+import androidx.test.platform.app.InstrumentationRegistry
+import androidx.compose.ui.test.assertContentDescriptionContains
 import dev.cockpit.app.data.ConnectionStore
 import dev.cockpit.app.net.BridgeClient
-import androidx.compose.ui.test.isRoot
-import androidx.compose.ui.test.printToLog
 import dev.cockpit.app.state.Loadable
 import dev.cockpit.app.state.ChatViewModel
 import dev.cockpit.app.state.LiveOutputViewModel
 import dev.cockpit.app.ui.screens.ChatScreen
 import dev.cockpit.app.ui.screens.LiveOutputScreen
-import androidx.test.platform.app.InstrumentationRegistry
 import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
@@ -33,10 +40,10 @@ import org.junit.Rule
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.io.File
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.CopyOnWriteArrayList
-
 class ChatControlsTest {
 
     @get:Rule
@@ -75,7 +82,7 @@ class ChatControlsTest {
                         if (request.requestUrl?.queryParameter("agent") == "claude")
                             """{"ok":true,"catalog":{"providers":[]}}"""
                         else
-                            """{"ok":true,"catalog":{"providers":[{"name":"openai-codex","models":[{"id":"gpt-5.4","name":"GPT-5.4","provider":"openai-codex","reasoning":true,"thinkingLevels":["off","low","high"],"contextWindow":200000},{"id":"gpt-5.3","name":"GPT-5.3","provider":"openai-codex","reasoning":true,"thinkingLevels":["off","low","high"],"contextWindow":128000}]}]}}"""
+                            """{"ok":true,"catalog":{"providers":[{"name":"openai-codex","models":[{"id":"gpt-5.4","name":"GPT-5.4","provider":"openai-codex","reasoning":true,"thinkingLevels":["off","low","high"],"contextWindow":200000},{"id":"gpt-5.3","name":"GPT-5.3","provider":"openai-codex","reasoning":true,"thinkingLevels":["off","low","high"],"contextWindow":128000},{"id":"gpt-5.2","name":"GPT-5.2","provider":"openai-codex","reasoning":true,"thinkingLevels":["off","low","high"],"contextWindow":128000},{"id":"gpt-5.1","name":"GPT-5.1","provider":"openai-codex","reasoning":true,"thinkingLevels":["off","low","high"],"contextWindow":128000},{"id":"gpt-5","name":"GPT-5","provider":"openai-codex","reasoning":true,"thinkingLevels":["off","low","high"],"contextWindow":128000}]},{"name":"anthropic","models":[{"id":"claude-sonnet-4.6","name":"Claude Sonnet 4.6","provider":"anthropic","reasoning":true,"thinkingLevels":["low","high"],"contextWindow":200000}]}]}}"""
                     path == "/api/agents" ->
                         agentCardJson
                             ?: """{"ok":true,"agents":[{"paneId":"w1:p1","workspaceId":"w1","tabId":"t1","agent":"pi","status":"$agentStatus","sessionPath":"/tmp/session.jsonl"}]}"""
@@ -98,6 +105,20 @@ class ChatControlsTest {
     fun tearDown() {
         server.shutdown()
     }
+    private fun largeFontEnabled(): Boolean =
+        InstrumentationRegistry.getArguments().getString("fontScale") == "1.5"
+
+    private fun capture(name: String) {
+        val directory = InstrumentationRegistry.getInstrumentation().targetContext.getExternalFilesDir(null)
+            ?: error("External files directory unavailable")
+        val file = File(directory, "$name.png")
+        file.outputStream().use { output ->
+            compose.onNodeWithTag("conversation_config_sheet").captureToImage().asAndroidBitmap()
+                .compress(Bitmap.CompressFormat.PNG, 100, output)
+        }
+        println("SCREENSHOT[$name]=${file.absolutePath}")
+    }
+
 
     @Test
     fun controlsMenuShowsLifecycleActionsAndOpensRenameDialog() {
@@ -312,13 +333,51 @@ class ChatControlsTest {
 
         compose.onNodeWithTag("chat_thinking_config").assertIsDisplayed().performClick()
         compose.onNodeWithTag("conversation_config_sheet").assertIsDisplayed()
+        compose.onNodeWithTag("conversation_model_search").performTextInput("openai-codex/gpt-5.3")
         compose.onNodeWithTag("thinking_level_high").assertIsDisplayed()
         compose.onNodeWithTag("thinking_level_low").performClick()
         compose.waitUntil(timeoutMillis = 5_000) { controlBodies.any { "set_thinking" in it && "low" in it } }
 
-        compose.onNodeWithTag("conversation_model_gpt-5.3").performScrollTo().performClick()
+        compose.onNodeWithTag("conversation_model_openai-codex/gpt-5.3").performScrollTo().performClick()
         compose.waitUntil(timeoutMillis = 5_000) { controlBodies.any { "set_model" in it && "openai-codex/gpt-5.3" in it } }
     }
+
+    @Test
+    fun configurationSheetGroupsProvidersAndScrollsWithoutSheetDrag() {
+        val store = ConnectionStore(InstrumentationRegistry.getInstrumentation().targetContext)
+        store.save(server.url("/").toString().trimEnd('/'), "t", null, null)
+        val bridge = BridgeClient(OkHttpClient.Builder().readTimeout(5, TimeUnit.SECONDS).build(), store)
+        val vm = ChatViewModel(bridge, "w1:p1", null, "working")
+        compose.setContent { ChatScreen(viewModel = vm, onBack = {}) }
+        compose.waitUntil(timeoutMillis = 10_000) { vm.ui.value.model != null }
+        compose.onNodeWithTag("chat_model_config").performClick()
+        compose.onNodeWithTag("conversation_config_sheet").assertIsDisplayed()
+        compose.onNodeWithTag("provider_header_openai-codex").assertIsDisplayed()
+        compose.onNodeWithTag("provider_count_openai-codex").assertIsDisplayed()
+        compose.onNodeWithContentDescription("Search models").assertIsDisplayed()
+        compose.onNodeWithTag("conversation_model_openai-codex/gpt-5.4")
+            .assertIsDisplayed()
+            .assertContentDescriptionContains("openai-codex/gpt-5.4", substring = true)
+        compose.onNodeWithTag("conversation_model_openai-codex/gpt-5.4")
+            .assertContentDescriptionContains("Current model", substring = true)
+        compose.onNodeWithContentDescription("Current model").assertIsDisplayed()
+        capture(if (largeFontEnabled()) "conversation-picker-large-font" else "conversation-picker-default")
+        repeat(3) {
+            compose.onNodeWithTag("conversation_model_list").performTouchInput { swipeUp() }
+        }
+        compose.onNodeWithTag("conversation_model_anthropic/claude-sonnet-4.6")
+            .assertIsDisplayed()
+            .assertContentDescriptionContains("anthropic/claude-sonnet-4.6", substring = true)
+        compose.onNodeWithTag("provider_header_anthropic").assertIsDisplayed()
+        repeat(3) {
+            compose.onNodeWithTag("conversation_model_list").performTouchInput { swipeDown() }
+        }
+        compose.onNodeWithTag("conversation_model_openai-codex/gpt-5.4").assertIsDisplayed()
+        compose.onNodeWithTag("conversation_model_list").performTouchInput { swipeDown() }
+        compose.onNodeWithTag("conversation_model_openai-codex/gpt-5.4").assertIsDisplayed()
+        compose.onNodeWithContentDescription("Close conversation setup").performClick()
+    }
+
     @Test
     fun configurationSheetHidesThinkingForBackendsWithoutTheCapability() {
         agentCardJson = """{"ok":true,"agents":[{"paneId":"w1:p1","workspaceId":"w1","tabId":"t1","agent":"claude","agentKind":"claude","displayName":"Claude Code","capabilities":["abort","compact","close","set_model"],"status":"working","sessionPath":"/tmp/claude.jsonl"}]}"""

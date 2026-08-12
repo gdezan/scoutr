@@ -2,13 +2,13 @@ package dev.cockpit.app.ui
 
 import android.graphics.Bitmap
 import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.ui.test.assertContentDescriptionContains
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
-import androidx.compose.ui.test.hasTestTag
-import org.junit.Assert.assertTrue
 import androidx.compose.ui.test.captureToImage
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -17,6 +17,9 @@ import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextInput
 import androidx.test.platform.app.InstrumentationRegistry
+import androidx.compose.ui.test.onNodeWithContentDescription
+import org.junit.Assert.assertTrue
+
 import dev.cockpit.app.data.ConnectionStore
 import dev.cockpit.app.data.SharedPreferencesLauncherSettingsStore
 import dev.cockpit.app.net.BridgeClient
@@ -31,7 +34,6 @@ import org.junit.Rule
 import org.junit.Test
 import java.io.File
 import java.util.concurrent.TimeUnit
-
 
 /**
  * Fast-launch behavior against a local mock bridge: focused pickers, create gating,
@@ -98,6 +100,8 @@ class NewSessionSheetTest {
         context.getSharedPreferences("cockpit_launcher", android.content.Context.MODE_PRIVATE).edit().clear().commit()
         return SharedPreferencesLauncherSettingsStore(context)
     }
+    private fun largeFontEnabled(): Boolean = InstrumentationRegistry.getArguments().getString("fontScale") == "1.5"
+
 
     private fun waitFor(tag: String) {
         compose.waitUntil(timeoutMillis = 10_000) {
@@ -105,12 +109,12 @@ class NewSessionSheetTest {
         }
     }
 
-    private fun capture(name: String) {
+    private fun capture(name: String, tag: String) {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val directory = context.getExternalFilesDir(null) ?: error("External files directory unavailable")
         val file = File(directory, "$name.png")
         file.outputStream().use { output ->
-            compose.onNodeWithTag("folder_picker").captureToImage().asAndroidBitmap().compress(Bitmap.CompressFormat.PNG, 100, output)
+            compose.onNodeWithTag(tag).captureToImage().asAndroidBitmap().compress(Bitmap.CompressFormat.PNG, 100, output)
         }
         println("SCREENSHOT[$name]=${file.absolutePath}")
     }
@@ -136,7 +140,7 @@ class NewSessionSheetTest {
         compose.onNodeWithTag("open_folder_picker").performScrollTo().performClick()
         waitFor("folder_list")
         compose.onNodeWithTag("use_folder").assertIsDisplayed().assertIsEnabled()
-        capture("folder-picker-populated")
+        capture("folder-picker-populated", "folder_picker")
 
         compose.onNodeWithTag("folder_list").performScrollToNode(hasTestTag("folder_item_folder-24"))
         compose.onNodeWithTag("folder_item_folder-24").assertIsDisplayed()
@@ -158,7 +162,7 @@ class NewSessionSheetTest {
         compose.waitUntil(timeoutMillis = 10_000) { !vm.ui.value.loadingDirs }
         compose.onNodeWithText("No subfolders").assertIsDisplayed()
         compose.onNodeWithTag("use_folder").assertIsDisplayed().assertIsEnabled()
-        capture("folder-picker-empty")
+        capture("folder-picker-empty", "folder_picker")
     }
 
     @Test
@@ -176,10 +180,13 @@ class NewSessionSheetTest {
         compose.onNodeWithTag("open_folder_picker").performScrollTo().performClick()
         waitFor("folder_item_Dev")
         compose.onNodeWithTag("folder_item_Dev").performClick()
-        compose.waitUntil(timeoutMillis = 2_000) { vm.ui.value.loadingDirs }
+        compose.waitUntil(timeoutMillis = 2_000) {
+            vm.ui.value.loadingDirs && runCatching {
+                compose.onNodeWithTag("use_folder").assertIsNotEnabled()
+            }.isSuccess
+        }
         compose.onNodeWithTag("use_folder").assertIsDisplayed()
-        compose.onNodeWithTag("use_folder").assertIsNotEnabled()
-        capture("folder-picker-loading")
+        capture("folder-picker-loading", "folder_picker")
     }
 
     @Test
@@ -200,7 +207,7 @@ class NewSessionSheetTest {
         compose.onNodeWithText("Folder listing failed. Check the bridge and retry.").assertIsDisplayed()
         compose.onNodeWithTag("use_folder").assertIsDisplayed()
         compose.onNodeWithTag("use_folder").assertIsNotEnabled()
-        capture("folder-picker-error")
+        capture("folder-picker-error", "folder_picker")
     }
 
     @Test
@@ -280,34 +287,49 @@ class NewSessionSheetTest {
             models = """{"ok":true,"catalog":{"providers":[
                 {"name":"openai-codex","models":[
                     {"id":"gpt-5.4","name":"GPT-5.4","provider":"openai-codex","reasoning":true,"thinkingLevels":["low","high"],"contextWindow":200000},
-                    {"id":"gpt-4.1","name":"GPT-4.1","provider":"openai-codex","reasoning":true,"thinkingLevels":["low"],"contextWindow":128000}]},
-                {"name":"deepseek","models":[
-                    {"id":"deepseek-v4-flash","name":"DeepSeek V4 Flash","provider":"deepseek","reasoning":false,"thinkingLevels":[],"contextWindow":128000}]}
+                    {"id":"gpt-5.3","name":"GPT-5.3","provider":"openai-codex","reasoning":true,"thinkingLevels":["low","high"],"contextWindow":128000},
+                    {"id":"gpt-5.2","name":"GPT-5.2","provider":"openai-codex","reasoning":true,"thinkingLevels":["low","high"],"contextWindow":128000},
+                    {"id":"gpt-5.1","name":"GPT-5.1","provider":"openai-codex","reasoning":true,"thinkingLevels":["low","high"],"contextWindow":128000},
+                    {"id":"gpt-5","name":"GPT-5","provider":"openai-codex","reasoning":true,"thinkingLevels":["low","high"],"contextWindow":128000}]},
+                {"name":"anthropic","models":[
+                    {"id":"claude-sonnet-4.6","name":"Claude Sonnet 4.6","provider":"anthropic","reasoning":true,"thinkingLevels":["low","high"],"contextWindow":200000}]}
             ]}}""",
+
         )
 
         val vm = NewSessionViewModel(bridge(), launcherSettingsStore())
-        compose.setContent {
-            NewSessionSheet(viewModel = vm, onDismiss = {}, onCreated = {})
-        }
+        compose.setContent { NewSessionSheet(viewModel = vm, onDismiss = {}, onCreated = {}) }
 
+        compose.onNodeWithTag("new_session_content").performScrollToNode(hasTestTag("open_model_picker"))
+        compose.onNodeWithTag("open_model_picker").performClick()
+        waitFor("provider_header_openai-codex")
+        compose.onNodeWithTag("filter_reasoning").assertDoesNotExist()
+        compose.onNodeWithTag("filter_thinking_high").assertDoesNotExist()
+        compose.onNodeWithText("Any context").assertDoesNotExist()
+        compose.onNodeWithTag("model_search").performClick()
+        compose.onNodeWithTag("model_search").performTextInput("openai-codex/gpt-5.3")
+        compose.onNodeWithTag("model_item_openai-codex/gpt-5.3")
+            .assertIsDisplayed()
+            .assertContentDescriptionContains("openai-codex/gpt-5.3", substring = true)
+            .performClick()
+        compose.waitUntil(timeoutMillis = 5_000) { vm.ui.value.selectedModelKey == "openai-codex/gpt-5.3" }
         compose.onNodeWithTag("open_model_picker").performScrollTo().performClick()
         waitFor("provider_header_openai-codex")
+        compose.onNodeWithContentDescription("Clear model search").performClick()
+        waitFor("provider_header_anthropic")
         compose.onNodeWithTag("provider_header_openai-codex").assertIsDisplayed()
-        // The second provider's models are below the fold; scroll the list.
-        compose.onNodeWithTag("model_list").performScrollToNode(hasTestTag("provider_header_deepseek"))
-        compose.onNodeWithTag("provider_header_deepseek").assertIsDisplayed()
-
-        // Every model appears exactly once, under exactly one provider group.
-        // The tag is the provider-qualified key, so a model id shared by two
-        // providers (e.g. deepseek-v4-flash) still resolves to a single node.
+        compose.onNodeWithTag("provider_count_openai-codex").assertIsDisplayed()
         compose.onNodeWithTag("model_item_openai-codex/gpt-5.4").assertIsDisplayed()
         compose.onAllNodes(hasTestTag("model_item_openai-codex/gpt-5.4")).assertCountEquals(1)
-        compose.onAllNodes(hasTestTag("model_item_openai-codex/gpt-4.1")).assertCountEquals(1)
-        compose.onAllNodes(hasTestTag("model_item_deepseek/deepseek-v4-flash")).assertCountEquals(1)
+        compose.onAllNodes(hasTestTag("model_item_openai-codex/gpt-5")).assertCountEquals(1)
+        compose.onAllNodes(hasTestTag("model_item_anthropic/claude-sonnet-4.6")).assertCountEquals(1)
+        // The second provider's models are below the fold; scroll the list.
+        compose.onNodeWithTag("model_list").performScrollToNode(hasTestTag("provider_header_anthropic"))
+        compose.onNodeWithTag("provider_header_anthropic").assertIsDisplayed()
+        capture(if (largeFontEnabled()) "model-picker-provider-groups-large-font" else "model-picker-provider-groups-default", "model_picker")
 
         // Selection still lands and closes the picker.
-        compose.onNodeWithTag("model_item_deepseek/deepseek-v4-flash").performClick()
-        compose.waitUntil(timeoutMillis = 5_000) { vm.ui.value.selectedModelKey == "deepseek/deepseek-v4-flash" }
+        compose.onNodeWithTag("model_item_anthropic/claude-sonnet-4.6").performClick()
+        compose.waitUntil(timeoutMillis = 5_000) { vm.ui.value.selectedModelKey == "anthropic/claude-sonnet-4.6" }
     }
 }

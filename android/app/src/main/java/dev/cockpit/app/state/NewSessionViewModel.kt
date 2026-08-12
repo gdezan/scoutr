@@ -245,19 +245,6 @@ class NewSessionViewModel(
 
     fun setModelQuery(query: String) = updateModelPicker { it.copy(modelFilters = it.modelFilters.copy(query = query)) }
 
-    fun toggleReasoningFilter() = updateModelPicker {
-        it.copy(modelFilters = it.modelFilters.copy(reasoningOnly = !it.modelFilters.reasoningOnly))
-    }
-
-    fun setMinimumContext(tokens: Long?) = updateModelPicker {
-        it.copy(modelFilters = it.modelFilters.copy(minimumContextTokens = tokens))
-    }
-
-    fun setThinkingFilter(level: String?) = updateModelPicker {
-        it.copy(modelFilters = it.modelFilters.copy(thinkingLevel = level))
-    }
-
-    fun clearModelFilters() = updateModelPicker { it.copy(modelFilters = ModelPickerFilters()) }
 
     fun selectModel(modelKey: String) {
         val model = findModel(ui.value.providers, modelKey) ?: return
