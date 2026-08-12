@@ -42,6 +42,7 @@ import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.CircularProgressIndicator
@@ -106,7 +107,6 @@ import dev.cockpit.app.ui.motion.HapticEvent
 import dev.cockpit.app.ui.motion.rememberHaptic
 import dev.cockpit.app.ui.motion.useReduceMotion
 import dev.cockpit.app.state.ChatUiState
-import dev.cockpit.app.state.meaningfulLiveOutputLines
 import dev.cockpit.app.state.ChatViewModel
 import dev.cockpit.app.state.MessageDeliveryState
 import dev.cockpit.app.state.PendingUserMessage
@@ -122,6 +122,7 @@ import kotlinx.serialization.json.JsonPrimitive
 fun ChatScreen(
     viewModel: ChatViewModel,
     onBack: () -> Unit,
+    onOpenLiveOutput: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val ui by viewModel.ui.collectAsState()
@@ -142,17 +143,6 @@ fun ChatScreen(
     var closeOpen by rememberSaveable { mutableStateOf(false) }
     var configurationOpen by rememberSaveable { mutableStateOf(false) }
 
-    // Live-output polling is owned by visibility + work state (fix 10): the
-    // inline card is the default surface while the agent works, so we poll
-    // whenever the screen is alive AND the agent is working, and stop on
-    // background (onStopOrDispose) or when the run ends (key change).
-    // Opening the expanded drawer in any state (blocked/idle/done) also starts
-    // polling — the drawer must fetch what the agent did even after it stopped.
-    LifecycleStartEffect(ui.agentStatus, ui.liveOutputExpanded) {
-        if (ui.agentStatus == "working" || ui.liveOutputExpanded) viewModel.startLiveOutputPolling()
-        onStopOrDispose { viewModel.stopLiveOutputPolling() }
-    }
-
     Column(modifier.fillMaxSize()) {
         ChatHeader(
             paneId = viewModel.paneId,
@@ -166,6 +156,7 @@ fun ChatScreen(
             onToggleDetails = { detailsVisible = !detailsVisible },
             onOpenConfiguration = { configurationOpen = true },
             onBack = onBack,
+            onOpenLiveOutput = onOpenLiveOutput,
             onControl = { action ->
                 when (action) {
                     "rename" -> renameOpen = true
@@ -176,11 +167,6 @@ fun ChatScreen(
             },
         )
 
-        // Live output state computed once per recomposition and shared by the
-        // list branches and the strip gate below.
-        val liveLines = meaningfulLiveOutputLines(ui.liveOutputText)
-        val inlineLiveVisible =
-            ui.agentStatus == "working" && liveLines.isNotEmpty() && !ui.liveOutputExpanded
         val emptyTranscriptHint = !ui.exists && ui.pendingMessages.isEmpty()
         val loadingSkeleton = ui.loading && ui.entries.isEmpty() && ui.pendingMessages.isEmpty()
         Box(Modifier.weight(1f).fillMaxWidth()) {
@@ -220,12 +206,6 @@ fun ChatScreen(
                         answeringQuestionId = ui.answeringQuestionId,
                         pendingMessages = ui.pendingMessages,
                         detailsVisible = detailsVisible,
-                        liveOutputExpanded = ui.liveOutputExpanded,
-                        liveOutputLines = liveLines,
-                        liveOutputTruncated = ui.liveOutputTruncated,
-                        liveOutputError = ui.liveOutputError,
-                        liveOutputVisible = inlineLiveVisible,
-                        onToggleLiveOutput = { viewModel.setLiveOutputExpanded(true) },
                         starting = starting,
                         onRetryPending = viewModel::retryPendingMessage,
                         onAnswerQuestion = { id, answer ->
@@ -245,17 +225,6 @@ fun ChatScreen(
                     color = MaterialTheme.colorScheme.error,
                     style = MaterialTheme.typography.bodySmall,
                     modifier = Modifier.padding(horizontal = 16.dp),
-                )
-            }
-            LiveOutputDrawer(ui)
-            // The strip is the fallback affordance: it is hidden only while the
-            // inline card actually owns the surface (list branch + working +
-            // output). On the loading and empty-transcript branches there is no
-            // inline card, so the strip stays available.
-            if (!(inlineLiveVisible && !loadingSkeleton && !emptyTranscriptHint)) {
-                LiveOutputStrip(
-                    ui = ui,
-                    onToggle = { viewModel.setLiveOutputExpanded(!ui.liveOutputExpanded) },
                 )
             }
             ChatComposer(
@@ -368,6 +337,7 @@ private fun ChatHeader(
     onToggleDetails: () -> Unit,
     onOpenConfiguration: () -> Unit,
     onBack: () -> Unit,
+    onOpenLiveOutput: () -> Unit,
     onControl: (String) -> Unit,
 ) {
     Column(Modifier.fillMaxWidth()) {
@@ -413,6 +383,18 @@ private fun ChatHeader(
                     Icon(Icons.Default.MoreVert, contentDescription = "Session actions")
                 }
                 DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                    // The raw pane tail is an escape hatch, not an ambient
+                    // surface: it lives behind its own screen so its poll only
+                    // runs while someone is looking at it.
+                    DropdownMenuItem(
+                        text = { Text("Live output…") },
+                        leadingIcon = { Icon(Icons.Default.Terminal, contentDescription = null) },
+                        onClick = {
+                            menuOpen = false
+                            onOpenLiveOutput()
+                        },
+                        modifier = Modifier.testTag("live_output_menu"),
+                    )
                     // Null capabilities mean the backend is unknown yet; show the
                     // full pi surface until the first agents poll names it.
                     val all = listOf(
@@ -528,12 +510,6 @@ fun ChatList(
     pendingMessages: List<PendingUserMessage> = emptyList(),
     questions: List<QuestionEntry> = emptyList(),
     answeringQuestionId: String? = null,
-    liveOutputExpanded: Boolean = false,
-    liveOutputLines: List<String> = emptyList(),
-    liveOutputTruncated: Boolean = false,
-    liveOutputError: String? = null,
-    liveOutputVisible: Boolean = false,
-    onToggleLiveOutput: () -> Unit = {},
     starting: Boolean = false,
     onRetryPending: (String) -> Unit = {},
     onAnswerQuestion: (String, String) -> Unit = { _, _ -> },
@@ -557,12 +533,12 @@ fun ChatList(
 
     // Follow: initial open + every append while at the bottom. The index is
     // computed the same way the LazyColumn emits items (entries, questions,
-    // pending, starting, inline live output) so follow always lands on the
-    // true last item; bounded + guarded against a race with the poll.
+    // pending, starting) so follow always lands on the true last item;
+    // bounded + guarded against a race with the poll.
     val lastItemKey = pendingMessages.lastOrNull()?.localId ?: entries.lastOrNull()?.entryId
     val lastIndex = entries.size + questions.size + pendingMessages.size +
-        (if (starting) 1 else 0) + (if (liveOutputVisible) 1 else 0) - 1
-    LaunchedEffect(entries.size, pendingMessages.size, lastItemKey, liveOutputExpanded, liveOutputVisible, starting) {
+        (if (starting) 1 else 0) - 1
+    LaunchedEffect(entries.size, pendingMessages.size, lastItemKey, starting) {
         if (followNew && lastIndex >= 0) {
             try {
                 listState.scrollToItem(lastIndex)
@@ -631,23 +607,6 @@ fun ChatList(
                         placementSpec = CockpitMotion.itemPlacementSpec(reduceMotion),
                         fadeOutSpec = CockpitMotion.itemSpec(reduceMotion),
                     ))
-                }
-            }
-            if (liveOutputVisible) {
-                item(key = "inline_live_output") {
-                    InlineLiveOutput(
-                        lines = liveOutputLines,
-                        truncated = liveOutputTruncated,
-                        error = liveOutputError,
-                        onTap = onToggleLiveOutput,
-                        modifier = Modifier
-                            .padding(top = 10.dp)
-                            .animateItem(
-                                fadeInSpec = CockpitMotion.itemSpec(reduceMotion),
-                                placementSpec = CockpitMotion.itemPlacementSpec(reduceMotion),
-                                fadeOutSpec = CockpitMotion.itemSpec(reduceMotion),
-                            ),
-                    )
                 }
             }
         }

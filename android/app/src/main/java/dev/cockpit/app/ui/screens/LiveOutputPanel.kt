@@ -1,95 +1,110 @@
 package dev.cockpit.app.ui.screens
 
-import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkVertically
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import dev.cockpit.app.ui.motion.LocalReduceMotion
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import dev.cockpit.app.state.ChatUiState
-import dev.cockpit.app.state.meaningfulLiveOutputLines
+import androidx.lifecycle.compose.LifecycleStartEffect
+import dev.cockpit.app.state.LiveOutputUiState
+import dev.cockpit.app.state.LiveOutputViewModel
+import dev.cockpit.app.ui.motion.LocalReduceMotion
 
+/**
+ * The raw pane tail, full screen and on demand.
+ *
+ * The chat screen carries a working indicator, not output, so this is the one
+ * place `/api/agents/{id}/read` is consumed — and the poll lives exactly as
+ * long as the screen is visible (`LifecycleStartEffect`), never in the
+ * background.
+ */
 @Composable
-internal fun LiveOutputDrawer(ui: ChatUiState) {
-    val outputLines = meaningfulLiveOutputLines(ui.liveOutputText)
-    AnimatedVisibility(
-        visible = ui.liveOutputExpanded,
-        enter = expandVertically(
-            animationSpec = tween(180, easing = FastOutSlowInEasing),
-            expandFrom = Alignment.Bottom,
-        ) + fadeIn(tween(120, delayMillis = 60)),
-        exit = shrinkVertically(tween(150), shrinkTowards = Alignment.Bottom) + fadeOut(tween(100)),
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(200.dp)
-                .background(MaterialTheme.colorScheme.surface)
-                .clipToBounds()
-                .testTag("live_output_drawer"),
+fun LiveOutputScreen(
+    viewModel: LiveOutputViewModel,
+    onBack: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val ui by viewModel.ui.collectAsState()
+
+    LifecycleStartEffect(Unit) {
+        viewModel.startPolling()
+        onStopOrDispose { viewModel.stopPolling() }
+    }
+
+    Column(modifier.fillMaxSize().testTag("live_output_screen")) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-            LiveOutputHeader(ui)
-            when {
-                ui.liveOutputLoading && outputLines.isEmpty() -> LiveOutputMessage("Waiting for output…")
-                outputLines.isEmpty() && ui.liveOutputError != null -> LiveOutputMessage(
-                    "Output unavailable\n${ui.liveOutputError}",
-                    MaterialTheme.colorScheme.error,
-                )
-                outputLines.isEmpty() -> LiveOutputMessage("No recent output")
-                else -> LiveOutputBody(outputLines)
+            IconButton(onClick = onBack, modifier = Modifier.testTag("live_output_back")) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
             }
+            Column(Modifier.weight(1f)) {
+                Text(
+                    "Live output",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    viewModel.paneId,
+                    style = MaterialTheme.typography.bodySmall,
+                    fontFamily = FontFamily.Monospace,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                )
+            }
+        }
+        HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f))
+        LiveOutputHeader(ui)
+        val outputLines = ui.lines
+        when {
+            ui.loading && outputLines.isEmpty() -> LiveOutputMessage("Waiting for output…")
+            outputLines.isEmpty() && ui.error != null -> LiveOutputMessage(
+                "Output unavailable\n${ui.error}",
+                MaterialTheme.colorScheme.error,
+            )
+            outputLines.isEmpty() -> LiveOutputMessage("No recent output")
+            else -> LiveOutputBody(outputLines)
         }
     }
 }
 
 @Composable
-private fun LiveOutputHeader(ui: ChatUiState) {
+private fun LiveOutputHeader(ui: LiveOutputUiState) {
     val stateLabel = when {
-        ui.liveOutputError != null -> "STALE · RECONNECTING"
-        ui.liveOutputTruncated -> "EARLIER OUTPUT TRIMMED"
+        ui.error != null -> "STALE · RECONNECTING"
+        ui.truncated -> "EARLIER OUTPUT TRIMMED"
         else -> null
     }
     Row(
@@ -105,7 +120,7 @@ private fun LiveOutputHeader(ui: ChatUiState) {
         stateLabel?.let {
             Text(
                 it,
-                color = if (ui.liveOutputError != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                color = if (ui.error != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
                 style = MaterialTheme.typography.labelSmall,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -157,136 +172,8 @@ private fun ColumnScope.LiveOutputBody(lines: List<String>) {
 }
 
 @Composable
-internal fun LiveOutputStrip(
-    ui: ChatUiState,
-    onToggle: () -> Unit,
-) {
-    val summary = if (ui.liveOutputError != null && meaningfulLiveOutputLines(ui.liveOutputText).isEmpty()) {
-        "Output unavailable"
-    } else {
-        ui.liveOutputSummary
-    }
-    val description = "Live output, ${if (ui.liveOutputExpanded) "expanded" else "collapsed"}. $summary"
-    Column(Modifier.fillMaxWidth()) {
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(48.dp)
-                .semantics(mergeDescendants = true) {
-                    contentDescription = description
-                }
-                .clickable(role = Role.Button, onClick = onToggle)
-                .padding(horizontal = 14.dp)
-                .testTag("live_output_toggle"),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Box(
-                Modifier
-                    .size(6.dp)
-                    .clip(CircleShape)
-                    .background(liveStatusColor(ui.agentStatus)),
-            )
-            Spacer(Modifier.width(10.dp))
-            Text(
-                summary,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                style = MaterialTheme.typography.bodySmall,
-                fontFamily = FontFamily.Monospace,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f),
-            )
-            Text(
-                if (ui.liveOutputExpanded) "▾" else "▴",
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                style = MaterialTheme.typography.bodyMedium,
-            )
-        }
-    }
-}
-
-@Composable
-private fun LiveOutputMessage(message: String, color: Color = MaterialTheme.colorScheme.onSurfaceVariant) {
-    Box(Modifier.fillMaxSize().padding(horizontal = 24.dp), contentAlignment = Alignment.Center) {
+private fun ColumnScope.LiveOutputMessage(message: String, color: Color = MaterialTheme.colorScheme.onSurfaceVariant) {
+    Box(Modifier.fillMaxWidth().weight(1f).padding(horizontal = 24.dp), contentAlignment = Alignment.Center) {
         Text(message, style = MaterialTheme.typography.bodySmall, color = color)
-    }
-}
-
-@Composable
-private fun liveStatusColor(status: String): Color = when (status) {
-    "blocked" -> MaterialTheme.colorScheme.error
-    "working" -> MaterialTheme.colorScheme.primary
-    "done" -> MaterialTheme.colorScheme.secondary
-    else -> MaterialTheme.colorScheme.outline
-}
-
-/**
- * The default live-output surface while an agent is working (fix 10): a quiet
- * inline card at the bottom of the transcript instead of a hidden drawer. It
- * shows the last few meaningful lines of real agent output, is capped like the
- * drawer (bridge 120 lines / 48 KiB, we render the tail), and tapping it
- * expands the full drawer. Only composed while the agent is working — when the
- * run ends or the app backgrounds, the card (and its polling) disappears.
- */
-@Composable
-internal fun InlineLiveOutput(
-    lines: List<String>,
-    truncated: Boolean,
-    onTap: () -> Unit,
-    modifier: Modifier = Modifier,
-    error: String? = null,
-) {
-    val visibleLines = lines.takeLast(5)
-    val scheme = MaterialTheme.colorScheme
-    // Polling failure with frozen output must not read as live streaming:
-    // the accent dot and LIVE badge swap to the error state ("state is the
-    // color"), mirroring the drawer's STALE · RECONNECTING marker.
-    val stale = error != null
-    val accent = if (stale) scheme.error else scheme.primary
-    Column(
-        modifier = modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .background(scheme.surfaceVariant.copy(alpha = 0.35f))
-            .clickable(role = Role.Button, onClick = onTap)
-            .padding(horizontal = 12.dp, vertical = 8.dp)
-            .testTag("inline_live_output")
-            .semantics { contentDescription = "Live output. Tap to expand." },
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(
-                Modifier
-                    .size(6.dp)
-                    .clip(CircleShape)
-                    .background(accent),
-            )
-            Spacer(Modifier.width(8.dp))
-            Text(
-                if (stale) "STALE · RECONNECTING" else "LIVE",
-                color = accent,
-                style = MaterialTheme.typography.labelSmall,
-                letterSpacing = 1.sp,
-            )
-            if (truncated) {
-                Spacer(Modifier.width(10.dp))
-                Text(
-                    "earlier output trimmed",
-                    color = scheme.onSurfaceVariant,
-                    style = MaterialTheme.typography.labelSmall,
-                )
-            }
-        }
-        Spacer(Modifier.height(6.dp))
-        Text(
-            visibleLines.joinToString("\n"),
-            color = scheme.onSurfaceVariant,
-            style = MaterialTheme.typography.bodySmall,
-            lineHeight = 16.sp,
-            fontFamily = FontFamily.Monospace,
-            maxLines = 5,
-            softWrap = false,
-            overflow = TextOverflow.Clip,
-        )
     }
 }

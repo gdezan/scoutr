@@ -24,7 +24,7 @@ import java.util.concurrent.atomic.AtomicInteger
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
-class ChatLiveOutputViewModelTest {
+class LiveOutputViewModelTest {
     private lateinit var server: MockWebServer
     private val outputReads = AtomicInteger()
     @Volatile private var outputFails = false
@@ -37,7 +37,6 @@ class ChatLiveOutputViewModelTest {
             override fun dispatch(request: RecordedRequest): MockResponse {
                 val path = request.requestUrl?.encodedPath.orEmpty()
                 val body = when (path) {
-                    "/api/agents" -> """{"ok":true,"agents":[{"paneId":"w1:p1","workspaceId":"w1","tabId":"t1","agent":"pi","status":"working"}]}"""
                     "/api/agents/w1:p1/read" -> {
                         outputReads.incrementAndGet()
                         if (outputFails) return MockResponse().setResponseCode(503).setBody("offline")
@@ -59,63 +58,68 @@ class ChatLiveOutputViewModelTest {
     fun refreshLoadsBoundedOutputAndPreservesItOnError() = runBlocking {
         val viewModel = viewModel()
 
-        viewModel.refreshLiveOutput()
+        viewModel.refresh()
 
-        assertEquals("compile\nall tests passed", viewModel.ui.value.liveOutputText)
-        assertEquals(9, viewModel.ui.value.liveOutputRevision)
-        assertTrue(viewModel.ui.value.liveOutputTruncated)
+        assertEquals("compile\nall tests passed", viewModel.ui.value.text)
+        assertEquals(9, viewModel.ui.value.revision)
+        assertTrue(viewModel.ui.value.truncated)
 
         outputFails = true
-        viewModel.refreshLiveOutput()
+        viewModel.refresh()
 
-        assertEquals("compile\nall tests passed", viewModel.ui.value.liveOutputText)
-        assertNotNull(viewModel.ui.value.liveOutputError)
+        // A failed poll must not blank the last snapshot; the screen shows the
+        // frozen tail under a STALE marker instead of an empty panel.
+        assertEquals("compile\nall tests passed", viewModel.ui.value.text)
+        assertNotNull(viewModel.ui.value.error)
     }
 
     @Test
-    fun collapsedSummarySkipsTerminalChrome() {
-        val state = ChatUiState(
-            agentStatus = "working",
-            liveOutputText = "Useful verification result\nTook 0.1s\nElapsed 6.0s\n────────\n.: Working...\n~/repo │ anthropic/claude-sonnet │ high\n7d:39% Pursuing goal cache R/W 63M/0",
+    fun renderedLinesSkipTerminalChrome() {
+        val state = LiveOutputUiState(
+            text = "Useful verification result\nTook 0.1s\nElapsed 6.0s\n────────\n.: Working...\n~/repo │ anthropic/claude-sonnet │ high\n7d:39% Pursuing goal cache R/W 63M/0",
         )
 
-        assertEquals("Useful verification result", state.liveOutputSummary)
+        assertEquals(listOf("Useful verification result"), state.lines)
     }
 
     @Test
-    fun pollingContinuesWhileWorkingAfterPanelCollapses() = runBlocking {
+    fun pollingRunsWhileStartedAndStopsOnStop() = runBlocking {
         val viewModel = viewModel()
-        viewModel.setLiveOutputExpanded(true)
-        viewModel.startLiveOutputPolling()
+        viewModel.startPolling()
         var deadline = System.currentTimeMillis() + 1_000
         while (outputReads.get() == 0 && System.currentTimeMillis() < deadline) {
             org.robolectric.shadows.ShadowLooper.idleMainLooper()
             delay(25)
         }
-        assertTrue(outputReads.get() > 0)
+        assertTrue("polling starts with the screen", outputReads.get() > 0)
 
-        // Fix 10: closing the drawer must NOT stop streaming — while the agent
-        // works, the inline card is the live surface and polling continues.
-        viewModel.setLiveOutputExpanded(false)
-        delay(100)
-        val atCollapse = outputReads.get()
+        // Keeps ticking while the screen is open…
+        val atStart = outputReads.get()
         deadline = System.currentTimeMillis() + 3_000
-        while (outputReads.get() <= atCollapse && System.currentTimeMillis() < deadline) {
+        while (outputReads.get() <= atStart && System.currentTimeMillis() < deadline) {
             // Advance the PAUSED main looper's clock past the poll delay so
             // the next 900ms tick actually fires.
             org.robolectric.shadows.ShadowLooper.idleMainLooper(900, TimeUnit.MILLISECONDS)
             delay(25)
         }
-        assertTrue(
-            "streaming continues after the drawer closes while the agent works",
-            outputReads.get() > atCollapse,
-        )
+        assertTrue("polling repeats while the screen is open", outputReads.get() > atStart)
+
+        // …and stops dead when the screen goes away. Zero ambient cost is the
+        // whole point of moving the poll off the chat screen.
+        viewModel.stopPolling()
+        delay(100)
+        val atStop = outputReads.get()
+        repeat(4) {
+            org.robolectric.shadows.ShadowLooper.idleMainLooper(900, TimeUnit.MILLISECONDS)
+            delay(25)
+        }
+        assertEquals("no reads after the screen closes", atStop, outputReads.get())
     }
 
-    private fun viewModel(): ChatViewModel {
+    private fun viewModel(): LiveOutputViewModel {
         val store = ConnectionStore(RuntimeEnvironment.getApplication())
         store.save(server.url("/").toString().trimEnd('/'), "test-token", null, null)
         val bridge = BridgeClient(OkHttpClient.Builder().readTimeout(5, TimeUnit.SECONDS).build(), store)
-        return ChatViewModel(bridge, "w1:p1", null, "working")
+        return LiveOutputViewModel(bridge, "w1:p1")
     }
 }

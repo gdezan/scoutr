@@ -1,5 +1,9 @@
 package dev.cockpit.app.ui
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onAllNodesWithTag
@@ -13,7 +17,9 @@ import androidx.compose.ui.test.hasTestTag
 import dev.cockpit.app.data.ConnectionStore
 import dev.cockpit.app.net.BridgeClient
 import dev.cockpit.app.state.ChatViewModel
+import dev.cockpit.app.state.LiveOutputViewModel
 import dev.cockpit.app.ui.screens.ChatScreen
+import dev.cockpit.app.ui.screens.LiveOutputScreen
 import androidx.test.platform.app.InstrumentationRegistry
 import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.MockResponse
@@ -137,26 +143,42 @@ class ChatControlsTest {
         compose.runOnIdle { assertEquals(1, backCalls.get()) }
     }
 
-
     @Test
-    fun drawerStillFetchesWhenAgentIsNotWorking() {
-        agentStatus = "idle"
+    fun liveOutputOpensFromTheSessionMenuAndTheChatScreenNeverPollsIt() {
         val store = ConnectionStore(InstrumentationRegistry.getInstrumentation().targetContext)
         store.save(server.url("/").toString().trimEnd('/'), "t", null, null)
         val bridge = BridgeClient(OkHttpClient.Builder().readTimeout(5, TimeUnit.SECONDS).build(), store)
-        val vm = ChatViewModel(bridge, "w1:p1", null, "idle")
+        val chatVm = ChatViewModel(bridge, "w1:p1", null, "working")
+        val liveVm = LiveOutputViewModel(bridge, "w1:p1")
 
-        compose.setContent { ChatScreen(viewModel = vm, onBack = {}) }
-        // Not working -> no inline card; the strip remains and opening the
-        // drawer must still fetch (the user opens it to see what the agent did).
-        compose.waitUntil(timeoutMillis = 10_000) {
-            compose.onAllNodes(hasTestTag("live_output_toggle")).fetchSemanticsNodes().isNotEmpty()
+        // Stands in for the NavHost: the menu item is the route's entry point,
+        // and back pops it.
+        compose.setContent {
+            var viewing by remember { mutableStateOf(false) }
+            if (viewing) LiveOutputScreen(viewModel = liveVm, onBack = { viewing = false })
+            else ChatScreen(viewModel = chatVm, onBack = {}, onOpenLiveOutput = { viewing = true })
         }
-        compose.onNodeWithTag("live_output_toggle").performClick()
-        compose.waitUntil(timeoutMillis = 10_000) { vm.ui.value.liveOutputText.contains("42 tests passed") }
-        compose.onNodeWithTag("live_output_drawer").assertIsDisplayed()
+
+        compose.waitUntil(timeoutMillis = 10_000) {
+            compose.onAllNodes(hasTestTag("chat_controls")).fetchSemanticsNodes().isNotEmpty()
+        }
+        // The transcript poll has been running for a while by now; the read
+        // endpoint must still be untouched — no ambient live-output cost.
+        assertEquals("the chat screen must not poll live output", 0, liveOutputRequests.get())
+
+        compose.onNodeWithTag("chat_controls").performClick()
+        compose.onNodeWithTag("live_output_menu").assertIsDisplayed().performClick()
+
+        compose.onNodeWithTag("live_output_screen").assertIsDisplayed()
+        compose.waitUntil(timeoutMillis = 10_000) { liveOutputRequests.get() > 0 }
         compose.onAllNodesWithText("42 tests passed", substring = true)[0].assertIsDisplayed()
+
+        compose.onNodeWithTag("live_output_back").performClick()
+        compose.onNodeWithTag("chat_controls").assertIsDisplayed()
+        compose.onNodeWithTag("live_output_screen").assertDoesNotExist()
     }
+
+
     @Test
     fun configurationSheetShowsAndSelectsExactThinkingAndModel() {
         val store = ConnectionStore(InstrumentationRegistry.getInstrumentation().targetContext)
@@ -216,46 +238,4 @@ class ChatControlsTest {
         compose.onNodeWithText("Rename session…").assertDoesNotExist()
     }
 
-    @Test
-    fun liveOutputStreamsInlineWhileWorkingAndKeepsPolling() {
-        val store = ConnectionStore(InstrumentationRegistry.getInstrumentation().targetContext)
-        store.save(server.url("/").toString().trimEnd('/'), "t", null, null)
-        val bridge = BridgeClient(OkHttpClient.Builder().readTimeout(5, TimeUnit.SECONDS).build(), store)
-        val vm = ChatViewModel(bridge, "w1:p1", null, "working")
-
-        compose.setContent { ChatScreen(viewModel = vm, onBack = {}) }
-        // Fix 10: while the agent works, real output streams inline at the
-        // bottom of the transcript — no expand needed, polling just runs.
-        compose.waitUntil(timeoutMillis = 10_000) { vm.ui.value.liveOutputText.contains("42 tests passed") }
-        // The inline card is a lazy item: it enters composition on the first
-        // recomposition after the text lands, so wait for it to exist before
-        // asserting bounds (layout can lag the state update by a frame).
-        compose.waitUntil(timeoutMillis = 10_000) {
-            compose.onAllNodesWithTag("inline_live_output").fetchSemanticsNodes().isNotEmpty()
-        }
-        compose.onNodeWithTag("inline_live_output").assertIsDisplayed()
-        compose.onAllNodesWithText("42 tests passed", substring = true)[0].assertIsDisplayed()
-        assertTrue("polling must run while working without interaction", liveOutputRequests.get() > 0)
-        Thread.sleep(1_800)
-        val beforeExpand = liveOutputRequests.get()
-        assertTrue("inline streaming keeps polling while working", beforeExpand > 0)
-
-        // Tapping the inline card expands the full drawer; inline hides while
-        // the drawer owns the surface.
-        compose.onNodeWithTag("inline_live_output").performClick()
-        compose.onNodeWithTag("live_output_drawer").assertIsDisplayed()
-        compose.onAllNodesWithText("42 tests passed", substring = true)[0].assertIsDisplayed()
-
-        // Collapsing the drawer brings the inline card back and polling keeps
-        // running — the screen-visibility/work-state lifecycle owns it now,
-        // not the panel toggle.
-        compose.onNodeWithTag("live_output_toggle").performClick()
-        compose.onNodeWithTag("inline_live_output").assertIsDisplayed()
-        val afterCollapse = liveOutputRequests.get()
-        Thread.sleep(1_800)
-        assertTrue(
-            "streaming must continue after the drawer closes while the agent works",
-            liveOutputRequests.get() > afterCollapse,
-        )
-    }
 }

@@ -118,12 +118,6 @@ data class ChatUiState(
     val commands: List<SlashCommandInfo> = emptyList(),
     val commandsLoading: Boolean = true,
     val commandsError: String? = null,
-    val liveOutputExpanded: Boolean = false,
-    val liveOutputLoading: Boolean = false,
-    val liveOutputText: String = "",
-    val liveOutputRevision: Long = 0,
-    val liveOutputTruncated: Boolean = false,
-    val liveOutputError: String? = null,
 ) {
     val lastUserMessage: String?
         get() = pendingMessages.lastOrNull()?.text
@@ -139,33 +133,6 @@ data class ChatUiState(
     /** Derived: set_thinking is only offered when the backend advertises it. */
     val canSetThinking: Boolean
         get() = capabilities == null || "set_thinking" in capabilities
-
-    val liveOutputSummary: String
-        get() = meaningfulLiveOutputLines(liveOutputText)
-            .lastOrNull()
-            ?.trim()
-            ?: when (agentStatus) {
-                "working" -> "Agent working"
-                "blocked" -> "Agent needs you"
-                "done" -> "Agent finished"
-                "idle" -> "Agent idle"
-                else -> "Live output"
-            }
-}
-
-internal fun meaningfulLiveOutputLines(text: String): List<String> = text
-    .lineSequence()
-    .map(String::trimEnd)
-    .filterNot { isLiveOutputChromeLine(it.trim()) }
-    .toList()
-
-internal fun isLiveOutputChromeLine(line: String): Boolean {
-    if (line.isBlank() || line.none(Char::isLetterOrDigit)) return true
-    if (line.startsWith("Elapsed ", ignoreCase = true)) return true
-    if (line.startsWith("Took ", ignoreCase = true) && line.drop(5).firstOrNull()?.isDigit() == true) return true
-    if (line.endsWith("Working...", ignoreCase = true)) return true
-    if (line.contains("cache R/W", ignoreCase = true)) return true
-    return line.count { it == '│' } >= 2 && line.contains('/')
 }
 
 /**
@@ -188,7 +155,6 @@ class ChatViewModel(
     val ui: StateFlow<ChatUiState> = _ui.asStateFlow()
 
     private var pollJob: Job? = null
-    private var liveOutputJob: Job? = null
 
     /** Resolved transcript path; a fresh session's card may not report it yet. */
     private var resolvedPath: String? = sessionPath
@@ -209,55 +175,6 @@ class ChatViewModel(
                 delay(2500)
                 refresh()
             }
-        }
-    }
-
-    fun setLiveOutputExpanded(expanded: Boolean) {
-        _ui.update { it.copy(liveOutputExpanded = expanded) }
-    }
-
-    /**
-     * Live-output polling is owned by the screen, not the panel: the chat
-     * composable starts it while the screen is visible AND the agent is
-     * working (fix 10 — the inline live card is the default surface, the
-     * drawer is just a bigger view), and stops it on background or when the
-     * run ends. The VM only guards idempotence.
-     */
-    fun startLiveOutputPolling() {
-        if (liveOutputJob?.isActive == true) return
-        liveOutputJob = viewModelScope.launch {
-            while (isActive) {
-                refreshLiveOutput()
-                delay(LIVE_OUTPUT_POLL_MS)
-            }
-        }
-    }
-
-    fun stopLiveOutputPolling() {
-        liveOutputJob?.cancel()
-        liveOutputJob = null
-    }
-
-    suspend fun refreshLiveOutput() {
-        _ui.update { it.copy(liveOutputLoading = it.liveOutputText.isEmpty()) }
-        try {
-            val response = bridge.liveOutput(paneId, LIVE_OUTPUT_LINES)
-            val output = response.output
-            if (output == null) {
-                _ui.update { it.copy(liveOutputLoading = false, liveOutputError = response.error ?: "Live output unavailable") }
-                return
-            }
-            _ui.update {
-                it.copy(
-                    liveOutputLoading = false,
-                    liveOutputText = output.text,
-                    liveOutputRevision = output.revision,
-                    liveOutputTruncated = output.truncated,
-                    liveOutputError = null,
-                )
-            }
-        } catch (error: Exception) {
-            _ui.update { it.copy(liveOutputLoading = false, liveOutputError = error.message ?: "Live output unavailable") }
         }
     }
 
@@ -565,16 +482,10 @@ class ChatViewModel(
 
     override fun onCleared() {
         pollJob?.cancel()
-        liveOutputJob?.cancel()
         super.onCleared()
     }
 
     companion object {
-        private const val LIVE_OUTPUT_LINES = 80
-        // Shorter than the 2.5s transcript poll; the inline card is the
-        // primary "agent is working" surface so it must not feel stale.
-        // Guarded by the screen-visibility + working-state lifecycle effect.
-        private const val LIVE_OUTPUT_POLL_MS = 900L
         private const val COMMAND_REFRESH_MS = 30_000L
         fun factory(
             bridge: BridgeClient,
