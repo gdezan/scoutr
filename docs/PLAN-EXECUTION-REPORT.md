@@ -39,9 +39,9 @@ kept truthful as work lands. The final column of each row carries commit hashes.
 | 05 | `CatalogAction` for resume/fork/rename | PENDING AUDIT | | | | | |
 | 05 | Capabilities decoded into UI state; menu rendered from set | PENDING AUDIT | | | | | |
 | 05 | Server-side capability enforcement in `controlSession` | PENDING AUDIT | | | | | |
-| 06 | `Poller` + tests; four loops migrated | PENDING AUDIT | | | | | |
-| 06 | `Loadable` + `FailureKind` (from `BridgeException`); VMs migrated; offline rule explicit | PENDING AUDIT | | | | | |
-| 06 | `viewModelFactory` helper; eight factories collapsed | PENDING AUDIT | | | | | |
+| 06 | `Poller` + tests; four loops migrated | SHIPPED | fad4d24 | `state/Poller.kt`; Board (3s), SessionHistory (8s), Chat (2.5s), Usage (10s) use it; `PollerTest` (immediate tick, restart cancels, stop, scope death) | | |
+| 06 | `Loadable` + `FailureKind` (from `BridgeException`); VMs migrated; offline rule explicit | SHIPPED | fad4d24 | `state/Loadable.kt`; Usage/Connect/Board/SessionHistory/Chat/Review migrated per-field; Usage chart-never-blanks rule explicit in `UsageViewModel` + test | | |
+| 06 | `viewModelFactory` helper; eight factories collapsed | SHIPPED | fad4d24 | `state/ViewModelFactory.kt`; Board/Chat/Connect/SessionHistory collapsed; CommandPalette/LiveOutput/NewSession/Review retained by decision (blast radius) | | |
 | 07 | `Destination` in `ui/nav/Destination.kt` with `routes`/`forRoute` | PENDING AUDIT | | | | | |
 | 07 | Bottom-bar check derived; `Routes` trimmed | PENDING AUDIT | | | | | |
 | 07 | `TabScaffold` extracted; four tabs use it | PENDING AUDIT | | | | | |
