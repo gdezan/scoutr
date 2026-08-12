@@ -35,10 +35,10 @@ kept truthful as work lands. The final column of each row carries commit hashes.
 | 04 | `FakeCockpitApi` shared by test source sets; MockWebServer tests migrated | SHIPPED | app/src/commonTest/.../FakeCockpitApi.kt wired into test+androidTest in build.gradle.kts; 8 state/ test files migrated | 137 unit tests pass | 491e50c | | |
 | 04 | WS path tests; `BridgeException`; auth folded; `call`/`post` private | SHIPPED | BridgeClientWsTest: steer/runSlashCommand/answerQuestion frames, error frame → IOException, feed skipping, empty-key omission; BridgeClientUploadTest kept as HTTP contract test | 137 unit tests pass | 491e50c | | |
 | 04 | AGENTS.md gotcha deleted | SHIPPED | AGENTS.md net/ map reads 'BridgeClient behind the CockpitApi interface'; fake noted | | 491e50c | | |
-| 05 | `SessionAction` enum both sides; call sites converted | PENDING AUDIT | | | | | |
-| 05 | `CatalogAction` for resume/fork/rename | PENDING AUDIT | | | | | |
-| 05 | Capabilities decoded into UI state; menu rendered from set | PENDING AUDIT | | | | | |
-| 05 | Server-side capability enforcement in `controlSession` | PENDING AUDIT | | | | | |
+| 05 | `SessionAction` enum both sides; call sites converted | SHIPPED | 20bb93b | `data/SessionAction.kt` (wire+label, `fromWire` drops unknowns); CockpitApi/controlSession take the enum; all 7 call sites converted | | |
+| 05 | `CatalogAction` for resume/fork/rename | SHIPPED | 20bb93b | `data/CatalogAction.kt` (Resume/Fork/Rename/Delete — delete added because the enum must declare the full catalog verb set); `sessionCatalogAction` typed | | |
+| 05 | Capabilities decoded into UI state; menu rendered from set | SHIPPED | 20bb93b | `toSessionActions()` decode helper; overflow menu renders from the set in enum declaration order; thinking chip gated via `canSetThinking` (plan 01) | | |
+| 05 | Server-side capability enforcement in `controlSession` | SHIPPED | (plan 01 verified) | claude adapter rejects out-of-capability verbs with 'unsupported control action for claude' before pane input; pi adapter covers the pi surface | | |
 | 06 | `Poller` + tests; four loops migrated | SHIPPED | fad4d24 | `state/Poller.kt`; Board (3s), SessionHistory (8s), Chat (2.5s), Usage (10s) use it; `PollerTest` (immediate tick, restart cancels, stop, scope death) | | |
 | 06 | `Loadable` + `FailureKind` (from `BridgeException`); VMs migrated; offline rule explicit | SHIPPED | fad4d24 | `state/Loadable.kt`; Usage/Connect/Board/SessionHistory/Chat/Review migrated per-field; Usage chart-never-blanks rule explicit in `UsageViewModel` + test | | |
 | 06 | `viewModelFactory` helper; eight factories collapsed | SHIPPED | fad4d24 | `state/ViewModelFactory.kt`; Board/Chat/Connect/SessionHistory collapsed; CommandPalette/LiveOutput/NewSession/Review retained by decision (blast radius) | | |
