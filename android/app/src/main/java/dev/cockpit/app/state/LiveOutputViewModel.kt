@@ -3,7 +3,7 @@ package dev.cockpit.app.state
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
-import dev.cockpit.app.net.BridgeClient
+import dev.cockpit.app.net.CockpitApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -56,7 +56,7 @@ internal fun isLiveOutputChromeLine(line: String): Boolean {
  * driven by the screen's `LifecycleStartEffect`; the VM only guards idempotence.
  */
 class LiveOutputViewModel(
-    private val bridge: BridgeClient,
+    private val bridge: CockpitApi,
     val paneId: String,
 ) : ViewModel() {
 
@@ -114,7 +114,7 @@ class LiveOutputViewModel(
         // bounded by the screen lifecycle, so it costs nothing when closed.
         private const val LIVE_OUTPUT_POLL_MS = 900L
 
-        fun factory(bridge: BridgeClient, paneId: String): ViewModelProvider.Factory =
+        fun factory(bridge: CockpitApi, paneId: String): ViewModelProvider.Factory =
             object : ViewModelProvider.Factory {
                 @Suppress("UNCHECKED_CAST")
                 override fun <T : ViewModel> create(modelClass: Class<T>): T {

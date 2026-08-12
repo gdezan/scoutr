@@ -5,7 +5,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import dev.cockpit.app.data.ConnectionStore
 import dev.cockpit.app.data.SessionCatalogItem
-import dev.cockpit.app.net.BridgeClient
+import dev.cockpit.app.net.CockpitApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -46,7 +46,7 @@ data class PaletteUiState(
  * only ever needs to get you to the right pane.
  */
 class CommandPaletteViewModel(
-    private val bridge: BridgeClient,
+    private val bridge: CockpitApi,
     private val connectionStore: ConnectionStore,
 ) : ViewModel() {
 
@@ -179,7 +179,7 @@ class CommandPaletteViewModel(
     }
 
     companion object {
-        fun factory(bridge: BridgeClient, connectionStore: ConnectionStore): ViewModelProvider.Factory =
+        fun factory(bridge: CockpitApi, connectionStore: ConnectionStore): ViewModelProvider.Factory =
             object : ViewModelProvider.Factory {
                 @Suppress("UNCHECKED_CAST")
                 override fun <T : ViewModel> create(modelClass: Class<T>): T =

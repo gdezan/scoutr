@@ -1,15 +1,18 @@
 package dev.cockpit.app.state
 
 import dev.cockpit.app.data.ConnectionStore
-import dev.cockpit.app.net.BridgeClient
+import dev.cockpit.app.data.DirListing
+import dev.cockpit.app.data.DirListingResponse
+import dev.cockpit.app.data.RepoCommit
+import dev.cockpit.app.data.RepoDiffFileStat
+import dev.cockpit.app.data.RepoDiffResponse
+import dev.cockpit.app.data.RepoOverviewResponse
+import dev.cockpit.app.data.RepoStatusEntry
+import dev.cockpit.app.net.BridgeException
+import dev.cockpit.app.net.FakeCockpitApi
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
-import okhttp3.OkHttpClient
-import okhttp3.mockwebserver.MockResponse
-import okhttp3.mockwebserver.MockWebServer
-import org.junit.After
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -19,46 +22,33 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import org.robolectric.shadows.ShadowLooper
-import java.util.concurrent.TimeUnit
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
 class ReviewViewModelTest {
 
-    private lateinit var server: MockWebServer
+    private lateinit var fake: FakeCockpitApi
     private lateinit var connectionStore: ConnectionStore
     private lateinit var viewModel: ReviewViewModel
 
     @Before
     fun setUp() {
-        server = MockWebServer()
-        server.start()
+        fake = FakeCockpitApi()
         connectionStore = ConnectionStore(RuntimeEnvironment.getApplication())
-        saveConnection(server.url("/").toString().trimEnd('/'))
-        val bridge = BridgeClient(OkHttpClient.Builder().readTimeout(5, TimeUnit.SECONDS).build(), connectionStore)
-        viewModel = ReviewViewModel(bridge, connectionStore, ReviewStore(RuntimeEnvironment.getApplication()))
+        saveConnection()
+        viewModel = ReviewViewModel(fake, connectionStore, ReviewStore(RuntimeEnvironment.getApplication()))
     }
 
-    @After
-    fun tearDown() {
-        server.shutdown()
-    }
-
-    private fun saveConnection(baseUrl: String) {
+    private fun saveConnection() {
         val app = RuntimeEnvironment.getApplication()
         app.getSharedPreferences("cockpit_connection", android.content.Context.MODE_PRIVATE).edit()
-            .putString("host", baseUrl)
+            .putString("host", "http://test-bridge")
             .putString("token", "test-token")
             .apply()
     }
 
-    private fun enqueueJson(body: String, code: Int = 200) {
-        server.enqueue(
-            MockResponse()
-                .setResponseCode(code)
-                .setHeader("Content-Type", "application/json")
-                .setBody(body),
-        )
+    private fun stubDirs(path: String = "/home/test", dirs: List<String> = emptyList()) {
+        fake.dirsResult = Result.success(DirListingResponse(ok = true, listing = DirListing(path = path, dirs = dirs)))
     }
 
     private fun waitFor(timeoutMs: Long = 4000, condition: () -> Boolean): Boolean {
@@ -73,7 +63,7 @@ class ReviewViewModelTest {
 
     @Test
     fun openPickerLoadsDirectoryListing() {
-        enqueueJson("""{"ok":true,"listing":{"path":"/home/test","dirs":["repo-a","repo-b"]}}""")
+        stubDirs(dirs = listOf("repo-a", "repo-b"))
         viewModel.openPicker()
 
         val settled = waitFor { viewModel.ui.value.dirs.isNotEmpty() }
@@ -85,11 +75,11 @@ class ReviewViewModelTest {
 
     @Test
     fun browseIntoAppendsToCurrentPath() {
-        enqueueJson("""{"ok":true,"listing":{"path":"/home/test","dirs":["repo-a"]}}""")
+        stubDirs(dirs = listOf("repo-a"))
         viewModel.openPicker()
         waitFor { viewModel.ui.value.dirs.isNotEmpty() }
 
-        enqueueJson("""{"ok":true,"listing":{"path":"/home/test/repo-a","dirs":[]}}""")
+        stubDirs(path = "/home/test/repo-a")
         viewModel.browseInto("repo-a")
 
         val settled = waitFor { viewModel.ui.value.dirPath == "/home/test/repo-a" }
@@ -98,15 +88,19 @@ class ReviewViewModelTest {
 
     @Test
     fun selectRepoLoadsOverview() {
-        enqueueJson("""{"ok":true,"listing":{"path":"/home/test","dirs":[]}}""")
+        stubDirs()
         viewModel.openPicker()
         waitFor { viewModel.ui.value.dirs.isNotEmpty() }
 
-        enqueueJson(
-            """{"ok":true,"path":"/home/test/repo-a","root":"/home/test/repo-a","branch":"main",
-               "status":[{"code":" M","path":"a.txt"}],"statusTruncated":false,
-               "log":[{"hash":"abc123","subject":"initial commit","author":"A","date":1700000000}],
-               "logTruncated":false}""",
+        fake.repoOverviewResult = Result.success(
+            RepoOverviewResponse(
+                ok = true,
+                path = "/home/test/repo-a",
+                root = "/home/test/repo-a",
+                branch = "main",
+                status = listOf(RepoStatusEntry(code = " M", path = "a.txt")),
+                log = listOf(RepoCommit(hash = "abc123", subject = "initial commit", author = "A", date = 1700000000)),
+            ),
         )
         viewModel.selectRepo("/home/test/repo-a")
 
@@ -120,11 +114,11 @@ class ReviewViewModelTest {
 
     @Test
     fun selectRepoErrorSurfaces() {
-        enqueueJson("""{"ok":true,"listing":{"path":"/home/test","dirs":[]}}""")
+        stubDirs()
         viewModel.openPicker()
         waitFor { viewModel.ui.value.dirs.isNotEmpty() }
 
-        enqueueJson("""{"ok":false,"error":"path outside allowed repo roots"}""", code = 403)
+        fake.repoOverviewResult = Result.failure(BridgeException(403, "path outside allowed repo roots"))
         viewModel.selectRepo("/etc/passwd")
 
         val settled = waitFor { viewModel.ui.value.error != null }
@@ -135,21 +129,26 @@ class ReviewViewModelTest {
 
     @Test
     fun loadDiffFetchesBoundedDiff() {
-        enqueueJson("""{"ok":true,"listing":{"path":"/home/test","dirs":["repo-a"]}}""")
+        stubDirs(dirs = listOf("repo-a"))
         viewModel.openPicker()
         waitFor { viewModel.ui.value.dirs.isNotEmpty() }
 
-        enqueueJson(
-            """{"ok":true,"path":"/home/test/repo-a","root":"/home/test/repo-a","branch":"main",
-               "status":[],"statusTruncated":false,"log":[],"logTruncated":false}""",
+        fake.repoOverviewResult = Result.success(
+            RepoOverviewResponse(ok = true, path = "/home/test/repo-a", root = "/home/test/repo-a", branch = "main"),
         )
-        enqueueJson("""{"ok":true,"artifacts":[],"truncated":false}""")
+        fake.repoArtifactsResult = Result.success(
+            dev.cockpit.app.data.RepoArtifactsResponse(ok = true),
+        )
         viewModel.selectRepo("/home/test/repo-a")
         waitFor { viewModel.ui.value.overview != null }
 
-        enqueueJson(
-            """{"ok":true,"diff":"--- a/a.txt\n+++ b/a.txt\n@@ -1 +1,2 @@\n hello\n+world\n",
-               "truncated":false,"stat":[{"path":"a.txt","additions":1,"deletions":0}]}""",
+        fake.repoDiffResult = Result.success(
+            RepoDiffResponse(
+                ok = true,
+                diff = "--- a/a.txt\n+++ b/a.txt\n@@ -1 +1,2 @@\n hello\n+world\n",
+                truncated = false,
+                stat = listOf(RepoDiffFileStat(path = "a.txt", additions = 1, deletions = 0)),
+            ),
         )
         viewModel.loadDiff("HEAD")
 
@@ -162,22 +161,27 @@ class ReviewViewModelTest {
 
     @Test
     fun refreshReloadsCurrentRepo() {
-        enqueueJson("""{"ok":true,"listing":{"path":"/home/test","dirs":[]}}""")
+        stubDirs()
         viewModel.openPicker()
         waitFor { viewModel.ui.value.dirs.isNotEmpty() }
 
-        enqueueJson(
-            """{"ok":true,"path":"/home/test/repo-a","root":"/home/test/repo-a","branch":"main",
-               "status":[],"statusTruncated":false,"log":[],"logTruncated":false}""",
+        fake.repoOverviewResult = Result.success(
+            RepoOverviewResponse(ok = true, path = "/home/test/repo-a", root = "/home/test/repo-a", branch = "main"),
         )
-        enqueueJson("""{"ok":true,"artifacts":[],"truncated":false}""")
+        fake.repoArtifactsResult = Result.success(
+            dev.cockpit.app.data.RepoArtifactsResponse(ok = true),
+        )
         viewModel.selectRepo("/home/test/repo-a")
         waitFor { viewModel.ui.value.overview != null }
 
-        enqueueJson(
-            """{"ok":true,"path":"/home/test/repo-a","root":"/home/test/repo-a","branch":"main",
-               "status":[{"code":"??","path":"new.txt"}],"statusTruncated":false,
-               "log":[],"logTruncated":false}""",
+        fake.repoOverviewResult = Result.success(
+            RepoOverviewResponse(
+                ok = true,
+                path = "/home/test/repo-a",
+                root = "/home/test/repo-a",
+                branch = "main",
+                status = listOf(RepoStatusEntry(code = "??", path = "new.txt")),
+            ),
         )
         viewModel.refresh()
 

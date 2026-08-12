@@ -9,7 +9,7 @@ import dev.cockpit.app.data.LauncherSettingsStore
 import dev.cockpit.app.data.ModelInfo
 import dev.cockpit.app.data.ModelProvider
 import dev.cockpit.app.data.SessionLauncherPreset
-import dev.cockpit.app.net.BridgeClient
+import dev.cockpit.app.net.CockpitApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -102,7 +102,7 @@ data class CreatedSessionResult(val paneId: String)
  * preferences, presets, and atomic create plus first-prompt delivery.
  */
 class NewSessionViewModel(
-    private val bridge: BridgeClient,
+    private val bridge: CockpitApi,
     private val settingsStore: LauncherSettingsStore,
 ) : ViewModel() {
     private var settings = settingsStore.loadLauncherSettings()
@@ -431,7 +431,7 @@ class NewSessionViewModel(
 
     companion object {
         fun factory(
-            bridge: BridgeClient,
+            bridge: CockpitApi,
             settingsStore: LauncherSettingsStore,
         ): ViewModelProvider.Factory = object : ViewModelProvider.Factory {
             @Suppress("UNCHECKED_CAST")

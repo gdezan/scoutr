@@ -1,16 +1,14 @@
 package dev.cockpit.app.state
 
 import dev.cockpit.app.data.ConnectionStore
+import dev.cockpit.app.data.CreatedSessionResponse
+import dev.cockpit.app.data.SessionCatalogItem
+import dev.cockpit.app.data.SessionCatalogResponse
 import dev.cockpit.app.data.SessionCatalogStore
-import dev.cockpit.app.net.BridgeClient
+import dev.cockpit.app.net.BridgeException
+import dev.cockpit.app.net.FakeCockpitApi
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
-import okhttp3.OkHttpClient
-import okhttp3.mockwebserver.Dispatcher
-import okhttp3.mockwebserver.MockResponse
-import okhttp3.mockwebserver.MockWebServer
-import okhttp3.mockwebserver.RecordedRequest
-import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -22,61 +20,66 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
-import java.util.concurrent.TimeUnit
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
 class SessionHistoryViewModelTest {
 
-    private lateinit var server: MockWebServer
+    private lateinit var fake: FakeCockpitApi
     private lateinit var store: RecordingSessionCatalogStore
 
     @Before
     fun setUp() {
-        server = MockWebServer()
-        server.start()
+        fake = FakeCockpitApi()
         store = RecordingSessionCatalogStore()
+        stubCatalog()
     }
-
-    @After
-    fun tearDown() {
-        server.shutdown()
-    }
-
-    private val catalogBody = """
-        {"ok":true,"truncated":false,"sessions":[
-          {"id":"abc","path":"/root/sessions/abc.jsonl","title":"Fix billing bug","cwd":"/repo/a","model":"openai-codex/gpt-5.4","updatedAt":${System.currentTimeMillis()}.0,"preview":"User asked to fix the billing math","active":true,"paneId":"pane1","workspaceId":"ws1","status":"blocked"},
-          {"id":"def","path":"/root/sessions/def.jsonl","title":"Docs refresh","cwd":"/repo/b","model":"anthropic/claude-sonnet-4-6","updatedAt":${System.currentTimeMillis() - 3_600_000}.0,"preview":"Update the README","active":false}
-        ]}
-    """.trimIndent()
 
     private fun stubCatalog() {
-        val dispatcher = object : Dispatcher() {
-            override fun dispatch(request: RecordedRequest): MockResponse = when {
-                request.path!!.startsWith("/api/session-catalog/resume") ->
-                    MockResponse().setResponseCode(201).setBody("""{"ok":true,"workspaceId":"ws9","paneId":"pane9"}""")
-                request.path!!.startsWith("/api/session-catalog/fork") ->
-                    MockResponse().setResponseCode(201).setBody("""{"ok":true,"workspaceId":"ws9","paneId":"pane9"}""")
-                request.path!!.startsWith("/api/session-catalog/rename") ->
-                    MockResponse().setResponseCode(200).setBody("""{"ok":true}""")
-                request.path!!.startsWith("/api/session-catalog/delete") ->
-                    MockResponse().setResponseCode(200).setBody("""{"ok":true}""")
-                request.path!!.contains("/control") ->
-                    MockResponse().setResponseCode(200).setBody("""{"ok":true}""")
-                request.path!!.startsWith("/api/session-catalog") ->
-                    MockResponse().setResponseCode(200).setBody(catalogBody)
-                else -> MockResponse().setResponseCode(404).setBody("""{"ok":false,"error":"not found"}""")
-            }
-        }
-        server.dispatcher = dispatcher
+        fake.sessionCatalogResult = Result.success(
+            SessionCatalogResponse(
+                ok = true,
+                truncated = false,
+                sessions = listOf(
+                    SessionCatalogItem(
+                        id = "abc",
+                        path = "/root/sessions/abc.jsonl",
+                        title = "Fix billing bug",
+                        cwd = "/repo/a",
+                        model = "openai-codex/gpt-5.4",
+                        updatedAt = System.currentTimeMillis().toDouble(),
+                        preview = "User asked to fix the billing math",
+                        active = true,
+                        paneId = "pane1",
+                        workspaceId = "ws1",
+                        status = "blocked",
+                    ),
+                    SessionCatalogItem(
+                        id = "def",
+                        path = "/root/sessions/def.jsonl",
+                        title = "Docs refresh",
+                        cwd = "/repo/b",
+                        model = "anthropic/claude-sonnet-4-6",
+                        updatedAt = (System.currentTimeMillis() - 3_600_000).toDouble(),
+                        preview = "Update the README",
+                        active = false,
+                    ),
+                ),
+            ),
+        )
+        fake.catalogActionResult = Result.success(
+            CreatedSessionResponse(ok = true, workspaceId = "ws9", paneId = "pane9"),
+        )
     }
+
+    private fun catalogQueries(): List<String?> =
+        fake.calls.filter { it.name == "sessionCatalog" }.map { it.args["query"] as String? }
 
     @Test
     fun loadsCatalogWithPinAndArchiveFlags() = runBlocking {
-        stubCatalog()
         store.pinned.add("/root/sessions/abc.jsonl")
         val connection = savedConnection()
-        val viewModel = SessionHistoryViewModel(bridge(), connection, store)
+        val viewModel = SessionHistoryViewModel(fake, connection, store)
         viewModel.waitForLoaded()
 
         val ui = viewModel.ui.value
@@ -89,33 +92,21 @@ class SessionHistoryViewModelTest {
 
     @Test
     fun queryIsSentToTheBridgeAndFilters() = runBlocking {
-        val queries = mutableListOf<String?>()
-        val dispatcher = object : Dispatcher() {
-            override fun dispatch(request: RecordedRequest): MockResponse {
-                if (request.path!!.startsWith("/api/session-catalog")) {
-                    queries += request.requestUrl?.queryParameter("q")
-                    return MockResponse().setResponseCode(200).setBody(catalogBody)
-                }
-                return MockResponse().setResponseCode(404).setBody("""{"ok":false}""")
-            }
-        }
-        server.dispatcher = dispatcher
-        val viewModel = SessionHistoryViewModel(bridge(), savedConnection(), store)
+        val viewModel = SessionHistoryViewModel(fake, savedConnection(), store)
         viewModel.setQuery("billing")
         viewModel.waitForLoaded()
 
         val deadline = System.currentTimeMillis() + 2_000
-        while ("billing" !in queries && System.currentTimeMillis() < deadline) {
+        while ("billing" !in catalogQueries() && System.currentTimeMillis() < deadline) {
             org.robolectric.shadows.ShadowLooper.idleMainLooper()
             delay(25)
         }
-        assertTrue("expected a search with q=billing, saw $queries", "billing" in queries)
+        assertTrue("expected a search with q=billing, saw ${catalogQueries()}", "billing" in catalogQueries())
     }
 
     @Test
     fun resumeReturnsPaneToOpen() = runBlocking {
-        stubCatalog()
-        val viewModel = SessionHistoryViewModel(bridge(), savedConnection(), store)
+        val viewModel = SessionHistoryViewModel(fake, savedConnection(), store)
         viewModel.waitForLoaded()
 
         val resumed = viewModel.resume(viewModel.ui.value.items[0])
@@ -126,21 +117,22 @@ class SessionHistoryViewModelTest {
 
     @Test
     fun renameSendsTextAndSucceeds() = runBlocking {
-        stubCatalog()
-        val viewModel = SessionHistoryViewModel(bridge(), savedConnection(), store)
+        val viewModel = SessionHistoryViewModel(fake, savedConnection(), store)
         viewModel.waitForLoaded()
 
         val ok = viewModel.rename(viewModel.ui.value.items[0], "New title")
         assertTrue(ok)
         assertNull(viewModel.ui.value.busyPath)
+        val rename = fake.calls.last { it.name == "sessionCatalogAction" }
+        assertEquals("rename", rename.args["action"])
+        assertEquals("New title", rename.args["text"])
     }
 
     @Test
     fun deleteClearsLocalFlagsOnSuccess() = runBlocking {
-        stubCatalog()
         store.pinned.add("/root/sessions/def.jsonl")
         store.archived.add("/root/sessions/def.jsonl")
-        val viewModel = SessionHistoryViewModel(bridge(), savedConnection(), store)
+        val viewModel = SessionHistoryViewModel(fake, savedConnection(), store)
         viewModel.waitForLoaded()
 
         val ok = viewModel.delete(viewModel.ui.value.items[1])
@@ -151,22 +143,20 @@ class SessionHistoryViewModelTest {
 
     @Test
     fun closeRoutesToPaneControl() = runBlocking {
-        stubCatalog()
-        val viewModel = SessionHistoryViewModel(bridge(), savedConnection(), store)
+        val viewModel = SessionHistoryViewModel(fake, savedConnection(), store)
         viewModel.waitForLoaded()
 
         val ok = viewModel.close(viewModel.ui.value.items[0])
         assertTrue(ok)
+        val control = fake.calls.last { it.name == "controlSession" }
+        assertEquals("pane1", control.args["paneId"])
+        assertEquals("close", control.args["action"])
     }
 
     @Test
     fun bridgeErrorSurfacesErrorState() = runBlocking {
-        val dispatcher = object : Dispatcher() {
-            override fun dispatch(request: RecordedRequest): MockResponse =
-                MockResponse().setResponseCode(503).setBody("""{"ok":false,"error":"no herdr snapshot yet"}""")
-        }
-        server.dispatcher = dispatcher
-        val viewModel = SessionHistoryViewModel(bridge(), savedConnection(), store)
+        fake.sessionCatalogResult = Result.failure(BridgeException(503, "no herdr snapshot yet"))
+        val viewModel = SessionHistoryViewModel(fake, savedConnection(), store)
         viewModel.waitForLoaded()
 
         assertFalse(viewModel.ui.value.connected)
@@ -175,14 +165,8 @@ class SessionHistoryViewModelTest {
 
     private fun savedConnection(): ConnectionStore =
         ConnectionStore(RuntimeEnvironment.getApplication()).apply {
-            save(server.url("/").toString().trimEnd('/'), "test-token", null, null)
+            save("http://test-bridge", "test-token", null, null)
         }
-
-    private fun bridge(): BridgeClient {
-        val connection = ConnectionStore(RuntimeEnvironment.getApplication())
-        connection.save(server.url("/").toString().trimEnd('/'), "test-token", null, null)
-        return BridgeClient(OkHttpClient.Builder().readTimeout(5, TimeUnit.SECONDS).build(), connection)
-    }
 
     private fun SessionHistoryViewModel.waitForLoaded() = runBlocking {
         repeat(100) {

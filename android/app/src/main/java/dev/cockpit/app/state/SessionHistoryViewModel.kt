@@ -6,7 +6,7 @@ import androidx.lifecycle.viewModelScope
 import dev.cockpit.app.data.ConnectionStore
 import dev.cockpit.app.data.SessionCatalogItem
 import dev.cockpit.app.data.SessionCatalogStore
-import dev.cockpit.app.net.BridgeClient
+import dev.cockpit.app.net.CockpitApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -50,7 +50,7 @@ data class ResumedSession(
 )
 
 class SessionHistoryViewModel(
-    private val bridge: BridgeClient,
+    private val bridge: CockpitApi,
     private val connectionStore: ConnectionStore,
     private val store: SessionCatalogStore,
     initialState: HistoryUiState = HistoryUiState(),
@@ -238,7 +238,7 @@ class SessionHistoryViewModel(
 
     companion object {
         fun factory(
-            bridge: BridgeClient,
+            bridge: CockpitApi,
             connectionStore: ConnectionStore,
             store: SessionCatalogStore,
         ): ViewModelProvider.Factory =

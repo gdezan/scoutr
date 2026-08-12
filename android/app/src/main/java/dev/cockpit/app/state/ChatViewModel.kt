@@ -9,7 +9,7 @@ import dev.cockpit.app.data.ModelProvider
 import dev.cockpit.app.data.SessionEntry
 import dev.cockpit.app.data.SlashCommandInfo
 import dev.cockpit.app.data.entryText
-import dev.cockpit.app.net.BridgeClient
+import dev.cockpit.app.net.CockpitApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import java.io.IOException
@@ -277,7 +277,7 @@ data class ChatUiState(
  * Steering: herdr agent.prompt through the bridge (user-initiated only).
  */
 class ChatViewModel(
-    private val bridge: BridgeClient,
+    private val bridge: CockpitApi,
     val paneId: String,
     private val sessionPath: String?,
     agentStatus: String = "working",
@@ -673,7 +673,7 @@ class ChatViewModel(
     companion object {
         private const val COMMAND_REFRESH_MS = 30_000L
         fun factory(
-            bridge: BridgeClient,
+            bridge: CockpitApi,
             paneId: String,
             sessionPath: String?,
             agentStatus: String,

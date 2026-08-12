@@ -1,21 +1,20 @@
 package dev.cockpit.app.state
 
-import dev.cockpit.app.data.ConnectionStore
+import dev.cockpit.app.data.AgentKindInfo
+import dev.cockpit.app.data.AgentKindsResponse
+import dev.cockpit.app.data.CreatedSessionResponse
+import dev.cockpit.app.data.DirListing
+import dev.cockpit.app.data.DirListingResponse
 import dev.cockpit.app.data.LauncherSettings
 import dev.cockpit.app.data.LauncherSettingsStore
-import dev.cockpit.app.net.BridgeClient
+import dev.cockpit.app.data.ModelInfo
+import dev.cockpit.app.data.ModelProvider
+import dev.cockpit.app.data.ModelsCatalog
+import dev.cockpit.app.data.ModelsCatalogResponse
+import dev.cockpit.app.net.FakeCockpitApi
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
-import okhttp3.OkHttpClient
-import okhttp3.mockwebserver.Dispatcher
-import okhttp3.mockwebserver.MockResponse
-import okhttp3.mockwebserver.MockWebServer
-import okhttp3.mockwebserver.RecordedRequest
-import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -25,27 +24,19 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
-import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
-import java.util.concurrent.TimeUnit
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
 class NewSessionViewModelTest {
-    private lateinit var server: MockWebServer
+    private lateinit var fake: FakeCockpitApi
     private lateinit var settingsStore: RecordingLauncherSettingsStore
 
     @Before
     fun setUp() {
-        server = MockWebServer()
-        server.start()
+        fake = FakeCockpitApi()
         settingsStore = RecordingLauncherSettingsStore()
         stubEndpoints()
-    }
-
-    @After
-    fun tearDown() {
-        server.shutdown()
     }
 
     @Test
@@ -56,7 +47,7 @@ class NewSessionViewModelTest {
             thinkingByModel = mapOf("openai-codex/gpt-5.4" to "high"),
         )
 
-        val viewModel = NewSessionViewModel(bridge(), settingsStore)
+        val viewModel = NewSessionViewModel(fake, settingsStore)
         viewModel.waitForLoaded()
 
         val ui = viewModel.ui.value
@@ -70,7 +61,7 @@ class NewSessionViewModelTest {
 
     @Test
     fun pickerPreferencesTemplatesAndPresetsPersist() {
-        val viewModel = NewSessionViewModel(bridge(), settingsStore)
+        val viewModel = NewSessionViewModel(fake, settingsStore)
         viewModel.waitForLoaded()
 
         viewModel.selectModel("openai-codex/gpt-5.4")
@@ -92,7 +83,8 @@ class NewSessionViewModelTest {
 
     @Test
     fun createSendsOneAtomicLaunchRequestAndRemembersRecents() {
-        val viewModel = NewSessionViewModel(bridge(), settingsStore)
+        fake.createSessionResult = Result.success(CreatedSessionResponse(ok = true, workspaceId = "wN", paneId = "wN:p1"))
+        val viewModel = NewSessionViewModel(fake, settingsStore)
         viewModel.waitForLoaded()
         viewModel.selectModel("openai-codex/gpt-5.4")
         viewModel.setThinkingLevel("high")
@@ -102,13 +94,12 @@ class NewSessionViewModelTest {
         viewModel.create()
         viewModel.waitForCreated()
 
-        val request = takeRequestsUntilCreate()
-        val body = Json.parseToJsonElement(request.body.readUtf8()).jsonObject
-        assertEquals("/home/gdezan", body.getValue("cwd").jsonPrimitive.content)
-        assertEquals("openai-codex/gpt-5.4", body.getValue("model").jsonPrimitive.content)
-        assertEquals("demo", body.getValue("name").jsonPrimitive.content)
-        assertEquals("high", body.getValue("thinkingLevel").jsonPrimitive.content)
-        assertEquals("  preserve my spacing  ", body.getValue("initialPrompt").jsonPrimitive.content)
+        val create = fake.calls.last { it.name == "createSession" }.args
+        assertEquals("/home/gdezan", create["cwd"])
+        assertEquals("openai-codex/gpt-5.4", create["model"])
+        assertEquals("demo", create["name"])
+        assertEquals("high", create["thinkingLevel"])
+        assertEquals("  preserve my spacing  ", create["initialPrompt"])
         assertEquals("wN:p1", viewModel.ui.value.created?.paneId)
         assertEquals("openai-codex/gpt-5.4", settingsStore.settings.recentModelKeys.first())
         assertEquals("/home/gdezan", settingsStore.settings.recentFolders.first())
@@ -116,24 +107,26 @@ class NewSessionViewModelTest {
 
     @Test
     fun latestFolderRequestWinsWhenResponsesArriveOutOfOrder() {
-        val viewModel = NewSessionViewModel(bridge(), settingsStore)
-        viewModel.waitForLoaded()
-        server.dispatcher = object : Dispatcher() {
-            override fun dispatch(request: RecordedRequest): MockResponse {
-                val requestedPath = request.requestUrl?.queryParameter("path").orEmpty()
-                if (requestedPath.endsWith("first")) Thread.sleep(150)
+        val modelsHandler = fake.onCall
+        fake.onCall = { name, args ->
+            if (name == "dirs") {
+                val requestedPath = (args["path"] as String?).orEmpty()
                 val path = when {
                     requestedPath.endsWith("second") -> "/home/gdezan/second"
                     else -> "/home/gdezan/first"
                 }
-                return MockResponse().setHeader("content-type", "application/json")
-                    .setBody("""{"ok":true,"listing":{"path":"$path","dirs":[]}}""")
-            }
+                Result.success(DirListingResponse(ok = true, listing = DirListing(path, emptyList())))
+            } else modelsHandler?.invoke(name, args)
         }
+        fake.callDelays["dirs"] = 0
+        val viewModel = NewSessionViewModel(fake, settingsStore)
+        viewModel.waitForLoaded()
+        fake.callDelays["dirs"] = 150
 
         runBlocking {
             val first = async { viewModel.loadDirs("/home/gdezan/first") }
             delay(20)
+            fake.callDelays["dirs"] = 0
             val second = async { viewModel.loadDirs("/home/gdezan/second") }
             first.await()
             second.await()
@@ -155,7 +148,7 @@ class NewSessionViewModelTest {
                 ),
             ),
         )
-        val viewModel = NewSessionViewModel(bridge(), settingsStore)
+        val viewModel = NewSessionViewModel(fake, settingsStore)
         viewModel.waitForLoaded()
 
         viewModel.applyPreset("stale")
@@ -166,7 +159,8 @@ class NewSessionViewModelTest {
 
     @Test
     fun selectingCataloglessBackendSkipsModelRequirementAndSendsAgent() {
-        val viewModel = NewSessionViewModel(bridge(), settingsStore)
+        fake.createSessionResult = Result.success(CreatedSessionResponse(ok = true, workspaceId = "wN", paneId = "wN:p1"))
+        val viewModel = NewSessionViewModel(fake, settingsStore)
         viewModel.waitForLoaded()
 
         // Pi loads a model catalog and requires a model.
@@ -190,37 +184,77 @@ class NewSessionViewModelTest {
 
         viewModel.create()
         viewModel.waitForCreated()
-        val create = takeRequestsUntilCreate()
-        val body = Json.parseToJsonElement(create.body.readUtf8()).jsonObject
-        assertEquals("claude", body["agent"]?.jsonPrimitive?.content)
-        assertEquals("", body["model"]?.jsonPrimitive?.content)
+        val create = fake.calls.last { it.name == "createSession" }.args
+        assertEquals("claude", create["agent"])
+        assertEquals("", create["model"])
     }
 
     private fun stubEndpoints() {
-        server.dispatcher = object : Dispatcher() {
-            override fun dispatch(request: RecordedRequest): MockResponse {
-                val path = (request.path ?: "").substringBefore('?')
-                val body = when (path) {
-                    "/api/dirs" -> """{"ok":true,"listing":{"path":"/home/gdezan","dirs":["Dev","Downloads"]}}"""
-                    "/api/agents/kinds" -> """{"ok":true,"kinds":[{"id":"pi","displayName":"Pi","capabilities":["abort","retry","compact","fork","rename","close","set_model","set_thinking"],"hasModelCatalog":true,"hasSlashCommands":true},{"id":"claude","displayName":"Claude Code","capabilities":["abort","compact","close","set_model"],"hasModelCatalog":false,"hasSlashCommands":false}]}"""
-                    "/api/models" ->
-                        if (request.requestUrl?.queryParameter("agent") == "claude") {
-                            """{"ok":true,"catalog":{"providers":[]}}"""
-                        } else {
-                            """{"ok":true,"catalog":{"providers":[{"name":"openai-codex","models":[{"id":"gpt-5.4","name":"GPT-5.4","reasoning":true,"thinkingLevels":["low","high"],"contextWindow":200000}]},{"name":"anthropic","models":[{"id":"claude-sonnet-4-6","name":"Claude Sonnet 4.6","reasoning":true,"thinkingLevels":["high"],"contextWindow":null}]}]}}"""
-                        }
-                    "/api/sessions" -> """{"ok":true,"workspaceId":"wN","paneId":"wN:p1"}"""
-                    else -> """{"ok":false,"error":"unexpected path $path"}"""
+        fake.dirsResult = Result.success(
+            DirListingResponse(ok = true, listing = DirListing(path = "/home/gdezan", dirs = listOf("Dev", "Downloads"))),
+        )
+        fake.agentKindsResult = Result.success(
+            AgentKindsResponse(
+                ok = true,
+                kinds = listOf(
+                    AgentKindInfo(
+                        id = "pi",
+                        displayName = "Pi",
+                        capabilities = listOf("abort", "retry", "compact", "fork", "rename", "close", "set_model", "set_thinking"),
+                        hasModelCatalog = true,
+                        hasSlashCommands = true,
+                    ),
+                    AgentKindInfo(
+                        id = "claude",
+                        displayName = "Claude Code",
+                        capabilities = listOf("abort", "compact", "close", "set_model"),
+                        hasModelCatalog = false,
+                        hasSlashCommands = false,
+                    ),
+                ),
+            ),
+        )
+        fake.onCall = { name, args ->
+            if (name == "models") {
+                val agent = args["agent"] as String?
+                if (agent == "claude") {
+                    Result.success(ModelsCatalogResponse(ok = true, catalog = ModelsCatalog(providers = emptyList())))
+                } else {
+                    Result.success(
+                        ModelsCatalogResponse(
+                            ok = true,
+                            catalog = ModelsCatalog(
+                                providers = listOf(
+                                    ModelProvider(
+                                        name = "openai-codex",
+                                        models = listOf(
+                                            ModelInfo(
+                                                id = "gpt-5.4",
+                                                name = "GPT-5.4",
+                                                reasoning = true,
+                                                thinkingLevels = listOf("low", "high"),
+                                                contextWindow = 200000,
+                                            ),
+                                        ),
+                                    ),
+                                    ModelProvider(
+                                        name = "anthropic",
+                                        models = listOf(
+                                            ModelInfo(
+                                                id = "claude-sonnet-4-6",
+                                                name = "Claude Sonnet 4.6",
+                                                reasoning = true,
+                                                thinkingLevels = listOf("high"),
+                                            ),
+                                        ),
+                                    ),
+                                ),
+                            ),
+                        ),
+                    )
                 }
-                return MockResponse().setHeader("content-type", "application/json").setBody(body)
-            }
+            } else null
         }
-    }
-
-    private fun bridge(): BridgeClient {
-        val store = ConnectionStore(RuntimeEnvironment.getApplication())
-        store.save(server.url("/").toString().trimEnd('/'), "test-token", null, null)
-        return BridgeClient(OkHttpClient.Builder().readTimeout(5, TimeUnit.SECONDS).build(), store)
     }
 
     private fun NewSessionViewModel.waitForLoaded() = runBlocking {
@@ -239,14 +273,6 @@ class NewSessionViewModelTest {
             delay(25)
         }
         assertNotNull("Session was not created", ui.value.created)
-    }
-
-    private fun takeRequestsUntilCreate(): RecordedRequest {
-        repeat(10) {
-            val request = server.takeRequest(1, TimeUnit.SECONDS)
-            if (request?.path == "/api/sessions") return request
-        }
-        error("No create-session request was recorded")
     }
 
     private class RecordingLauncherSettingsStore(

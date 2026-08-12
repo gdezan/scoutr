@@ -12,6 +12,7 @@ import dev.cockpit.app.data.SharedPreferencesLauncherSettingsStore
 import dev.cockpit.app.data.SharedPreferencesSessionCatalogStore
 import dev.cockpit.app.data.NtfyMessage
 import dev.cockpit.app.net.BridgeClient
+import dev.cockpit.app.net.CockpitApi
 import dev.cockpit.app.net.NtfyClient
 import okhttp3.OkHttpClient
 import java.util.concurrent.TimeUnit
@@ -45,7 +46,7 @@ class AppContainer(application: Application) {
         .pingInterval(20, TimeUnit.SECONDS)
         .build()
 
-    val bridge = BridgeClient(
+    val bridge: CockpitApi = BridgeClient(
         okHttp = okHttp,
         connectionStore = connectionStore,
     )

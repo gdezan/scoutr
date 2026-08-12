@@ -6,7 +6,7 @@ import androidx.lifecycle.viewModelScope
 import dev.cockpit.app.data.AgentCard
 import dev.cockpit.app.data.BoardState
 import dev.cockpit.app.data.ConnectionStore
-import dev.cockpit.app.net.BridgeClient
+import dev.cockpit.app.net.CockpitApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -32,7 +32,7 @@ sealed interface ConnectState {
 }
 
 class BoardViewModel(
-    private val bridge: BridgeClient,
+    private val bridge: CockpitApi,
     private val connectionStore: ConnectionStore,
     private val ntfyClient: dev.cockpit.app.net.NtfyClient? = null,
     private val onNtfyMessage: (dev.cockpit.app.data.NtfyMessage) -> Unit = {},
@@ -165,7 +165,7 @@ class BoardViewModel(
 
     companion object {
         fun factory(
-            bridge: BridgeClient,
+            bridge: CockpitApi,
             connectionStore: ConnectionStore,
             ntfyClient: dev.cockpit.app.net.NtfyClient? = null,
             onNtfyMessage: (dev.cockpit.app.data.NtfyMessage) -> Unit = {},

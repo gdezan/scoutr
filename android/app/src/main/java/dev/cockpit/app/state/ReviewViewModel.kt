@@ -7,7 +7,7 @@ import androidx.lifecycle.viewModelScope
 import dev.cockpit.app.data.ConnectionStore
 import dev.cockpit.app.data.RepoDiffResponse
 import dev.cockpit.app.data.RepoOverviewResponse
-import dev.cockpit.app.net.BridgeClient
+import dev.cockpit.app.net.CockpitApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -45,7 +45,7 @@ data class ReviewUiState(
  * API — no mutation, no arbitrary command surface.
  */
 class ReviewViewModel(
-    private val bridge: BridgeClient,
+    private val bridge: CockpitApi,
     private val connectionStore: ConnectionStore,
     private val store: ReviewStore,
 ) : ViewModel() {
@@ -161,7 +161,7 @@ class ReviewViewModel(
     }
 
     companion object {
-        fun factory(bridge: BridgeClient, connectionStore: ConnectionStore): ViewModelProvider.Factory =
+        fun factory(bridge: CockpitApi, connectionStore: ConnectionStore): ViewModelProvider.Factory =
             object : ViewModelProvider.Factory {
                 @Suppress("UNCHECKED_CAST")
                 override fun <T : ViewModel> create(modelClass: Class<T>, extras: CreationExtras): T {

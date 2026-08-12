@@ -6,14 +6,11 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import androidx.core.app.NotificationCompat
+import dev.cockpit.app.CockpitApp
 import dev.cockpit.app.MainActivity
-import dev.cockpit.app.data.ConnectionStore
-import dev.cockpit.app.net.BridgeClient
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import okhttp3.OkHttpClient
-import java.util.concurrent.TimeUnit
 
 /**
  * Handles the inline "Reply" action on a monitor notification: steers the
@@ -34,15 +31,10 @@ class NotificationReplyReceiver : BroadcastReceiver() {
         val result = goAsync()
         CoroutineScope(Dispatchers.IO).launch {
             try {
-                val connection = ConnectionStore(context)
-                val bridge = BridgeClient(
-                    OkHttpClient.Builder()
-                        .connectTimeout(10, TimeUnit.SECONDS)
-                        .readTimeout(30, TimeUnit.SECONDS)
-                        .build(),
-                    connection,
-                )
-                bridge.steer(paneId, text)
+                // The container's client: same OkHttp pool, same stored
+                // connection the app is paired with.
+                val app = context.applicationContext as CockpitApp
+                app.container.bridge.steer(paneId, text)
             } catch (_: Exception) {
                 // Reply is best-effort from the notification shade.
             } finally {

@@ -1,15 +1,11 @@
 package dev.cockpit.app.state
 
-import dev.cockpit.app.data.ConnectionStore
-import dev.cockpit.app.net.BridgeClient
+import dev.cockpit.app.data.LiveOutputResponse
+import dev.cockpit.app.data.LiveOutputSnapshot
+import dev.cockpit.app.net.BridgeException
+import dev.cockpit.app.net.FakeCockpitApi
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
-import okhttp3.OkHttpClient
-import okhttp3.mockwebserver.Dispatcher
-import okhttp3.mockwebserver.MockResponse
-import okhttp3.mockwebserver.MockWebServer
-import okhttp3.mockwebserver.RecordedRequest
-import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
@@ -17,42 +13,31 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
-import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import java.util.concurrent.TimeUnit
-import java.util.concurrent.atomic.AtomicInteger
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
 class LiveOutputViewModelTest {
-    private lateinit var server: MockWebServer
-    private val outputReads = AtomicInteger()
-    @Volatile private var outputFails = false
+    private lateinit var fake: FakeCockpitApi
 
     @Before
     fun setUp() {
-        server = MockWebServer()
-        server.start()
-        server.dispatcher = object : Dispatcher() {
-            override fun dispatch(request: RecordedRequest): MockResponse {
-                val path = request.requestUrl?.encodedPath.orEmpty()
-                val body = when (path) {
-                    "/api/agents/w1:p1/read" -> {
-                        outputReads.incrementAndGet()
-                        if (outputFails) return MockResponse().setResponseCode(503).setBody("offline")
-                        """{"ok":true,"output":{"paneId":"w1:p1","text":"compile\nall tests passed","revision":9,"truncated":true,"lineLimit":80}}"""
-                    }
-                    else -> """{"ok":false,"error":"unexpected $path"}"""
-                }
-                return MockResponse().setHeader("content-type", "application/json").setBody(body)
-            }
-        }
+        fake = FakeCockpitApi()
+        fake.liveOutputResult = Result.success(
+            LiveOutputResponse(
+                output = LiveOutputSnapshot(
+                    paneId = "w1:p1",
+                    text = "compile\nall tests passed",
+                    revision = 9,
+                    truncated = true,
+                    lineLimit = 80,
+                ),
+            ),
+        )
     }
 
-    @After
-    fun tearDown() {
-        server.shutdown()
-    }
+    private fun outputReads(): Int = fake.calls.count { it.name == "liveOutput" }
 
     @Test
     fun refreshLoadsBoundedOutputAndPreservesItOnError() = runBlocking {
@@ -64,7 +49,7 @@ class LiveOutputViewModelTest {
         assertEquals(9, viewModel.ui.value.revision)
         assertTrue(viewModel.ui.value.truncated)
 
-        outputFails = true
+        fake.liveOutputResult = Result.failure(BridgeException(503, "offline"))
         viewModel.refresh()
 
         // A failed poll must not blank the last snapshot; the screen shows the
@@ -87,39 +72,34 @@ class LiveOutputViewModelTest {
         val viewModel = viewModel()
         viewModel.startPolling()
         var deadline = System.currentTimeMillis() + 1_000
-        while (outputReads.get() == 0 && System.currentTimeMillis() < deadline) {
+        while (outputReads() == 0 && System.currentTimeMillis() < deadline) {
             org.robolectric.shadows.ShadowLooper.idleMainLooper()
             delay(25)
         }
-        assertTrue("polling starts with the screen", outputReads.get() > 0)
+        assertTrue("polling starts with the screen", outputReads() > 0)
 
         // Keeps ticking while the screen is open…
-        val atStart = outputReads.get()
+        val atStart = outputReads()
         deadline = System.currentTimeMillis() + 3_000
-        while (outputReads.get() <= atStart && System.currentTimeMillis() < deadline) {
+        while (outputReads() <= atStart && System.currentTimeMillis() < deadline) {
             // Advance the PAUSED main looper's clock past the poll delay so
             // the next 900ms tick actually fires.
             org.robolectric.shadows.ShadowLooper.idleMainLooper(900, TimeUnit.MILLISECONDS)
             delay(25)
         }
-        assertTrue("polling repeats while the screen is open", outputReads.get() > atStart)
+        assertTrue("polling repeats while the screen is open", outputReads() > atStart)
 
         // …and stops dead when the screen goes away. Zero ambient cost is the
         // whole point of moving the poll off the chat screen.
         viewModel.stopPolling()
         delay(100)
-        val atStop = outputReads.get()
+        val atStop = outputReads()
         repeat(4) {
             org.robolectric.shadows.ShadowLooper.idleMainLooper(900, TimeUnit.MILLISECONDS)
             delay(25)
         }
-        assertEquals("no reads after the screen closes", atStop, outputReads.get())
+        assertEquals("no reads after the screen closes", atStop, outputReads())
     }
 
-    private fun viewModel(): LiveOutputViewModel {
-        val store = ConnectionStore(RuntimeEnvironment.getApplication())
-        store.save(server.url("/").toString().trimEnd('/'), "test-token", null, null)
-        val bridge = BridgeClient(OkHttpClient.Builder().readTimeout(5, TimeUnit.SECONDS).build(), store)
-        return LiveOutputViewModel(bridge, "w1:p1")
-    }
+    private fun viewModel(): LiveOutputViewModel = LiveOutputViewModel(fake, "w1:p1")
 }

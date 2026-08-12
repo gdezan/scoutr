@@ -39,6 +39,13 @@ android {
         compose = true
     }
 
+    // FakeCockpitApi lives in src/commonTest/kotlin, shared by the local
+    // unit tests and the emulator suite so both can stub the bridge.
+    sourceSets {
+        getByName("test") { java.srcDir("src/commonTest/kotlin") }
+        getByName("androidTest") { java.srcDir("src/commonTest/kotlin") }
+    }
+
     testOptions {
         managedDevices {
             localDevices {

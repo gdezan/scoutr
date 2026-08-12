@@ -25,6 +25,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.serialization.json.Json
@@ -42,7 +43,16 @@ import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
 /**
- * Typed client for the cockpit bridge HTTP + WebSocket API.
+ * A non-2xx bridge response: the HTTP [status] plus the bridge's own error
+ * reason. Callers can distinguish 401 (re-pair) from 403 (not allowed) from
+ * 5xx (retry) without parsing message strings. Extends [IOException] so the
+ * existing offline/connection handling keeps catching it.
+ */
+class BridgeException(val status: Int, reason: String) : IOException("bridge $status: $reason")
+
+/**
+ * Typed client for the cockpit bridge HTTP + WebSocket API. The one
+ * production [CockpitApi] implementation.
  *
  * Base URL is built from the stored connection (e.g. https://artemis.tail…ts.net:8737).
  * Every request carries the pairing token as a Bearer header; the WS upgrade uses
@@ -52,7 +62,7 @@ import kotlin.coroutines.resumeWithException
 class BridgeClient(
     private val okHttp: OkHttpClient,
     private val connectionStore: ConnectionStore,
-) {
+) : CockpitApi {
     private val json = Json { ignoreUnknownKeys = true }
 
     /** Bridge failure body: {"ok":false,"error":"..."} (error optional). */
@@ -60,18 +70,18 @@ class BridgeClient(
     private data class BridgeErrorBody(val ok: Boolean = false, val error: String? = null)
 
     /**
-     * Human-readable failure message for a non-2xx bridge response. Prefers
-     * the bridge's own `error` reason (e.g. the review 403 explanation) over
-     * OkHttp's generic status line, so the app can surface *why*.
+     * The bridge's own `error` reason (e.g. the review 403 explanation) over
+     * OkHttp's generic status line, so the app can surface *why* a request
+     * failed.
      */
-    private fun bridgeFailure(response: Response, body: String?): String {
-        val reason = body
+    private fun bridgeReason(response: Response, body: String?): String {
+        return body
             ?.let { runCatching { json.decodeFromString(BridgeErrorBody.serializer(), it).error }.getOrNull() }
             ?.takeIf { it.isNotBlank() }
-        return reason?.let { "bridge ${response.code}: $it" } ?: "bridge ${response.code}: ${response.message}"
+            ?: response.message
     }
 
-    val connectedHost: String? get() = connectionStore.saved?.host
+    override val connectedHost: String? get() = connectionStore.saved?.host
 
     private fun baseUrl(): String {
         val saved = connectionStore.saved ?: throw IOException("no connection configured")
@@ -87,33 +97,30 @@ class BridgeClient(
         query: Map<String, String> = emptyMap(),
         host: String? = null,
         token: String? = null,
+        body: RequestBody? = null,
     ): Request {
         val base = (host?.trimEnd('/') ?: baseUrl())
         val auth = token ?: token()
         val url = (base + path).toHttpUrl().newBuilder().apply {
             for ((key, value) in query) addQueryParameter(key, value)
         }.build()
-        return Request.Builder()
+        val builder = Request.Builder()
             .url(url)
             .header("Authorization", "Bearer $auth")
-            .get()
-            .build()
+        return if (body == null) builder.get().build() else builder.post(body).build()
     }
 
-    /** POST JSON to the bridge and decode the response as [T]. */
-    suspend fun <T> post(
+    /** Calls the bridge and decodes the response body as [T]. */
+    private suspend fun <T> call(
         path: String,
-        body: JsonObject,
+        query: Map<String, String> = emptyMap(),
+        body: RequestBody? = null,
+        host: String? = null,
+        token: String? = null,
         decode: (String) -> T,
     ): T =
         suspendCancellableCoroutine { continuation ->
-            val url = (baseUrl() + path).toHttpUrl()
-            val request = Request.Builder()
-                .url(url)
-                .header("Authorization", "Bearer ${token()}")
-                .post(body.toString().toRequestBody("application/json".toMediaType()))
-                .build()
-            val call = okHttp.newCall(request)
+            val call = okHttp.newCall(request(path, query, host, token, body))
             continuation.invokeOnCancellation { call.cancel() }
             call.enqueue(object : Callback {
                 override fun onFailure(call: Call, e: IOException) {
@@ -126,7 +133,9 @@ class BridgeClient(
                             if (it.isSuccessful) {
                                 resumeDecoded(continuation, it.body?.string(), decode)
                             } else {
-                                continuation.resumeWithException(IOException(bridgeFailure(it, it.body?.string())))
+                                continuation.resumeWithException(
+                                    BridgeException(it.code, bridgeReason(it, it.body?.string())),
+                                )
                             }
                         }
                     }
@@ -135,25 +144,25 @@ class BridgeClient(
         }
 
     /** List subdirectories for the folder picker (rooted at home by the bridge). */
-    suspend fun dirs(path: String? = null): DirListingResponse =
+    override suspend fun dirs(path: String?): DirListingResponse =
         call("/api/dirs", query = if (path == null) emptyMap() else mapOf("path" to path)) {
             json.decodeFromString(DirListingResponse.serializer(), it)
         }
 
     /** Read-only git overview (branch, status, recent log) for an allowed repo. */
-    suspend fun repoOverview(path: String): RepoOverviewResponse =
+    override suspend fun repoOverview(path: String): RepoOverviewResponse =
         call("/api/repo", query = mapOf("path" to path)) {
             json.decodeFromString(RepoOverviewResponse.serializer(), it)
         }
 
     /** Bounded, read-only git diff. kind "commit" diffs ref^..ref; "working" (default) diffs the working tree against ref. */
-    suspend fun repoDiff(path: String, base: String = "HEAD", kind: String = "working"): RepoDiffResponse =
+    override suspend fun repoDiff(path: String, base: String, kind: String): RepoDiffResponse =
         call("/api/repo/diff", query = mapOf("path" to path, "base" to base, "kind" to kind)) {
             json.decodeFromString(RepoDiffResponse.serializer(), it)
         }
 
     /** Bounded listing of generated artifacts (build outputs, deps, test reports). */
-    suspend fun repoArtifacts(path: String): RepoArtifactsResponse =
+    override suspend fun repoArtifacts(path: String): RepoArtifactsResponse =
         call("/api/repo/artifacts", query = mapOf("path" to path)) {
             json.decodeFromString(RepoArtifactsResponse.serializer(), it)
         }
@@ -162,46 +171,19 @@ class BridgeClient(
      * Upload an image attachment for the chat composer; returns the host path
      * pi can attach via its `@path` prompt syntax.
      */
-    suspend fun uploadAttachment(name: String, mime: String, bytes: ByteArray): AttachmentResponse =
-        suspendCancellableCoroutine { continuation ->
-            val httpUrl = (baseUrl() + "/api/attachments").toHttpUrl().newBuilder()
-                .addQueryParameter("name", name)
-                .build()
-            val request = Request.Builder()
-                .url(httpUrl)
-                .header("Authorization", "Bearer ${token()}")
-                .post(bytes.toRequestBody(mime.toMediaType()))
-                .build()
-            val call = okHttp.newCall(request)
-            continuation.invokeOnCancellation { call.cancel() }
-            call.enqueue(object : Callback {
-                override fun onFailure(call: Call, e: IOException) {
-                    if (!continuation.isCancelled) continuation.resumeWithException(e)
-                }
-
-                override fun onResponse(call: Call, response: Response) {
-                    response.use {
-                        if (!continuation.isCancelled) {
-                            if (it.isSuccessful) {
-                                val body = it.body?.string().orEmpty()
-                                continuation.resume(json.decodeFromString(AttachmentResponse.serializer(), body))
-                            } else {
-                                continuation.resumeWithException(IOException(bridgeFailure(it, it.body?.string())))
-                            }
-                        }
-                    }
-                }
-            })
+    override suspend fun uploadAttachment(name: String, mime: String, bytes: ByteArray): AttachmentResponse =
+        call("/api/attachments", query = mapOf("name" to name), body = bytes.toRequestBody(mime.toMediaType())) {
+            json.decodeFromString(AttachmentResponse.serializer(), it)
         }
 
     /** Model catalog for a backend (defaults to pi); catalog-less backends return an empty catalog. */
-    suspend fun models(agent: String? = null): ModelsCatalogResponse =
+    override suspend fun models(agent: String?): ModelsCatalogResponse =
         call("/api/models", query = if (agent == null) emptyMap() else mapOf("agent" to agent)) {
             json.decodeFromString(ModelsCatalogResponse.serializer(), it)
         }
 
     /** Slash commands for a backend (defaults to pi); catalog-less backends return an empty catalog. */
-    suspend fun commands(cwd: String? = null, agent: String? = null): CommandsCatalogResponse =
+    override suspend fun commands(cwd: String?, agent: String?): CommandsCatalogResponse =
         call("/api/commands", query = buildMap {
             if (cwd != null) put("cwd", cwd)
             if (agent != null) put("agent", agent)
@@ -210,47 +192,54 @@ class BridgeClient(
         }
 
     /** Registered agent backends for the new-session sheet's backend selector. */
-    suspend fun agentKinds(): AgentKindsResponse =
+    override suspend fun agentKinds(): AgentKindsResponse =
         call("/api/agents/kinds") { json.decodeFromString(AgentKindsResponse.serializer(), it) }
+
     /** Bounded list of persisted pi sessions, joined with live pane state. */
-    suspend fun sessionCatalog(query: String? = null, limit: Int? = null): SessionCatalogResponse =
+    override suspend fun sessionCatalog(query: String?, limit: Int?): SessionCatalogResponse =
         call("/api/session-catalog", query = buildMap {
             if (query != null) put("q", query)
             if (limit != null) put("limit", limit.toString())
         }) { json.decodeFromString(SessionCatalogResponse.serializer(), it) }
 
     /** Resume/fork/rename/delete a stored session. Resume returns pane+workspace ids. */
-    suspend fun sessionCatalogAction(
+    override suspend fun sessionCatalogAction(
         action: String,
         path: String,
-        text: String? = null,
-    ): CreatedSessionResponse = post("/api/session-catalog/$action", buildJsonObject {
-        put("path", JsonPrimitive(path))
-        if (text != null) put("text", JsonPrimitive(text))
-    }) { json.decodeFromString(CreatedSessionResponse.serializer(), it) }
+        text: String?,
+    ): CreatedSessionResponse = call(
+        "/api/session-catalog/$action",
+        body = buildJsonObject {
+            put("path", JsonPrimitive(path))
+            if (text != null) put("text", JsonPrimitive(text))
+        }.toString().toRequestBody("application/json".toMediaType()),
+    ) { json.decodeFromString(CreatedSessionResponse.serializer(), it) }
 
     /** Bounded ANSI-free terminal snapshot for a live agent pane. */
-    suspend fun liveOutput(paneId: String, lines: Int = 80): LiveOutputResponse =
+    override suspend fun liveOutput(paneId: String, lines: Int): LiveOutputResponse =
         call("/api/agents/$paneId/read", query = mapOf("lines" to lines.toString())) {
             json.decodeFromString(LiveOutputResponse.serializer(), it)
         }
 
     /** Create a pane-native agent session and deliver its optional first prompt in one bridge call. */
-    suspend fun createSession(
+    override suspend fun createSession(
         cwd: String,
         model: String,
-        name: String? = null,
-        initialPrompt: String? = null,
-        thinkingLevel: String? = null,
-        agent: String? = null,
-    ): CreatedSessionResponse = post("/api/sessions", buildJsonObject {
-        put("cwd", JsonPrimitive(cwd))
-        put("model", JsonPrimitive(model))
-        if (name != null) put("name", JsonPrimitive(name))
-        if (initialPrompt != null) put("initialPrompt", JsonPrimitive(initialPrompt))
-        if (thinkingLevel != null) put("thinkingLevel", JsonPrimitive(thinkingLevel))
-        if (agent != null) put("agent", JsonPrimitive(agent))
-    }) { json.decodeFromString(CreatedSessionResponse.serializer(), it) }
+        name: String?,
+        initialPrompt: String?,
+        thinkingLevel: String?,
+        agent: String?,
+    ): CreatedSessionResponse = call(
+        "/api/sessions",
+        body = buildJsonObject {
+            put("cwd", JsonPrimitive(cwd))
+            put("model", JsonPrimitive(model))
+            if (name != null) put("name", JsonPrimitive(name))
+            if (initialPrompt != null) put("initialPrompt", JsonPrimitive(initialPrompt))
+            if (thinkingLevel != null) put("thinkingLevel", JsonPrimitive(thinkingLevel))
+            if (agent != null) put("agent", JsonPrimitive(agent))
+        }.toString().toRequestBody("application/json".toMediaType()),
+    ) { json.decodeFromString(CreatedSessionResponse.serializer(), it) }
 
     /**
      * Resume a pending bridge call, turning a decode failure into the
@@ -269,75 +258,47 @@ class BridgeClient(
         }
     }
 
-
-    /** One pane control action: abort/retry/compact/fork/rename/cycle_thinking. */
-    suspend fun controlSession(paneId: String, action: String, text: String? = null): ControlResponse =
-        post("/api/sessions/${paneId}/control", buildJsonObject {
-            put("action", JsonPrimitive(action))
-            if (text != null) put("text", JsonPrimitive(text))
-        }) { json.decodeFromString(ControlResponse.serializer(), it) }
-
-    /** Calls the bridge and decodes the response body as [T]. */
-    suspend fun <T> call(
-        path: String,
-        query: Map<String, String> = emptyMap(),
-        host: String? = null,
-        token: String? = null,
-        decode: (String) -> T,
-    ): T =
-        suspendCancellableCoroutine { continuation ->
-            val call = okHttp.newCall(request(path, query, host, token))
-            continuation.invokeOnCancellation { call.cancel() }
-            call.enqueue(object : Callback {
-                override fun onFailure(call: Call, e: IOException) {
-                    if (!continuation.isCancelled) continuation.resumeWithException(e)
-                }
-
-                override fun onResponse(call: Call, response: Response) {
-                    response.use {
-                        if (!continuation.isCancelled) {
-                            if (it.isSuccessful) {
-                                resumeDecoded(continuation, it.body?.string(), decode)
-                            } else {
-                                continuation.resumeWithException(IOException(bridgeFailure(it, it.body?.string())))
-                            }
-                        }
-                    }
-                }
-            })
-        }
+    /** One pane control action: abort/retry/compact/fork/rename/close/set_model/set_thinking. */
+    override suspend fun controlSession(paneId: String, action: String, text: String?): ControlResponse =
+        call(
+            "/api/sessions/${paneId}/control",
+            body = buildJsonObject {
+                put("action", JsonPrimitive(action))
+                if (text != null) put("text", JsonPrimitive(text))
+            }.toString().toRequestBody("application/json".toMediaType()),
+        ) { json.decodeFromString(ControlResponse.serializer(), it) }
 
     /**
      * Probe the bridge health endpoint. Optional host/token overrides let the
      * connect screen verify a candidate connection before saving it.
      */
-    suspend fun health(host: String? = null, token: String? = null): HealthResponse =
+    override suspend fun health(host: String?, token: String?): HealthResponse =
         call("/api/health", host = host, token = token) {
             json.decodeFromString(HealthResponse.serializer(), it)
         }
 
-    suspend fun agents(): AgentsResponse =
+    override suspend fun agents(): AgentsResponse =
         call("/api/agents") { json.decodeFromString(AgentsResponse.serializer(), it) }
 
-    suspend fun session(path: String, since: String? = null): SessionReadResponse =
+    override suspend fun session(path: String, since: String?): SessionReadResponse =
         call("/api/sessions", query = buildMap {
             put("path", path)
             if (since != null) put("since", since)
         }) { json.decodeFromString(SessionReadResponse.serializer(), it) }
 
-    suspend fun usage(): UsageResponse =
+    override suspend fun usage(): UsageResponse =
         call("/api/usage") { json.decodeFromString(UsageResponse.serializer(), it) }
 
     /**
      * Opens a short-lived WS, sends one command, and waits for the first ack frame.
      * Used for steering / answering questions where the app needs confirmation.
      */
-    suspend fun sendCommand(command: Map<String, String>): WsFrame = sendCommandJson(
+    override suspend fun sendCommand(command: Map<String, String>): WsFrame = sendCommandJson(
         buildJsonObject { for ((k, v) in command) put(k, JsonPrimitive(v)) },
     )
 
     /** sendCommand with structured values (e.g. key arrays); see sendCommand. */
-    suspend fun sendCommandJson(command: JsonObject): WsFrame = suspendCancellableCoroutine { continuation ->
+    override suspend fun sendCommandJson(command: JsonObject): WsFrame = suspendCancellableCoroutine { continuation ->
         val saved = connectionStore.saved
         if (saved == null) {
             continuation.resumeWithException(IOException("no connection configured"))
@@ -380,17 +341,17 @@ class BridgeClient(
         }
     }
 
-    suspend fun steer(target: String, text: String): WsFrame =
+    override suspend fun steer(target: String, text: String): WsFrame =
         sendCommand(mapOf("type" to "steer", "target" to target, "text" to text))
 
-    suspend fun runSlashCommand(paneId: String, text: String): WsFrame =
+    override suspend fun runSlashCommand(paneId: String, text: String): WsFrame =
         sendCommand(mapOf("type" to "slash_command", "paneId" to paneId, "text" to text))
 
-    suspend fun answerQuestion(
+    override suspend fun answerQuestion(
         paneId: String,
         text: String,
-        keys: List<String> = emptyList(),
-        trailingKeys: List<String> = emptyList(),
+        keys: List<String>,
+        trailingKeys: List<String>,
     ): WsFrame = sendCommandJson(
         buildJsonObject {
             put("type", "answer_question")

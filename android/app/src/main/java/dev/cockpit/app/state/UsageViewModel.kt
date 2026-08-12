@@ -3,7 +3,7 @@ package dev.cockpit.app.state
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
-import dev.cockpit.app.net.BridgeClient
+import dev.cockpit.app.net.CockpitApi
 import dev.cockpit.app.data.UsageResponse
 import dev.cockpit.app.data.UsageSnapshot
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -19,7 +19,7 @@ data class UsageUiState(
 )
 
 class UsageViewModel(
-    private val bridge: BridgeClient,
+    private val bridge: CockpitApi,
 ) : ViewModel() {
 
     private val _ui = MutableStateFlow(UsageUiState())
@@ -48,7 +48,7 @@ class UsageViewModel(
     }
 
     companion object {
-        fun factory(bridge: BridgeClient): ViewModelProvider.Factory = object : ViewModelProvider.Factory {
+        fun factory(bridge: CockpitApi): ViewModelProvider.Factory = object : ViewModelProvider.Factory {
             @Suppress("UNCHECKED_CAST")
             override fun <T : ViewModel> create(modelClass: Class<T>): T {
                 return UsageViewModel(bridge) as T

@@ -1,40 +1,30 @@
 package dev.cockpit.app.state
 
-import dev.cockpit.app.data.ConnectionStore
+import dev.cockpit.app.data.AgentCard
+import dev.cockpit.app.data.AgentsResponse
+import dev.cockpit.app.data.CommandsCatalog
+import dev.cockpit.app.data.CommandsCatalogResponse
 import dev.cockpit.app.data.ContentBlock
+import dev.cockpit.app.data.QuestionEntry
 import dev.cockpit.app.data.SessionEntry
+import dev.cockpit.app.data.SessionReadResponse
 import dev.cockpit.app.data.entryText
-import dev.cockpit.app.net.BridgeClient
-import kotlinx.coroutines.delay
+import dev.cockpit.app.net.FakeCockpitApi
 import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
-import okhttp3.OkHttpClient
-import okhttp3.WebSocket
-import okhttp3.WebSocketListener
-import okhttp3.mockwebserver.Dispatcher
-import okhttp3.mockwebserver.MockResponse
-import okhttp3.mockwebserver.MockWebServer
-import okhttp3.mockwebserver.RecordedRequest
-import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
-import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
-import java.util.concurrent.CopyOnWriteArrayList
-import java.util.concurrent.TimeUnit
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
 class ChatPendingMessageTest {
-    private lateinit var server: MockWebServer
-    private val commands = CopyOnWriteArrayList<String>()
-    private val commandCatalogCwds = CopyOnWriteArrayList<String>()
-    @Volatile private var confirmMessage = false
-    @Volatile private var failWebSocket = false
+    private lateinit var fake: FakeCockpitApi
     @Volatile private var agentStatus = "working"
     @Volatile private var agentCwd: String? = "/repo"
     @Volatile private var agentPresent = true
@@ -42,120 +32,167 @@ class ChatPendingMessageTest {
 
     @Before
     fun setUp() {
-        server = MockWebServer()
-        server.start()
-        server.dispatcher = object : Dispatcher() {
-            override fun dispatch(request: RecordedRequest): MockResponse {
-                val path = request.requestUrl?.encodedPath.orEmpty()
-                return when (path) {
-                    "/api/models" -> json("""{"ok":true,"catalog":{"providers":[]}}""")
-                    "/api/commands" -> {
-                        val cwd = request.requestUrl?.queryParameter("cwd") ?: "<global>"
-                        commandCatalogCwds += cwd
-                        if (cwd == "/slow") Thread.sleep(200)
-                        val name = when (cwd) {
-                            "/slow" -> "slow-command"
-                            "/fast" -> "fast-command"
-                            else -> "compact"
-                        }
-                        json("""{"ok":true,"catalog":{"commands":[{"name":"$name","description":"Command","source":"builtin","argumentHint":null}]}}""")
-                    }
-                    "/api/agents" -> {
-                        if (!agentPresent) {
-                            json("""{"ok":true,"agents":[]}""")
-                        } else {
-                            val cwd = agentCwd?.let { "\"$it\"" } ?: "null"
-                            json("""{"ok":true,"agents":[{"paneId":"w1:p1","workspaceId":"w1","tabId":"t1","agent":"pi","status":"$agentStatus","cwd":$cwd,"sessionPath":"/tmp/session.jsonl"}]}""")
-                        }
-                    }
-                    "/api/sessions" -> {
-                        val entries = if (confirmMessage) {
-                            """[{"entryId":"server-1","role":"user","content":[{"type":"text","text":"Fix it"}]}]"""
-                        } else "[]"
-                        // pi records an ask_user_question answer only in the
-                        // toolResult's details — never as a user entry — so
-                        // the question flips to answered with no new entry.
-                        val questions = """[{"id":"q1","question":"Proceed?","header":"Confirm","options":[],"multiSelect":false,"answered":$answerRecorded,"answerText":"Proceed","selected":[],"timestamp":"2026-08-10T10:00:00.000Z"}]"""
-                        json("""{"ok":true,"exists":true,"entries":$entries,"since":null,"questions":$questions}""")
-                    }
-                    "/ws" -> if (failWebSocket) {
-                        MockResponse().setResponseCode(503)
-                    } else {
-                        MockResponse().withWebSocketUpgrade(object : WebSocketListener() {
-                            override fun onMessage(webSocket: WebSocket, text: String) {
-                                commands += text
-                                confirmMessage = true
-                                webSocket.send("""{"type":"ack"}""")
-                            }
-
-                            override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
-                                webSocket.close(code, reason)
-                            }
-                        })
-                    }
-                    else -> MockResponse().setResponseCode(404)
+        fake = FakeCockpitApi()
+        fake.commandsResult = Result.success(
+            CommandsCatalogResponse(
+                ok = true,
+                catalog = CommandsCatalog(
+                    commands = listOf(
+                        dev.cockpit.app.data.SlashCommandInfo(
+                            name = "compact",
+                            description = "Command",
+                            source = "builtin",
+                        ),
+                    ),
+                ),
+            ),
+        )
+        fake.onCall = { name, args ->
+            if (name == "commands") {
+                val cwd = args["cwd"] as String?
+                val name = when (cwd) {
+                    "/slow" -> "slow-command"
+                    "/fast" -> "fast-command"
+                    else -> "compact"
                 }
-            }
+                Result.success(
+                    CommandsCatalogResponse(
+                        ok = true,
+                        catalog = CommandsCatalog(
+                            commands = listOf(
+                                dev.cockpit.app.data.SlashCommandInfo(
+                                    name = name,
+                                    description = "Command",
+                                    source = "builtin",
+                                ),
+                            ),
+                        ),
+                    ),
+                )
+            } else null
         }
     }
 
-    @After
-    fun tearDown() {
-        server.shutdown()
+    private fun stubAgents() {
+        fake.agentsResult = Result.success(
+            AgentsResponse(
+                agents = if (agentPresent) {
+                    listOf(
+                        AgentCard(
+                            paneId = "w1:p1",
+                            workspaceId = "w1",
+                            tabId = "t1",
+                            agent = "pi",
+                            status = agentStatus,
+                            cwd = agentCwd,
+                            sessionPath = "/tmp/session.jsonl",
+                        ),
+                    )
+                } else emptyList(),
+            ),
+        )
     }
+
+    private fun stubSession(entries: List<SessionEntry> = emptyList(), answered: Boolean = false) {
+        fake.sessionResult = Result.success(
+            SessionReadResponse(
+                ok = true,
+                exists = true,
+                path = "/tmp/session.jsonl",
+                entries = entries,
+                questions = listOf(
+                    QuestionEntry(
+                        id = "q1",
+                        question = "Proceed?",
+                        header = "Confirm",
+                        options = emptyList(),
+                        multiSelect = false,
+                        answered = answered,
+                        answerText = if (answered) "Proceed" else null,
+                        timestamp = "2026-08-10T10:00:00.000Z",
+                    ),
+                ),
+            ),
+        )
+    }
+
+    private fun commandsCwds(): List<String?> =
+        fake.calls.filter { it.name == "commands" }.map { it.args["cwd"] as String? }
 
     @Test
     fun sendAppearsQueuedImmediatelyThenReconcilesWithTranscript() = runBlocking {
+        stubAgents()
+        stubSession()
         val viewModel = viewModel()
 
         viewModel.send("Fix it")
 
         assertEquals("Fix it", viewModel.ui.value.pendingMessages.single().text)
         assertEquals(MessageDeliveryState.QUEUED, viewModel.ui.value.pendingMessages.single().state)
+        // The agent records the message only after the WS send lands; the
+        // pending bubble confirms once the transcript shows the entry.
+        stubSession(
+            entries = listOf(
+                SessionEntry(entryId = "server-1", role = "user", content = listOf(ContentBlock(type = "text", text = "Fix it"))),
+            ),
+        )
         waitUntil { viewModel.ui.value.pendingMessages.isEmpty() }
-        assertTrue(commands.single().contains("\"text\":\"Fix it\""))
+        assertTrue(fake.sentCommands.single().toString().contains("\"text\":\"Fix it\""))
         assertEquals(listOf("server-1"), viewModel.ui.value.entries.map { it.entryId })
     }
 
     @Test
     fun failedSendStaysVisibleAndCanBeRetried() = runBlocking {
-        failWebSocket = true
+        stubAgents()
+        stubSession()
+        fake.wsFailure = java.io.IOException("websocket rejected")
         val viewModel = viewModel()
         viewModel.send("Fix it")
 
         waitUntil { viewModel.ui.value.pendingMessages.singleOrNull()?.state == MessageDeliveryState.FAILED }
         val failed = viewModel.ui.value.pendingMessages.single()
 
-        failWebSocket = false
+        fake.wsFailure = null
         viewModel.retryPendingMessage(failed.localId)
         assertEquals(MessageDeliveryState.QUEUED, viewModel.ui.value.pendingMessages.single().state)
+        // The agent records the message only once the retried WS send lands;
+        // the pending bubble confirms once the transcript shows the entry.
+        stubSession(
+            entries = listOf(
+                SessionEntry(entryId = "server-1", role = "user", content = listOf(ContentBlock(type = "text", text = "Fix it"))),
+            ),
+        )
         waitUntil { viewModel.ui.value.pendingMessages.isEmpty() }
     }
 
     @Test
     fun blockedSessionRoutesSlashCommandsBeforeQuestionAnswers() = runBlocking {
         agentStatus = "blocked"
+        stubAgents()
+        stubSession()
         val viewModel = viewModel()
         waitUntil("cwd") { viewModel.ui.value.cwd == "/repo" }
-        waitUntil("catalog") { viewModel.ui.value.commands.isNotEmpty() && commandCatalogCwds.contains("/repo") }
+        waitUntil("catalog") { viewModel.ui.value.commands.isNotEmpty() && commandsCwds().contains("/repo") }
 
         viewModel.send("/compact")
 
-        waitUntil("slash command") { commands.isNotEmpty() }
-        assertTrue(commands.single().contains("\"type\":\"slash_command\""))
-        assertTrue(commands.single().contains("\"text\":\"/compact\""))
+        waitUntil("slash command") { fake.sentCommands.isNotEmpty() }
+        assertTrue(fake.sentCommands.single().toString().contains("\"type\":\"slash_command\""))
+        assertTrue(fake.sentCommands.single().toString().contains("\"text\":\"/compact\""))
         assertTrue(viewModel.ui.value.pendingMessages.isEmpty())
 
-        commands.clear()
+        fake.sentCommands.clear()
         viewModel.send("Proceed")
-        waitUntil("question answer") { commands.isNotEmpty() }
-        assertTrue(commands.single().contains("\"type\":\"answer_question\""))
-        assertTrue(commands.single().contains("\"text\":\"Proceed\""))
+        waitUntil("question answer") { fake.sentCommands.isNotEmpty() }
+        assertTrue(fake.sentCommands.single().toString().contains("\"type\":\"answer_question\""))
+        assertTrue(fake.sentCommands.single().toString().contains("\"text\":\"Proceed\""))
     }
 
     @Test
     fun composerAnswerConfirmsWhenQuestionFlipsToAnswered() = runBlocking {
         agentStatus = "blocked"
+        stubAgents()
+        stubSession()
         val viewModel = viewModel()
         waitUntil("pending question") {
             viewModel.ui.value.questions.singleOrNull()?.answered == false
@@ -168,6 +205,7 @@ class ChatPendingMessageTest {
         // entry. The pending bubble must still confirm once the question is
         // answered.
         answerRecorded = true
+        stubSession(answered = true)
         waitUntil("answer confirmed") { viewModel.ui.value.pendingMessages.isEmpty() }
         assertTrue(viewModel.ui.value.questions.single().answered)
         // pi records the answer only in the toolResult — no user entry for
@@ -178,11 +216,15 @@ class ChatPendingMessageTest {
 
     @Test
     fun staleCommandResponseCannotReplaceANewerCatalog() = runBlocking {
+        stubAgents()
+        stubSession()
         val viewModel = viewModel()
         waitUntil("initial catalog") { viewModel.ui.value.commands.isNotEmpty() }
 
+        fake.callDelays["commands"] = 200
         val slow = async { viewModel.refreshCommands("/slow") }
         delay(25)
+        fake.callDelays["commands"] = 0
         val fast = async { viewModel.refreshCommands("/fast") }
         slow.await()
         fast.await()
@@ -192,24 +234,30 @@ class ChatPendingMessageTest {
 
     @Test
     fun clearsProjectCommandsWhenAgentLosesItsCwd() = runBlocking {
+        stubAgents()
+        stubSession()
         val viewModel = viewModel()
-        waitUntil("project catalog") { viewModel.ui.value.cwd == "/repo" && commandCatalogCwds.contains("/repo") }
+        waitUntil("project catalog") { viewModel.ui.value.cwd == "/repo" && commandsCwds().contains("/repo") }
 
         agentCwd = null
+        stubAgents()
         viewModel.refresh()
 
-        waitUntil("global catalog") { viewModel.ui.value.cwd == null && commandCatalogCwds.lastOrNull() == "<global>" }
+        waitUntil("global catalog") { viewModel.ui.value.cwd == null && commandsCwds().lastOrNull() == null }
     }
 
     @Test
     fun clearsProjectCommandsWhenAgentDisappears() = runBlocking {
+        stubAgents()
+        stubSession()
         val viewModel = viewModel()
-        waitUntil("project catalog") { viewModel.ui.value.cwd == "/repo" && commandCatalogCwds.contains("/repo") }
+        waitUntil("project catalog") { viewModel.ui.value.cwd == "/repo" && commandsCwds().contains("/repo") }
 
         agentPresent = false
+        stubAgents()
         viewModel.refresh()
 
-        waitUntil("global catalog") { viewModel.ui.value.cwd == null && commandCatalogCwds.lastOrNull() == "<global>" }
+        waitUntil("global catalog") { viewModel.ui.value.cwd == null && commandsCwds().lastOrNull() == null }
     }
 
     @Test
@@ -266,23 +314,17 @@ class ChatPendingMessageTest {
         assertEquals(listOf(message), dropConfirmedMessages(listOf(message), listOf(oldEntry)))
     }
 
-    private fun viewModel(): ChatViewModel {
-        val store = ConnectionStore(RuntimeEnvironment.getApplication())
-        store.save(server.url("/").toString().trimEnd('/'), "test-token")
-        val client = OkHttpClient.Builder().readTimeout(5, TimeUnit.SECONDS).build()
-        return ChatViewModel(BridgeClient(client, store), "w1:p1", "/tmp/session.jsonl", "working")
-    }
+    private fun viewModel(): ChatViewModel =
+        ChatViewModel(fake, "w1:p1", "/tmp/session.jsonl", "working")
 
     private suspend fun waitUntil(description: String = "condition", condition: () -> Boolean) {
         repeat(200) {
-            org.robolectric.shadows.ShadowLooper.idleMainLooper()
+            // Advance the paused main looper's clock so post-ack refreshes
+            // (parked on their 750ms retry delay) actually fire.
+            org.robolectric.shadows.ShadowLooper.idleMainLooper(100, java.util.concurrent.TimeUnit.MILLISECONDS)
             if (condition()) return
             delay(25)
         }
         error("$description did not become true")
     }
-
-    private fun json(body: String): MockResponse = MockResponse()
-        .setHeader("content-type", "application/json")
-        .setBody(body)
 }
