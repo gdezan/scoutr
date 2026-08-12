@@ -1188,11 +1188,15 @@ private fun AttachmentChip(
     val context = LocalContext.current
     val bitmap by produceState<android.graphics.Bitmap?>(initialValue = null, uri) {
         value = try {
-            context.contentResolver.openInputStream(uri)?.use { stream ->
+            // Decode bounds and pixels from two fresh streams: content-provider
+            // streams are usually not markable, so reset() used to throw and
+            // the preview never rendered.
+            val sample = context.contentResolver.openInputStream(uri)?.use { stream ->
                 val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
                 android.graphics.BitmapFactory.decodeStream(stream, null, bounds)
-                stream.reset()
-                val sample = (bounds.outWidth / 96).coerceAtLeast(1)
+                (bounds.outWidth / 96).coerceAtLeast(1)
+            } ?: 1
+            context.contentResolver.openInputStream(uri)?.use { stream ->
                 val opts = android.graphics.BitmapFactory.Options().apply { inSampleSize = sample }
                 android.graphics.BitmapFactory.decodeStream(stream, null, opts)
             }

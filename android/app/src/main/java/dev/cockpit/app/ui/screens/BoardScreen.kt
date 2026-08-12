@@ -464,16 +464,8 @@ private fun statusLabel(status: AgentStatus) = when (status) {
 }
 
 /** Compact "time in state" from the bridge-stamped entry time. */
-internal fun timeInState(sinceMs: Double?): String? {
-    if (sinceMs == null) return null
-    val minutes = ((System.currentTimeMillis() - sinceMs.toLong()) / 60_000L).toInt().coerceAtLeast(0)
-    return when {
-        minutes < 1 -> "now"
-        minutes < 60 -> "${minutes}m"
-        minutes < 24 * 60 -> "${minutes / 60}h"
-        else -> "${minutes / (24 * 60)}d"
-    }
-}
+internal fun timeInState(sinceMs: Double?): String? =
+    sinceMs?.let { dev.cockpit.app.ui.relativeTime(it) }
 
 /** Stable skeleton rows (fixed geometry, no spinner flash) while first load runs. */
 @Composable

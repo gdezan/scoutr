@@ -609,20 +609,8 @@ internal fun shortModel(model: String): String {
 }
 
 /** Compact relative time for epoch-millisecond stamps ("now", "5m", "3h", "2d", else date). */
-internal fun relativeTime(epochMs: Double): String {
-    if (epochMs <= 0) return ""
-    val minutes = ((System.currentTimeMillis() - epochMs.toLong()) / 60_000L).coerceAtLeast(0)
-    return when {
-        minutes < 1 -> "now"
-        minutes < 60 -> "${minutes}m"
-        minutes < 24 * 60 -> "${minutes / 60}h"
-        minutes < 7 * 24 * 60 -> "${minutes / (24 * 60)}d"
-        else -> {
-            val date = java.text.SimpleDateFormat("MMM d", java.util.Locale.US).format(java.util.Date(epochMs.toLong()))
-            date
-        }
-    }
-}
+internal fun relativeTime(epochMs: Double): String =
+    dev.cockpit.app.ui.relativeTime(epochMs, dateAfterDays = 7)
 
 @Composable
 private fun RenameDialog(
