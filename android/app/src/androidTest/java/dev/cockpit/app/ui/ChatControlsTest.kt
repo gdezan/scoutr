@@ -16,6 +16,9 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasTestTag
 import dev.cockpit.app.data.ConnectionStore
 import dev.cockpit.app.net.BridgeClient
+import androidx.compose.ui.test.isRoot
+import androidx.compose.ui.test.printToLog
+import dev.cockpit.app.state.Loadable
 import dev.cockpit.app.state.ChatViewModel
 import dev.cockpit.app.state.LiveOutputViewModel
 import dev.cockpit.app.ui.screens.ChatScreen
@@ -255,7 +258,9 @@ class ChatControlsTest {
         val vm = ChatViewModel(bridge, "w1:p1", null, "working")
 
         compose.setContent { ChatScreen(viewModel = vm, onBack = {}) }
-        compose.waitUntil(timeoutMillis = 10_000) { vm.ui.value.modelProviders.isNotEmpty() && vm.ui.value.model != null }
+        compose.waitUntil(timeoutMillis = 10_000) {
+            (vm.ui.value.configuration as? Loadable.Ready)?.value?.isNotEmpty() == true && vm.ui.value.model != null
+        }
 
         compose.onNodeWithTag("chat_thinking_config").assertIsDisplayed().performClick()
         compose.onNodeWithTag("conversation_config_sheet").assertIsDisplayed()

@@ -16,6 +16,8 @@ import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.pressKey
 import dev.cockpit.app.data.SlashCommandInfo
+import dev.cockpit.app.state.FailureKind
+import dev.cockpit.app.state.Loadable
 import dev.cockpit.app.ui.screens.ChatComposer
 import dev.cockpit.app.ui.theme.CockpitTheme
 import org.junit.Assert.assertTrue
@@ -45,7 +47,7 @@ class SlashCommandMenuTest {
                     onValueChange = { input = it },
                     placeholder = "Steer the agent…",
                     enabled = true,
-                    commands = commands,
+                    commands = Loadable.Ready(commands),
                     onSend = { sends += 1 },
                 )
             }
@@ -73,9 +75,7 @@ class SlashCommandMenuTest {
     @Test
     fun showsLoadingErrorEmptyAndNoMatchStates() {
         var input by mutableStateOf("/")
-        var currentCommands by mutableStateOf(emptyList<SlashCommandInfo>())
-        var loading by mutableStateOf(true)
-        var error by mutableStateOf<String?>(null)
+        var currentCommands by mutableStateOf<Loadable<List<SlashCommandInfo>>>(Loadable.Idle)
         var retried = false
         compose.setContent {
             CockpitTheme {
@@ -85,8 +85,6 @@ class SlashCommandMenuTest {
                     placeholder = "Steer the agent…",
                     enabled = true,
                     commands = currentCommands,
-                    commandsLoading = loading,
-                    commandsError = error,
                     onRetryCommands = { retried = true },
                     onSend = {},
                 )
@@ -94,14 +92,14 @@ class SlashCommandMenuTest {
         }
 
         compose.onNodeWithText("Loading commands…").assertIsDisplayed()
-        compose.runOnIdle { loading = false; error = "Commands unavailable" }
+        compose.runOnIdle { currentCommands = Loadable.Failed("Commands unavailable", FailureKind.Server) }
         compose.onNodeWithText("Commands unavailable").assertIsDisplayed()
         compose.onNodeWithTag("slash_command_retry").performClick()
         assertTrue(retried)
 
-        compose.runOnIdle { error = null }
+        compose.runOnIdle { currentCommands = Loadable.Ready(emptyList()) }
         compose.onNodeWithText("No commands available").assertIsDisplayed()
-        compose.runOnIdle { currentCommands = commands; input = "/zzz" }
+        compose.runOnIdle { currentCommands = Loadable.Ready(commands); input = "/zzz" }
         compose.onNodeWithText("No commands match “zzz”").assertIsDisplayed()
     }
 
@@ -116,7 +114,7 @@ class SlashCommandMenuTest {
                     onValueChange = { input = it },
                     placeholder = "Steer the agent…",
                     enabled = true,
-                    commands = many,
+                    commands = Loadable.Ready(many),
                     onSend = {},
                 )
             }

@@ -85,7 +85,6 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
-import dev.cockpit.app.CockpitApp
 import dev.cockpit.app.ui.components.CockpitTextField
 import dev.cockpit.app.ui.components.ConfirmDialog
 import dev.cockpit.app.data.SessionCatalogItem
@@ -94,6 +93,7 @@ import dev.cockpit.app.state.HistoryUiState
 import dev.cockpit.app.state.HistoryView
 import dev.cockpit.app.state.ResumedSession
 import dev.cockpit.app.state.SessionHistoryViewModel
+import dev.cockpit.app.state.viewModelFactory
 
 /** The Sessions tab: catalog of stored and live pi sessions with lifecycle actions. */
 @Composable
@@ -746,12 +746,13 @@ private fun HistorySkeleton() {
 
 @Composable
 private fun rememberHistoryViewModel(): SessionHistoryViewModel {
-    val app = LocalContext.current.applicationContext as CockpitApp
     return viewModel(
-        factory = SessionHistoryViewModel.factory(
-            app.container.bridge,
-            app.container.connectionStore,
-            app.container.sessionCatalogStore,
-        ),
+        factory = viewModelFactory<SessionHistoryViewModel> { app ->
+            SessionHistoryViewModel(
+                app.container.bridge,
+                app.container.connectionStore,
+                app.container.sessionCatalogStore,
+            )
+        },
     )
 }

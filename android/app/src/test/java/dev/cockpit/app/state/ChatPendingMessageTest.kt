@@ -10,6 +10,7 @@ import dev.cockpit.app.data.SessionEntry
 import dev.cockpit.app.data.SessionReadResponse
 import dev.cockpit.app.data.entryText
 import dev.cockpit.app.net.FakeCockpitApi
+import dev.cockpit.app.state.Loadable
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
@@ -119,6 +120,9 @@ class ChatPendingMessageTest {
     private fun commandsCwds(): List<String?> =
         fake.calls.filter { it.name == "commands" }.map { it.args["cwd"] as String? }
 
+    private fun ChatViewModel.readyCommands(): List<dev.cockpit.app.data.SlashCommandInfo> =
+        (ui.value.commands as? Loadable.Ready)?.value.orEmpty()
+
     @Test
     fun sendAppearsQueuedImmediatelyThenReconcilesWithTranscript() = runBlocking {
         stubAgents()
@@ -172,7 +176,7 @@ class ChatPendingMessageTest {
         stubSession()
         val viewModel = viewModel()
         waitUntil("cwd") { viewModel.ui.value.cwd == "/repo" }
-        waitUntil("catalog") { viewModel.ui.value.commands.isNotEmpty() && commandsCwds().contains("/repo") }
+        waitUntil("catalog") { viewModel.readyCommands().isNotEmpty() && commandsCwds().contains("/repo") }
 
         viewModel.send("/compact")
 
@@ -219,7 +223,7 @@ class ChatPendingMessageTest {
         stubAgents()
         stubSession()
         val viewModel = viewModel()
-        waitUntil("initial catalog") { viewModel.ui.value.commands.isNotEmpty() }
+        waitUntil("initial catalog") { viewModel.readyCommands().isNotEmpty() }
 
         fake.callDelays["commands"] = 200
         val slow = async { viewModel.refreshCommands("/slow") }
@@ -229,7 +233,7 @@ class ChatPendingMessageTest {
         slow.await()
         fast.await()
 
-        assertEquals(listOf("fast-command"), viewModel.ui.value.commands.map { it.name })
+        assertEquals(listOf("fast-command"), viewModel.readyCommands().map { it.name })
     }
 
     @Test

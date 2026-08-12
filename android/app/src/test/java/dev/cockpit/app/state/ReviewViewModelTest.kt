@@ -10,6 +10,7 @@ import dev.cockpit.app.data.RepoOverviewResponse
 import dev.cockpit.app.data.RepoStatusEntry
 import dev.cockpit.app.net.BridgeException
 import dev.cockpit.app.net.FakeCockpitApi
+import dev.cockpit.app.state.Loadable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
@@ -51,6 +52,8 @@ class ReviewViewModelTest {
         fake.dirsResult = Result.success(DirListingResponse(ok = true, listing = DirListing(path = path, dirs = dirs)))
     }
 
+    private fun <T> readyOf(load: Loadable<T>): T? = (load as? Loadable.Ready)?.value
+
     private fun waitFor(timeoutMs: Long = 4000, condition: () -> Boolean): Boolean {
         val deadline = System.currentTimeMillis() + timeoutMs
         while (System.currentTimeMillis() < deadline) {
@@ -66,9 +69,9 @@ class ReviewViewModelTest {
         stubDirs(dirs = listOf("repo-a", "repo-b"))
         viewModel.openPicker()
 
-        val settled = waitFor { viewModel.ui.value.dirs.isNotEmpty() }
+        val settled = waitFor { readyOf(viewModel.ui.value.dirs)?.isNotEmpty() == true }
         assertTrue("dirs never loaded", settled)
-        assertEquals(listOf("repo-a", "repo-b"), viewModel.ui.value.dirs)
+        assertEquals(listOf("repo-a", "repo-b"), readyOf(viewModel.ui.value.dirs))
         assertEquals("/home/test", viewModel.ui.value.dirPath)
         assertNull(viewModel.ui.value.repoPath)
     }
@@ -77,7 +80,7 @@ class ReviewViewModelTest {
     fun browseIntoAppendsToCurrentPath() {
         stubDirs(dirs = listOf("repo-a"))
         viewModel.openPicker()
-        waitFor { viewModel.ui.value.dirs.isNotEmpty() }
+        waitFor { readyOf(viewModel.ui.value.dirs)?.isNotEmpty() == true }
 
         stubDirs(path = "/home/test/repo-a")
         viewModel.browseInto("repo-a")
@@ -90,7 +93,7 @@ class ReviewViewModelTest {
     fun selectRepoLoadsOverview() {
         stubDirs()
         viewModel.openPicker()
-        waitFor { viewModel.ui.value.dirs.isNotEmpty() }
+        waitFor { readyOf(viewModel.ui.value.dirs)?.isNotEmpty() == true }
 
         fake.repoOverviewResult = Result.success(
             RepoOverviewResponse(
@@ -104,11 +107,12 @@ class ReviewViewModelTest {
         )
         viewModel.selectRepo("/home/test/repo-a")
 
-        val settled = waitFor { viewModel.ui.value.overview != null }
+        val settled = waitFor { viewModel.ui.value.overview is Loadable.Ready }
         assertTrue("overview never loaded", settled)
-        assertEquals("main", viewModel.ui.value.overview?.branch)
-        assertEquals(1, viewModel.ui.value.overview?.status?.size)
-        assertEquals("initial commit", viewModel.ui.value.overview?.log?.first()?.subject)
+        val overview = readyOf(viewModel.ui.value.overview)
+        assertEquals("main", overview?.branch)
+        assertEquals(1, overview?.status?.size)
+        assertEquals("initial commit", overview?.log?.first()?.subject)
         assertEquals("/home/test/repo-a", viewModel.ui.value.repoPath)
     }
 
@@ -116,14 +120,14 @@ class ReviewViewModelTest {
     fun selectRepoErrorSurfaces() {
         stubDirs()
         viewModel.openPicker()
-        waitFor { viewModel.ui.value.dirs.isNotEmpty() }
+        waitFor { readyOf(viewModel.ui.value.dirs)?.isNotEmpty() == true }
 
         fake.repoOverviewResult = Result.failure(BridgeException(403, "path outside allowed repo roots"))
         viewModel.selectRepo("/etc/passwd")
 
-        val settled = waitFor { viewModel.ui.value.error != null }
+        val settled = waitFor { (viewModel.ui.value.overview as? Loadable.Failed) != null }
         assertTrue("error never surfaced", settled)
-        assertTrue(viewModel.ui.value.error.orEmpty().contains("bridge 403"))
+        assertTrue((viewModel.ui.value.overview as? Loadable.Failed)?.reason.orEmpty().contains("bridge 403"))
         assertNull(viewModel.ui.value.repoPath)
     }
 
@@ -131,7 +135,7 @@ class ReviewViewModelTest {
     fun loadDiffFetchesBoundedDiff() {
         stubDirs(dirs = listOf("repo-a"))
         viewModel.openPicker()
-        waitFor { viewModel.ui.value.dirs.isNotEmpty() }
+        waitFor { readyOf(viewModel.ui.value.dirs)?.isNotEmpty() == true }
 
         fake.repoOverviewResult = Result.success(
             RepoOverviewResponse(ok = true, path = "/home/test/repo-a", root = "/home/test/repo-a", branch = "main"),
@@ -140,7 +144,7 @@ class ReviewViewModelTest {
             dev.cockpit.app.data.RepoArtifactsResponse(ok = true),
         )
         viewModel.selectRepo("/home/test/repo-a")
-        waitFor { viewModel.ui.value.overview != null }
+        waitFor { viewModel.ui.value.overview is Loadable.Ready }
 
         fake.repoDiffResult = Result.success(
             RepoDiffResponse(
@@ -152,18 +156,19 @@ class ReviewViewModelTest {
         )
         viewModel.loadDiff("HEAD")
 
-        val settled = waitFor { viewModel.ui.value.diff != null }
+        val settled = waitFor { viewModel.ui.value.diff is Loadable.Ready }
         assertTrue("diff never loaded", settled)
         assertEquals("HEAD", viewModel.ui.value.diffRef)
-        assertTrue(viewModel.ui.value.diff?.diff.orEmpty().contains("+world"))
-        assertEquals(1, viewModel.ui.value.diff?.stat?.size)
+        val diff = readyOf(viewModel.ui.value.diff)
+        assertTrue(diff?.diff.orEmpty().contains("+world"))
+        assertEquals(1, diff?.stat?.size)
     }
 
     @Test
     fun refreshReloadsCurrentRepo() {
         stubDirs()
         viewModel.openPicker()
-        waitFor { viewModel.ui.value.dirs.isNotEmpty() }
+        waitFor { readyOf(viewModel.ui.value.dirs)?.isNotEmpty() == true }
 
         fake.repoOverviewResult = Result.success(
             RepoOverviewResponse(ok = true, path = "/home/test/repo-a", root = "/home/test/repo-a", branch = "main"),
@@ -172,7 +177,7 @@ class ReviewViewModelTest {
             dev.cockpit.app.data.RepoArtifactsResponse(ok = true),
         )
         viewModel.selectRepo("/home/test/repo-a")
-        waitFor { viewModel.ui.value.overview != null }
+        waitFor { viewModel.ui.value.overview is Loadable.Ready }
 
         fake.repoOverviewResult = Result.success(
             RepoOverviewResponse(
@@ -185,8 +190,8 @@ class ReviewViewModelTest {
         )
         viewModel.refresh()
 
-        val settled = waitFor { viewModel.ui.value.overview?.status?.isNotEmpty() == true }
+        val settled = waitFor { readyOf(viewModel.ui.value.overview)?.status?.isNotEmpty() == true }
         assertTrue("refresh never applied", settled)
-        assertEquals("??", viewModel.ui.value.overview?.status?.first()?.code)
+        assertEquals("??", readyOf(viewModel.ui.value.overview)?.status?.first()?.code)
     }
 }

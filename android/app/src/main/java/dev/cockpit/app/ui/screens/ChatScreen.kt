@@ -110,6 +110,7 @@ import dev.cockpit.app.ui.motion.CockpitMotion
 import dev.cockpit.app.ui.motion.HapticEvent
 import dev.cockpit.app.ui.motion.rememberHaptic
 import dev.cockpit.app.ui.motion.useReduceMotion
+import dev.cockpit.app.state.Loadable
 import dev.cockpit.app.state.ChatUiState
 import dev.cockpit.app.state.ChatViewModel
 import dev.cockpit.app.state.MessageDeliveryState
@@ -176,7 +177,7 @@ fun ChatScreen(
         )
 
         val emptyTranscriptHint = !ui.exists && ui.pendingMessages.isEmpty()
-        val loadingSkeleton = ui.loading && ui.entries.isEmpty() && ui.pendingMessages.isEmpty()
+        val loadingSkeleton = ui.transcript is Loadable.Loading && ui.entries.isEmpty() && ui.pendingMessages.isEmpty()
         Box(Modifier.weight(1f).fillMaxWidth()) {
             when {
                 loadingSkeleton -> {
@@ -231,9 +232,10 @@ fun ChatScreen(
         }
 
         Column(Modifier.fillMaxWidth().imePadding()) {
-            if (ui.error != null) {
+            val sendError = ui.sendError
+            if (sendError != null) {
                 Text(
-                    ui.error ?: "",
+                    sendError,
                     color = MaterialTheme.colorScheme.error,
                     style = MaterialTheme.typography.bodySmall,
                     modifier = Modifier.padding(horizontal = 16.dp),
@@ -245,8 +247,6 @@ fun ChatScreen(
                 placeholder = if (viewModel.waitingForAnswer) "Answer the question…" else "Steer the agent…",
                 enabled = !ui.sending,
                 commands = ui.commands,
-                commandsLoading = ui.commandsLoading,
-                commandsError = ui.commandsError,
                 onRetryCommands = viewModel::retryCommands,
                 attachment = attachment,
                 attachmentUploading = attachmentUploading,
@@ -1027,9 +1027,7 @@ internal fun ChatComposer(
     onValueChange: (String) -> Unit,
     placeholder: String,
     enabled: Boolean,
-    commands: List<SlashCommandInfo> = emptyList(),
-    commandsLoading: Boolean = false,
-    commandsError: String? = null,
+    commands: Loadable<List<SlashCommandInfo>> = Loadable.Idle,
     onRetryCommands: () -> Unit = {},
     attachment: android.net.Uri? = null,
     attachmentUploading: Boolean = false,
@@ -1038,11 +1036,12 @@ internal fun ChatComposer(
     onSend: () -> Unit,
 ) {
     val query = slashCommandQuery(value)
-    val matches = remember(commands, query) { query?.let { matchSlashCommands(commands, it) }.orEmpty() }
+    val commandsValue = (commands as? Loadable.Ready)?.value.orEmpty()
+    val matches = remember(commandsValue, query) { query?.let { matchSlashCommands(commandsValue, it) }.orEmpty() }
     val exactMatch = query?.let { typed -> matches.firstOrNull { it.name.equals(typed, ignoreCase = true) } }
     val acceptingCompletion = query != null && matches.isNotEmpty() && exactMatch == null
     var selectedIndex by remember { mutableStateOf(0) }
-    LaunchedEffect(value, commands) { selectedIndex = 0 }
+    LaunchedEffect(value, commandsValue) { selectedIndex = 0 }
 
     fun select(command: SlashCommandInfo) {
         onValueChange(fillSlashCommand(command))
@@ -1065,8 +1064,8 @@ internal fun ChatComposer(
             SlashCommandMenu(
                 commands = matches,
                 query = query,
-                loading = commandsLoading,
-                error = commandsError,
+                loading = commands is Loadable.Loading || commands is Loadable.Idle,
+                error = (commands as? Loadable.Failed)?.reason,
                 selectedIndex = selectedIndex,
                 onSelect = ::select,
                 onRetry = onRetryCommands,

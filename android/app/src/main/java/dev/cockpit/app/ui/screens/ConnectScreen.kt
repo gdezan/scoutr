@@ -33,7 +33,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
+
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -41,10 +41,11 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
-import dev.cockpit.app.CockpitApp
+
 import dev.cockpit.app.data.PairingPayloadParser
-import dev.cockpit.app.state.ConnectState
 import dev.cockpit.app.state.ConnectViewModel
+import dev.cockpit.app.state.viewModelFactory
+import dev.cockpit.app.state.Loadable
 
 @Composable
 fun ConnectScreen(
@@ -73,7 +74,7 @@ fun ConnectScreen(
     }
 
     // React to the handshake result exactly once.
-    if (state is ConnectState.Connected) {
+    if (state is Loadable.Ready) {
         onConnected()
         viewModel.reset()
     }
@@ -149,7 +150,7 @@ fun ConnectScreen(
         Spacer(Modifier.height(24.dp))
 
         when (val s = state) {
-            is ConnectState.Testing -> {
+            is Loadable.Loading -> {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
                     Spacer(Modifier.width(12.dp))
@@ -157,9 +158,9 @@ fun ConnectScreen(
                 }
             }
 
-            is ConnectState.Failed -> {
+            is Loadable.Failed -> {
                 Text(
-                    text = "Could not reach the bridge: ${s.message}",
+                    text = "Could not reach the bridge: ${s.reason}",
                     color = MaterialTheme.colorScheme.error,
                     style = MaterialTheme.typography.bodyMedium,
                 )
@@ -187,9 +188,10 @@ fun ConnectScreen(
 
 @Composable
 private fun rememberConnectViewModel(): ConnectViewModel {
-    val app = LocalContext.current.applicationContext as CockpitApp
     return viewModel(
-        factory = ConnectViewModel.factory(app.container.bridge, app.container.connectionStore),
+        factory = viewModelFactory<ConnectViewModel> { app ->
+            ConnectViewModel(app.container.bridge, app.container.connectionStore)
+        },
     )
 }
 

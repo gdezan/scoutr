@@ -83,6 +83,7 @@ import dev.cockpit.app.state.SessionHistoryViewModel
 import dev.cockpit.app.state.UsageViewModel
 import dev.cockpit.app.state.ReviewViewModel
 import dev.cockpit.app.state.ReduceMotionStore
+import dev.cockpit.app.state.viewModelFactory
 import dev.cockpit.app.ui.screens.BoardScreen
 import dev.cockpit.app.ui.screens.NewSessionSheet
 import dev.cockpit.app.ui.screens.ChatScreen
@@ -196,12 +197,14 @@ private fun CockpitAppNav(
     // One activity-scoped board VM: the bottom-bar badge and the Board screen
     // share the same live snapshot, so there is no duplicate polling.
     val boardViewModel: BoardViewModel = viewModel(
-        factory = BoardViewModel.factory(
-            container.bridge,
-            container.connectionStore,
-            container.ntfy,
-            container::showAgentNotification,
-        ),
+        factory = viewModelFactory<BoardViewModel> { app ->
+            BoardViewModel(
+                app.container.bridge,
+                app.container.connectionStore,
+                app.container.ntfy,
+                app.container::showAgentNotification,
+            )
+        },
         key = "activity_board",
     )
 
@@ -346,11 +349,13 @@ private fun CockpitAppNav(
             }
             composable(Routes.SESSIONS) {
                 val historyViewModel: SessionHistoryViewModel = viewModel(
-                    factory = SessionHistoryViewModel.factory(
-                        container.bridge,
-                        container.connectionStore,
-                        container.sessionCatalogStore,
-                    ),
+                    factory = viewModelFactory<SessionHistoryViewModel> { app ->
+                        SessionHistoryViewModel(
+                            app.container.bridge,
+                            app.container.connectionStore,
+                            app.container.sessionCatalogStore,
+                        )
+                    },
                 )
                 Scaffold(
                     contentWindowInsets = WindowInsets(0.dp),
@@ -387,7 +392,9 @@ private fun CockpitAppNav(
                 val sessionPath = backStackEntry.arguments?.getString("sessionPath")?.takeIf { it.isNotBlank() }
                 val agentStatus = backStackEntry.arguments?.getString("status") ?: "working"
                 val chatViewModel: ChatViewModel = viewModel(
-                    factory = ChatViewModel.factory(container.bridge, paneId, sessionPath, agentStatus),
+                    factory = viewModelFactory<ChatViewModel> { app ->
+                        ChatViewModel(app.container.bridge, paneId, sessionPath, agentStatus)
+                    },
                     key = "chat_$paneId",
                 )
                 ChatScreen(
@@ -416,7 +423,9 @@ private fun CockpitAppNav(
             }
             composable(Routes.USAGE) {
                 val usageViewModel: UsageViewModel = viewModel(
-                    factory = UsageViewModel.factory(container.bridge),
+                    factory = viewModelFactory<UsageViewModel> { app ->
+                        UsageViewModel(app.container.bridge)
+                    },
                 )
                 Scaffold(
                     contentWindowInsets = WindowInsets(0.dp),

@@ -63,8 +63,8 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.cockpit.app.data.AgentCard
 import dev.cockpit.app.data.AgentStatus
-import dev.cockpit.app.CockpitApp
 import dev.cockpit.app.state.BoardViewModel
+import dev.cockpit.app.state.viewModelFactory
 import dev.cockpit.app.ui.components.ConfirmDialog
 import dev.cockpit.app.ui.motion.CockpitMotion
 import dev.cockpit.app.ui.motion.HapticEvent
@@ -530,8 +530,9 @@ private fun BoardSkeleton(modifier: Modifier = Modifier) {
 
 @Composable
 private fun rememberBoardViewModel(): BoardViewModel {
-    val app = LocalContext.current.applicationContext as CockpitApp
     return viewModel(
-        factory = BoardViewModel.factory(app.container.bridge, app.container.connectionStore),
+        factory = viewModelFactory<BoardViewModel> { app ->
+            BoardViewModel(app.container.bridge, app.container.connectionStore)
+        },
     )
 }

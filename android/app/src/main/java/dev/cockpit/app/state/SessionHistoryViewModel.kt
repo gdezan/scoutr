@@ -1,21 +1,18 @@
 package dev.cockpit.app.state
 
 import androidx.lifecycle.ViewModel
-import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import dev.cockpit.app.data.ConnectionStore
 import dev.cockpit.app.data.SessionCatalogItem
 import dev.cockpit.app.data.SessionCatalogStore
 import dev.cockpit.app.net.CockpitApi
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.io.IOException
+import kotlin.time.Duration.Companion.seconds
 
 /** One catalog row with its on-device pin/archive flags. */
 data class HistoryItem(
@@ -62,7 +59,7 @@ class SessionHistoryViewModel(
     /** The active search query, applied on refresh (and on user commit). */
     private var query: String = ""
 
-    private var pollJob: Job? = null
+    private val poller = Poller(viewModelScope)
 
     init {
         if (connectionStore.saved != null) startPolling()
@@ -76,13 +73,7 @@ class SessionHistoryViewModel(
     fun retry() = viewModelScope.launch { refresh() }
 
     private fun startPolling() {
-        pollJob?.cancel()
-        pollJob = viewModelScope.launch {
-            while (isActive) {
-                refresh()
-                delay(8_000)
-            }
-        }
+        poller.start(8.seconds) { refresh() }
     }
 
     suspend fun refresh() {
@@ -232,21 +223,7 @@ class SessionHistoryViewModel(
     }
 
     override fun onCleared() {
-        pollJob?.cancel()
+        poller.stop()
         super.onCleared()
-    }
-
-    companion object {
-        fun factory(
-            bridge: CockpitApi,
-            connectionStore: ConnectionStore,
-            store: SessionCatalogStore,
-        ): ViewModelProvider.Factory =
-            object : ViewModelProvider.Factory {
-                @Suppress("UNCHECKED_CAST")
-                override fun <T : ViewModel> create(modelClass: Class<T>): T {
-                    return SessionHistoryViewModel(bridge, connectionStore, store) as T
-                }
-            }
     }
 }

@@ -3,6 +3,7 @@ package dev.cockpit.app.state
 import dev.cockpit.app.data.AgentCard
 import dev.cockpit.app.data.AgentsResponse
 import dev.cockpit.app.net.FakeCockpitApi
+import dev.cockpit.app.state.Loadable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
@@ -54,7 +55,7 @@ class ChatStatusTest {
         runBlocking {
             repeat(200) {
                 org.robolectric.shadows.ShadowLooper.idleMainLooper()
-                if (!ui.value.loading) return@runBlocking
+                if (ui.value.transcript is Loadable.Ready) return@runBlocking
                 delay(25)
             }
         }

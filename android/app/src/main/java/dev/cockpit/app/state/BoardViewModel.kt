@@ -1,7 +1,6 @@
 package dev.cockpit.app.state
 
 import androidx.lifecycle.ViewModel
-import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import dev.cockpit.app.data.AgentCard
 import dev.cockpit.app.data.BoardState
@@ -16,6 +15,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.io.IOException
+import kotlin.time.Duration.Companion.seconds
 
 data class BoardUiState(
     val board: BoardState = BoardState(),
@@ -23,13 +23,6 @@ data class BoardUiState(
     val connected: Boolean = false,
     val error: String? = null,
 )
-
-sealed interface ConnectState {
-    data object Idle : ConnectState
-    data object Testing : ConnectState
-    data class Connected(val herdrVersion: String?, val herdrProtocol: Int?) : ConnectState
-    data class Failed(val message: String) : ConnectState
-}
 
 class BoardViewModel(
     private val bridge: CockpitApi,
@@ -42,7 +35,7 @@ class BoardViewModel(
     private val _ui = MutableStateFlow(initialState)
     val ui: StateFlow<BoardUiState> = _ui.asStateFlow()
 
-    private var pollJob: Job? = null
+    private val poller = Poller(viewModelScope)
     private var ntfyJob: Job? = null
 
     val hasSavedConnection: Boolean get() = connectionStore.saved != null
@@ -80,16 +73,10 @@ class BoardViewModel(
     }
 
     private fun startLive() {
-        pollJob?.cancel()
         // Poll the bridge for the latest board state. A long-lived WebSocket
         // is deliberately avoided here: an abrupt server close can crash the
         // OkHttp reader, and the bridge already caches + re-snapshots anyway.
-        pollJob = viewModelScope.launch {
-            while (isActive) {
-                refresh()
-                delay(3_000)
-            }
-        }
+        poller.start(3.seconds) { refresh() }
     }
 
     /**
@@ -158,23 +145,8 @@ class BoardViewModel(
     }
 
     override fun onCleared() {
-        pollJob?.cancel()
+        poller.stop()
         ntfyJob?.cancel()
         super.onCleared()
-    }
-
-    companion object {
-        fun factory(
-            bridge: CockpitApi,
-            connectionStore: ConnectionStore,
-            ntfyClient: dev.cockpit.app.net.NtfyClient? = null,
-            onNtfyMessage: (dev.cockpit.app.data.NtfyMessage) -> Unit = {},
-        ): ViewModelProvider.Factory =
-            object : ViewModelProvider.Factory {
-                @Suppress("UNCHECKED_CAST")
-                override fun <T : ViewModel> create(modelClass: Class<T>): T {
-                    return BoardViewModel(bridge, connectionStore, ntfyClient, onNtfyMessage) as T
-                }
-            }
     }
 }

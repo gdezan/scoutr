@@ -45,6 +45,7 @@ import dev.cockpit.app.data.UsageSnapshot
 import dev.cockpit.app.data.UsageWindow
 import dev.cockpit.app.state.UsageUiState
 import dev.cockpit.app.state.UsageViewModel
+import dev.cockpit.app.state.Loadable
 import java.text.NumberFormat
 import java.util.Currency
 import java.util.Locale
@@ -88,21 +89,18 @@ internal fun UsageContent(
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        when {
-            ui.loading && ui.providers.isEmpty() -> UsageLoading()
-            ui.error != null && ui.providers.isEmpty() -> UsageError(ui.error, onRefresh)
-            ui.providers.isEmpty() -> UsageEmpty(onRefresh)
-            else -> {
-                if (ui.loading) {
-                    LinearProgressIndicator(
-                        modifier = Modifier.fillMaxWidth().height(2.dp).testTag("usage_refreshing"),
-                        color = MaterialTheme.colorScheme.primary,
-                        trackColor = MaterialTheme.colorScheme.surfaceVariant,
-                    )
-                }
-                ui.error?.let { UsageError(it, onRefresh) }
-                for (provider in ui.providers) {
-                    key(provider.provider) { ProviderCard(provider, nowMillis, onRefresh) }
+        when (val load = ui.providers) {
+            is Loadable.Loading -> UsageLoading()
+            is Loadable.Idle -> UsageEmpty(onRefresh)
+            is Loadable.Failed -> UsageError(load.reason, onRefresh)
+            is Loadable.Ready -> {
+                if (load.value.isEmpty()) {
+                    UsageEmpty(onRefresh)
+                } else {
+                    ui.error?.let { UsageError(it, onRefresh) }
+                    for (provider in load.value) {
+                        key(provider.provider) { ProviderCard(provider, nowMillis, onRefresh) }
+                    }
                 }
             }
         }

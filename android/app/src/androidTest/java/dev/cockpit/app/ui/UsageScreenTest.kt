@@ -12,6 +12,8 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import dev.cockpit.app.data.UsageSnapshot
 import dev.cockpit.app.data.UsageWindow
+import dev.cockpit.app.state.FailureKind
+import dev.cockpit.app.state.Loadable
 import dev.cockpit.app.state.UsageUiState
 import dev.cockpit.app.ui.screens.UsageContent
 import dev.cockpit.app.ui.theme.CockpitTheme
@@ -29,8 +31,9 @@ class UsageScreenTest {
             CockpitTheme {
                 UsageContent(
                     ui = UsageUiState(
-                        providers = listOf(
-                            UsageSnapshot(
+                        providers = Loadable.Ready(
+                            listOf(
+                                UsageSnapshot(
                                 provider = "openai-codex",
                                 label = "Codex",
                                 windows = listOf(
@@ -43,6 +46,7 @@ class UsageScreenTest {
                                 label = "DeepSeek",
                                 windows = listOf(UsageWindow(label = "USD", amount = 12.5, currency = "USD")),
                                 error = "Balance delayed",
+                            ),
                             ),
                         ),
                     ),
@@ -65,7 +69,7 @@ class UsageScreenTest {
     @Test
     fun exposesStableLoadingAndActionableErrorStates() {
         var retries = 0
-        var ui by mutableStateOf(UsageUiState(loading = true))
+        var ui by mutableStateOf(UsageUiState(providers = Loadable.Loading))
         compose.setContent {
             CockpitTheme {
                 UsageContent(
@@ -77,7 +81,7 @@ class UsageScreenTest {
         }
 
         compose.onNodeWithTag("usage_loading").assertIsDisplayed()
-        compose.runOnIdle { ui = UsageUiState(error = "Usage service is offline") }
+        compose.runOnIdle { ui = UsageUiState(providers = Loadable.Failed("Usage service is offline", FailureKind.Server)) }
         compose.onNodeWithTag("usage_error").assertIsDisplayed()
         compose.onNodeWithText("Usage service is offline").assertIsDisplayed()
         compose.onNodeWithText("Retry").performClick()
@@ -96,11 +100,13 @@ class UsageScreenTest {
         var nowMillis by mutableStateOf(1_000_000_000L)
         var ui by mutableStateOf(
             UsageUiState(
-                providers = listOf(
-                    UsageSnapshot(
+                providers = Loadable.Ready(
+                    listOf(
+                        UsageSnapshot(
                         provider = "codex",
                         label = "Codex",
                         windows = listOf(UsageWindow(label = "5h", usedPercent = 40.0, resetAt = resetAt)),
+                    ),
                     ),
                 ),
             ),

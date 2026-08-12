@@ -50,6 +50,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.cockpit.app.CockpitApp
+import dev.cockpit.app.state.Loadable
 import dev.cockpit.app.state.ReviewViewModel
 
 import dev.cockpit.app.ui.components.CockpitTextField
@@ -161,7 +162,7 @@ private fun PickerMode(
             }
         }
         HorizontalDivider()
-        val pickerError = ui.dirsError ?: ui.error
+        val pickerError = (ui.dirs as? Loadable.Failed)?.reason ?: (ui.overview as? Loadable.Failed)?.reason
         if (pickerError != null) {
             Text(
                 pickerError,
@@ -170,17 +171,19 @@ private fun PickerMode(
                 modifier = Modifier.padding(16.dp).testTag("review_picker_error"),
             )
         }
-        if (ui.dirsLoading) {
+        if (ui.dirs is Loadable.Loading) {
             Box(Modifier.fillMaxWidth().padding(vertical = 48.dp), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator()
             }
-        } else if (ui.dirs.isEmpty()) {
-            Box(Modifier.fillMaxWidth().padding(vertical = 48.dp), contentAlignment = Alignment.Center) {
-                Text("No subdirectories", color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
         } else {
-            LazyColumn(Modifier.fillMaxSize()) {
-                items(ui.dirs, key = { it }) { dir ->
+            val dirs = (ui.dirs as? Loadable.Ready)?.value ?: emptyList()
+            if (dirs.isEmpty()) {
+                Box(Modifier.fillMaxWidth().padding(vertical = 48.dp), contentAlignment = Alignment.Center) {
+                    Text("No subdirectories", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            } else {
+                LazyColumn(Modifier.fillMaxSize()) {
+                    items(dirs, key = { it }) { dir ->
                     Row(
                         Modifier
                             .fillMaxWidth()
@@ -204,6 +207,7 @@ private fun PickerMode(
                 }
             }
         }
+        }
     }
 }
 
@@ -216,14 +220,21 @@ private fun ReviewMode(
     modifier: Modifier = Modifier,
 ) {
     val overview = ui.overview
-    if (overview == null) {
+    if (overview is Loadable.Loading) {
         Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            if (ui.loading) CircularProgressIndicator() else Text(ui.error ?: "No data", color = MaterialTheme.colorScheme.error)
+            CircularProgressIndicator()
+        }
+        return
+    }
+    val overviewData = (overview as? Loadable.Ready)?.value
+    if (overviewData == null) {
+        Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Text((overview as? Loadable.Failed)?.reason ?: "No data", color = MaterialTheme.colorScheme.error)
         }
         return
     }
 
-    if (diffOpen && ui.diff != null) {
+    if (diffOpen && ui.diff is Loadable.Ready) {
         DiffMode(viewModel, ui, onBack = { onDiffChanged(false) }, modifier)
         return
     }
@@ -235,16 +246,16 @@ private fun ReviewMode(
         ) {
             Column(Modifier.weight(1f)) {
                 Text(
-                    overview.path.substringAfterLast('/'),
+                    overviewData.path.substringAfterLast('/'),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
-                    (overview.branch?.let { "branch $it" } ?: "detached HEAD") +
-                        " · ${overview.status.size} changed" +
-                        syncSuffix(overview),
+                    (overviewData.branch?.let { "branch $it" } ?: "detached HEAD") +
+                        " · ${overviewData.status.size} changed" +
+                        syncSuffix(overviewData),
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -253,20 +264,15 @@ private fun ReviewMode(
             TextButton(onClick = viewModel::refresh) { Text("Refresh") }
         }
         HorizontalDivider()
-        if (ui.loading) {
-            Box(Modifier.fillMaxWidth().padding(vertical = 48.dp), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator()
-            }
-        } else {
-            LazyColumn(Modifier.fillMaxSize()) {
-                if (overview.status.isNotEmpty()) {
+        LazyColumn(Modifier.fillMaxSize()) {
+                if (overviewData.status.isNotEmpty()) {
                     item {
                         SectionLabel("Working tree")
                     }
-                    items(overview.status, key = { it.path }) { entry ->
+                    items(overviewData.status, key = { it.path }) { entry ->
                         StatusRow(entry.code, entry.path)
                     }
-                    if (overview.statusTruncated) {
+                    if (overviewData.statusTruncated) {
                         item { TruncatedNote("status list truncated") }
                     }
                 }
@@ -279,33 +285,34 @@ private fun ReviewMode(
                         title = "Working tree",
                         subtitle = "diff vs HEAD",
                         selected = ui.diffRef == "HEAD",
-                        loading = ui.diffLoading && ui.diffRef == "HEAD",
+                        loading = ui.diff is Loadable.Loading && ui.diffRef == "HEAD",
                         onClick = { viewModel.loadDiff("HEAD"); onDiffChanged(true) },
                     )
                 }
-                items(overview.log, key = { it.hash }) { commit ->
+                items(overviewData.log, key = { it.hash }) { commit ->
                     DiffRow(
                         title = commit.subject,
                         subtitle = "${shortHash(commit.hash)} · ${commit.author} · ${commitDate(commit.date)}",
                         selected = ui.diffRef == commit.hash,
-                        loading = ui.diffLoading && ui.diffRef == commit.hash,
+                        loading = ui.diff is Loadable.Loading && ui.diffRef == commit.hash,
                         onClick = { viewModel.loadDiff(commit.hash, "commit"); onDiffChanged(true) },
                     )
                 }
-                if (overview.logTruncated) {
+                if (overviewData.logTruncated) {
                     item { TruncatedNote("recent commits truncated") }
                 }
-                if (ui.artifacts.isNotEmpty()) {
+                val artifacts = (ui.artifacts as? Loadable.Ready)?.value.orEmpty()
+                if (artifacts.isNotEmpty()) {
                     item {
                         SectionLabel("Generated artifacts")
                     }
-                    items(ui.artifacts, key = { it.path }) { artifact ->
+                    items(artifacts, key = { it.path }) { artifact ->
                         Row(
                             Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Text(
-                                artifact.path.removePrefix(overview.root).removePrefix("/"),
+                                artifact.path.removePrefix(overviewData.root).removePrefix("/"),
                                 style = MaterialTheme.typography.bodySmall,
                                 fontFamily = FontFamily.Monospace,
                                 color = MaterialTheme.colorScheme.onSurface,
@@ -327,7 +334,6 @@ private fun ReviewMode(
                 }
                 item { Spacer(Modifier.height(24.dp)) }
             }
-        }
     }
 }
 
@@ -436,6 +442,8 @@ private fun DiffMode(
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val diffLoad = ui.diff
+    val diffData = (diffLoad as? Loadable.Ready)?.value
     Column(modifier.fillMaxSize()) {
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
@@ -452,25 +460,25 @@ private fun DiffMode(
                 modifier = Modifier.weight(1f),
             )
             Text(
-                "${ui.diff?.stat?.size ?: 0} files",
+                "${diffData?.stat?.size ?: 0} files",
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
         HorizontalDivider()
-        if (ui.diffLoading) {
+        if (diffLoad is Loadable.Loading) {
             Box(Modifier.fillMaxWidth().padding(vertical = 48.dp), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator()
             }
-        } else if (ui.error != null) {
+        } else if (diffLoad is Loadable.Failed) {
             Text(
-                ui.error ?: "",
+                diffLoad.reason,
                 color = MaterialTheme.colorScheme.error,
                 style = MaterialTheme.typography.bodySmall,
                 modifier = Modifier.padding(16.dp),
             )
         } else {
-            val diff = ui.diff?.diff ?: ""
+            val diff = diffData?.diff ?: ""
             if (diff.isBlank()) {
                 Box(Modifier.fillMaxWidth().padding(vertical = 48.dp), contentAlignment = Alignment.Center) {
                     Text("No changes", color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -486,7 +494,7 @@ private fun DiffMode(
                     }
                 }
             }
-            if (ui.diff?.truncated == true) {
+            if (diffData?.truncated == true) {
                 TruncatedNote("diff truncated to 64 KiB")
             }
         }

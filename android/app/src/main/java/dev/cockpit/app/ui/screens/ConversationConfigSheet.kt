@@ -45,6 +45,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.cockpit.app.state.ChatUiState
+import dev.cockpit.app.state.Loadable
 import dev.cockpit.app.state.ModelPickerFilters
 import dev.cockpit.app.state.searchModelCatalog
 
@@ -57,9 +58,12 @@ internal fun ConversationConfigSheet(
     onDismiss: () -> Unit,
 ) {
     var query by remember { mutableStateOf("") }
-    val models = remember(ui.modelProviders, query, ui.model) {
+    val configuration = ui.configuration
+    val providers = (configuration as? Loadable.Ready)?.value.orEmpty()
+    val configBusy = configuration is Loadable.Loading || ui.configActionBusy
+    val models = remember(providers, query, ui.model) {
         searchModelCatalog(
-            providers = ui.modelProviders,
+            providers = providers,
             filters = ModelPickerFilters(query = query),
             selectedKey = ui.model,
         )
@@ -82,7 +86,7 @@ internal fun ConversationConfigSheet(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                if (ui.configurationLoading) {
+                if (configBusy) {
                     CircularProgressIndicator(Modifier.padding(12.dp).width(20.dp), strokeWidth = 2.dp)
                 }
                 IconButton(onClick = onDismiss) {
@@ -113,7 +117,7 @@ internal fun ConversationConfigSheet(
                         items(ui.availableThinkingLevels, key = { it }) { level ->
                             FilterChip(
                                 selected = level == ui.thinkingLevel,
-                                enabled = !ui.configurationLoading,
+                                enabled = !configBusy,
                                 onClick = { onSelectThinking(level) },
                                 label = { Text(level.replaceFirstChar(Char::uppercase)) },
                                 leadingIcon = if (level == ui.thinkingLevel) {
@@ -141,7 +145,7 @@ internal fun ConversationConfigSheet(
             )
             // A catalog-less backend (claude) has no pickable models; the
             // value line stays informative, the dead search does not render.
-            if (ui.modelProviders.isNotEmpty()) {
+            if (providers.isNotEmpty()) {
             OutlinedTextField(
                 value = query,
                 onValueChange = { query = it },
@@ -152,9 +156,9 @@ internal fun ConversationConfigSheet(
             )
 
             when {
-                ui.configurationError != null -> {
+                configuration is Loadable.Failed -> {
                     Text(
-                        ui.configurationError,
+                        configuration.reason,
                         color = MaterialTheme.colorScheme.error,
                         style = MaterialTheme.typography.bodySmall,
                         modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
@@ -175,7 +179,7 @@ internal fun ConversationConfigSheet(
                         val selected = match.key == ui.model
                         Surface(
                             onClick = { onSelectModel(match.key) },
-                            enabled = !ui.configurationLoading,
+                            enabled = !configBusy,
                             shape = RoundedCornerShape(12.dp),
                             color = if (selected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.72f) else Color.Transparent,
                             modifier = Modifier.fillMaxWidth().testTag("conversation_model_${match.model.id}"),

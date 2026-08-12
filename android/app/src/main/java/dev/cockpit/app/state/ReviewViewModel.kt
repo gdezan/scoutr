@@ -17,23 +17,18 @@ import kotlinx.coroutines.launch
 data class ReviewUiState(
     /** Selected repo path; null while the folder picker is shown. */
     val repoPath: String? = null,
-    val overview: RepoOverviewResponse? = null,
-    val loading: Boolean = false,
-    val error: String? = null,
+    val overview: Loadable<RepoOverviewResponse> = Loadable.Idle,
 
-    // Generated-artifact listing (bounded by the bridge).
-    val artifacts: List<dev.cockpit.app.data.RepoArtifact> = emptyList(),
+    // Generated-artifact listing (bounded by the bridge); a failure here must
+    // not break the overview, so it has its own slot.
+    val artifacts: Loadable<List<dev.cockpit.app.data.RepoArtifact>> = Loadable.Idle,
     val artifactsTruncated: Boolean = false,
-    val artifactsLoading: Boolean = false,
     // Folder picker state.
     val dirPath: String = "",
-    val dirs: List<String> = emptyList(),
-    val dirsLoading: Boolean = false,
-    val dirsError: String? = null,
+    val dirs: Loadable<List<String>> = Loadable.Idle,
     // Diff viewer state.
-    val diff: RepoDiffResponse? = null,
+    val diff: Loadable<RepoDiffResponse> = Loadable.Idle,
     val diffRef: String? = null,
-    val diffLoading: Boolean = false,
     /** Last reviewed repo (persisted), offered as a quick reopen in the picker. */
     val lastRepoPath: String? = null,
 )
@@ -58,8 +53,8 @@ class ReviewViewModel(
             _ui.update {
                 it.copy(
                     repoPath = null,
-                    overview = null,
-                    diff = null,
+                    overview = Loadable.Idle,
+                    diff = Loadable.Idle,
                     diffRef = null,
                     lastRepoPath = store.lastRepoPath,
                 )
@@ -70,19 +65,18 @@ class ReviewViewModel(
 
     fun browse(path: String) {
         viewModelScope.launch {
-            _ui.update { it.copy(dirsLoading = true, dirsError = null) }
+            _ui.update { it.copy(dirs = Loadable.Loading) }
             try {
                 val listing = bridge.dirs(path.ifBlank { null })
                 _ui.update {
                     it.copy(
                         dirPath = listing.listing?.path ?: "",
-                        dirs = listing.listing?.dirs ?: emptyList(),
-                        dirsLoading = false,
+                        dirs = Loadable.Ready(listing.listing?.dirs ?: emptyList()),
                     )
                 }
             } catch (error: Exception) {
                 _ui.update {
-                    it.copy(dirsLoading = false, dirsError = error.message ?: "Folder listing failed")
+                    it.copy(dirs = Loadable.Failed(error.message ?: "Folder listing failed", error.failureKind()))
                 }
             }
         }
@@ -101,55 +95,58 @@ class ReviewViewModel(
 
     fun selectRepo(path: String) {
         viewModelScope.launch {
-            _ui.update { it.copy(loading = true, error = null) }
+            _ui.update { it.copy(overview = Loadable.Loading) }
             try {
                 val overview = bridge.repoOverview(path)
                 if (overview.error != null) {
-                    _ui.update { it.copy(loading = false, error = overview.error) }
+                    _ui.update {
+                        it.copy(overview = Loadable.Failed(overview.error, FailureKind.Server))
+                    }
                     return@launch
                 }
                 store.lastRepoPath = path
                 _ui.update {
-                    it.copy(repoPath = path, overview = overview, loading = false, lastRepoPath = path)
+                    it.copy(repoPath = path, overview = Loadable.Ready(overview), lastRepoPath = path)
                 }
                 loadArtifacts(path)
             } catch (error: Exception) {
-                _ui.update { it.copy(loading = false, error = error.message ?: "Repo read failed") }
+                _ui.update {
+                    it.copy(overview = Loadable.Failed(error.message ?: "Repo read failed", error.failureKind()))
+                }
             }
         }
     }
 
     fun loadArtifacts(path: String) {
-        if (_ui.value.artifactsLoading) return
+        if (_ui.value.artifacts is Loadable.Loading) return
         viewModelScope.launch {
-            _ui.update { it.copy(artifactsLoading = true) }
+            _ui.update { it.copy(artifacts = Loadable.Loading) }
             try {
                 val result = bridge.repoArtifacts(path)
                 _ui.update {
                     it.copy(
-                        artifacts = result.artifacts,
+                        artifacts = Loadable.Ready(result.artifacts),
                         artifactsTruncated = result.truncated,
-                        artifactsLoading = false,
                     )
                 }
             } catch (_: Exception) {
                 // Artifacts are supplementary; a failure must not break the overview.
-                _ui.update { it.copy(artifactsLoading = false) }
+                _ui.update { it.copy(artifacts = Loadable.Idle) }
             }
         }
     }
 
     fun loadDiff(ref: String, kind: String = "working") {
         val path = _ui.value.repoPath ?: return
-        if (_ui.value.diffLoading) return
+        if (_ui.value.diff is Loadable.Loading) return
         viewModelScope.launch {
-            _ui.update { it.copy(diffLoading = true, diffRef = ref, error = null) }
+            _ui.update { it.copy(diff = Loadable.Loading, diffRef = ref) }
             try {
                 val diff = bridge.repoDiff(path, ref, kind)
-                _ui.update { it.copy(diff = diff, diffLoading = false) }
+                _ui.update { it.copy(diff = Loadable.Ready(diff)) }
             } catch (error: Exception) {
                 _ui.update {
-                    it.copy(diffLoading = false, error = error.message ?: "Diff read failed")
+                    it.copy(diff = Loadable.Failed(error.message ?: "Diff read failed", error.failureKind()))
                 }
             }
         }

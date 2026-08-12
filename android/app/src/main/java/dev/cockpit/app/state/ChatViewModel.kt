@@ -1,7 +1,6 @@
 package dev.cockpit.app.state
 
 import androidx.lifecycle.ViewModel
-import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import dev.cockpit.app.data.ModelInfo
 import dev.cockpit.app.data.QuestionEntry
@@ -10,15 +9,14 @@ import dev.cockpit.app.data.SessionEntry
 import dev.cockpit.app.data.SlashCommandInfo
 import dev.cockpit.app.data.entryText
 import dev.cockpit.app.net.CockpitApi
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import java.io.IOException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlin.time.Duration.Companion.seconds
 
 /**
  * Merge a poll result into the transcript: a null cursor replaces the list
@@ -211,9 +209,11 @@ data class ChatUiState(
     val questionnaireProgress: Map<String, QuestionnaireRun> = emptyMap(),
     val questionError: String? = null,
     val exists: Boolean = true,
-    val loading: Boolean = true,
+    /** Transcript read lifecycle; the entries/questions themselves stay in separate fields (they are merged in place). */
+    val transcript: Loadable<Unit> = Loadable.Idle,
     val sending: Boolean = false,
-    val error: String? = null,
+    /** Send-path failures only (steer/upload/slash); read failures live in [transcript]. */
+    val sendError: String? = null,
     /** Agent status from the last /api/agents poll ("working", "blocked", …). */
     val agentStatus: String = "working",
     /**
@@ -234,13 +234,12 @@ data class ChatUiState(
     val sessionTitle: String = "Session",
     val model: String? = null,
     val thinkingLevel: String? = null,
-    val modelProviders: List<ModelProvider> = emptyList(),
-    val configurationLoading: Boolean = false,
-    val configurationError: String? = null,
+    /** Model catalog for the session's backend; Ready even for an empty catalog (catalog-less backends are cached too). */
+    val configuration: Loadable<List<ModelProvider>> = Loadable.Idle,
+    /** A set_model/set_thinking control is in flight (the sheet's busy state; the catalog fetch shows via [configuration]). */
+    val configActionBusy: Boolean = false,
     val cwd: String? = null,
-    val commands: List<SlashCommandInfo> = emptyList(),
-    val commandsLoading: Boolean = true,
-    val commandsError: String? = null,
+    val commands: Loadable<List<SlashCommandInfo>> = Loadable.Idle,
 ) {
     val lastUserMessage: String?
         get() = pendingMessages.lastOrNull()?.text
@@ -248,7 +247,7 @@ data class ChatUiState(
                 ?.let { entryText(it.content) }
 
     val activeModel: ModelInfo?
-        get() = modelProviders.flatMap { it.models }.firstOrNull { "${it.provider}/${it.id}" == model }
+        get() = (configuration as? Loadable.Ready)?.value.orEmpty().flatMap { it.models }.firstOrNull { "${it.provider}/${it.id}" == model }
 
     val availableThinkingLevels: List<String>
         get() = activeModel?.thinkingLevels ?: emptyList()
@@ -286,7 +285,7 @@ class ChatViewModel(
     private val _ui = MutableStateFlow(ChatUiState(agentStatus = agentStatus))
     val ui: StateFlow<ChatUiState> = _ui.asStateFlow()
 
-    private var pollJob: Job? = null
+    private val poller = Poller(viewModelScope)
 
     /** Resolved transcript path; a fresh session's card may not report it yet. */
     private var resolvedPath: String? = sessionPath
@@ -301,13 +300,7 @@ class ChatViewModel(
     val waitingForAnswer: Boolean get() = _ui.value.agentStatus == "blocked"
 
     init {
-        viewModelScope.launch { refresh() }
-        pollJob = viewModelScope.launch {
-            while (isActive) {
-                delay(2500)
-                refresh()
-            }
-        }
+        poller.start(2.5.seconds) { refresh() }
     }
 
     /**
@@ -325,22 +318,34 @@ class ChatViewModel(
         if (!agentChanged) return
         _ui.update {
             it.copy(
-                configurationLoading = true,
-                configurationError = null,
-                modelProviders = emptyList(),
+                configuration = Loadable.Loading,
             )
         }
         try {
             val response = bridge.models(agent)
             val catalog = response.catalog
             if (catalog == null) {
-                _ui.update { it.copy(configurationLoading = false, configurationError = response.error ?: "Model catalog unavailable") }
+                _ui.update {
+                    it.copy(
+                        configuration = Loadable.Failed(
+                            response.error ?: "Model catalog unavailable",
+                            FailureKind.Server,
+                        ),
+                    )
+                }
                 return
             }
             configurationAgent = agent
-            _ui.update { it.copy(modelProviders = catalog.providers, configurationLoading = false, configurationError = null) }
+            _ui.update { it.copy(configuration = Loadable.Ready(catalog.providers)) }
         } catch (error: Exception) {
-            _ui.update { it.copy(configurationLoading = false, configurationError = error.message ?: "Model catalog unavailable") }
+            _ui.update {
+                it.copy(
+                    configuration = Loadable.Failed(
+                        error.message ?: "Model catalog unavailable",
+                        error.failureKind(),
+                    ),
+                )
+            }
         }
     }
 
@@ -349,25 +354,25 @@ class ChatViewModel(
         val cwdChanged = cwd != commandCatalogCwd
         lastCommandRefreshAt = System.currentTimeMillis()
         _ui.update {
-            it.copy(
-                commands = if (cwdChanged) emptyList() else it.commands,
-                commandsLoading = true,
-                commandsError = null,
-            )
+            it.copy(commands = if (cwdChanged) Loadable.Loading else it.commands)
         }
         try {
             val response = bridge.commands(cwd, _ui.value.agentKind)
             if (commandRequestGeneration != requestGeneration) return
             val catalog = response.catalog
             if (catalog == null) {
-                _ui.update { it.copy(commandsLoading = false, commandsError = response.error ?: "Commands unavailable") }
+                _ui.update {
+                    it.copy(commands = Loadable.Failed(response.error ?: "Commands unavailable", FailureKind.Server))
+                }
                 return
             }
             commandCatalogCwd = cwd
-            _ui.update { it.copy(commands = catalog.commands, commandsLoading = false, commandsError = null) }
+            _ui.update { it.copy(commands = Loadable.Ready(catalog.commands)) }
         } catch (error: Exception) {
             if (commandRequestGeneration == requestGeneration) {
-                _ui.update { it.copy(commandsLoading = false, commandsError = error.message ?: "Commands unavailable") }
+                _ui.update {
+                    it.copy(commands = Loadable.Failed(error.message ?: "Commands unavailable", error.failureKind()))
+                }
             }
         }
     }
@@ -380,7 +385,7 @@ class ChatViewModel(
         try {
             val path = syncStatusAndPath()
             refreshConfiguration()
-            if (_ui.value.commandsLoading || System.currentTimeMillis() - lastCommandRefreshAt >= COMMAND_REFRESH_MS) {
+            if (_ui.value.commands !is Loadable.Ready || System.currentTimeMillis() - lastCommandRefreshAt >= COMMAND_REFRESH_MS) {
                 refreshCommands(_ui.value.cwd)
             }
             if (path == null) {
@@ -388,7 +393,7 @@ class ChatViewModel(
                 // its JSONL only after the first exchange). That is a pending
                 // state, not an error — the composer still steers the agent
                 // and the next poll picks the transcript up once it lands.
-                _ui.update { it.copy(loading = false, exists = false, error = null) }
+                _ui.update { it.copy(transcript = Loadable.Ready(Unit), exists = false) }
                 return
             }
             val response = bridge.session(path, since = _ui.value.entries.lastOrNull()?.entryId)
@@ -407,14 +412,13 @@ class ChatViewModel(
                         previouslyAnswered,
                     ),
                     exists = response.exists,
-                    loading = false,
+                    transcript = Loadable.Ready(Unit),
                     model = response.model ?: it.model,
                     thinkingLevel = response.thinkingLevel ?: it.thinkingLevel,
-                    error = null,
                 )
             }
         } catch (e: Exception) {
-            _ui.update { it.copy(loading = false, error = e.message ?: "session read failed") }
+            _ui.update { it.copy(transcript = Loadable.Failed(e.message ?: "session read failed", e.failureKind())) }
         }
     }
 
@@ -463,15 +467,21 @@ class ChatViewModel(
         viewModelScope.launch {
             val configurationAction = action == "set_model" || action == "set_thinking"
             if (action == "set_thinking" && !_ui.value.canSetThinking) {
-                _ui.update { it.copy(configurationLoading = false, configurationError = "This agent does not support thinking levels") }
+                _ui.update {
+                    it.copy(
+                        configActionBusy = false,
+                        configuration = Loadable.Failed("This agent does not support thinking levels", FailureKind.Server),
+                    )
+                }
                 return@launch
             }
+            // A control action is not a fetch: keep the loaded catalog visible
+            // while busy and on failure; only the busy flag flips.
             _ui.update {
                 it.copy(
                     sending = !configurationAction,
-                    configurationLoading = configurationAction,
-                    configurationError = null,
-                    error = null,
+                    configActionBusy = configurationAction,
+                    sendError = null,
                 )
             }
             try {
@@ -479,7 +489,7 @@ class ChatViewModel(
                 _ui.update {
                     it.copy(
                         sending = false,
-                        configurationLoading = false,
+                        configActionBusy = false,
                         model = if (action == "set_model") text else it.model,
                         thinkingLevel = if (action == "set_thinking") text else it.thinkingLevel,
                     )
@@ -490,8 +500,8 @@ class ChatViewModel(
             } catch (e: Exception) {
                 val message = e.message ?: "control failed"
                 _ui.update {
-                    if (configurationAction) it.copy(configurationLoading = false, configurationError = message)
-                    else it.copy(sending = false, error = message)
+                    if (configurationAction) it.copy(configActionBusy = false)
+                    else it.copy(sending = false, sendError = message)
                 }
             }
         }
@@ -510,7 +520,7 @@ class ChatViewModel(
             state = MessageDeliveryState.QUEUED,
             baselineIds = _ui.value.entries.mapTo(mutableSetOf()) { it.entryId },
         )
-        _ui.update { it.copy(pendingMessages = it.pendingMessages + message, sending = true, error = null) }
+        _ui.update { it.copy(pendingMessages = it.pendingMessages + message, sending = true, sendError = null) }
         deliver(message.localId)
     }
 
@@ -522,7 +532,7 @@ class ChatViewModel(
         val trimmed = text.trim()
         if (bytes.isEmpty() && trimmed.isEmpty()) return
         viewModelScope.launch {
-            _ui.update { it.copy(sending = true, error = null) }
+            _ui.update { it.copy(sending = true, sendError = null) }
             try {
                 val response = bridge.uploadAttachment(name, mime, bytes)
                 if (response.error != null) throw IOException(response.error)
@@ -534,7 +544,7 @@ class ChatViewModel(
                 _ui.update {
                     it.copy(
                         sending = false,
-                        error = error.message ?: "Attachment upload failed",
+                        sendError = error.message ?: "Attachment upload failed",
                     )
                 }
             }
@@ -620,14 +630,14 @@ class ChatViewModel(
 
     private fun runSlashCommand(text: String) {
         viewModelScope.launch {
-            _ui.update { it.copy(sending = true, error = null) }
+            _ui.update { it.copy(sending = true, sendError = null) }
             try {
                 bridge.runSlashCommand(paneId, text)
                 _ui.update { it.copy(sending = false) }
                 delay(500)
                 refresh()
             } catch (error: Exception) {
-                _ui.update { it.copy(sending = false, error = error.message ?: "Command failed") }
+                _ui.update { it.copy(sending = false, sendError = error.message ?: "Command failed") }
             }
         }
     }
@@ -666,22 +676,11 @@ class ChatViewModel(
     }
 
     override fun onCleared() {
-        pollJob?.cancel()
+        poller.stop()
         super.onCleared()
     }
 
     companion object {
         private const val COMMAND_REFRESH_MS = 30_000L
-        fun factory(
-            bridge: CockpitApi,
-            paneId: String,
-            sessionPath: String?,
-            agentStatus: String,
-        ): ViewModelProvider.Factory = object : ViewModelProvider.Factory {
-            @Suppress("UNCHECKED_CAST")
-            override fun <T : ViewModel> create(modelClass: Class<T>): T {
-                return ChatViewModel(bridge, paneId, sessionPath, agentStatus) as T
-            }
-        }
     }
 }

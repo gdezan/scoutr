@@ -13,6 +13,7 @@ import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.pressKey
 import org.junit.Assert.assertTrue
 import dev.cockpit.app.data.SlashCommandInfo
+import dev.cockpit.app.state.Loadable
 import dev.cockpit.app.ui.screens.ChatComposer
 import dev.cockpit.app.ui.theme.CockpitTheme
 import org.junit.Assert.assertEquals
@@ -91,11 +92,13 @@ class ChatComposerKeyTest {
                     onValueChange = { input.value = it },
                     placeholder = "Steer the agent…",
                     enabled = true,
-                    commands = listOf(
-                        SlashCommandInfo(
-                            name = "compact",
-                            description = "Compact the context",
-                            source = "builtin",
+                    commands = Loadable.Ready(
+                        listOf(
+                            SlashCommandInfo(
+                                name = "compact",
+                                description = "Compact the context",
+                                source = "builtin",
+                            ),
                         ),
                     ),
                     onSend = { sends += 1 },
