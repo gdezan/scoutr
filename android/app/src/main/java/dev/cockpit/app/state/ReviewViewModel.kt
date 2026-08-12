@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.CancellationException
 
 data class ReviewUiState(
     /** Selected repo path; null while the folder picker is shown. */
@@ -74,6 +75,8 @@ class ReviewViewModel(
                         dirs = Loadable.Ready(listing.listing?.dirs ?: emptyList()),
                     )
                 }
+            } catch (c: CancellationException) {
+                throw c
             } catch (error: Exception) {
                 _ui.update {
                     it.copy(dirs = Loadable.Failed(error.message ?: "Folder listing failed", error.failureKind()))
@@ -109,6 +112,8 @@ class ReviewViewModel(
                     it.copy(repoPath = path, overview = Loadable.Ready(overview), lastRepoPath = path)
                 }
                 loadArtifacts(path)
+            } catch (c: CancellationException) {
+                throw c
             } catch (error: Exception) {
                 _ui.update {
                     it.copy(overview = Loadable.Failed(error.message ?: "Repo read failed", error.failureKind()))
@@ -129,6 +134,8 @@ class ReviewViewModel(
                         artifactsTruncated = result.truncated,
                     )
                 }
+            } catch (c: CancellationException) {
+                throw c
             } catch (_: Exception) {
                 // Artifacts are supplementary; a failure must not break the overview.
                 _ui.update { it.copy(artifacts = Loadable.Idle) }
@@ -144,6 +151,8 @@ class ReviewViewModel(
             try {
                 val diff = bridge.repoDiff(path, ref, kind)
                 _ui.update { it.copy(diff = Loadable.Ready(diff)) }
+            } catch (c: CancellationException) {
+                throw c
             } catch (error: Exception) {
                 _ui.update {
                     it.copy(diff = Loadable.Failed(error.message ?: "Diff read failed", error.failureKind()))

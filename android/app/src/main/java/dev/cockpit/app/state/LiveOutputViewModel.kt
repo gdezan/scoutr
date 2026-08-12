@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.CancellationException
 
 data class LiveOutputUiState(
     val loading: Boolean = false,
@@ -98,6 +99,8 @@ class LiveOutputViewModel(
                     error = null,
                 )
             }
+        } catch (c: CancellationException) {
+            throw c
         } catch (error: Exception) {
             _ui.update { it.copy(loading = false, error = error.message ?: "Live output unavailable") }
         }

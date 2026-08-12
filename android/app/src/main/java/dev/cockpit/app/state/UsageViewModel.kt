@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.CancellationException
 import kotlin.time.Duration.Companion.seconds
 
 data class UsageUiState(
@@ -49,6 +50,8 @@ class UsageViewModel(
             try {
                 val response: UsageResponse = bridge.usage()
                 _ui.update { it.copy(providers = Loadable.Ready(response.usage), error = null) }
+            } catch (c: CancellationException) {
+                throw c
             } catch (e: Exception) {
                 _ui.update {
                     it.copy(

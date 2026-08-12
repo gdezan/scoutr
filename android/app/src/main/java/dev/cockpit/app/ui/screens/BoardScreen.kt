@@ -38,6 +38,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.LifecycleStartEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -88,6 +89,13 @@ fun BoardScreen(
     onCloseAgent: (AgentCard) -> Unit = {},
 ) {
     val ui by viewModel.ui.collectAsState()
+
+    // The board poll and ntfy push loop run only while the board is STARTED.
+    LifecycleStartEffect(Unit) {
+        viewModel.startPolling()
+        onStopOrDispose { viewModel.stopPolling() }
+    }
+
     val reduceMotion = useReduceMotion()
     // A subtle tap when an agent first lands in "needs you" so the glance is
     // backed by touch, not just color.

@@ -50,8 +50,9 @@ class ChatStatusTest {
         )
     }
 
-    /** Idle the main looper until the VM's init refresh has landed its state. */
+    /** Start the lifecycle poll and idle until its first tick has landed. */
     private fun ChatViewModel.awaitRefreshSettled() {
+        startPolling()
         runBlocking {
             repeat(200) {
                 org.robolectric.shadows.ShadowLooper.idleMainLooper()

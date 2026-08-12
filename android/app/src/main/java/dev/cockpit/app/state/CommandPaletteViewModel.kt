@@ -15,6 +15,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.CancellationException
 
 /** One palette row: a live agent, a stored session, or a global action. */
 data class PaletteResult(
@@ -103,6 +104,8 @@ class CommandPaletteViewModel(
                     results = agentResults(agents) + sessionResults(sessions),
                 )
             }
+        } catch (c: CancellationException) {
+            throw c
         } catch (error: Exception) {
             if (queryGeneration != generation) return
             _ui.update { it.copy(loading = false, error = error.message ?: "Search failed") }
@@ -116,6 +119,8 @@ class CommandPaletteViewModel(
             val agents = bridge.agents().agents
             if (queryGeneration != generation) return
             _ui.update { it.copy(loading = false, results = agentResults(agents)) }
+        } catch (c: CancellationException) {
+            throw c
         } catch (error: Exception) {
             if (queryGeneration != generation) return
             _ui.update { it.copy(loading = false, error = error.message ?: "Search failed") }
@@ -134,6 +139,8 @@ class CommandPaletteViewModel(
             try {
                 bridge.sessionCatalogAction(CatalogAction.Resume, path)
                 _ui.update { it.copy(busyPath = null) }
+            } catch (c: CancellationException) {
+                throw c
             } catch (error: Exception) {
                 _ui.update { it.copy(busyPath = null, error = error.message ?: "Resume failed") }
             }
@@ -148,6 +155,8 @@ class CommandPaletteViewModel(
                 _ui.update { it.copy(busyPaneId = null) }
                 delay(400)
                 if (_ui.value.query.isBlank()) refreshAgents()
+            } catch (c: CancellationException) {
+                throw c
             } catch (error: Exception) {
                 _ui.update { it.copy(busyPaneId = null, error = error.message ?: "Action failed") }
             }

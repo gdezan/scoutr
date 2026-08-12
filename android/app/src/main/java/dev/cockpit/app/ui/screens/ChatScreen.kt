@@ -135,6 +135,12 @@ fun ChatScreen(
 ) {
     val ui by viewModel.ui.collectAsState()
 
+    // The transcript poll runs only while the chat screen is STARTED.
+    LifecycleStartEffect(Unit) {
+        viewModel.startPolling()
+        onStopOrDispose { viewModel.stopPolling() }
+    }
+
     val haptic = rememberHaptic()
     var input by remember { mutableStateOf("") }
     var attachment by remember { mutableStateOf<android.net.Uri?>(null) }

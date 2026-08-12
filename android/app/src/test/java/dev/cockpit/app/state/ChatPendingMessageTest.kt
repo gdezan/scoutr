@@ -319,7 +319,7 @@ class ChatPendingMessageTest {
     }
 
     private fun viewModel(): ChatViewModel =
-        ChatViewModel(fake, "w1:p1", "/tmp/session.jsonl", "working")
+        ChatViewModel(fake, "w1:p1", "/tmp/session.jsonl", "working").also { it.startPolling() }
 
     private suspend fun waitUntil(description: String = "condition", condition: () -> Boolean) {
         repeat(200) {

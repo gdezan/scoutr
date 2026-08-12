@@ -15,6 +15,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.CancellationException
 import java.io.IOException
 import kotlin.time.Duration.Companion.seconds
 
@@ -63,14 +64,42 @@ class BoardViewModel(
                 _ui.update {
                     it.copy(connected = health.ok && health.herdr?.connected == true, loading = false)
                 }
+            } catch (c: CancellationException) {
+                throw c
             } catch (e: Exception) {
                 _ui.update { it.copy(loading = false, connected = false, error = e.message ?: "connection failed") }
             }
-            // Always poll; refresh() flips `connected` itself, so a transient
-            // probe failure self-heals once the bridge is reachable again.
-            startLive()
-            startPush()
+            // Restart the loops after a config change only while the board
+            // is visible: refresh() flips `connected` itself, so a transient
+            // probe failure self-heals once the bridge is reachable again,
+            // and a stop that raced this probe must not resurrect the loops.
+            if (lifecycleActive) {
+                lifecycleActive = false
+                startPolling()
+            }
         }
+    }
+
+    // True while the board screen is STARTED. Only the lifecycle wrapper
+    // starts loops; connect() may restart them, but never resurrect them
+    // after a stop that raced the health probe.
+    private var lifecycleActive = false
+
+    /** Start the 3s board poll and the ntfy push loop; no-op when already polling. */
+    fun startPolling() {
+        if (lifecycleActive) return
+        lifecycleActive = true
+        startLive()
+        startPush()
+    }
+
+    /** Stop both loops; in-flight one-shot actions are untouched. */
+    fun stopPolling() {
+        if (!lifecycleActive) return
+        lifecycleActive = false
+        poller.stop()
+        ntfyJob?.cancel()
+        ntfyJob = null
     }
 
     private fun startLive() {
@@ -93,6 +122,8 @@ class BoardViewModel(
         ntfyJob = viewModelScope.launch {
             var lastId = try {
                 client.latestId(url, topic)
+            } catch (c: CancellationException) {
+                throw c
             } catch (_: Exception) {
                 null
             }
@@ -104,6 +135,8 @@ class BoardViewModel(
                             onNtfyMessage(message)
                             lastId = message.id
                         }
+                } catch (c: CancellationException) {
+                    throw c
                 } catch (_: Exception) {
                     // ntfy may be briefly unreachable; retry on the next loop.
                 }
@@ -124,6 +157,8 @@ class BoardViewModel(
             }
         } catch (e: IOException) {
             _ui.update { it.copy(connected = false, error = e.message ?: "lost connection") }
+        } catch (c: CancellationException) {
+            throw c
         } catch (_: Exception) {
             // transient decode issues should not flap the board
         }

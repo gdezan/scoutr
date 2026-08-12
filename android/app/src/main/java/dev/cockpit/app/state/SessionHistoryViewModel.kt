@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.CancellationException
 import java.io.IOException
 import kotlin.time.Duration.Companion.seconds
 
@@ -63,9 +64,8 @@ class SessionHistoryViewModel(
 
     private val poller = Poller(viewModelScope)
 
-    init {
-        if (connectionStore.saved != null) startPolling()
-    }
+    // No init-started polling: HistoryScreen's LifecycleStartEffect drives
+    // the loop so it runs only while the screen is STARTED.
 
     fun setQuery(value: String) {
         query = value.trim()
@@ -74,8 +74,23 @@ class SessionHistoryViewModel(
 
     fun retry() = viewModelScope.launch { refresh() }
 
-    private fun startPolling() {
+    // True while the history screen is STARTED; the lifecycle wrapper owns
+    // the loop, and Poller's immediate first tick doubles as the first paint.
+    private var lifecycleActive = false
+
+    /** Start the 8s catalog poll; no-op when already polling or offline. */
+    fun startPolling() {
+        if (lifecycleActive) return
+        if (connectionStore.saved == null) return
+        lifecycleActive = true
         poller.start(8.seconds) { refresh() }
+    }
+
+    /** Stop the catalog poll; in-flight one-shot actions are untouched. */
+    fun stopPolling() {
+        if (!lifecycleActive) return
+        lifecycleActive = false
+        poller.stop()
     }
 
     suspend fun refresh() {
@@ -100,6 +115,8 @@ class SessionHistoryViewModel(
             }
         } catch (e: IOException) {
             _ui.update { it.copy(connected = false, loading = false, error = e.message ?: "lost connection") }
+        } catch (c: CancellationException) {
+            throw c
         } catch (_: Exception) {
             // transient decode issues should not flap the list
         }
@@ -136,6 +153,8 @@ class SessionHistoryViewModel(
             if (response.ok && response.paneId != null) {
                 ResumedSession(response.paneId, response.workspaceId)
             } else null
+        } catch (c: CancellationException) {
+            throw c
         } catch (e: Exception) {
             reportError(e)
             null
@@ -151,6 +170,8 @@ class SessionHistoryViewModel(
             if (response.ok && response.paneId != null) {
                 ResumedSession(response.paneId, response.workspaceId)
             } else null
+        } catch (c: CancellationException) {
+            throw c
         } catch (e: Exception) {
             reportError(e)
             null
@@ -164,6 +185,8 @@ class SessionHistoryViewModel(
         return try {
             val response = bridge.sessionCatalogAction(CatalogAction.Rename, item.session.path, text = newName)
             response.ok
+        } catch (c: CancellationException) {
+            throw c
         } catch (e: Exception) {
             reportError(e)
             false
@@ -182,6 +205,8 @@ class SessionHistoryViewModel(
                 return false
             }
             bridge.controlSession(paneId, SessionAction.Close).ok
+        } catch (c: CancellationException) {
+            throw c
         } catch (e: Exception) {
             reportError(e)
             false
@@ -200,6 +225,8 @@ class SessionHistoryViewModel(
                 store.setArchived(item.session.path, false)
             }
             response.ok
+        } catch (c: CancellationException) {
+            throw c
         } catch (e: Exception) {
             reportError(e)
             false

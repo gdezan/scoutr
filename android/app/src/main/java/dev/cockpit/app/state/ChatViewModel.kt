@@ -10,6 +10,7 @@ import dev.cockpit.app.data.SessionEntry
 import dev.cockpit.app.data.SlashCommandInfo
 import dev.cockpit.app.data.entryText
 import dev.cockpit.app.net.CockpitApi
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import java.io.IOException
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -300,8 +301,23 @@ class ChatViewModel(
     /** True when the agent is blocked on a question the user should answer. */
     val waitingForAnswer: Boolean get() = _ui.value.agentStatus == "blocked"
 
-    init {
+    // True while the chat screen is STARTED. The lifecycle wrapper owns the
+    // loop; Poller's immediate first tick doubles as the first paint, so
+    // there is deliberately no init refresh (Poller's call-site contract).
+    private var lifecycleActive = false
+
+    /** Start the 2.5s transcript poll; no-op when already polling. */
+    fun startPolling() {
+        if (lifecycleActive) return
+        lifecycleActive = true
         poller.start(2.5.seconds) { refresh() }
+    }
+
+    /** Stop the transcript poll; in-flight one-shot actions are untouched. */
+    fun stopPolling() {
+        if (!lifecycleActive) return
+        lifecycleActive = false
+        poller.stop()
     }
 
     /**
@@ -338,6 +354,8 @@ class ChatViewModel(
             }
             configurationAgent = agent
             _ui.update { it.copy(configuration = Loadable.Ready(catalog.providers)) }
+        } catch (c: CancellationException) {
+            throw c
         } catch (error: Exception) {
             _ui.update {
                 it.copy(
@@ -369,6 +387,8 @@ class ChatViewModel(
             }
             commandCatalogCwd = cwd
             _ui.update { it.copy(commands = Loadable.Ready(catalog.commands)) }
+        } catch (c: CancellationException) {
+            throw c
         } catch (error: Exception) {
             if (commandRequestGeneration == requestGeneration) {
                 _ui.update {
@@ -418,6 +438,8 @@ class ChatViewModel(
                     thinkingLevel = response.thinkingLevel ?: it.thinkingLevel,
                 )
             }
+        } catch (c: CancellationException) {
+            throw c
         } catch (e: Exception) {
             _ui.update { it.copy(transcript = Loadable.Failed(e.message ?: "session read failed", e.failureKind())) }
         }
@@ -457,7 +479,9 @@ class ChatViewModel(
                 _ui.update { it.copy(cwd = null) }
                 refreshCommands(null)
             }
-        } catch (_: Exception) {
+            } catch (c: CancellationException) {
+                throw c
+            } catch (_: Exception) {
             // bridge unreachable; keep the current state
         }
         return resolvedPath
@@ -498,6 +522,8 @@ class ChatViewModel(
                 onSuccess()
                 delay(700)
                 refresh()
+            } catch (c: CancellationException) {
+                throw c
             } catch (e: Exception) {
                 val message = e.message ?: "control failed"
                 _ui.update {
@@ -541,6 +567,8 @@ class ChatViewModel(
                 val full = if (trimmed.isEmpty()) prefix else "$prefix $trimmed"
                 _ui.update { it.copy(sending = false) }
                 send(full)
+            } catch (c: CancellationException) {
+                throw c
             } catch (error: Exception) {
                 _ui.update {
                     it.copy(
@@ -576,6 +604,8 @@ class ChatViewModel(
                     if (now?.answered == true || now == null) return@launch
                     delay(750)
                 }
+            } catch (c: CancellationException) {
+                throw c
             } catch (error: Exception) {
                 _ui.update {
                     it.copy(
@@ -637,6 +667,8 @@ class ChatViewModel(
                 _ui.update { it.copy(sending = false) }
                 delay(500)
                 refresh()
+            } catch (c: CancellationException) {
+                throw c
             } catch (error: Exception) {
                 _ui.update { it.copy(sending = false, sendError = error.message ?: "Command failed") }
             }
@@ -663,6 +695,8 @@ class ChatViewModel(
                     if (_ui.value.pendingMessages.none { it.localId == localId }) return@launch
                     delay(750)
                 }
+            } catch (c: CancellationException) {
+                throw c
             } catch (_: Exception) {
                 _ui.update { state ->
                     state.copy(

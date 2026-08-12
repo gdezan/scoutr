@@ -14,6 +14,8 @@ import dev.cockpit.app.data.NtfyMessage
 import dev.cockpit.app.net.BridgeClient
 import dev.cockpit.app.net.CockpitApi
 import dev.cockpit.app.net.NtfyClient
+import dev.cockpit.app.service.resolveNotificationLink
+import dev.cockpit.app.service.statusForTitle
 import okhttp3.OkHttpClient
 import java.util.concurrent.TimeUnit
 
@@ -66,9 +68,13 @@ class AppContainer(application: Application) {
 
     /** Show a heads-up notification for a pushed agent event. */
     fun showAgentNotification(message: NtfyMessage) {
+        // The click string is untrusted ntfy payload: validate + rebuild it
+        // exactly like the service's notification path, so a foreign URI is
+        // never handed to the launcher.
+        val link = resolveNotificationLink(message.click, message.paneId, statusForTitle(message.title))
         val intent = Intent(appContext, MainActivity::class.java).apply {
             action = Intent.ACTION_VIEW
-            message.click?.let { data = android.net.Uri.parse(it) }
+            link?.let { data = android.net.Uri.parse(it.uri) }
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
         }
         val pending = PendingIntent.getActivity(

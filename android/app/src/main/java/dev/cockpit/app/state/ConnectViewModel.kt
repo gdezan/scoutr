@@ -8,6 +8,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.CancellationException
 
 /** Result of a successful health handshake. */
 data class ConnectedInfo(val herdrVersion: String?, val herdrProtocol: Int?)
@@ -50,6 +51,8 @@ class ConnectViewModel(
                         FailureKind.Server,
                     )
                 }
+            } catch (c: CancellationException) {
+                throw c
             } catch (e: Exception) {
                 _state.value = Loadable.Failed(
                     e.message ?: "Could not reach the bridge",

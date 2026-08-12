@@ -111,11 +111,14 @@ class CockpitMonitorService : Service() {
     private fun showEventNotification(message: NtfyMessage) {
         // ntfy drops custom JSON fields, so the deep link arrives in its
         // documented 'click' URL; paneId (when present) drives the reply action.
-        val deepLink = message.click
-            ?: message.paneId?.let { cockpitChatUri(it, statusFor(message)) }
-            ?: return
-        val paneId = message.paneId ?: parseCockpitUri(deepLink)?.paneId
-        val status = statusFor(message)
+        // The click string is untrusted payload: validate + rebuild it exactly
+        // like MainActivity's entry path, and never hand a foreign URI to the
+        // launcher. An invalid click falls back to the raw paneId; with
+        // neither, the notification is skipped (matches the old ?: return).
+        val link = resolveNotificationLink(message.click, message.paneId, statusForTitle(message.title)) ?: return
+        val deepLink = link.uri
+        val paneId = link.paneId
+        val status = statusForTitle(message.title)
         val contentIntent = Intent(this, MainActivity::class.java).apply {
             action = Intent.ACTION_VIEW
             data = android.net.Uri.parse(deepLink)
@@ -145,8 +148,6 @@ class CockpitMonitorService : Service() {
         manager.notify(message.id.hashCode(), notification)
     }
 
-    private fun statusFor(message: NtfyMessage): String =
-        if (message.title?.contains("needs you") == true) "blocked" else "working"
 
     private fun createChannels() {
         val manager = getSystemService(NotificationManager::class.java)

@@ -59,6 +59,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.LifecycleStartEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -104,6 +105,13 @@ fun HistoryScreen(
     modifier: Modifier = Modifier,
 ) {
     val ui by viewModel.ui.collectAsState()
+
+    // The catalog poll runs only while the history screen is STARTED.
+    LifecycleStartEffect(Unit) {
+        viewModel.startPolling()
+        onStopOrDispose { viewModel.stopPolling() }
+    }
+
     var view by rememberSaveable { mutableStateOf(HistoryView.Active) }
     var query by rememberSaveable { mutableStateOf("") }
     var pendingClose by remember { mutableStateOf<HistoryItem?>(null) }

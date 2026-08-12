@@ -15,6 +15,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.CancellationException
 import java.util.UUID
 
 /** Quick-pick roots for the folder picker. */
@@ -137,6 +138,8 @@ class NewSessionViewModel(
                     selectedAgent = if (stillKnown || kinds.isEmpty()) current else (kinds.firstOrNull()?.id ?: "pi"),
                 )
             }
+        } catch (c: CancellationException) {
+            throw c
         } catch (_: Exception) {
             // The selector is a convenience; without it the launcher still works for pi.
         }
@@ -166,6 +169,8 @@ class NewSessionViewModel(
             } else {
                 _ui.update { it.copy(loadingDirs = false, folderError = "Folder listing failed. Check the bridge and retry.") }
             }
+        } catch (c: CancellationException) {
+            throw c
         } catch (error: Exception) {
             if (requestId != folderRequestId) return
             _ui.update {
@@ -206,6 +211,8 @@ class NewSessionViewModel(
                     it.copy(loadingModels = false, modelError = response.error ?: "Model catalog failed. Check the bridge and retry.")
                 }
             }
+        } catch (c: CancellationException) {
+            throw c
         } catch (error: Exception) {
             _ui.update {
                 it.copy(loadingModels = false, modelError = error.message ?: "Model catalog failed. Check the bridge and retry.")
@@ -383,6 +390,8 @@ class NewSessionViewModel(
                         it.copy(creating = false, launcherError = response.error ?: "Session creation failed. The bridge rolled back the workspace.")
                     }
                 }
+            } catch (c: CancellationException) {
+                throw c
             } catch (error: Exception) {
                 _ui.update {
                     it.copy(creating = false, launcherError = error.message ?: "Session creation failed. Check the bridge and retry.")
