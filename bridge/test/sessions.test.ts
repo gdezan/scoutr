@@ -324,8 +324,14 @@ describe("controlSession", () => {
         ],
       },
     });
-    await assert.rejects(controlSession(herdr, { paneId: "p2", action: "retry", text: "x" }), /unsupported control action for claude/);
-    await assert.rejects(controlSession(herdr, { paneId: "p2", action: "fork" }), /unsupported control action for claude/);
+    // The capability check (plan 004) rejects before the backend switch, with
+    // a 400 carrying the backend id.
+    await assert.rejects(controlSession(herdr, { paneId: "p2", action: "retry", text: "x" }), /claude does not support retry/);
+    await assert.rejects(controlSession(herdr, { paneId: "p2", action: "fork" }), /claude does not support fork/);
+    await assert.rejects(
+      controlSession(herdr, { paneId: "p2", action: "fork" }),
+      (error: unknown) => error instanceof SessionsError && error.status === 400,
+    );
   });
 
   it("rename persists the pi name and updates the workspace label", async () => {

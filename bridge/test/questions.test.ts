@@ -90,6 +90,46 @@ test("multi-select answers carry selected labels", () => {
   assert.deepEqual(questions[0].selected, ["Auth", "Docs"]);
 });
 
+test("answers with questionIndex attach out of positional order", () => {
+  // Two questions in one call; the transcript records answers in reverse
+  // order with their positions. Positional pairing would misalign them.
+  const questions = extractQuestions([
+    assistantWithQuestion(TOOL_CALL_ID, {
+      questions: [
+        { question: "First?", header: "A", options: [{ label: "yes" }, { label: "no" }] },
+        { question: "Second?", header: "B", options: [{ label: "up" }, { label: "down" }] },
+      ],
+    }),
+    toolResultWithAnswers(TOOL_CALL_ID, [
+      { questionIndex: 1, question: "Second?", kind: "option", answer: "down" },
+      { questionIndex: 0, question: "First?", kind: "option", answer: "yes" },
+    ]),
+  ]);
+  assert.equal(questions.length, 2);
+  assert.equal(questions[0].answered, true);
+  assert.equal(questions[0].answerText, "yes");
+  assert.equal(questions[1].answered, true);
+  assert.equal(questions[1].answerText, "down");
+});
+
+test("a partially-indexed call never falls back to positional pairing", () => {
+  // One indexed answer in the call disables positional alignment entirely:
+  // the unindexed question must stay pending rather than steal the indexed
+  // answer's position.
+  const questions = extractQuestions([
+    assistantWithQuestion(TOOL_CALL_ID, {
+      questions: [
+        { question: "First?", header: "A", options: [{ label: "yes" }, { label: "no" }] },
+        { question: "Second?", header: "B", options: [{ label: "up" }, { label: "down" }] },
+      ],
+    }),
+    toolResultWithAnswers(TOOL_CALL_ID, [{ questionIndex: 1, question: "Second?", kind: "option", answer: "down" }]),
+  ]);
+  assert.equal(questions[0].answered, false, "position 0 has no indexed answer; no positional fallback");
+  assert.equal(questions[1].answered, true);
+  assert.equal(questions[1].answerText, "down");
+});
+
 test("unanswered questions stay pending while later questions are answered", () => {
   const questions = extractQuestions([
     assistantWithQuestion("call_one", {

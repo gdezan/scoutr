@@ -80,8 +80,18 @@ export function extractQuestions(entries: TranscriptEntry[]): QuestionEntry[] {
   for (const { entryId, timestamp, call } of calls) {
     const raw = parseQuestions(call.arguments);
     const answers = answersByCallId.get(call.id) ?? [];
+    // Answers carry their position (`questionIndex`) when the transcript
+    // records it; positional pairing is only a fallback for old transcripts
+    // where no answer in the call has an index (a partially-indexed call
+    // must not misalign — unindexed positions stay unanswered).
+    const byIndex = new Map<number, (typeof answers)[number]>();
+    for (const a of answers) {
+      if (a.questionIndex !== undefined) byIndex.set(a.questionIndex, a);
+    }
     raw.forEach((question, index) => {
-      const match = index < answers.length ? answers[index] : undefined;
+      const match =
+        byIndex.get(index) ??
+        (byIndex.size === 0 && index < answers.length ? answers[index] : undefined);
       const answer = match && kindIsAnswer(match.kind) ? match : undefined;
       questions.push({
         id: question.id || `${call.id}#${index}`,

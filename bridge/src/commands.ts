@@ -1,5 +1,6 @@
-import { sanitizeAnswerText } from "./questions.js";
-import { backendForAgentSessionInfo, getBackendOrNull } from "./agents/registry.js";
+import { MAX_ANSWER_LENGTH, sanitizeAnswerText } from "./questions.js";
+import { resolveBackendForPane } from "./agents/registry.js";
+import { MAX_PROMPT_LENGTH, PROMPT_FORBIDDEN_CHAR } from "./sessions.js";
 import type { SessionSnapshot } from "./herdr/types.js";
 import type { ServerDeps } from "./routes/types.js";
 
@@ -34,7 +35,17 @@ export async function handleCommand(command: CommandMessage, deps: ServerDeps): 
     }
     case "steer": {
       const { target, text } = command;
-      if (!target || !text) throw new Error("steer requires target and text");
+      if (!target) throw new Error("steer requires target and text");
+      // Newlines are legal (multi-line prompts); anything that could alter
+      // submission into a PTY is not.
+      if (
+        typeof text !== "string" ||
+        text.length === 0 ||
+        text.length > MAX_PROMPT_LENGTH ||
+        PROMPT_FORBIDDEN_CHAR.test(text)
+      ) {
+        throw new Error("steer text must be plain text without control characters");
+      }
       return { type: "steered", target, result: await deps.herdr.agentPrompt(target, text) };
     }
     case "answer_question": {
@@ -60,17 +71,11 @@ export async function handleCommand(command: CommandMessage, deps: ServerDeps): 
         // `trailingKeys` are sent after the text (editor submit + review).
         await backend.answerQuestion(deps.herdr, paneId, safe, keys ?? [], trailingKeys);
       } else {
-        // Unknown agents still get the generic type-then-submit treatment.
-        if (hasKeys) {
-          await deps.herdr.paneSendKeys(paneId, keys ?? []);
-          if (safe) {
-            await deps.herdr.paneSendText(paneId, safe);
-            await deps.herdr.paneSendKeys(paneId, trailingKeys ?? ["Enter"]);
-          }
-        } else {
-          await deps.herdr.paneSendText(paneId, safe);
-          await deps.herdr.paneSendKeys(paneId, ["Enter"]);
-        }
+        // Unknown agents get plain type-then-submit; questionnaire key
+        // protocols belong to a registered backend.
+        if (!safe) throw new Error("answer_question requires text for unknown agents");
+        await deps.herdr.paneSendText(paneId, safe);
+        await deps.herdr.paneSendKeys(paneId, ["Enter"]);
       }
       return { type: "answered", paneId, text: safe };
     }
@@ -83,7 +88,18 @@ export async function handleCommand(command: CommandMessage, deps: ServerDeps): 
     }
     case "send_text": {
       const { paneId, text } = command;
-      if (!paneId || !text) throw new Error("send_text requires paneId and text");
+      if (!paneId) throw new Error("send_text requires paneId");
+      // Same one-line/no-control-characters contract as answers: the text
+      // goes into a PTY, but unlike answer text it must not be silently
+      // altered — the caller sees a rejection instead.
+      if (
+        typeof text !== "string" ||
+        text.length === 0 ||
+        text.length > MAX_ANSWER_LENGTH ||
+        sanitizeAnswerText(text) !== text
+      ) {
+        throw new Error("send_text requires plain single-line text (max 4000 chars)");
+      }
       await deps.herdr.paneSendText(paneId, text);
       return { type: "sent", paneId };
     }
@@ -108,14 +124,5 @@ export function validateSlashCommand(text: unknown): string {
 }
 
 function backendForPane(deps: ServerDeps, paneId: string) {
-  const snapshot = deps.feed.snapshot as SessionSnapshot | null;
-  const pane = snapshot?.panes.find((candidate) => candidate.pane_id === paneId);
-  if (pane) {
-    return backendForAgentSessionInfo(pane.agent_session) ?? getBackendOrNull(pane.agent ?? "");
-  }
-  const agent = snapshot?.agents.find((candidate) => candidate.pane_id === paneId);
-  if (agent) {
-    return backendForAgentSessionInfo(agent.agent_session) ?? getBackendOrNull(agent.agent);
-  }
-  return null;
+  return resolveBackendForPane(deps.feed.snapshot as SessionSnapshot | null, paneId);
 }

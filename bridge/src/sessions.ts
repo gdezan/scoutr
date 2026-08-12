@@ -3,7 +3,7 @@ import { BridgeError } from "./errors.js";
 import { resolveAllowedDir } from "./dirs.js";
 import type { Transcript } from "./transcript.js";
 import { resolveCatalogSessionPath } from "./session-catalog.js";
-import { backendFor, backendForAgentSessionInfo, getBackendOrNull } from "./agents/registry.js";
+import { backendFor, resolveBackendForPane } from "./agents/registry.js";
 import type { AgentBackend, ControlAction, ControlParams } from "./agents/types.js";
 import { shellQuote } from "./shell.js";
 import { findPaneWorkspace } from "./herdr/panes.js";
@@ -48,9 +48,9 @@ export class SessionsError extends BridgeError {
 
 const MAX_MODEL_LENGTH = 200;
 const MAX_NAME_LENGTH = 100;
-const MAX_PROMPT_LENGTH = 100_000;
+export const MAX_PROMPT_LENGTH = 100_000;
 const CONTROL_CHAR = /[\u0000-\u001f\u007f]/;
-const PROMPT_FORBIDDEN_CHAR = /[\u0000\u007f]/;
+export const PROMPT_FORBIDDEN_CHAR = /[\u0000\u007f]/;
 const AGENT_START_TIMEOUT_MS = 8_000;
 const AGENT_POLL_MS = 100;
 
@@ -256,6 +256,9 @@ export async function controlSession(
     return;
   }
   const backend = await backendForPane(herdr, paneId);
+  if (!backend.capabilities.has(action)) {
+    throw new SessionsError(`${backend.id} does not support ${action}`, 400);
+  }
   try {
     await backend.control(herdr, params);
   } catch (error) {
@@ -269,15 +272,7 @@ export async function controlSession(
 /** The registered backend that owns a live pane (by herdr's agent label). */
 async function backendForPane(herdr: HerdrPort, paneId: string): Promise<AgentBackend> {
   try {
-    const snapshot = await herdr.snapshot();
-    const pane = snapshot.panes.find((candidate) => candidate.pane_id === paneId);
-    const backend =
-      backendForAgentSessionInfo(pane?.agent_session) ??
-      getBackendOrNull(pane?.agent ?? "") ??
-      (() => {
-        const agent = snapshot.agents.find((candidate) => candidate.pane_id === paneId);
-        return agent ? backendForAgentSessionInfo(agent.agent_session) ?? getBackendOrNull(agent.agent) : null;
-      })();
+    const backend = resolveBackendForPane(await herdr.snapshot(), paneId);
     if (backend) return backend;
   } catch {
     // fall through

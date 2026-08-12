@@ -1,5 +1,5 @@
 import type { AgentBackend } from "./types.js";
-import type { AgentSessionInfo } from "../herdr/types.js";
+import type { AgentSessionInfo, SessionSnapshot } from "../herdr/types.js";
 import { piBackend } from "./pi/index.js";
 import { claudeBackend } from "./claude/index.js";
 
@@ -20,6 +20,23 @@ export function getBackendOrNull(agentId: string): AgentBackend | null {
 export function backendForAgentSessionInfo(session: AgentSessionInfo | null | undefined): AgentBackend | null {
   if (!session) return null;
   return REGISTRY.get(session.agent) ?? null;
+}
+
+/**
+ * The registered backend that owns a live pane, from a snapshot. A pane can
+ * identify its agent either via the herdr agent session (`agent_session.agent`)
+ * or the plain agent label; a third backend needs to learn nothing beyond
+ * its own registration.
+ */
+export function resolveBackendForPane(
+  snapshot: SessionSnapshot | null | undefined,
+  paneId: string,
+): AgentBackend | null {
+  const pane = snapshot?.panes.find((p) => p.pane_id === paneId);
+  if (pane) return backendForAgentSessionInfo(pane.agent_session) ?? getBackendOrNull(pane.agent ?? "");
+  const agent = snapshot?.agents.find((a) => a.pane_id === paneId);
+  if (agent) return backendForAgentSessionInfo(agent.agent_session) ?? getBackendOrNull(agent.agent);
+  return null;
 }
 
 /** The first registered backend whose sandbox owns this transcript path. */

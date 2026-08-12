@@ -239,7 +239,7 @@ describe("cockpit bridge HTTP/WS API (offline)", () => {
 
   test("sessions requires an allowed path", async () => {
     const { status } = await getJson("/api/sessions?path=/etc/passwd");
-    assert.equal(status, 500); // path guard rejects
+    assert.equal(status, 403); // path guard rejects (plan 004: deliberate 403, not 500)
   });
 
   test("session catalog lists persisted sessions and validates limits", async () => {

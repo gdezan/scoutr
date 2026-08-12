@@ -3,7 +3,8 @@ import { canonicalPath } from "../dirs.js";
 import { entryText, inspectSessionFile, type SessionFileInfo, type Transcript, type TranscriptEntry } from "../transcript.js";
 import type { QuestionEntry } from "../questions.js";
 import { backendForSessionPath } from "../agents/registry.js";
-import { createSession, controlSession } from "../sessions.js";
+import type { ControlAction } from "../agents/types.js";
+import { createSession, controlSession, SessionsError } from "../sessions.js";
 import type { Route, RouteContext, RouteResult } from "./types.js";
 
 export const sessionsRoutes: Route[] = [
@@ -44,6 +45,22 @@ interface TranscriptMemoEntry {
 const TRANSCRIPT_MEMO_CAP = 8;
 const transcriptMemo = new Map<string, TranscriptMemoEntry>();
 
+/**
+ * The wire-valid control vocabulary, kept in lockstep with the
+ * `ControlAction` union — an unknown action must be rejected before it can
+ * reach a backend switch.
+ */
+const CONTROL_ACTIONS = [
+  "abort",
+  "retry",
+  "compact",
+  "fork",
+  "rename",
+  "close",
+  "set_model",
+  "set_thinking",
+] as const satisfies readonly ControlAction[];
+
 async function readTranscriptMemoized(
   target: string,
   backend: NonNullable<ReturnType<typeof backendForSessionPath>>,
@@ -68,17 +85,12 @@ async function readSessionRoute(ctx: RouteContext): Promise<RouteResult> {
   if (!pathParam) {
     return { status: 400, body: { ok: false, error: "missing path query parameter" } };
   }
-  try {
-    const result = await readSession(pathParam, since);
-    return { status: 200, body: { ok: true, ...result } };
-  } catch (error) {
-    // Session reads are file-bound, not herdr-bound: unexpected failures are
-    // server faults (500), not upstream (502).
-    return {
-      status: 500,
-      body: { ok: false, error: error instanceof Error ? error.message : String(error) },
-    };
-  }
+  // Session reads are file-bound, not herdr-bound: the deliberate
+  // outside-the-store rejection surfaces as its 403 via the dispatcher, and
+  // unexpected failures are server faults (502 via the dispatcher's
+  // catch-all).
+  const result = await readSession(pathParam, since);
+  return { status: 200, body: { ok: true, ...result } };
 }
 
 export async function readSession(pathParam: string, since: string | null): Promise<SessionReadResult> {
@@ -86,7 +98,7 @@ export async function readSession(pathParam: string, since: string | null): Prom
   const target = canonicalPath(resolve(pathParam));
   const backend = backendForSessionPath(target);
   if (!backend) {
-    throw new Error("session path is outside a registered session store");
+    throw new SessionsError("session path is outside a registered session store", 403);
   }
   const info = await inspectSessionFile(target);
   if (!info.exists) {
@@ -148,7 +160,10 @@ async function controlRoute(ctx: RouteContext): Promise<RouteResult> {
     return { status: 400, body: { ok: false, error: "invalid pane id" } };
   }
   const body = ctx.body;
-  await controlSession(ctx.deps.herdr, { paneId, action: body.action as never, text: body.text });
+  if (typeof body.action !== "string" || !(CONTROL_ACTIONS as readonly string[]).includes(body.action)) {
+    return { status: 400, body: { ok: false, error: `unknown control action: ${String(body.action)}` } };
+  }
+  await controlSession(ctx.deps.herdr, { paneId, action: body.action as ControlAction, text: body.text });
   return { status: 200, body: { ok: true } };
 }
 

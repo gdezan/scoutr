@@ -47,8 +47,12 @@ function fakeDeps(sessionCatalogRoot?: string) {
       sessionCatalogRoot,
     },
     sent: fake.sent,
+    fake,
   };
 }
+
+/** Second snapshot pane owned by the claude backend (capability checks). */
+const CLAUDE_PANE: PaneInfo = { ...SNAPSHOT_PANE, pane_id: "p-claude", agent: "claude", display_agent: "claude" };
 
 async function rawPost(path: string, body: string, token = TOKEN): Promise<{ status: number; data: any }> {
   const response = await fetch(`http://127.0.0.1:${PORT}${path}`, {
@@ -87,6 +91,7 @@ function lastLaunch(sent: readonly SentInput[]): string {
 describe("POST /api/sessions and /api/sessions/:paneId/control", () => {
   let server: CockpitServer;
   let sent: SentInput[];
+  let snapshot: ReturnType<typeof fakeHerdr>;
   let sessionRoot: string;
   let sessionPath: string;
 
@@ -108,6 +113,7 @@ describe("POST /api/sessions and /api/sessions/:paneId/control", () => {
     })}\n`);
     const fake = fakeDeps(sessionRoot);
     sent = fake.sent;
+    snapshot = fake.fake;
     server = createCockpitServer(fake.deps, { listen: true });
   });
 
@@ -245,7 +251,34 @@ describe("POST /api/sessions and /api/sessions/:paneId/control", () => {
   });
 
   it("control: unknown action returns 400", async () => {
-    const { status } = await post("/api/sessions/p1/control", { action: "explode" });
+    const { status, data } = await post("/api/sessions/p1/control", { action: "definitely-not-real" });
     assert.equal(status, 400);
+    assert.match(data.error, /unknown control action/);
+  });
+
+  it("control: rejects actions outside the backend's declared capabilities", async () => {
+    // claude declares abort/compact/close/set_model — fork is not among them.
+    await snapshot.setSnapshot({ ...(await snapshot.snapshot()), panes: [SNAPSHOT_PANE, CLAUDE_PANE] });
+    sent.length = 0;
+    const { status, data } = await post("/api/sessions/p-claude/control", { action: "fork" });
+    assert.equal(status, 400);
+    assert.match(data.error, /claude does not support fork/);
+    const controlCalls = sent.filter((call) => call.method !== "snapshot");
+    assert.deepEqual(controlCalls, [], "a capability-rejected action must not reach herdr");
+  });
+
+  it("control: missing action is rejected at the route", async () => {
+    const { status, data } = await post("/api/sessions/p1/control", {});
+    assert.equal(status, 400);
+    assert.match(data.error, /unknown control action/);
+  });
+
+  it("session read for a path outside every registered store returns 403", async () => {
+    const response = await fetch(`http://127.0.0.1:${PORT}/api/sessions?path=${encodeURIComponent("/etc/passwd")}`, {
+      headers: { authorization: `Bearer ${TOKEN}` },
+    });
+    assert.equal(response.status, 403);
+    const data = (await response.json()) as { ok: boolean; error: string };
+    assert.match(data.error, /outside a registered session store/);
   });
 });

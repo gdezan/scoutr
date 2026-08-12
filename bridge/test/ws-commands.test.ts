@@ -3,14 +3,56 @@ import assert from "node:assert/strict";
 import { handleCommand } from "../src/commands.js";
 import { fakeHerdr } from "./support/fake-herdr.js";
 import type { ServerDeps } from "../src/routes/types.js";
+import { fakeFeed } from "./support/fake-feed.js";
+import type { PaneInfo, SessionSnapshot } from "../src/herdr/types.js";
 
-function makeDeps(): { herdr: ReturnType<typeof fakeHerdr>; deps: ServerDeps } {
+/**
+ * One pane owned by the requested agent, so `resolveBackendForPane` finds a
+ * real backend and the answer path under test is the backend's own
+ * implementation — not the unknown-agent fallback.
+ */
+function makeSnapshot(agent: string | null): SessionSnapshot {
+  const pane: PaneInfo = {
+    pane_id: "p1",
+    workspace_id: "ws1",
+    tab_id: "t1",
+    terminal_id: "term1",
+    focused: false,
+    agent_status: "idle",
+    revision: 0,
+    agent,
+    display_agent: agent,
+    agent_session: null,
+    cwd: null,
+    foreground_cwd: null,
+    label: null,
+    title: null,
+    terminal_title: null,
+    terminal_title_stripped: null,
+    state_labels: {},
+    scroll: null,
+  };
+  return {
+    version: "0.8.0",
+    protocol: 19,
+    focused_workspace_id: null,
+    focused_tab_id: null,
+    focused_pane_id: null,
+    workspaces: [],
+    tabs: [],
+    panes: agent ? [pane] : [],
+    agents: [],
+    layouts: [],
+  };
+}
+
+function makeDeps(agent?: "pi" | "claude"): { herdr: ReturnType<typeof fakeHerdr>; deps: ServerDeps } {
   const herdr = fakeHerdr();
   return {
     herdr,
     deps: {
       herdr,
-      feed: {} as never,
+      feed: fakeFeed(makeSnapshot(agent ?? null)),
       usage: {} as never,
       config: { token: "x".repeat(16), port: 1 },
     },
@@ -62,8 +104,8 @@ describe("WS command dispatch", () => {
     assert.equal((herdr.sent[0]?.params as { text: string }).text, "abc");
   });
 
-  test("answer_question with keys sends navigation keys only for option answers", async () => {
-    const { herdr, deps } = makeDeps();
+  test("answer_question with keys sends navigation keys only for option answers (pi questionnaire)", async () => {
+    const { herdr, deps } = makeDeps("pi");
     const result = await handleCommand(
       { type: "answer_question", paneId: "p1", text: "", keys: ["down", "down", "enter"] },
       deps,
@@ -72,8 +114,8 @@ describe("WS command dispatch", () => {
     assert.deepEqual(herdr.sent, [{ method: "paneSendKeys", params: { pane_id: "p1", keys: ["down", "down", "enter"] } }]);
   });
 
-  test("answer_question with keys and text opens the editor then types and submits", async () => {
-    const { herdr, deps } = makeDeps();
+  test("answer_question with keys and text opens the editor then types and submits (pi backend)", async () => {
+    const { herdr, deps } = makeDeps("pi");
     await handleCommand(
       { type: "answer_question", paneId: "p1", text: "Mango", keys: ["down", "enter"], trailingKeys: ["enter", "enter"] },
       deps,
@@ -91,6 +133,15 @@ describe("WS command dispatch", () => {
       () => handleCommand({ type: "answer_question", paneId: "p1", text: "" } as never, deps),
       /text or keys/,
     );
+  });
+
+  test("unknown-agent answers require text: keys alone are rejected (no questionnaire protocol)", async () => {
+    const { herdr, deps } = makeDeps();
+    await assert.rejects(
+      () => handleCommand({ type: "answer_question", paneId: "p1", text: "", keys: ["down", "enter"] } as never, deps),
+      /requires text for unknown agents/,
+    );
+    assert.deepEqual(herdr.sent, []);
   });
 
   test("answer_question rejects keys outside the navigation allowlist", async () => {
@@ -128,6 +179,64 @@ describe("WS command dispatch", () => {
     const result = await handleCommand({ type: "send_text", paneId: "p1", text: "hello" }, deps);
     assert.equal(result.type, "sent");
     assert.deepEqual(herdr.sent, [{ method: "paneSendText", params: { pane_id: "p1", text: "hello" } }]);
+  });
+
+  test("send_text rejects text that would alter PTY submission (newline/control chars)", async () => {
+    const { herdr, deps } = makeDeps();
+    await assert.rejects(
+      () => handleCommand({ type: "send_text", paneId: "p1", text: "line one\nline two" } as never, deps),
+      /plain single-line text/,
+    );
+    await assert.rejects(
+      () => handleCommand({ type: "send_text", paneId: "p1", text: `ctrl${String.fromCharCode(0)}char` } as never, deps),
+      /plain single-line text/,
+    );
+    await assert.rejects(
+      () => handleCommand({ type: "send_text", paneId: "p1", text: "" } as never, deps),
+      /plain single-line text/,
+    );
+    assert.deepEqual(herdr.sent, []);
+  });
+
+  test("steer accepts multi-line prompt text (createSession prompt limit)", async () => {
+    const { herdr, deps } = makeDeps();
+    const text = "first line\nsecond line";
+    const result = await handleCommand({ type: "steer", target: "p1", text }, deps);
+    assert.equal(result.type, "steered");
+    assert.deepEqual(herdr.sent, [{ method: "agentPrompt", params: { target: "p1", text } }]);
+  });
+
+  test("steer rejects NUL/DEL control characters", async () => {
+    const { herdr, deps } = makeDeps();
+    await assert.rejects(
+      () => handleCommand({ type: "steer", target: "p1", text: `ok${String.fromCharCode(0)}` } as never, deps),
+      /without control characters/,
+    );
+    assert.deepEqual(herdr.sent, []);
+  });
+
+  test("claude answers flatten multi-line text to one line then Enter", async () => {
+    const { herdr, deps } = makeDeps("claude");
+    const result = await handleCommand({ type: "answer_question", paneId: "p1", text: "keep\nworking" }, deps);
+    assert.equal(result.type, "answered");
+    assert.deepEqual(herdr.sent, [
+      { method: "paneSendText", params: { pane_id: "p1", text: "keep working" } },
+      { method: "paneSendKeys", params: { pane_id: "p1", keys: ["Enter"] } },
+    ]);
+  });
+
+  test("pi answers replay the full key sequence through the backend (keys, text, trailingKeys)", async () => {
+    const { herdr, deps } = makeDeps("pi");
+    const result = await handleCommand(
+      { type: "answer_question", paneId: "p1", text: "Mango", keys: ["down", "enter"], trailingKeys: ["enter", "enter"] },
+      deps,
+    );
+    assert.equal(result.type, "answered");
+    assert.deepEqual(herdr.sent, [
+      { method: "paneSendKeys", params: { pane_id: "p1", keys: ["down", "enter"] } },
+      { method: "paneSendText", params: { pane_id: "p1", text: "Mango" } },
+      { method: "paneSendKeys", params: { pane_id: "p1", keys: ["enter", "enter"] } },
+    ]);
   });
 
   test("unknown commands throw", async () => {
