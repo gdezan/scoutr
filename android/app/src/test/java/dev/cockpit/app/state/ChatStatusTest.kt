@@ -39,13 +39,14 @@ class ChatStatusTest {
         server.shutdown()
     }
 
-    private fun stubAgents(status: String) {
+    private fun stubAgents(status: String, statusSinceMs: Long? = null) {
+        val stamp = statusSinceMs?.let { ""","statusSinceMs":$it""" } ?: ""
         server.dispatcher = object : okhttp3.mockwebserver.Dispatcher() {
             override fun dispatch(request: okhttp3.mockwebserver.RecordedRequest): MockResponse {
                 val path = (request.path ?: "").substringBefore('?')
                 val body = when {
                     path == "/api/agents" ->
-                        """{"ok":true,"agents":[{"paneId":"w1:p1","workspaceId":"w1","tabId":"w1:t1","agent":"pi","status":"$status","cwd":"/home/gdezan/Dev/agents-mobile","sessionPath":"/home/gdezan/.pi/agent/sessions/s/s.jsonl"}]}"""
+                        """{"ok":true,"agents":[{"paneId":"w1:p1","workspaceId":"w1","tabId":"w1:t1","agent":"pi","status":"$status","cwd":"/home/gdezan/Dev/agents-mobile","sessionPath":"/home/gdezan/.pi/agent/sessions/s/s.jsonl"$stamp}]}"""
                     path == "/api/sessions" ->
                         """{"ok":true,"entries":[],"since":null,"lastEntryId":null,"preview":"","exists":false,"mtimeMs":0}"""
                     else -> """{"ok":false,"error":"unexpected $path"}"""
@@ -83,6 +84,28 @@ class ChatStatusTest {
         vm.awaitRefreshSettled()
         assertTrue(vm.waitingForAnswer)
         assertEquals("blocked", vm.ui.value.agentStatus)
+    }
+
+    @Test
+    fun statusSinceStampFeedsTheElapsedTimer() {
+        // The working indicator times the run from the bridge's stamp, so it
+        // has to survive the poll into state rather than being re-derived
+        // locally (a local clock restarts at 0s on every reconnect).
+        stubAgents("working", statusSinceMs = 1_700_000_000_000L)
+        val vm = ChatViewModel(bridge(), "w1:p1", null, "working")
+
+        vm.awaitRefreshSettled()
+        assertEquals(1_700_000_000_000L, vm.ui.value.statusSinceMs)
+    }
+
+    @Test
+    fun unstampedCardLeavesTheTimerUnset() {
+        stubAgents("working")
+        val vm = ChatViewModel(bridge(), "w1:p1", null, "working")
+
+        vm.awaitRefreshSettled()
+        // No fabricated "0s": the indicator renders its label alone.
+        assertEquals(null, vm.ui.value.statusSinceMs)
     }
 
     @Test

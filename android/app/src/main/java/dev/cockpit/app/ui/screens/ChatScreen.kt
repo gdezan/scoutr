@@ -101,6 +101,8 @@ import dev.cockpit.app.data.SlashCommandInfo
 import dev.cockpit.app.data.entryText
 import dev.cockpit.app.ui.components.AssistantMarkdown
 import dev.cockpit.app.ui.components.QuestionCard
+import dev.cockpit.app.ui.components.WorkingIndicator
+import dev.cockpit.app.ui.components.workingIndicatorMode
 
 import dev.cockpit.app.ui.motion.CockpitMotion
 import dev.cockpit.app.ui.motion.HapticEvent
@@ -207,6 +209,9 @@ fun ChatScreen(
                         pendingMessages = ui.pendingMessages,
                         detailsVisible = detailsVisible,
                         starting = starting,
+                        agentStatus = ui.agentStatus,
+                        statusSinceMs = ui.statusSinceMs,
+                        hasPendingQuestion = ui.questions.isNotEmpty(),
                         onRetryPending = viewModel::retryPendingMessage,
                         onAnswerQuestion = { id, answer ->
                             haptic(HapticEvent.Confirm)
@@ -511,11 +516,15 @@ fun ChatList(
     questions: List<QuestionEntry> = emptyList(),
     answeringQuestionId: String? = null,
     starting: Boolean = false,
+    agentStatus: String = "idle",
+    statusSinceMs: Long? = null,
+    hasPendingQuestion: Boolean = false,
     onRetryPending: (String) -> Unit = {},
     onAnswerQuestion: (String, String) -> Unit = { _, _ -> },
     modifier: Modifier = Modifier,
 ) {
     val listState = rememberLazyListState()
+    val indicatorMode = workingIndicatorMode(starting, agentStatus, hasPendingQuestion)
 
     val reduceMotion = useReduceMotion()
     var followNew by remember { mutableStateOf(true) }
@@ -533,12 +542,12 @@ fun ChatList(
 
     // Follow: initial open + every append while at the bottom. The index is
     // computed the same way the LazyColumn emits items (entries, questions,
-    // pending, starting) so follow always lands on the true last item;
-    // bounded + guarded against a race with the poll.
+    // pending, working indicator) so follow always lands on the true last
+    // item; bounded + guarded against a race with the poll.
     val lastItemKey = pendingMessages.lastOrNull()?.localId ?: entries.lastOrNull()?.entryId
     val lastIndex = entries.size + questions.size + pendingMessages.size +
-        (if (starting) 1 else 0) - 1
-    LaunchedEffect(entries.size, pendingMessages.size, lastItemKey, starting) {
+        (if (indicatorMode != null) 1 else 0) - 1
+    LaunchedEffect(entries.size, pendingMessages.size, lastItemKey, indicatorMode) {
         if (followNew && lastIndex >= 0) {
             try {
                 listState.scrollToItem(lastIndex)
@@ -600,13 +609,17 @@ fun ChatList(
                     )
                 )
             }
-            if (starting) {
-                item(key = "starting") {
-                    StartingSessionRow(Modifier.animateItem(
-                        fadeInSpec = CockpitMotion.itemSpec(reduceMotion),
-                        placementSpec = CockpitMotion.itemPlacementSpec(reduceMotion),
-                        fadeOutSpec = CockpitMotion.itemSpec(reduceMotion),
-                    ))
+            if (indicatorMode != null) {
+                item(key = "working_indicator") {
+                    WorkingIndicator(
+                        mode = indicatorMode,
+                        statusSinceMs = statusSinceMs,
+                        modifier = Modifier.animateItem(
+                            fadeInSpec = CockpitMotion.itemSpec(reduceMotion),
+                            placementSpec = CockpitMotion.itemPlacementSpec(reduceMotion),
+                            fadeOutSpec = CockpitMotion.itemSpec(reduceMotion),
+                        ),
+                    )
                 }
             }
         }
@@ -683,34 +696,6 @@ private fun UserBubble(entry: SessionEntry, modifier: Modifier = Modifier) {
                 Text(text, color = MaterialTheme.colorScheme.onSurface)
             }
         }
-    }
-}
-
-/**
- * Quiet "the agent is booting, your first message is queued" row shown below
- * the pending bubble while a brand-new session's first response is pending.
- * Without it, a slow first response reads as a broken/empty chat.
- */
-@Composable
-private fun StartingSessionRow(modifier: Modifier = Modifier) {
-    Row(
-        modifier
-            .fillMaxWidth()
-            .padding(start = 4.dp, top = 14.dp)
-            .testTag("starting_session"),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        CircularProgressIndicator(
-            modifier = Modifier.size(14.dp),
-            strokeWidth = 2.dp,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Text(
-            "Starting session… waiting for the agent",
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
     }
 }
 

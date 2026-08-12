@@ -100,6 +100,13 @@ data class ChatUiState(
     val error: String? = null,
     /** Agent status from the last /api/agents poll ("working", "blocked", …). */
     val agentStatus: String = "working",
+    /**
+     * Epoch ms when the agent entered [agentStatus] (bridge-stamped); null
+     * until the first poll, or when the bridge has no stamp for the pane. The
+     * working indicator's elapsed timer reads it, so it survives backgrounding
+     * and reconnects instead of restarting at 0s.
+     */
+    val statusSinceMs: Long? = null,
     /** Registry backend id from the card; null until the first poll. */
     val agentKind: String? = null,
     /**
@@ -289,6 +296,12 @@ class ChatViewModel(
                 _ui.update {
                     it.copy(
                         agentStatus = card.status,
+                        // An unstamped card keeps the previous stamp only while
+                        // the status itself is unchanged; across a transition a
+                        // stale stamp would time the wrong state, so drop it and
+                        // let the indicator render without a timer.
+                        statusSinceMs = card.statusSinceMs?.toLong()
+                            ?: it.statusSinceMs.takeIf { _ -> card.status == it.agentStatus },
                         agentKind = card.agentKind.takeIf(String::isNotBlank) ?: it.agentKind,
                         agentDisplayName = card.displayName?.takeIf(String::isNotBlank)
                             ?: card.agentKind?.takeIf(String::isNotBlank)

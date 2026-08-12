@@ -107,8 +107,10 @@ Each checkpoint must name source files and rendered screenshot paths, ask for a 
 
 ### 8. Bounded live output
 
-- [x] (unchanged from previous revision — authenticated route, caps, lifecycle polling, drawer)
-- [x] Short non-replaying animation for newly changed output — the live-output drawer pulses (180 ms fade-up, reduce-motion aware) when the newest line changes (`LiveOutputPanel.kt`).
+- [x] Authenticated route and caps unchanged. What changed: live output is no longer an ambient chat-screen surface. The inline card, the strip above the composer, and the expandable drawer are gone; the raw pane tail now lives on its own full-screen route (`chat/{paneId}/live`, "Live output…" in the session menu), backed by `LiveOutputViewModel`.
+- [x] Polling is screen-scoped — `LifecycleStartEffect` on the viewer starts and stops the 900 ms poll, so `/api/agents/{id}/read` is hit only while someone is looking at it. A working session costs nothing.
+- [x] Short non-replaying animation for newly changed output — the viewer body pulses (180 ms fade-up, reduce-motion aware) when the newest line changes (`LiveOutputPanel.kt`).
+- [x] The chat screen's busy signal is the `WorkingIndicator` at the tail of the transcript: ripple + label + time-in-status, no output text.
 
 ### 9. Read-only review center
 
@@ -137,7 +139,7 @@ Each checkpoint must name source files and rendered screenshot paths, ask for a 
 - [x] Conversation controls. (unchanged)
 - [x] Optimistic queued messages with Retry. (unchanged; reconciliation whitespace fix this round)
 - [x] Slash commands. (unchanged)
-- [x] Purposeful streaming feedback for real events; no fake typing or delayed content — transcript/tool/status arrive as real events, live output pulses on change. (Fake-typing remains explicitly out of scope by contract.)
+- [x] Purposeful streaming feedback for real events; no fake typing or delayed content — transcript/tool/status arrive as real events; the working indicator's elapsed time is read from the bridge's `statusSinceMs` stamp, never a local clock, so it survives backgrounding instead of restarting at 0 s. (Fake-typing remains explicitly out of scope by contract.)
 - [x] Stable skeletons or inline progress replace generic centered spinners where layout can be known. Board/history/usage have skeletons; the review overview shows a stable structure.
 - [x] Typography, 48dp touch targets, contrast, TalkBack semantics, font scaling, edge-to-edge, IME, and one-handed reach audited — `docs/AUDIT.md`; runtime evidence large-font + landscape. Residuals: TalkBack walk-through, contrast-meter pass.
 - [x] No gradients, excess glass, generic M3 defaults, arbitrary card soup, bouncing, or decorative motion (design language enforced; new surfaces reviewed against it).

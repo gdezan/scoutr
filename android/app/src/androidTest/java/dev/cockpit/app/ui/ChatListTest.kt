@@ -15,8 +15,12 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.unit.dp
+import androidx.compose.runtime.CompositionLocalProvider
 import dev.cockpit.app.data.ContentBlock
+import dev.cockpit.app.data.QuestionEntry
+import dev.cockpit.app.data.QuestionOption
 import dev.cockpit.app.data.SessionEntry
+import dev.cockpit.app.ui.motion.LocalReduceMotion
 import dev.cockpit.app.state.MessageDeliveryState
 import dev.cockpit.app.state.PendingUserMessage
 import dev.cockpit.app.ui.screens.ChatList
@@ -100,9 +104,9 @@ class ChatListTest {
 
     @Test
     fun startingIndicatorShowsForBrandNewSessionWithPendingMessage() {
-        // Fix 8: a new session whose first message is queued shows an explicit
-        // "starting" stage (spinner + label) under the pending bubble instead of
-        // a bare empty chat, so a slow first response never reads as broken.
+        // A new session whose first message is queued shows an explicit
+        // "starting" stage under the pending bubble instead of a bare empty
+        // chat, so a slow first response never reads as broken.
         composeRule.setContent {
             CockpitTheme {
                 ChatList(
@@ -110,18 +114,92 @@ class ChatListTest {
                     pendingMessages = listOf(PendingUserMessage("local-1", "Steer the agent", MessageDeliveryState.QUEUED)),
                     detailsVisible = false,
                     starting = true,
+                    agentStatus = "working",
                 )
             }
         }
         composeRule.onNodeWithText("Steer the agent").assertIsDisplayed()
-        composeRule.onNodeWithTag("starting_session").assertIsDisplayed()
-        composeRule.onNodeWithText("Starting session… waiting for the agent").assertIsDisplayed()
+        composeRule.onNodeWithTag("working_indicator").assertIsDisplayed()
+        composeRule.onNodeWithText("Starting session…").assertIsDisplayed()
     }
 
     @Test
-    fun noStartingIndicatorOnceEntriesExist() {
-        // The stage is only for the first response window: once any entry lands,
-        // the indicator must be gone even if a pending message remains.
+    fun workingIndicatorShowsWorkingAndTheElapsedTimer() {
+        composeRule.setContent {
+            CockpitTheme {
+                ChatList(
+                    entries = emptyList(),
+                    detailsVisible = false,
+                    agentStatus = "working",
+                    statusSinceMs = System.currentTimeMillis() - 72_000,
+                )
+            }
+        }
+        composeRule.onNodeWithTag("working_indicator").assertIsDisplayed()
+        composeRule.onNodeWithText("Working…").assertIsDisplayed()
+        composeRule.onNodeWithText("1m 12s").assertIsDisplayed()
+    }
+
+    @Test
+    fun workingIndicatorOmitsTheTimerWithoutAStatusStamp() {
+        // No stamp, no fabricated "0s" — the label sits alone.
+        composeRule.setContent {
+            CockpitTheme {
+                ChatList(
+                    entries = emptyList(),
+                    detailsVisible = false,
+                    agentStatus = "working",
+                    statusSinceMs = null,
+                )
+            }
+        }
+        composeRule.onNodeWithTag("working_indicator").assertIsDisplayed()
+        composeRule.onNodeWithText("Working…").assertIsDisplayed()
+        composeRule.onNodeWithText("0s").assertDoesNotExist()
+    }
+
+    @Test
+    fun blockedWithoutAQuestionAsksTheUser() {
+        composeRule.setContent {
+            CockpitTheme {
+                ChatList(
+                    entries = emptyList(),
+                    detailsVisible = false,
+                    agentStatus = "blocked",
+                    statusSinceMs = System.currentTimeMillis() - 5_000,
+                )
+            }
+        }
+        composeRule.onNodeWithTag("working_indicator").assertIsDisplayed()
+        composeRule.onNodeWithText("Waiting for you").assertIsDisplayed()
+    }
+
+    @Test
+    fun blockedWithAQuestionCardShowsNoIndicator() {
+        val question = QuestionEntry(
+            id = "call-1#0",
+            question = "Which database?",
+            options = listOf(QuestionOption(label = "Postgres")),
+        )
+        composeRule.setContent {
+            CockpitTheme {
+                ChatList(
+                    entries = emptyList(),
+                    questions = listOf(question),
+                    detailsVisible = false,
+                    agentStatus = "blocked",
+                    hasPendingQuestion = true,
+                    statusSinceMs = System.currentTimeMillis() - 5_000,
+                )
+            }
+        }
+        // The card already states the need and carries the buttons.
+        composeRule.onNodeWithText("Which database?").assertIsDisplayed()
+        composeRule.onNodeWithTag("working_indicator").assertDoesNotExist()
+    }
+
+    @Test
+    fun idleAgentShowsNoIndicator() {
         val entry = SessionEntry(
             entryId = "id-1",
             role = "assistant",
@@ -134,11 +212,33 @@ class ChatListTest {
                     pendingMessages = listOf(PendingUserMessage("local-1", "Steer the agent", MessageDeliveryState.QUEUED)),
                     detailsVisible = false,
                     starting = false,
+                    agentStatus = "idle",
                 )
             }
         }
         composeRule.onNodeWithText("first reply").assertIsDisplayed()
-        composeRule.onNodeWithTag("starting_session").assertDoesNotExist()
+        composeRule.onNodeWithTag("working_indicator").assertDoesNotExist()
+    }
+
+    @Test
+    fun reduceMotionStillRendersTheIndicatorAndItsTimer() {
+        // Reduce motion drops the ripple animation, not the surface: the
+        // static ring, the label, and the timer all stay.
+        composeRule.setContent {
+            CompositionLocalProvider(LocalReduceMotion provides true) {
+                CockpitTheme {
+                    ChatList(
+                        entries = emptyList(),
+                        detailsVisible = false,
+                        agentStatus = "working",
+                        statusSinceMs = System.currentTimeMillis() - 3_000,
+                    )
+                }
+            }
+        }
+        composeRule.onNodeWithTag("working_indicator").assertIsDisplayed()
+        composeRule.onNodeWithText("Working…").assertIsDisplayed()
+        composeRule.onNodeWithText("3s").assertIsDisplayed()
     }
 
     @Test
