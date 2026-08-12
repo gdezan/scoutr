@@ -1,5 +1,7 @@
 package dev.cockpit.app.net
 
+import dev.cockpit.app.data.CatalogAction
+import dev.cockpit.app.data.SessionAction
 import dev.cockpit.app.data.AgentKindsResponse
 import dev.cockpit.app.data.AgentsResponse
 import dev.cockpit.app.data.AttachmentResponse
@@ -96,7 +98,7 @@ class FakeCockpitApi : CockpitApi {
     override suspend fun sessionCatalog(query: String?, limit: Int?): SessionCatalogResponse =
         record("sessionCatalog", mapOf("query" to query, "limit" to limit)) { sessionCatalogResult }
 
-    override suspend fun sessionCatalogAction(action: String, path: String, text: String?): CreatedSessionResponse =
+    override suspend fun sessionCatalogAction(action: CatalogAction, path: String, text: String?): CreatedSessionResponse =
         record("sessionCatalogAction", mapOf("action" to action, "path" to path, "text" to text)) { catalogActionResult }
 
     override suspend fun createSession(
@@ -118,7 +120,7 @@ class FakeCockpitApi : CockpitApi {
         ),
     ) { createSessionResult }
 
-    override suspend fun controlSession(paneId: String, action: String, text: String?): ControlResponse =
+    override suspend fun controlSession(paneId: String, action: SessionAction, text: String?): ControlResponse =
         record("controlSession", mapOf("paneId" to paneId, "action" to action, "text" to text)) { controlResult }
 
     override suspend fun models(agent: String?): ModelsCatalogResponse =

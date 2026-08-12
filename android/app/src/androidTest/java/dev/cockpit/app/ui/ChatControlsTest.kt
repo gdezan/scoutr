@@ -130,6 +130,54 @@ class ChatControlsTest {
     }
 
     @Test
+    fun overflowMenuRendersFromCapabilitySet() {
+        // Table-driven over capability sets served through the real bridge:
+        // the overflow menu shows exactly the verbs the backend advertises
+        // (plus Live output, which is not a wire verb), unknown verbs are
+        // dropped, and an empty set leaves only Live output.
+        val store = ConnectionStore(InstrumentationRegistry.getInstrumentation().targetContext)
+        store.save(server.url("/").toString().trimEnd('/'), "t", null, null)
+        val bridge = BridgeClient(OkHttpClient.Builder().readTimeout(5, TimeUnit.SECONDS).build(), store)
+        val vm = ChatViewModel(bridge, "w1:p1", null, "working")
+
+        compose.setContent { ChatScreen(viewModel = vm, onBack = {}) }
+        compose.waitUntil(timeoutMillis = 10_000) {
+            compose.onAllNodes(hasTestTag("chat_controls")).fetchSemanticsNodes().isNotEmpty()
+        }
+        val allMenuLabels = listOf(
+            "Abort response", "Retry last message", "Compact context",
+            "Fork session", "Rename session…", "Close session…",
+        )
+        val rows = listOf(
+            listOf("abort", "retry", "compact", "fork", "rename", "close") to allMenuLabels,
+            listOf("abort", "compact", "close", "set_model") to
+                listOf("Abort response", "Compact context", "Close session…"),
+            listOf("abort", "no_such_verb") to listOf("Abort response"),
+            emptyList<String>() to emptyList(),
+        )
+        rows.forEach { (capabilities, present) ->
+            agentCardJson =
+                """{"ok":true,"agents":[{"paneId":"w1:p1","workspaceId":"w1","tabId":"t1","agent":"pi","agentKind":"pi","displayName":"Pi","capabilities":${capabilities.joinToString(prefix = "[", postfix = "]") { "\"$it\"" }},"status":"working","sessionPath":"/tmp/pi.jsonl"}]}"""
+            // The VM polls every 2.5s; the next poll picks the new card up.
+            compose.waitUntil(timeoutMillis = 10_000) { vm.ui.value.capabilities == capabilities }
+
+            compose.onNodeWithTag("chat_controls").performClick()
+            if (present.isNotEmpty()) {
+                compose.waitUntil(timeoutMillis = 5_000) {
+                    compose.onAllNodesWithText(present.first()).fetchSemanticsNodes().isNotEmpty()
+                }
+            }
+            present.forEach { label -> compose.onNodeWithText(label).assertIsDisplayed() }
+            allMenuLabels.filter { it !in present }.forEach { label ->
+                compose.onNodeWithText(label).assertDoesNotExist()
+            }
+            // Dismiss the open menu before the next row.
+            androidx.test.espresso.Espresso.pressBack()
+            compose.waitForIdle()
+        }
+    }
+
+    @Test
     fun headerTogglesIndependentlyControlThinkingAndToolCalls() {
         richEntries = true
         val store = ConnectionStore(InstrumentationRegistry.getInstrumentation().targetContext)

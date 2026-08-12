@@ -1,5 +1,7 @@
 package dev.cockpit.app.state
 
+import dev.cockpit.app.data.CatalogAction
+import dev.cockpit.app.data.SessionAction
 import dev.cockpit.app.data.ConnectionStore
 import dev.cockpit.app.data.CreatedSessionResponse
 import dev.cockpit.app.data.SessionCatalogItem
@@ -124,7 +126,7 @@ class SessionHistoryViewModelTest {
         assertTrue(ok)
         assertNull(viewModel.ui.value.busyPath)
         val rename = fake.calls.last { it.name == "sessionCatalogAction" }
-        assertEquals("rename", rename.args["action"])
+        assertEquals(CatalogAction.Rename, rename.args["action"])
         assertEquals("New title", rename.args["text"])
     }
 
@@ -150,7 +152,7 @@ class SessionHistoryViewModelTest {
         assertTrue(ok)
         val control = fake.calls.last { it.name == "controlSession" }
         assertEquals("pane1", control.args["paneId"])
-        assertEquals("close", control.args["action"])
+        assertEquals(SessionAction.Close, control.args["action"])
     }
 
     @Test

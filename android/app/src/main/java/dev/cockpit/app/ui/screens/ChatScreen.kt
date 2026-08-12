@@ -95,6 +95,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import dev.cockpit.app.data.SessionAction
+import dev.cockpit.app.data.toSessionActions
 import dev.cockpit.app.data.ContentBlock
 import dev.cockpit.app.data.SessionEntry
 import dev.cockpit.app.data.QuestionEntry
@@ -168,9 +170,9 @@ fun ChatScreen(
             onOpenLiveOutput = onOpenLiveOutput,
             onControl = { action ->
                 when (action) {
-                    "rename" -> renameOpen = true
-                    "close" -> closeOpen = true
-                    "retry" -> viewModel.control("retry", ui.lastUserMessage)
+                    SessionAction.Rename -> renameOpen = true
+                    SessionAction.Close -> closeOpen = true
+                    SessionAction.Retry -> viewModel.control(SessionAction.Retry, ui.lastUserMessage)
                     else -> viewModel.control(action)
                 }
             },
@@ -295,7 +297,7 @@ fun ChatScreen(
             confirmButton = {
                 TextButton(
                     onClick = {
-                        if (label.isNotBlank()) viewModel.control("rename", label.trim())
+                        if (label.isNotBlank()) viewModel.control(SessionAction.Rename, label.trim())
                         renameOpen = false
                     },
                 ) { Text("Rename") }
@@ -315,7 +317,7 @@ fun ChatScreen(
                 TextButton(
                     onClick = {
                         closeOpen = false
-                        viewModel.control("close", onSuccess = onBack)
+                        viewModel.control(SessionAction.Close, onSuccess = onBack)
                     },
                 ) { Text("Close session", color = MaterialTheme.colorScheme.error) }
             },
@@ -329,12 +331,22 @@ fun ChatScreen(
     if (configurationOpen) {
         ConversationConfigSheet(
             ui = ui,
-            onSelectModel = { viewModel.control("set_model", it) },
-            onSelectThinking = { viewModel.control("set_thinking", it) },
+            onSelectModel = { viewModel.control(SessionAction.SetModel, it) },
+            onSelectThinking = { viewModel.control(SessionAction.SetThinking, it) },
             onDismiss = { configurationOpen = false },
         )
     }
 }
+
+/** The overflow-menu surface: everything except the sheet-only model/thinking verbs. */
+private val DEFAULT_MENU_ACTIONS = setOf(
+    SessionAction.Abort,
+    SessionAction.Retry,
+    SessionAction.Compact,
+    SessionAction.Fork,
+    SessionAction.Rename,
+    SessionAction.Close,
+)
 
 @Composable
 private fun ChatHeader(
@@ -352,7 +364,7 @@ private fun ChatHeader(
     onOpenConfiguration: () -> Unit,
     onBack: () -> Unit,
     onOpenLiveOutput: () -> Unit,
-    onControl: (String) -> Unit,
+    onControl: (SessionAction) -> Unit,
 ) {
     Column(Modifier.fillMaxWidth()) {
         Row(
@@ -419,19 +431,13 @@ private fun ChatHeader(
                     )
                     // Null capabilities mean the backend is unknown yet; show the
                     // full pi surface until the first agents poll names it.
-                    val all = listOf(
-                        "abort" to "Abort response",
-                        "retry" to "Retry last message",
-                        "compact" to "Compact context",
-                        "fork" to "Fork session",
-                        "rename" to "Rename session…",
-                        "close" to "Close session…",
-                    )
-                    val items = if (capabilities == null) all
-                    else all.filter { (action, _) -> action in capabilities }
-                    items.forEach { (action, label) ->
+                    // Rendered from the decoded set in enum declaration order
+                    // (Set iteration does not preserve menu order).
+                    val available = capabilities?.toSessionActions() ?: DEFAULT_MENU_ACTIONS
+                    SessionAction.entries.forEach { action ->
+                        if (action !in DEFAULT_MENU_ACTIONS || action !in available) return@forEach
                         DropdownMenuItem(
-                            text = { Text(label) },
+                            text = { Text(action.label) },
                             onClick = {
                                 menuOpen = false
                                 onControl(action)
@@ -451,7 +457,7 @@ private fun ChatHeader(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             HeaderStatusChip(status, Modifier.height(IntrinsicSize.Min))
-            if (capabilities == null || "set_thinking" in capabilities) {
+            if (capabilities == null || SessionAction.SetThinking.wire in capabilities) {
                 HeaderConfigurationChip(
                     label = "Thinking",
                     value = thinkingLevel ?: "…",

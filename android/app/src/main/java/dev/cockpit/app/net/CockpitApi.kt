@@ -1,5 +1,7 @@
 package dev.cockpit.app.net
 
+import dev.cockpit.app.data.CatalogAction
+import dev.cockpit.app.data.SessionAction
 import dev.cockpit.app.data.AgentKindsResponse
 import dev.cockpit.app.data.AgentsResponse
 import dev.cockpit.app.data.AttachmentResponse
@@ -31,7 +33,7 @@ interface CockpitApi {
     suspend fun agents(): AgentsResponse
     suspend fun session(path: String, since: String? = null): SessionReadResponse
     suspend fun sessionCatalog(query: String? = null, limit: Int? = null): SessionCatalogResponse
-    suspend fun sessionCatalogAction(action: String, path: String, text: String? = null): CreatedSessionResponse
+    suspend fun sessionCatalogAction(action: CatalogAction, path: String, text: String? = null): CreatedSessionResponse
     suspend fun createSession(
         cwd: String,
         model: String,
@@ -40,7 +42,7 @@ interface CockpitApi {
         thinkingLevel: String? = null,
         agent: String? = null,
     ): CreatedSessionResponse
-    suspend fun controlSession(paneId: String, action: String, text: String? = null): ControlResponse
+    suspend fun controlSession(paneId: String, action: SessionAction, text: String? = null): ControlResponse
     suspend fun models(agent: String? = null): ModelsCatalogResponse
     suspend fun commands(cwd: String? = null, agent: String? = null): CommandsCatalogResponse
     suspend fun agentKinds(): AgentKindsResponse

@@ -2,6 +2,8 @@ package dev.cockpit.app.state
 
 import dev.cockpit.app.data.AgentCard
 import dev.cockpit.app.data.AgentsResponse
+import dev.cockpit.app.data.CatalogAction
+import dev.cockpit.app.data.SessionAction
 import dev.cockpit.app.data.ConnectionStore
 import dev.cockpit.app.data.SessionCatalogItem
 import dev.cockpit.app.data.SessionCatalogResponse
@@ -124,7 +126,7 @@ class CommandPaletteViewModelTest {
         assertNull(viewModel.ui.value.busyPath)
         assertNull(viewModel.ui.value.error)
         val resume = fake.calls.last { it.name == "sessionCatalogAction" }
-        assertEquals("resume", resume.args["action"])
+        assertEquals(CatalogAction.Resume, resume.args["action"])
         assertEquals("/root/sessions/ghi.jsonl", resume.args["path"])
     }
 
@@ -133,14 +135,14 @@ class CommandPaletteViewModelTest {
         val viewModel = CommandPaletteViewModel(fake, savedConnection())
         viewModel.open()
         viewModel.waitForSettled()
-        viewModel.control("pane1", "abort")
+        viewModel.control("pane1", SessionAction.Abort)
         viewModel.waitForIdle()
 
         assertNull(viewModel.ui.value.busyPaneId)
         assertNull(viewModel.ui.value.error)
         val control = fake.calls.last { it.name == "controlSession" }
         assertEquals("pane1", control.args["paneId"])
-        assertEquals("abort", control.args["action"])
+        assertEquals(SessionAction.Abort, control.args["action"])
     }
 
     @Test

@@ -1,5 +1,7 @@
 package dev.cockpit.app.net
 
+import dev.cockpit.app.data.CatalogAction
+import dev.cockpit.app.data.SessionAction
 import dev.cockpit.app.data.AgentKindsResponse
 import dev.cockpit.app.data.AgentsResponse
 import dev.cockpit.app.data.AttachmentResponse
@@ -204,11 +206,11 @@ class BridgeClient(
 
     /** Resume/fork/rename/delete a stored session. Resume returns pane+workspace ids. */
     override suspend fun sessionCatalogAction(
-        action: String,
+        action: CatalogAction,
         path: String,
         text: String?,
     ): CreatedSessionResponse = call(
-        "/api/session-catalog/$action",
+        "/api/session-catalog/${action.wire}",
         body = buildJsonObject {
             put("path", JsonPrimitive(path))
             if (text != null) put("text", JsonPrimitive(text))
@@ -259,11 +261,11 @@ class BridgeClient(
     }
 
     /** One pane control action: abort/retry/compact/fork/rename/close/set_model/set_thinking. */
-    override suspend fun controlSession(paneId: String, action: String, text: String?): ControlResponse =
+    override suspend fun controlSession(paneId: String, action: SessionAction, text: String?): ControlResponse =
         call(
             "/api/sessions/${paneId}/control",
             body = buildJsonObject {
-                put("action", JsonPrimitive(action))
+                put("action", JsonPrimitive(action.wire))
                 if (text != null) put("text", JsonPrimitive(text))
             }.toString().toRequestBody("application/json".toMediaType()),
         ) { json.decodeFromString(ControlResponse.serializer(), it) }

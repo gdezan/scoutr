@@ -2,6 +2,8 @@ package dev.cockpit.app.state
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import dev.cockpit.app.data.SessionAction
+import dev.cockpit.app.data.CatalogAction
 import dev.cockpit.app.data.ConnectionStore
 import dev.cockpit.app.data.SessionCatalogItem
 import dev.cockpit.app.data.SessionCatalogStore
@@ -130,7 +132,7 @@ class SessionHistoryViewModel(
     suspend fun resume(item: HistoryItem): ResumedSession? {
         setBusy(item, "Resuming…")
         return try {
-            val response = bridge.sessionCatalogAction("resume", item.session.path)
+            val response = bridge.sessionCatalogAction(CatalogAction.Resume, item.session.path)
             if (response.ok && response.paneId != null) {
                 ResumedSession(response.paneId, response.workspaceId)
             } else null
@@ -145,7 +147,7 @@ class SessionHistoryViewModel(
     suspend fun fork(item: HistoryItem): ResumedSession? {
         setBusy(item, "Forking…")
         return try {
-            val response = bridge.sessionCatalogAction("fork", item.session.path)
+            val response = bridge.sessionCatalogAction(CatalogAction.Fork, item.session.path)
             if (response.ok && response.paneId != null) {
                 ResumedSession(response.paneId, response.workspaceId)
             } else null
@@ -160,7 +162,7 @@ class SessionHistoryViewModel(
     suspend fun rename(item: HistoryItem, newName: String): Boolean {
         setBusy(item, "Renaming…")
         return try {
-            val response = bridge.sessionCatalogAction("rename", item.session.path, text = newName)
+            val response = bridge.sessionCatalogAction(CatalogAction.Rename, item.session.path, text = newName)
             response.ok
         } catch (e: Exception) {
             reportError(e)
@@ -179,7 +181,7 @@ class SessionHistoryViewModel(
                 reportError("Session has no live pane to close")
                 return false
             }
-            bridge.controlSession(paneId, "close").ok
+            bridge.controlSession(paneId, SessionAction.Close).ok
         } catch (e: Exception) {
             reportError(e)
             false
@@ -192,7 +194,7 @@ class SessionHistoryViewModel(
     suspend fun delete(item: HistoryItem): Boolean {
         setBusy(item, "Deleting…")
         return try {
-            val response = bridge.sessionCatalogAction("delete", item.session.path)
+            val response = bridge.sessionCatalogAction(CatalogAction.Delete, item.session.path)
             if (response.ok) {
                 store.setPinned(item.session.path, false)
                 store.setArchived(item.session.path, false)

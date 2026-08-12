@@ -2,6 +2,7 @@ package dev.cockpit.app.state
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import dev.cockpit.app.data.SessionAction
 import dev.cockpit.app.data.AgentCard
 import dev.cockpit.app.data.BoardState
 import dev.cockpit.app.data.ConnectionStore
@@ -137,7 +138,7 @@ class BoardViewModel(
     fun closeAgent(paneId: String) {
         viewModelScope.launch {
             try {
-                bridge.controlSession(paneId, "close")
+                bridge.controlSession(paneId, SessionAction.Close)
             } catch (e: IOException) {
                 reportError(e.message ?: "could not close agent")
             }

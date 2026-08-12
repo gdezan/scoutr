@@ -1,6 +1,8 @@
 package dev.cockpit.app.state
 
 import android.os.Looper
+import dev.cockpit.app.data.CatalogAction
+import dev.cockpit.app.data.SessionAction
 import dev.cockpit.app.data.ConnectionStore
 import dev.cockpit.app.net.BridgeException
 import dev.cockpit.app.net.FakeCockpitApi
@@ -50,7 +52,7 @@ class BoardViewModelTest {
         shadowOf(Looper.getMainLooper()).idle()
         val control = controls().single()
         assertEquals("p1", control["paneId"])
-        assertEquals("close", control["action"])
+        assertEquals(SessionAction.Close, control["action"])
         assertTrue("no error on success", viewModel.ui.value.error == null)
     }
 

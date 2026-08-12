@@ -2,6 +2,7 @@ package dev.cockpit.app.state
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import dev.cockpit.app.data.SessionAction
 import dev.cockpit.app.data.ModelInfo
 import dev.cockpit.app.data.QuestionEntry
 import dev.cockpit.app.data.ModelProvider
@@ -254,7 +255,7 @@ data class ChatUiState(
 
     /** Derived: set_thinking is only offered when the backend advertises it. */
     val canSetThinking: Boolean
-        get() = capabilities == null || "set_thinking" in capabilities
+        get() = capabilities == null || SessionAction.SetThinking.wire in capabilities
 
     /**
      * True while a question card is still waiting for an answer. Answered
@@ -463,10 +464,10 @@ class ChatViewModel(
     }
 
     /** Run a lifecycle action or select an explicit model/thinking level. */
-    fun control(action: String, text: String? = null, onSuccess: () -> Unit = {}) {
+    fun control(action: SessionAction, text: String? = null, onSuccess: () -> Unit = {}) {
         viewModelScope.launch {
-            val configurationAction = action == "set_model" || action == "set_thinking"
-            if (action == "set_thinking" && !_ui.value.canSetThinking) {
+            val configurationAction = action == SessionAction.SetModel || action == SessionAction.SetThinking
+            if (action == SessionAction.SetThinking && !_ui.value.canSetThinking) {
                 _ui.update {
                     it.copy(
                         configActionBusy = false,
@@ -490,8 +491,8 @@ class ChatViewModel(
                     it.copy(
                         sending = false,
                         configActionBusy = false,
-                        model = if (action == "set_model") text else it.model,
-                        thinkingLevel = if (action == "set_thinking") text else it.thinkingLevel,
+                        model = if (action == SessionAction.SetModel) text else it.model,
+                        thinkingLevel = if (action == SessionAction.SetThinking) text else it.thinkingLevel,
                     )
                 }
                 onSuccess()

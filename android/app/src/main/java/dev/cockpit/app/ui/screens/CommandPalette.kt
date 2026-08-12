@@ -48,6 +48,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import dev.cockpit.app.CockpitApp
 import dev.cockpit.app.ui.components.CockpitTextField
+import dev.cockpit.app.data.SessionAction
 import dev.cockpit.app.state.CommandPaletteViewModel
 import dev.cockpit.app.state.PaletteResult
 import dev.cockpit.app.state.PaletteResultKind
@@ -150,8 +151,8 @@ fun CommandPalette(
                                 }
                             },
                             onResume = { viewModel.resume(result.sessionPath ?: "") },
-                            onAbort = { viewModel.control(result.paneId ?: "", "abort") },
-                            onClose = { viewModel.control(result.paneId ?: "", "close") },
+                            onAbort = { viewModel.control(result.paneId ?: "", SessionAction.Abort) },
+                            onClose = { viewModel.control(result.paneId ?: "", SessionAction.Close) },
                         )
                     }
                 }

@@ -3,6 +3,8 @@ package dev.cockpit.app.state
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import dev.cockpit.app.data.SessionAction
+import dev.cockpit.app.data.CatalogAction
 import dev.cockpit.app.data.ConnectionStore
 import dev.cockpit.app.data.SessionCatalogItem
 import dev.cockpit.app.net.CockpitApi
@@ -130,7 +132,7 @@ class CommandPaletteViewModel(
         viewModelScope.launch {
             _ui.update { it.copy(busyPath = path, error = null) }
             try {
-                bridge.sessionCatalogAction("resume", path)
+                bridge.sessionCatalogAction(CatalogAction.Resume, path)
                 _ui.update { it.copy(busyPath = null) }
             } catch (error: Exception) {
                 _ui.update { it.copy(busyPath = null, error = error.message ?: "Resume failed") }
@@ -138,7 +140,7 @@ class CommandPaletteViewModel(
         }
     }
 
-    fun control(paneId: String, action: String) {
+    fun control(paneId: String, action: SessionAction) {
         viewModelScope.launch {
             _ui.update { it.copy(busyPaneId = paneId, error = null) }
             try {
