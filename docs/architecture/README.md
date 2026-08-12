@@ -33,39 +33,34 @@ and four hand-maintained lists that must agree for a new tab to appear.
 
 | # | Plan | Strength | Unlocks |
 |---|---|---|---|
-| 1 | [Agent backend seam in the bridge](01-agent-backend-seam.md) | **Strong** | A second agent at all |
-| 2 | [One transcript module, three parsers deleted](02-transcript-module.md) | **Shipped** | Prerequisite for 1 |
-| 3 | [Herdr port + route table so the HTTP surface is actually tested](03-bridge-route-table-and-herdr-fake.md) | **Strong** | Safe change to 1 and 2 |
-| 4 | [A `CockpitApi` seam on Android](04-android-cockpit-api-seam.md) | **Strong** | Testable features + WS coverage |
-| 5 | [Capability-driven session actions](05-capability-driven-session-actions.md) | Worth exploring | Per-agent control sets |
-| 6 | [A `Poller` and a `Loadable` for the ViewModels](06-android-poller-and-loadable.md) | Worth exploring | Cheaper screens |
-| 7 | [Navigation registry](07-navigation-registry.md) | Worth exploring | Cheaper tabs |
+| 1 | [Agent backend seam in the bridge](01-agent-backend-seam.md) | **Shipped** (`688c020`) | A second agent at all |
+| 2 | [One transcript module, three parsers deleted](02-transcript-module.md) | **Shipped** (`f48c82c`) | Prerequisite for 1 |
+| 3 | [Herdr port + route table so the HTTP surface is actually tested](03-bridge-route-table-and-herdr-fake.md) | **Shipped** (`3c612bc`, `86a5b7a`) | Safe change to 1 and 2 |
+| 4 | [A `CockpitApi` seam on Android](04-android-cockpit-api-seam.md) | **Shipped** (`491e50c`) | Testable features + WS coverage |
+| 5 | [Capability-driven session actions](05-capability-driven-session-actions.md) | **Shipped** (`20bb93b`) | Per-agent control sets |
+| 6 | [A `Poller` and a `Loadable` for the ViewModels](06-android-poller-and-loadable.md) | **Shipped** (`fad4d24`) | Cheaper screens |
+| 7 | [Navigation registry](07-navigation-registry.md) | **Shipped** (`d46a6a4`) | Cheaper tabs |
 
 ## Top recommendation
 
-**Start with plan 2, then plan 3, then plan 1.** Plan 2 shipped on 2026-08-11 as
-`bridge/src/transcript.ts`; its `Transcript` type is the return shape plan 1's adapters
-should produce.
+**All seven plans shipped, in the order the sequencing section predicted.**
+Plan 2 landed first (`f48c82c`, one `bridge/src/transcript.ts`), plan 3 made the route
+layer testable offline (`3c612bc`, `86a5b7a`), plan 1 landed last and cheap (`688c020` —
+the seam the analysis below argues for), then 4 (`491e50c`), 6 (`fad4d24`), 5
+(`20bb93b`), and 7 (`d46a6a4`) on the Android side. The table above is now a historical
+record; the analysis prose below still explains *why* each plan had that shape.
 
-Plan 1 is the goal, but attempting it first means rewriting three duplicated parsers and
-a router whose tests silently skip (`bridge/test/server.test.ts:16` gates the entire HTTP
-suite on a live herdr socket existing). That is a refactor with no net.
-
-Plan 2 is pure consolidation with excellent existing coverage — `pi-session.test.ts`,
-`session-catalog.test.ts`, and `board-detail.test.ts` already pin the behaviour of all
-three parsers, so collapsing them is verifiable on the first run. Plan 3 then makes the
-route layer testable offline, which is what turns plan 1 from a leap into a series of
-small green steps. Plan 1 lands last and lands cheap.
-
-Plans 4–7 are independent of 1–3 and can proceed in parallel; plan 4 is the one with real
-leverage on the Android side, and plan 5 only becomes urgent once plan 1 ships.
+Live planning has moved to the implementation campaign in `plans/` (001–009, execution
+ledger in `docs/PLAN-EXECUTION-REPORT.md`); read `plans/README.md` for the current
+status. If a third agent backend or a new screen seam ships, only the commit column of
+this table needs touching.
 
 ## Sequencing
 
 ```
-2 ──▶ 3 ──▶ 1 ──▶ 5
-4 ──▶ 6
-7 (standalone)
+2 ──▶ 3 ──▶ 1 ──▶ 5   (all executed)
+4 ──▶ 6               (executed)
+7 (standalone)        (executed)
 ```
 
 ## Notes on prior decisions

@@ -6,14 +6,14 @@
 
 Cockpit is a self-hosted mobile cockpit for herdr panes and pi agents: a Node/TS bridge daemon owns the herdr Unix socket and exposes a private HTTP/WS API; the Android app (Kotlin + Jetpack Compose Material 3, package `dev.cockpit.app`) talks only to that API.
 
-- `bridge/` — Node/TS daemon. Entry: `src/cli.ts serve` (server.ts only exports `createCockpitServer`). Per-feature modules: `herdr/` (socket client + feed), `transcript.ts` (the one JSONL parser — chat, catalog, and board all read through it), `sessions.ts`, `session-catalog.ts`, `questions.ts`, `pi/commands.ts`, `live-output.ts`, `review.ts`, `attachments.ts`, `notify.ts`, `board-detail.ts`, `usage/`. Tests live in `bridge/test/` and run with `npm run typecheck && npm test` (`node --import tsx --test`).
+- `bridge/` — Node/TS daemon. Entry: `src/cli.ts serve` (server.ts only exports `createCockpitServer`). Per-feature modules: `herdr/` (socket client + feed + `port.ts` seam), `routes/` (route table + dispatcher owning auth/body/error-mapping; one module per feature), `agents/` (backend registry; `agents/pi/` and `agents/claude/` adapters; `agents/types.ts` is the `AgentBackend` interface), `transcript.ts` (the one JSONL parser — chat, catalog, and board all read through it), `sessions.ts`, `session-catalog.ts`, `questions.ts`, `commands.ts`, `live-output.ts`, `review.ts`, `attachments.ts`, `notify.ts`, `board-detail.ts`, `usage/`. Tests live in `bridge/test/` and run with `npm run typecheck && npm test` (`node --import tsx --test`); offline HTTP tests build on the fakes in `bridge/test/support/` (`fake-herdr.ts`, `fake-feed.ts`) behind the `HerdrPort` seam.
 - `android/` — Compose app, manual DI via `CockpitApp.AppContainer` (no Hilt/Room). Source dirs under `app/src/main/java/dev/cockpit/app/`: `data/` (DTOs + SharedPreferences stores), `net/` (BridgeClient behind the `CockpitApi` interface, NtfyClient), `state/` (ViewModels), `service/` (monitor service, deep links, reply receiver), `ui/components/`, `ui/screens/`, `ui/theme/` (Theme.kt + DiffPalette.kt), `ui/motion/` (motion vocabulary + haptics).
 - Design contract: always-dark Material 3, one accent `#5B8CFF` reserved for AI-owned states, calm surface cards, mono only for paths/commands/tool output, state is the color. See `ui/theme/Theme.kt` and `docs/DESIGN.md`.
 - Motion vocabulary: nothing bounces or spins (`ui/motion/Motion.kt`). The one looping animation in the app is the working indicator's expanding ripple (`ui/components/WorkingIndicator.kt`) — it expands rather than rotates, which is why it does not violate the no-spin rule; under `LocalReduceMotion` it collapses to a static ring. Prefer it over `CircularProgressIndicator` for agent-busy states.
 - Status→color is one language across screens: `blocked/NeedsYou → error`, `working → primary`, `done → secondary` (`ui/screens/BoardScreen.kt`, `ui/components/WorkingIndicator.kt`).
 - Live output is an escape hatch, not ambient chrome: the raw pane tail lives on its own route (`chat/{paneId}/live`, opened from the session menu) and `LiveOutputViewModel`'s poll runs only while that screen is visible. Do not reintroduce output text onto the chat screen — its busy signal is the working indicator.
 - Long-running goal contract: `docs/production-goal-checklist.md` (live item map) with `docs/COMPLETION-REPORT.md` and `docs/AUDIT.md`.
-- Extendability plans (adding a second agent backend, new screens/endpoints): `docs/architecture/README.md` — read before any refactor in `bridge/src/pi/`, `bridge/src/sessions.ts`, `bridge/src/server.ts`, or `android/…/net/BridgeClient.kt`.
+- Extendability plans (adding a second agent backend, new screens/endpoints): `docs/architecture/README.md` — read before any refactor in `bridge/src/agents/` (and its `pi/`, `claude/` subdirs), `bridge/src/routes/`, `bridge/src/sessions.ts`, `bridge/src/server.ts`, or `android/…/net/BridgeClient.kt`.
 - Verification recipes and traps: `docs/dev-workflow.md`; the `skills/cockpit-verification/SKILL.md` skill bundles the same loop (install to `~/.pi/agent/skills/` to make it loadable from any repo).
 
 ## Verification workflow
@@ -21,7 +21,7 @@ Cockpit is a self-hosted mobile cockpit for herdr panes and pi agents: a Node/TS
 Run these before committing UI/bridge work, and treat them as the acceptance gates:
 
 ```bash
-cd bridge && npm run typecheck && npm test                       # ~172 tests, ~90s
+cd bridge && npm run typecheck && npm test                       # 286 tests / 43 suites, ~10s
 cd android && ANDROID_HOME=$HOME/Android/sdk ./gradlew testDebugUnitTest --rerun-tasks
 cd android && ANDROID_HOME=$HOME/Android/sdk ./gradlew pixel2api36DebugAndroidTest   # Gradle Managed Device, ~2 min
 cd android && ANDROID_HOME=$HOME/Android/sdk ./gradlew assembleDebug
@@ -39,7 +39,7 @@ that is what makes it expensive. Bound it up front instead of discovering it aft
    `node --test`, `--timeout` for `herdr agent prompt --wait` / `herdr agent wait`, `-timeout` for gradle. A
    command with no natural end (`tail -f`, `adb logcat`) needs one every time.
 2. **Decide the expected duration first, then hold it to ~2x.** `cd bridge && npm test` is
-   ~90s; gradle managed-device tests are ~2 min. Past twice that, kill it and diagnose —
+   ~10s; gradle managed-device tests are ~2 min. Past twice that, kill it and diagnose —
    never re-run the same unbounded command hoping it finishes.
 3. **Never poll with a pattern that matches your own shell.** `pgrep -f 'import tsx test/'`
    in an `until` loop matches the loop's own command line and so never exits. Bracket the

@@ -7,7 +7,7 @@ traps. AGENTS.md points here for the details.
 ## The two halves
 
 - **Bridge** (`bridge/`): Node/TS daemon. `npm run typecheck && npm test`
-  (≈147 tests via `node --import tsx --test`). The daemon entry is
+  (the live test count lives in `AGENTS.md` only — it rots per commit). The daemon entry is
   `src/cli.ts serve` — `src/server.ts` only exports `createCockpitServer`
   and does nothing when run directly.
 - **Android** (`android/`): Compose app. Unit tests: `./gradlew

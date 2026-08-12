@@ -9,21 +9,23 @@ subscriptions.
 │  Android    │ ──────────────────────► │  cockpit-    │ ────────────► │  herdr 0.8  │
 │  app (Cockpit)│                        │  bridge      │               │  (socket)   │
 └─────────────┘                         └──────┬───────┘               └─────────────┘
-                                               │ spawns `pi --mode rpc`
+                                               │ creates a herdr pane
                                                ▼
                                     ┌───────────────────────┐
-                                    │  pi RPC sessions      │
-                                    │  (app-owned chat)     │
+                                    │  herdr pane           │
+                                    │  (pi / claude agent)  │
                                     └───────────────────────┘
 ```
 
 - **bridge/** — Node/TS daemon. Owns the herdr Unix socket (never exposes it
   raw), serves a token-authenticated HTTP + WebSocket API on localhost, fronted
   by `tailscale serve` TLS. Publishes blocked/done events to a self-hosted
-  ntfy. Spawns app-owned `pi --mode rpc` sessions.
+  ntfy. New chats are herdr panes: the bridge creates the pane and the agent
+  CLI runs inside it (`pi --model …` or `claude …`); the bridge never spawns
+  agent processes itself.
 - **android/** — Kotlin + Jetpack Compose (Material 3, dark-first) app:
-  live agent board, chat + steering (live panes and RPC sessions), usage rings,
-  ntfy push notifications.
+  live agent board, chat + steering of live panes, usage rings, ntfy push
+  notifications.
 
 Verified against herdr 0.8.0 (protocol 19) and pi (node 26 / mise).
 
@@ -34,7 +36,7 @@ Verified against herdr 0.8.0 (protocol 19) and pi (node 26 / mise).
 | Thing | Notes |
 |---|---|
 | herdr ≥ 0.8.0 running | `herdr --version`; socket at `~/.config/herdr/herdr.sock` |
-| pi installed | used for RPC sessions; `~/.local/bin/pi` or mise `node/26/bin/pi` |
+| pi installed | agent CLI for chat panes; `~/.local/bin/pi` or mise `node/26/bin/pi` |
 | Node ≥ 22 | tested on node 26 |
 | Tailscale | the phone and this machine on the same tailnet |
 | ntfy (optional but recommended) | for push; one binary, see step 3 |
@@ -45,7 +47,7 @@ Check the bridge can see herdr before going further:
 cd bridge
 npm install
 npm run build        # tsc -> dist/
-npm test             # 36 tests (socket client, parser, usage, RPC, ntfy)
+npm test             # socket client, transcript parsing, routes offline via fake herdr, usage, ntfy, agents
 npm run cli -- herdr status    # smoke: ping + version + protocol
 ```
 
@@ -290,14 +292,19 @@ today looks like: `adb pair 100.78.204.15:<port> <code>` then
 | Tailnet paths | `/` → bridge, `/ntfy` → ntfy |
 | Pairing token | `cockpit_<18 random bytes>` in config.json (0600) |
 | ntfy topic | `cockpit_<12 random bytes>` (shared secret, also in config.json) |
-| Env override `PI_BIN` | path to the pi script (else `~/.local/bin/pi`, mise paths, PATH) |
-| Env override `PI_NODE_BIN` | node used to run pi (else the node next to pi, mise paths) |
+| `XDG_CONFIG_HOME` | config dir for `config.json` (else `~/.config/cockpit/`) |
+| `HERDR_SOCKET_PATH` | herdr Unix socket (else `~/.config/herdr/herdr.sock`) |
+| `COCKPIT_REPO_ROOTS` | allow-list of review roots (403 outside it; appears in the 403 message) |
+| `PI_CODING_AGENT_DIR` | pi agent dir for usage/models (else `~/.pi/agent`) |
+| `PI_CODING_AGENT_SESSION_DIR` | pi session dir for the catalog (else the agent dir's `sessions/`) |
+| `PI_BIN` | path to the pi script (else `~/.local/bin/pi`, mise paths, PATH) |
+| `PI_NODE_BIN` | node used to run pi (else the node next to pi, mise paths) |
 | `publicHost` / `COCKPIT_PUBLIC_HOST` | public bridge URL for QR pairing (else tailscale DNS name, else loopback) |
 | App data | SharedPreferences `cockpit_connection` (host, token, ntfy) |
 
 ---
 
-## 7. Security notes
+## 8. Security notes
 
 - The herdr socket is **never exposed** over the network. The bridge is the
   only process that opens it, and it only accepts loopback connections
@@ -309,24 +316,26 @@ today looks like: `adb pair 100.78.204.15:<port> <code>` then
 - `tailscale serve` restricts the API to your tailnet; the token is a second
   layer on top.
 
-## 8. Troubleshooting
+## 9. Troubleshooting
 
 | Symptom | Fix |
 |---|---|
 | `serve` exits 127 | systemd unit must use the absolute node path (mise bin), not `node` |
-| RPC session fails "spawn pi ENOENT" | bridge runs without a mise PATH — it resolves known pi paths, or set `PI_BIN` / `PI_NODE_BIN` in the unit |
 | stale API after code changes | `npm run build` first, then `systemctl --user restart cockpit-bridge` |
 | 401 on curl/ws | export the token: `TOKEN=$(...); curl -H "Authorization: Bearer $TOKEN" ...` (a bare shell var is not exported to child processes) |
 | ntfy shows raw JSON as message | the bridge POSTs JSON to the ntfy root `/`; if you published to `/<topic>`, messages already stored that way stay raw |
-| push doesn't arrive on the phone | app polls every 30s; check `https://<host>.ts.net/ntfy/v1/health`; grant POST_NOTIFICATIONS (Android 13+) |
+| push doesn't arrive on the phone | the app polls while a screen is visible (board 3s, chat 2.5s); check `https://<host>.ts.net/ntfy/v1/health`; grant POST_NOTIFICATIONS (Android 13+) |
 | app shows "Disconnected" forever | board polls unconditionally after connect — it recovers when the bridge returns; check the bridge is up |
 | WS steer crashes the app | the long-lived WS feed was removed in favor of 3s polling; use the current APK |
 
-## 9. Known limits (v1)
+## 10. Known limits (v1)
 
 - No live terminal rendering (herdr `terminal observe/control` is the v2 path).
-- Claude Code: status + steer work via herdr; transcripts are not exposed (the
-  session path guard is pi-only).
+- Claude Code: status, steer, and transcripts all work via herdr — the session
+  path guard is multi-backend. Residual limits: no fork-at-path resume (use
+  `/fork` inside the session), no model catalog (the app hides the model
+  picker), and a smaller control set (`abort`, `compact`, `close`,
+  `set_model`).
 - Time-in-state pills only track agents whose status events flow (pi panes).
 - Push to a **killed** app: messages accumulate on ntfy (48h) and are delivered
   on next launch via the `since` cursor. Instant delivery needs FCM or a
