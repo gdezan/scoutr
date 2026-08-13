@@ -8,12 +8,14 @@ import { modelsRoutes } from "./models.js";
 import { reviewRoutes } from "./review.js";
 import { attachmentRoutes } from "./attachments.js";
 import { sessionsRoutes } from "./sessions.js";
+import { terminalRoutes } from "./terminal.js";
 import { usageRoutes } from "./usage.js";
 
 /** Every HTTP route, grouped by feature (mirrors the src/ module layout). */
 export function buildRoutes(): Route[] {
   return [
     ...healthRoutes,
+    ...terminalRoutes,
     ...agentsRoutes,
     ...sessionsRoutes,
     ...catalogRoutes,

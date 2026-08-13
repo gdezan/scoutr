@@ -17,6 +17,8 @@ import dev.cockpit.app.data.RepoDiffResponse
 import dev.cockpit.app.data.RepoOverviewResponse
 import dev.cockpit.app.data.SessionCatalogResponse
 import dev.cockpit.app.data.SessionReadResponse
+import dev.cockpit.app.data.TerminalHierarchyCommand
+import dev.cockpit.app.data.TerminalHierarchyResponse
 import dev.cockpit.app.data.UsageResponse
 import dev.cockpit.app.data.WsFrame
 import kotlinx.serialization.Serializable
@@ -176,6 +178,14 @@ class BridgeClient(
         call("/api/attachments", query = mapOf("name" to name), body = bytes.toRequestBody(mime.toMediaType())) {
             json.decodeFromString(AttachmentResponse.serializer(), it)
         }
+
+    /** Slice 4: mutate the terminal hierarchy; 409 close conflicts surface as BridgeException(409). */
+    override suspend fun terminalHierarchy(command: TerminalHierarchyCommand): TerminalHierarchyResponse =
+        call(
+            "/api/terminal/hierarchy",
+            body = Json.encodeToString(TerminalHierarchyCommand.serializer(), command)
+                .toRequestBody("application/json".toMediaType()),
+        ) { json.decodeFromString(TerminalHierarchyResponse.serializer(), it) }
 
     /** Model catalog for a backend (defaults to pi); catalog-less backends return an empty catalog. */
     override suspend fun models(agent: String?): ModelsCatalogResponse =

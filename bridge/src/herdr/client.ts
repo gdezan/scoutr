@@ -342,6 +342,29 @@ export class HerdrClient implements HerdrPort {
   }> {
     return this.request("workspace.create", params);
   }
+  /** Create a tab in a workspace. herdr pre-creates one root pane in it. */
+  async tabCreate(params: { workspace_id?: string | null; cwd?: string | null; label?: string | null; focus?: boolean }): Promise<{
+    tab: { tab_id?: string };
+    root_pane?: { pane_id?: string };
+  }> {
+    return this.request("tab.create", params);
+  }
+
+  async tabRename(tab_id: string, label: string): Promise<unknown> {
+    return this.request("tab.rename", { tab_id, label });
+  }
+
+  async tabClose(tab_id: string): Promise<unknown> {
+    return this.request("tab.close", { tab_id });
+  }
+
+  async paneRename(pane_id: string, label: string): Promise<unknown> {
+    return this.request("pane.rename", { pane_id, label });
+  }
+
+  async paneClose(pane_id: string): Promise<unknown> {
+    return this.request("pane.close", { pane_id });
+  }
 
   async workspaceClose(workspace_id: string): Promise<unknown> {
     return this.request("workspace.close", { workspace_id });

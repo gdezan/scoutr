@@ -16,6 +16,8 @@ import dev.cockpit.app.data.RepoDiffResponse
 import dev.cockpit.app.data.RepoOverviewResponse
 import dev.cockpit.app.data.SessionCatalogResponse
 import dev.cockpit.app.data.SessionReadResponse
+import dev.cockpit.app.data.TerminalHierarchyCommand
+import dev.cockpit.app.data.TerminalHierarchyResponse
 import dev.cockpit.app.data.UsageResponse
 import dev.cockpit.app.data.WsFrame
 import kotlinx.coroutines.CompletableDeferred
@@ -58,6 +60,7 @@ class FakeCockpitApi : CockpitApi {
     var repoArtifactsResult: Result<RepoArtifactsResponse> = Result.success(RepoArtifactsResponse())
     var usageResult: Result<UsageResponse> = Result.success(UsageResponse())
     var uploadResult: Result<AttachmentResponse> = Result.success(AttachmentResponse())
+    var terminalHierarchyResult: Result<TerminalHierarchyResponse> = Result.success(TerminalHierarchyResponse(ok = true))
 
     var wsResult: Result<WsFrame> = Result.success(WsFrame(type = "ack"))
     var wsFailure: Exception? = null
@@ -145,6 +148,9 @@ class FakeCockpitApi : CockpitApi {
 
     override suspend fun uploadAttachment(name: String, mime: String, bytes: ByteArray): AttachmentResponse =
         record("uploadAttachment", mapOf("name" to name, "mime" to mime, "bytes" to bytes)) { uploadResult }
+
+    override suspend fun terminalHierarchy(command: TerminalHierarchyCommand): TerminalHierarchyResponse =
+        record("terminalHierarchy", mapOf("command" to command)) { terminalHierarchyResult }
 
     override suspend fun sendCommand(command: Map<String, String>): WsFrame {
         val json = buildJsonObject { for ((k, v) in command) put(k, JsonPrimitive(v)) }

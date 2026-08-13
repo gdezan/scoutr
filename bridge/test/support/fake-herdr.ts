@@ -64,6 +64,31 @@ export function fakeHerdr(initial: Partial<SessionSnapshot> = {}): HerdrPort & F
       throwIfFailed(takeFailure("workspaceCreate"));
       return { workspace: { workspace_id: "ws1" }, root_pane: { pane_id: "p1" } };
     },
+    async tabCreate(params) {
+      sent.push({ method: "tabCreate", params: { ...params } });
+      throwIfFailed(takeFailure("tabCreate"));
+      return { tab: { tab_id: "t1" }, root_pane: { pane_id: "p1" } };
+    },
+    async tabRename(tab_id, label) {
+      sent.push({ method: "tabRename", params: { tab_id, label } });
+      throwIfFailed(takeFailure("tabRename"));
+      return {};
+    },
+    async tabClose(tab_id) {
+      sent.push({ method: "tabClose", params: { tab_id } });
+      throwIfFailed(takeFailure("tabClose"));
+      return {};
+    },
+    async paneRename(pane_id, label) {
+      sent.push({ method: "paneRename", params: { pane_id, label } });
+      throwIfFailed(takeFailure("paneRename"));
+      return {};
+    },
+    async paneClose(pane_id) {
+      sent.push({ method: "paneClose", params: { pane_id } });
+      throwIfFailed(takeFailure("paneClose"));
+      return {};
+    },
     async workspaceRename(workspace_id, label) {
       sent.push({ method: "workspaceRename", params: { workspace_id, label } });
       throwIfFailed(takeFailure("workspaceRename"));

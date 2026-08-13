@@ -16,6 +16,17 @@ export interface HerdrPort {
     label?: string | null;
     focus?: boolean;
   }): Promise<{ workspace: { workspace_id?: string }; root_pane?: { pane_id?: string } }>;
+  /** Create a tab in a workspace; herdr pre-creates one root pane in it. */
+  tabCreate(params: {
+    workspace_id?: string | null;
+    cwd?: string | null;
+    label?: string | null;
+    focus?: boolean;
+  }): Promise<{ tab: { tab_id?: string }; root_pane?: { pane_id?: string } }>;
+  tabRename(tab_id: string, label: string): Promise<unknown>;
+  tabClose(tab_id: string): Promise<unknown>;
+  paneRename(pane_id: string, label: string): Promise<unknown>;
+  paneClose(pane_id: string): Promise<unknown>;
   workspaceRename(workspace_id: string, label: string): Promise<unknown>;
   workspaceClose(workspace_id: string): Promise<unknown>;
   paneSendInput(pane_id: string, text: string, keys?: string[]): Promise<unknown>;

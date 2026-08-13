@@ -16,6 +16,8 @@ import dev.cockpit.app.data.RepoDiffResponse
 import dev.cockpit.app.data.RepoOverviewResponse
 import dev.cockpit.app.data.SessionCatalogResponse
 import dev.cockpit.app.data.SessionReadResponse
+import dev.cockpit.app.data.TerminalHierarchyCommand
+import dev.cockpit.app.data.TerminalHierarchyResponse
 import dev.cockpit.app.data.UsageResponse
 import dev.cockpit.app.data.WsFrame
 import kotlinx.serialization.json.JsonObject
@@ -51,6 +53,13 @@ interface CockpitApi {
     suspend fun repoArtifacts(path: String): RepoArtifactsResponse
     suspend fun usage(): UsageResponse
     suspend fun uploadAttachment(name: String, mime: String, bytes: ByteArray): AttachmentResponse
+
+    /**
+     * Mutates the terminal hierarchy (Slice 4). Returns the deterministic
+     * next selection plus the fresh herdr snapshot; a stale pane count on a
+     * close surfaces as BridgeException(409).
+     */
+    suspend fun terminalHierarchy(command: TerminalHierarchyCommand): TerminalHierarchyResponse
 
     /** Opens a short-lived WS, sends one command, and waits for the first ack frame. */
     suspend fun sendCommand(command: Map<String, String>): WsFrame
