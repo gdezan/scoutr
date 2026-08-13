@@ -1,136 +1,83 @@
+# Cockpit agent instructions
+
 ## Git workflow
 
-- Work directly on `main` and commit changes there unless the user explicitly specifies another branch or workflow.
+- Work directly on `main` and commit there unless the user explicitly specifies another branch or workflow.
 
-## Architecture map (Cockpit)
+## Project map
 
-Cockpit is a self-hosted mobile cockpit for herdr panes and pi agents: a Node/TS bridge daemon owns the herdr Unix socket and exposes a private HTTP/WS API; the Android app (Kotlin + Jetpack Compose Material 3, package `dev.cockpit.app`) talks only to that API.
+Cockpit is a self-hosted mobile cockpit for herdr panes and pi agents. A Node/TypeScript bridge daemon owns the herdr Unix socket and exposes a private HTTP/WS API; the Android app talks only to that API.
 
-- `bridge/` — Node/TS daemon. Entry: `src/cli.ts serve` (`server.ts` only exports `createCockpitServer`). Feature modules include `herdr/` (socket client/feed/`port.ts` seam), `routes/` (auth/body/error-mapping dispatcher), agent adapters under `agents/`, the shared `transcript.ts` JSONL parser, sessions/catalog/questions/commands, review, attachments, notifications, board detail, and usage. Terminal implementation adds its bidirectional child-process seam under `terminal/`; do not put it on `HerdrPort`. Tests live in `bridge/test/` and run with `npm run typecheck && npm test`; offline HTTP tests use `bridge/test/support/fake-herdr.ts` and `fake-feed.ts`.
-- `android/` — Compose app, manual DI via `CockpitApp.AppContainer` (no Hilt/Room). Source dirs under `app/src/main/java/dev/cockpit/app/`: `data/` (DTOs + SharedPreferences stores), `net/` (BridgeClient behind the `CockpitApi` interface, NtfyClient), `state/` (ViewModels), `service/` (monitor service, deep links, reply receiver), `ui/components/`, `ui/screens/`, `ui/theme/` (Theme.kt + DiffPalette.kt), `ui/motion/` (motion vocabulary + haptics).
-- Design contract: always-dark Material 3, one accent `#5B8CFF` reserved for AI-owned states, calm surface cards, mono only for paths/commands/tool output, state is the color. See `android/app/src/main/java/dev/cockpit/app/ui/theme/DESIGN.md`.
-- Motion vocabulary: nothing bounces or spins (`ui/motion/Motion.kt`). The one looping animation in the app is the working indicator's expanding ripple (`ui/components/WorkingIndicator.kt`) — it expands rather than rotates, which is why it does not violate the no-spin rule; under `LocalReduceMotion` it collapses to a static ring. Prefer it over `CircularProgressIndicator` for agent-busy states.
-- Status→color is one language across screens: `blocked/NeedsYou → error`, `working → primary`, `done → secondary` (`ui/screens/BoardScreen.kt`, `ui/components/WorkingIndicator.kt`).
-- Interactive terminal is the current priority and replaces Live Output. It is one full-screen Herdr pane at a time with an overlay hierarchy selector; it never puts raw output back on Chat. The detailed staged handoff is `.plans/full-screen-interactive-terminal.md`; durable transport/renderer choices are in `docs/adr/`.
-- Active UX implementation plans: `design-plans/README.md` lists the remaining work and execution order.
-- Verification recipes and traps: `docs/dev-workflow.md`; the `skills/cockpit-verification/SKILL.md` skill bundles the same loop (install to `~/.pi/agent/skills/` to make it loadable from any repo).
+- `bridge/` — Node/TS daemon. Entry: `src/cli.ts serve`; `server.ts` only exports `createCockpitServer`.
+  - `herdr/` owns socket client/feed and the `port.ts` seam.
+  - `routes/` owns auth/body/error mapping.
+  - Agent adapters live under `agents/`; shared JSONL parsing is in `transcript.ts`.
+  - Terminal child-process transport belongs under `terminal/`; do not put it on `HerdrPort`.
+  - Tests live in `bridge/test/`; offline HTTP tests use `bridge/test/support/fake-herdr.ts` and `fake-feed.ts`.
+- `android/` — Kotlin + Jetpack Compose Material 3, package `dev.cockpit.app`; manual DI via `CockpitApp.AppContainer` (no Hilt/Room).
+  - `data/` DTOs + SharedPreferences stores
+  - `net/` `BridgeClient` behind `CockpitApi`, plus `NtfyClient`
+  - `state/` ViewModels
+  - `service/` monitor service, deep links, reply receiver
+  - `ui/components/`, `ui/screens/`, `ui/theme/`, `ui/motion/`
 
-## Verification workflow
+Primary references:
 
-Run these once as final acceptance gates for materially changed UI/bridge work, after implementation, simplification, and review are complete—or run them all at once with `scripts/verify.sh` (add `--no-emulator` to skip the GMD suite):
+- Design contract: `android/app/src/main/java/dev/cockpit/app/ui/theme/DESIGN.md`
+- Current UX work and execution order: `design-plans/README.md`
+- Interactive terminal handoff: `.plans/full-screen-interactive-terminal.md`
+- Durable architecture decisions: `docs/adr/`
+- Verification recipes, emulator workflow, and failure recovery: `docs/dev-workflow.md`
+- Verification skill: `skills/cockpit-verification/SKILL.md`
+- Herdr agent orchestration: global `herdr-agent-delegation` skill
 
-```bash
-cd bridge && npm run typecheck && npm test                       # 296 tests / 43 suites, ~10s
-cd android && timeout 300 env ANDROID_HOME="$HOME/Android/sdk" ./gradlew testDebugUnitTest
-cd android && timeout 300 env ANDROID_HOME="$HOME/Android/sdk" ./gradlew pixel2api36DebugAndroidTest   # Gradle Managed Device, ~2 min
-cd android && timeout 300 env ANDROID_HOME="$HOME/Android/sdk" ./gradlew assembleDebug
-```
+## Operating rules
 
-## Serialized Android verification
+- **Avoid debugging loops.** Before each new attempt, identify what new evidence it can produce or what hypothesis it can eliminate. If it is materially similar to previous attempts or only succeeds by chance, stop, reassess assumptions, and choose a different diagnostic path.
+- **Run the narrowest useful experiment.** Prefer inspection, tracing, focused tests, or direct state verification over speculative edits. Unexpected results are evidence against the current mental model; do not work around them without understanding them.
+- **Prefer completion signals over elapsed-time guesses.** For recognized agents, use Herdr lifecycle waits (`agent prompt --wait`, `agent wait`). For ordinary shell processes, use `pane run` plus `pane wait-output` on a specific completion condition. Do not build sleep/poll loops. A timeout is a safety ceiling only when a reliable completion signal is unavailable or an external bound is actually required; it is not the normal completion mechanism.
+- **Use Herdr's semantic control surface.** Use agent commands for recognized agents and pane commands for ordinary terminals/processes. When delegating to an agent, follow the global `herdr-agent-delegation` skill rather than inventing sentinels or polling.
+- **Diagnose infrastructure failures before changing product behavior.** AAPT2, packaging, missing-dex, emulator-focus, socket, or harness failures are not evidence that production logic is wrong.
+- **Keep Android verification serial.** One Gradle invocation per checkout and one instrumentation run on `emulator-5554` at a time. Do not overlap Gradle jobs.
 
-Run Android verification as a **tight serial loop**: one Gradle invocation per checkout and one instrumentation run on `emulator-5554` at a time. Gradle shares build and intermediate directories, and instrumentation shares emulator window focus; parallel Gradle jobs can cause AAPT2 exits, missing-dex packaging failures, and false window-focus test failures.
+## Verification
 
-- While iterating, run the narrowest check that covers the change. Run focused classes one after another, then run the broader gates once when materially changed code is final, simplified, and reviewed. Do not rerun full unit, managed-device, assembly, or emulator suites after minor text-only, test-assertion-only, status-only, or similarly low-risk fixes. A screenshot watcher may run beside its test only when it does not start another Gradle process.
-- Prefer incremental builds. Add `--rerun-tasks` only when a relevant source change or stale output requires it; it is not a default speed or correctness flag.
-- Give each Gradle invocation an explicit timeout. If a failure names AAPT2, packaging, missing dex files, or window focus, stop competing jobs, run `timeout 30 ./gradlew --stop`, confirm `adb devices` shows only the intended emulator target, and rerun the narrowest failed check once. Diagnose infrastructure failures before changing production or test behavior.
-- Treat a verification step as complete only after its single process exits and its output has been recorded; never start the next Gradle command while the previous one is still running.
+- **Keep expensive runtime verification terminal.** The normal order is: implement → cheap targeted checks → review/fix → review-clean/code-frozen → emulator/integration/E2E/runtime acceptance → commit. Do not alternate emulator runs with code-review cycles.
+- During implementation and review, run only the narrowest inexpensive checks that help develop or validate the code. Device/emulator/instrumentation/E2E work is not part of the normal inner loop.
+- Start final emulator/integration/E2E/runtime verification only after all review findings are resolved and no further implementation edits are planned. After a successful final acceptance pass, do not run another review merely because verification completed.
+- If final acceptance exposes a real defect, fix it, return to the review/cheap-check phase, then perform final acceptance again only once the code is review-clean.
+- Verification must remain proportional to risk. Each additional suite or runtime check must cover a material risk not already addressed.
+- Prefer incremental builds; use `--rerun-tasks` only when stale Gradle output is suspected or a specific task must genuinely be forced.
+- For slow/noisy/device-bound checks inside Herdr, prefer a sibling pane and `pane wait-output` on an explicit unique completion condition rather than sleeps or guessed durations.
+- Use `skills/cockpit-verification/SKILL.md` for the phase boundary, targeted checks, final runtime evidence, and full-verification criteria.
 
-For runtime/UI evidence, install the APK on the running emulator (`adb install -r .../app-debug.apk`), drive it with `adb shell input tap/text/keyevent`, capture with `adb exec-out screencap -p`, and inspect screenshots with the vision-pane workflow below. The full emulator recipe (scratch bridge, adb prefs injection, uiautomator bounds, taste reviews) is in `docs/dev-workflow.md`.
-## Never wait on an unbounded command
+## Project invariants and traps
 
-A hung command produces no output, so waiting on it is indistinguishable from progress —
-that is what makes it expensive. Bound it up front instead of discovering it afterwards.
+- Android design is always-dark Material 3. Accent `#5B8CFF` is reserved for AI-owned states; use mono only for paths, commands, and tool output. Status is the color language.
+- Motion does not bounce or spin. Agent-busy state uses the expanding-ripple `WorkingIndicator`; under `LocalReduceMotion` it becomes a static ring. Prefer it over `CircularProgressIndicator` for agent-busy states.
+- Status mapping is consistent across screens: `blocked/NeedsYou -> error`, `working -> primary`, `done -> secondary`.
+- Interactive terminal is one full-screen Herdr pane at a time with an overlay hierarchy selector; do not put raw terminal output back on Chat.
+- ViewModels talk to `CockpitApi`; `BridgeClient` implements it. Unit tests use `FakeCockpitApi`. Emulator tests use a real `BridgeClient` with a fresh **unsaved** `ConnectionStore` so ViewModels do not start polling.
+- Run instrumentation only on the emulator, never the physical Pixel. If `emulator-5554` is absent, boot the `cockpit` AVD and confirm the target with `adb devices`.
+- `MockWebServer.url()` performs reverse DNS; never call it on the main thread.
+- Robolectric shares SharedPreferences across tests; explicitly save/clear connections.
+- readSeek anchors are invalid after editing the same file; re-grep/re-digest, or use plain `edit` for small changes.
+- `XDG_CONFIG_HOME` selects the bridge config dir; `COCKPIT_REPO_ROOTS` allow-lists review repos; config tokens must be at least 16 characters.
+- ntfy drops custom JSON publish fields; deep links belong in ntfy's documented `click` field.
+- Composer contract: Enter inserts a newline and must never send; keep multiline + `ImeAction.None` + no-op `KeyboardActions`.
+- `pkill -f` / `pgrep -f` can match their own shell command. Use bracketed patterns or a pid mechanism.
+- `pane wait-output` checks existing output first. For command-completion markers, make the marker unique per run and match an anchored whole line so echoed command text or stale output cannot satisfy the wait.
 
-1. **Bound before you run, not after it hangs.** Anything touching a socket, device,
-   emulator, or network gets an explicit limit: `timeout 120 <cmd>`, `--test-timeout` for
-   `node --test`, `--timeout` for `herdr agent prompt --wait` / `herdr agent wait`, `-timeout` for gradle. A
-   command with no natural end (`tail -f`, `adb logcat`) needs one every time.
-2. **Decide the expected duration first, then hold it to ~2x.** `cd bridge && npm test` is
-   ~10s; gradle managed-device tests are ~2 min. Past twice that, kill it and diagnose —
-   never re-run the same unbounded command hoping it finishes.
-3. **Never poll with a pattern that matches your own shell.** `pgrep -f 'import tsx test/'`
-   in an `until` loop matches the loop's own command line and so never exits. Bracket the
-   pattern (`'impor[t] tsx'`), or wait on a pidfile or sentinel file instead.
-4. **Fix a hang at its source.** Add the bound to `package.json`, the test file, or the
-   script so the next session inherits it, then record it below. A bound you applied only
-   at the call site is a bound the next agent will not have.
+## Task-specific workflows
 
-Known unbounded spots, already bounded — keep them that way: the live-socket suites in
-`bridge/test/herdr-client.test.ts` (a real herdr under load leaves `snapshot()`/`subscribe()`
-pending forever, which used to hang the whole run silently), `npm test` overall, gradle
-managed-device tasks, and every `herdr agent prompt … --wait` in the Vision and Code
-review workflows below.
-
-## Gotchas (read before touching)
-
-- **Avoid debugging loops:** before each new attempt, identify what new evidence it can produce or what hypothesis it can eliminate. If the attempt is materially similar to previous ones or only succeeds by chance, stop iterating, step back, reassess assumptions, and choose a different diagnostic path.
-- ViewModels talk to `CockpitApi` (`net/CockpitApi.kt`), implemented by `BridgeClient`; unit tests stub it with `FakeCockpitApi` (`app/src/commonTest/`, shared with the emulator suite). Emulator tests still use a real BridgeClient + a fresh **unsaved** ConnectionStore so ViewModels never start polling.
-- Tests run ONLY on the emulator — never install the APK or run instrumentation suites on the physical Pixel phone (it spazzes its screen). If `emulator-5554` is absent, boot the `cockpit` AVD: `$ANDROID_HOME/emulator/emulator -avd cockpit &` (only AVD, ~25-60s to boot; confirm via `adb devices`). Use the phone sparingly, for key integration walks only.
-- `MockWebServer.url()` does a reverse-DNS lookup — never call it on the main thread (build ViewModels before `setContent` in tests).
-- `pkill -f` matches your own command line if it contains the pattern — use `pkill -f 'cli[.]ts'` style brackets (see "Never wait on an unbounded command").
-- Robolectric shares SharedPreferences across tests — save/clear connections explicitly (savedConnection helper pattern).
-- readSeek tools demand fresh anchors after every edit to the same file; re-grep/re-digest first, or use the plain `edit` tool for small changes.
-- Bridge envs: `XDG_CONFIG_HOME` picks the config dir; `COCKPIT_REPO_ROOTS` allow-lists review repos; config tokens must be ≥16 chars.
-- ntfy drops custom JSON publish fields — deep links must travel in ntfy's documented `click` field (see `notify.ts`).
-- Composer keyboard contract: Enter inserts a newline and must never send; keep multiline + `ImeAction.None` + no-op `KeyboardActions` (pinned by `ChatComposerKeyTest`).
-- `herdr pane wait-output --match` also matches the pane's echoed command line (the sentinel text is in the command itself) — anchor with `--regex '^SENTINEL$'` or use a sentinel absent from the command.
-
-## Vision
-
-When a task involves an image — a screenshot, mockup, rendered UI, or diagram — inspect it directly when the current model supports vision. Otherwise, delegate the description to a vision-capable pi in a sibling herdr pane (`HERDR_ENV=1`). The wait is event-driven: pi in TUI mode pushes `working`/`idle` lifecycle events to herdr over its socket, and `herdr agent prompt --wait` returns the moment the answer is done — no sentinels, no polling. Run pi in TUI mode (no `-p`); print mode is headless and never reports lifecycle state.
-
-1. Split a sibling pane without stealing focus, then parse the new pane id from `.result.pane.pane_id`:
-
-   ```bash
-   herdr pane split --current --direction right --cwd "$PWD" --no-focus
-   ```
-
-2. Start pi in that pane as a named agent with the vision model (`agent start` returns once pi is detected and ready):
-
-   ```bash
-   herdr agent start vision --kind pi --pane <pane-id> -- --model opencode-go/gpt-5.6-luna
-   ```
-
-3. Submit the description request with the image attached via `@path`; `--wait` returns as soon as pi settles (or with `blocked` if it raises a question UI):
-
-   ```bash
-   herdr agent prompt vision "@<abs-image-path> Describe this image in detail: layout, text, colors, and any UI state or errors visible." --wait --timeout 180000
-   ```
-
-4. Read the answer, then close the pane you created:
-
-   ```bash
-   herdr agent read vision --source recent-unwrapped --lines 200 > /tmp/vision-answer.md
-   herdr pane close <pane-id>
-   ```
-
-Done when the description answers the specific question you had about the image. If the read is empty or the agent says the image was not attached, the model call or `@path` failed — fix and re-run. If `opencode-go/gpt-5.6-luna` no longer works, pick a model with `images: yes` from `pi --list-models`.
-
-## Code review
-
-Before committing, review the current work with a fresh pi in a sibling herdr pane (`HERDR_ENV=1`), using `openai-codex/gpt-5.6-sol` at low reasoning. Use the same pane workflow as Vision (split, start, prompt, read, close), with the reviewer model and prompt:
-
-```bash
-herdr agent start reviewer --kind pi --pane <pane-id> -- --model openai-codex/gpt-5.6-sol --thinking low
-herdr agent prompt reviewer "Review the current uncommitted work (git status, git diff, git diff --cached). Report concrete correctness bugs, spec mismatches, and violations of the conventions in AGENTS.md, each with file and line; skip style nits." --wait --timeout 300000
-herdr agent read reviewer --source recent-unwrapped --lines 200 > /tmp/code-review.md
-```
-
-Read `/tmp/code-review.md`, then close the pane. Fix every issue it raises, or consciously dismiss it, before committing. If the wait returns `blocked`/`agent_prompt_stalled`/`timeout` or the read is empty, the review did not complete — inspect `herdr agent get reviewer` and `herdr agent read reviewer`, unblock or re-prompt, and re-run. If `openai-codex/gpt-5.6-sol` no longer works, pick another model from `pi --list-models`.
-
-## Communication principles
-
-- When speaking with the user, use reader-centred plain language adapted to an experienced software engineer.
-- State the main point first, then provide only the context needed to understand or act on it.
-- Use precise technical terms when they add meaning, but avoid unnecessary jargon and define terms that may be ambiguous or domain-specific.
-- Organize complex information with clear headings, bullets, examples, and explicit distinctions between facts, assumptions, options, risks, and recommendations.
-- Do not oversimplify technical subjects; simplify the wording and structure instead.
-- Prefer concrete, concise, actionable explanations over background, repetition, hedging, or conversational filler.
+- **Herdr agent delegation:** use the global `herdr-agent-delegation` skill for sibling-pane agent start/prompt/wait/read/cleanup. Lifecycle state is the source of truth; do not replace it with sleep/poll/sentinel loops.
+- **Visual/UI evidence:** inspect screenshots or rendered UI directly when vision is available; otherwise use `skills/cockpit-vision/SKILL.md`. Do not infer visual correctness from code alone.
+- **Pre-commit review:** use `skills/cockpit-review/SKILL.md`. Every concrete finding must be fixed or consciously dismissed before committing.
+- **Verification/emulator work:** use `skills/cockpit-verification/SKILL.md` and `docs/dev-workflow.md` for the full procedure and recovery steps.
 
 ## Engineering principles
 
-- Do not preserve backward compatibility. Remove obsolete paths instead of adding compatibility layers, fallbacks, or migrations.
-- Choose the simplest implementation that fully meets the current requirements. Avoid speculative abstractions, configuration, and indirection.
-- Grow the system in layers. Start from the smallest version that works end to end, and add each new capability on top of a product that already works. Never trade a working product for unfinished complexity. Keep components modular and concerns clearly separated.
-- Default to established libraries. For any common capability — dates, HTTP, storage, state, build tooling — assume a well-maintained package already covers it: check the project's existing dependencies first, then look for a battle-tested package before writing your own, and read its docs before assuming it can't do the job. Reimplement only when a library would cost more than the code it saves, and say why in the commit.
-- Make architectural decisions for the long term. Do not accept a stopgap that only works for now and is meant to be replaced later.
+- Remove obsolete paths rather than adding backward-compatibility layers, fallbacks, or migrations unless the user explicitly requires compatibility.
+- Choose the simplest implementation that fully satisfies current requirements without knowingly creating an imminent rewrite. Do not add abstractions, configuration, or indirection for hypothetical future requirements.
+- Grow the system in working end-to-end layers. Keep components modular and concerns separated; do not trade a working product for unfinished complexity.
+- Prefer existing dependencies, then well-maintained established libraries, before custom implementations. Read the library documentation before concluding it cannot support the requirement. Reimplement only when the dependency would cost more than the code it replaces, and record why in the commit.
