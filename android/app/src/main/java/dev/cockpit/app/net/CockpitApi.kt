@@ -10,7 +10,6 @@ import dev.cockpit.app.data.ControlResponse
 import dev.cockpit.app.data.CreatedSessionResponse
 import dev.cockpit.app.data.DirListingResponse
 import dev.cockpit.app.data.HealthResponse
-import dev.cockpit.app.data.LiveOutputResponse
 import dev.cockpit.app.data.ModelsCatalogResponse
 import dev.cockpit.app.data.RepoArtifactsResponse
 import dev.cockpit.app.data.RepoDiffResponse
@@ -46,7 +45,6 @@ interface CockpitApi {
     suspend fun models(agent: String? = null): ModelsCatalogResponse
     suspend fun commands(cwd: String? = null, agent: String? = null): CommandsCatalogResponse
     suspend fun agentKinds(): AgentKindsResponse
-    suspend fun liveOutput(paneId: String, lines: Int = 80): LiveOutputResponse
     suspend fun dirs(path: String? = null): DirListingResponse
     suspend fun repoOverview(path: String): RepoOverviewResponse
     suspend fun repoDiff(path: String, base: String = "HEAD", kind: String = "working"): RepoDiffResponse

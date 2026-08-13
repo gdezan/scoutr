@@ -32,9 +32,7 @@ import dev.cockpit.app.data.ConnectionStore
 import dev.cockpit.app.net.BridgeClient
 import dev.cockpit.app.state.Loadable
 import dev.cockpit.app.state.ChatViewModel
-import dev.cockpit.app.state.LiveOutputViewModel
 import dev.cockpit.app.ui.screens.ChatScreen
-import dev.cockpit.app.ui.screens.LiveOutputScreen
 import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
@@ -54,7 +52,6 @@ class ChatControlsTest {
     val compose = createComposeRule()
 
     private lateinit var server: MockWebServer
-    private val liveOutputRequests = AtomicInteger()
     private val controlBodies = CopyOnWriteArrayList<String>()
     @Volatile private var agentStatus = "working"
     @Volatile private var agentCardJson: String? = null
@@ -65,7 +62,6 @@ class ChatControlsTest {
     @Before
     fun setUp() {
         server = MockWebServer()
-        liveOutputRequests.set(0)
         controlBodies.clear()
         agentStatus = "working"
         agentCardJson = null
@@ -93,10 +89,6 @@ class ChatControlsTest {
                     path == "/api/agents" ->
                         agentCardJson
                             ?: """{"ok":true,"agents":[{"paneId":"w1:p1","workspaceId":"w1","tabId":"t1","agent":"pi","status":"$agentStatus","sessionPath":"/tmp/session.jsonl"}]}"""
-                    path == "/api/agents/w1:p1/read" -> {
-                        liveOutputRequests.incrementAndGet()
-                        """{"ok":true,"output":{"paneId":"w1:p1","text":"build running\n42 tests passed","revision":2,"truncated":false,"lineLimit":80}}"""
-                    }
                     path == "/api/sessions/w1:p1/control" -> {
                         controlBodies += request.body.readUtf8()
                         """{"ok":true}"""
@@ -166,9 +158,8 @@ class ChatControlsTest {
     @Test
     fun overflowMenuRendersFromCapabilitySet() {
         // Table-driven over capability sets served through the real bridge:
-        // the overflow menu shows exactly the verbs the backend advertises
-        // (plus Live output, which is not a wire verb), unknown verbs are
-        // dropped, and an empty set leaves only Live output.
+        // the overflow menu shows exactly the verbs the backend advertises,
+        // unknown verbs are dropped, and an empty set leaves an empty menu.
         val store = ConnectionStore(InstrumentationRegistry.getInstrumentation().targetContext)
         store.save(server.url("/").toString().trimEnd('/'), "t", null, null)
         val bridge = BridgeClient(OkHttpClient.Builder().readTimeout(5, TimeUnit.SECONDS).build(), store)
@@ -295,42 +286,6 @@ class ChatControlsTest {
         compose.waitUntil(timeoutMillis = 5_000) { controlBodies.any { "close" in it } }
         compose.runOnIdle { assertEquals(1, backCalls.get()) }
     }
-
-    @Test
-    fun liveOutputOpensFromTheSessionMenuAndTheChatScreenNeverPollsIt() {
-        val store = ConnectionStore(InstrumentationRegistry.getInstrumentation().targetContext)
-        store.save(server.url("/").toString().trimEnd('/'), "t", null, null)
-        val bridge = BridgeClient(OkHttpClient.Builder().readTimeout(5, TimeUnit.SECONDS).build(), store)
-        val chatVm = ChatViewModel(bridge, "w1:p1", null, "working")
-        val liveVm = LiveOutputViewModel(bridge, "w1:p1")
-
-        // Stands in for the NavHost: the menu item is the route's entry point,
-        // and back pops it.
-        compose.setContent {
-            var viewing by remember { mutableStateOf(false) }
-            if (viewing) LiveOutputScreen(viewModel = liveVm, onBack = { viewing = false })
-            else ChatScreen(viewModel = chatVm, onBack = {}, onOpenLiveOutput = { viewing = true })
-        }
-
-        compose.waitUntil(timeoutMillis = 10_000) {
-            compose.onAllNodes(hasTestTag("chat_controls")).fetchSemanticsNodes().isNotEmpty()
-        }
-        // The transcript poll has been running for a while by now; the read
-        // endpoint must still be untouched — no ambient live-output cost.
-        assertEquals("the chat screen must not poll live output", 0, liveOutputRequests.get())
-
-        compose.onNodeWithTag("chat_controls").performClick()
-        compose.onNodeWithTag("live_output_menu").assertIsDisplayed().performClick()
-
-        compose.onNodeWithTag("live_output_screen").assertIsDisplayed()
-        compose.waitUntil(timeoutMillis = 10_000) { liveOutputRequests.get() > 0 }
-        compose.onAllNodesWithText("42 tests passed", substring = true)[0].assertIsDisplayed()
-
-        compose.onNodeWithTag("live_output_back").performClick()
-        compose.onNodeWithTag("chat_controls").assertIsDisplayed()
-        compose.onNodeWithTag("live_output_screen").assertDoesNotExist()
-    }
-
 
     @Test
     fun configurationSheetShowsAndSelectsExactThinkingAndModel() {

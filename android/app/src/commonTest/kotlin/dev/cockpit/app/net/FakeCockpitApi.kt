@@ -10,7 +10,6 @@ import dev.cockpit.app.data.ControlResponse
 import dev.cockpit.app.data.CreatedSessionResponse
 import dev.cockpit.app.data.DirListingResponse
 import dev.cockpit.app.data.HealthResponse
-import dev.cockpit.app.data.LiveOutputResponse
 import dev.cockpit.app.data.ModelsCatalogResponse
 import dev.cockpit.app.data.RepoArtifactsResponse
 import dev.cockpit.app.data.RepoDiffResponse
@@ -53,7 +52,6 @@ class FakeCockpitApi : CockpitApi {
     var modelsResult: Result<ModelsCatalogResponse> = Result.success(ModelsCatalogResponse(ok = true))
     var commandsResult: Result<CommandsCatalogResponse> = Result.success(CommandsCatalogResponse(ok = true))
     var agentKindsResult: Result<AgentKindsResponse> = Result.success(AgentKindsResponse())
-    var liveOutputResult: Result<LiveOutputResponse> = Result.success(LiveOutputResponse())
     var dirsResult: Result<DirListingResponse> = Result.success(DirListingResponse(ok = true))
     var repoOverviewResult: Result<RepoOverviewResponse> = Result.success(RepoOverviewResponse())
     var repoDiffResult: Result<RepoDiffResponse> = Result.success(RepoDiffResponse())
@@ -130,9 +128,6 @@ class FakeCockpitApi : CockpitApi {
         record("commands", mapOf("cwd" to cwd, "agent" to agent)) { commandsResult }
 
     override suspend fun agentKinds(): AgentKindsResponse = record("agentKinds") { agentKindsResult }
-
-    override suspend fun liveOutput(paneId: String, lines: Int): LiveOutputResponse =
-        record("liveOutput", mapOf("paneId" to paneId, "lines" to lines)) { liveOutputResult }
 
     override suspend fun dirs(path: String?): DirListingResponse =
         record("dirs", mapOf("path" to path)) { dirsResult }

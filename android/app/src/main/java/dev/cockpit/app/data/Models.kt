@@ -169,21 +169,6 @@ data class QuestionOption(
     val description: String = "",
 )
 
-@Serializable
-data class LiveOutputResponse(
-    val ok: Boolean = true,
-    val output: LiveOutputSnapshot? = null,
-    val error: String? = null,
-)
-
-@Serializable
-data class LiveOutputSnapshot(
-    val paneId: String,
-    val text: String = "",
-    val revision: Long = 0,
-    val truncated: Boolean = false,
-    val lineLimit: Int = 0,
-)
 
 @Serializable
 data class SessionEntry(

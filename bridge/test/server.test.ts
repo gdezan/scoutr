@@ -217,20 +217,6 @@ describe("cockpit bridge HTTP/WS API (offline)", () => {
     assert.ok("latestActivityAtMs" in cards[0]!);
   });
 
-  test("live output reads a bounded plain-text snapshot through the fake", async () => {
-    const { status, body } = await getJson("/api/agents/p1/read?lines=20");
-    assert.equal(status, 200);
-    const output = (body as { output: { paneId: string; text: string; lineLimit: number; truncated: boolean } }).output;
-    assert.equal(output.paneId, "p1");
-    assert.equal(output.lineLimit, 20);
-    assert.equal(output.truncated, false);
-  });
-
-  test("live output rejects a malformed pane id", async () => {
-    const { status } = await getJson("/api/agents/%zz/read");
-    assert.equal(status, 400);
-  });
-
   test("commands returns the slash-command catalog", async () => {
     const { status, body } = await getJson("/api/commands");
     assert.equal(status, 200);

@@ -11,7 +11,6 @@ import dev.cockpit.app.data.ControlResponse
 import dev.cockpit.app.data.CreatedSessionResponse
 import dev.cockpit.app.data.DirListingResponse
 import dev.cockpit.app.data.HealthResponse
-import dev.cockpit.app.data.LiveOutputResponse
 import dev.cockpit.app.data.ModelsCatalogResponse
 import dev.cockpit.app.data.RepoArtifactsResponse
 import dev.cockpit.app.data.RepoDiffResponse
@@ -216,12 +215,6 @@ class BridgeClient(
             if (text != null) put("text", JsonPrimitive(text))
         }.toString().toRequestBody("application/json".toMediaType()),
     ) { json.decodeFromString(CreatedSessionResponse.serializer(), it) }
-
-    /** Bounded ANSI-free terminal snapshot for a live agent pane. */
-    override suspend fun liveOutput(paneId: String, lines: Int): LiveOutputResponse =
-        call("/api/agents/$paneId/read", query = mapOf("lines" to lines.toString())) {
-            json.decodeFromString(LiveOutputResponse.serializer(), it)
-        }
 
     /** Create a pane-native agent session and deliver its optional first prompt in one bridge call. */
     override suspend fun createSession(

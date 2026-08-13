@@ -130,7 +130,6 @@ import kotlinx.serialization.json.JsonPrimitive
 fun ChatScreen(
     viewModel: ChatViewModel,
     onBack: () -> Unit,
-    onOpenLiveOutput: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val ui by viewModel.ui.collectAsState()
@@ -173,7 +172,6 @@ fun ChatScreen(
             onToggleTools = { expandTools = !expandTools },
             onOpenConfiguration = { configurationOpen = true },
             onBack = onBack,
-            onOpenLiveOutput = onOpenLiveOutput,
             onControl = { action ->
                 when (action) {
                     SessionAction.Rename -> renameOpen = true
@@ -369,7 +367,6 @@ private fun ChatHeader(
     onToggleTools: () -> Unit,
     onOpenConfiguration: () -> Unit,
     onBack: () -> Unit,
-    onOpenLiveOutput: () -> Unit,
     onControl: (SessionAction) -> Unit,
 ) {
     Column(Modifier.fillMaxWidth()) {
@@ -423,18 +420,6 @@ private fun ChatHeader(
                     Icon(Icons.Default.MoreVert, contentDescription = "Session actions")
                 }
                 DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                    // The raw pane tail is an escape hatch, not an ambient
-                    // surface: it lives behind its own screen so its poll only
-                    // runs while someone is looking at it.
-                    DropdownMenuItem(
-                        text = { Text("Live output…") },
-                        leadingIcon = { Icon(Icons.Default.Terminal, contentDescription = null) },
-                        onClick = {
-                            menuOpen = false
-                            onOpenLiveOutput()
-                        },
-                        modifier = Modifier.testTag("live_output_menu"),
-                    )
                     // Null capabilities mean the backend is unknown yet; show the
                     // full pi surface until the first agents poll names it.
                     // Rendered from the decoded set in enum declaration order

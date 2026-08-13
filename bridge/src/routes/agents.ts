@@ -1,4 +1,3 @@
-import { readLiveOutput } from "../live-output.js";
 import { cleanActivity } from "../board-detail.js";
 import type { BoardDetailCache } from "../board-detail.js";
 import type { SessionSnapshot, AgentInfo } from "../herdr/types.js";
@@ -8,7 +7,6 @@ import type { Route, RouteContext, RouteResult } from "./types.js";
 export const agentsRoutes: Route[] = [
   { method: "GET", path: "/api/agents", handle: agents },
   { method: "GET", path: "/api/agents/kinds", handle: agentKinds },
-  { method: "GET", path: "/api/agents/:paneId/read", handle: readAgentOutput },
 ];
 
 export interface AgentCard {
@@ -126,13 +124,3 @@ async function agentKinds(_ctx: RouteContext): Promise<RouteResult> {
   };
 }
 
-async function readAgentOutput(ctx: RouteContext): Promise<RouteResult> {
-  let paneId: string;
-  try {
-    paneId = decodeURIComponent(ctx.params.paneId ?? "");
-  } catch {
-    return { status: 400, body: { ok: false, error: "invalid pane id" } };
-  }
-  const output = await readLiveOutput(ctx.deps.herdr, paneId, ctx.query.get("lines"));
-  return { status: 200, body: { ok: true, output } };
-}

@@ -59,7 +59,7 @@ export interface RouteContext {
 /** Everything the dispatcher needs to serve one HTTP request. */
 export interface DispatchRequest {
   method: string;
-  /** Raw (percent-encoded) path, e.g. "/api/agents/p%201/read". */
+  /** Raw (percent-encoded) path, e.g. "/api/sessions/p%201/control". */
   pathname: string;
   search: URLSearchParams;
   /** Raw Authorization header value, if any. */

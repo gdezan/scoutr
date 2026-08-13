@@ -77,7 +77,6 @@ import dev.cockpit.app.data.AgentCard
 import dev.cockpit.app.state.BoardViewModel
 import dev.cockpit.app.state.NewSessionViewModel
 import dev.cockpit.app.state.ChatViewModel
-import dev.cockpit.app.state.LiveOutputViewModel
 import dev.cockpit.app.state.CommandPaletteViewModel
 import dev.cockpit.app.state.SessionHistoryViewModel
 import dev.cockpit.app.state.UsageViewModel
@@ -90,7 +89,6 @@ import dev.cockpit.app.ui.screens.ChatScreen
 import dev.cockpit.app.ui.screens.CommandPalette
 import dev.cockpit.app.ui.screens.ConnectScreen
 import dev.cockpit.app.ui.screens.HistoryScreen
-import dev.cockpit.app.ui.screens.LiveOutputScreen
 import dev.cockpit.app.ui.screens.UsageScreen
 import dev.cockpit.app.ui.screens.ReviewScreen
 import dev.cockpit.app.service.parseCockpitUri
@@ -110,13 +108,10 @@ import dev.cockpit.app.ui.theme.CockpitTheme
 private object Routes {
     const val CONNECT = "connect"
     const val CHAT = "chat/{paneId}?sessionPath={sessionPath}&status={status}"
-    const val LIVE_OUTPUT = "chat/{paneId}/live"
     const val SETTINGS = "settings"
 
     fun chat(paneId: String, sessionPath: String?, status: String): String =
         "chat/$paneId?sessionPath=${sessionPath?.let { java.net.URLEncoder.encode(it, "UTF-8") } ?: ""}&status=$status"
-
-    fun liveOutput(paneId: String): String = "chat/$paneId/live"
 }
 
 class MainActivity : ComponentActivity() {
@@ -392,25 +387,6 @@ private fun CockpitAppNav(
                 )
                 ChatScreen(
                     viewModel = chatViewModel,
-                    onBack = { navController.popBackStack() },
-                    onOpenLiveOutput = { navController.navigate(Routes.liveOutput(paneId)) },
-                )
-            }
-            composable(
-                route = Routes.LIVE_OUTPUT,
-                arguments = listOf(
-                    androidx.navigation.navArgument("paneId") { type = androidx.navigation.NavType.StringType },
-                ),
-            ) { backStackEntry ->
-                val paneId = backStackEntry.arguments?.getString("paneId") ?: ""
-                // Keyed apart from the chat route's "chat_$paneId": the viewer
-                // owns its own poll and must never share the chat VM instance.
-                val liveOutputViewModel: LiveOutputViewModel = viewModel(
-                    factory = LiveOutputViewModel.factory(container.bridge, paneId),
-                    key = "live_output_$paneId",
-                )
-                LiveOutputScreen(
-                    viewModel = liveOutputViewModel,
                     onBack = { navController.popBackStack() },
                 )
             }

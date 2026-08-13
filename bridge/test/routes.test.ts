@@ -259,7 +259,7 @@ describe("dispatchRoute", () => {
     const seen: RouteContext[] = [];
     const table = new RouteTable([{
       method: "GET",
-      path: "/api/agents/:paneId/read",
+      path: "/api/sessions/:paneId/control",
       handle: async (c: RouteContext) => {
         seen.push(c);
         return { status: 200, body: { ok: true } };
@@ -267,7 +267,7 @@ describe("dispatchRoute", () => {
     }]);
     const result = await dispatchRoute(
       table,
-      request({ pathname: "/api/agents/p%201/read", search: new URLSearchParams({ lines: "20" }) }),
+      request({ pathname: "/api/sessions/p%201/control", search: new URLSearchParams({ lines: "20" }) }),
       deps(),
     );
     assert.equal(result.status, 200);
