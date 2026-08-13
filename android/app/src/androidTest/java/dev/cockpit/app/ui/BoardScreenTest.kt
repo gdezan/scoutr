@@ -15,14 +15,17 @@ import androidx.compose.ui.test.assertContentDescriptionContains
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipeDown
 import androidx.compose.ui.test.swipeLeft
 import android.content.ClipboardManager
 import androidx.test.platform.app.InstrumentationRegistry
 import dev.cockpit.app.data.AgentCard
 import dev.cockpit.app.data.BoardState
+import dev.cockpit.app.data.AgentsResponse
 import dev.cockpit.app.data.ConnectionStore
 import dev.cockpit.app.state.BoardUiState
 import dev.cockpit.app.state.BoardViewModel
+import dev.cockpit.app.net.FakeCockpitApi
 import dev.cockpit.app.ui.screens.BoardScreen
 import dev.cockpit.app.ui.theme.CockpitTheme
 import org.junit.Assert.assertTrue
@@ -318,6 +321,32 @@ class BoardScreenTest {
             "action bar should match the card height",
             abs((card.bottom - card.top).value - (action.bottom - action.top).value) < 1f,
         )
+    }
+
+    @Test
+    fun swipeDownRequestsFreshBoard() {
+        val agent = blockedAgent("p1", "Fix billing bug", "/repo/a", "openai-codex/gpt-5.4", "Found it")
+        val fake = FakeCockpitApi().apply {
+            agentsResult = Result.success(AgentsResponse(agents = listOf(agent)))
+        }
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val connection = ConnectionStore(context).apply { clear() }
+        val viewModel = BoardViewModel(
+            bridge = fake,
+            connectionStore = connection,
+            initialState = BoardUiState(board = BoardState.group(listOf(agent)), connected = true),
+        )
+        compose.setContent {
+            CockpitTheme { BoardScreen(viewModel = viewModel) }
+        }
+        compose.waitForIdle()
+        viewModel.stopPolling()
+        val callsBeforeSwipe = fake.calls.count { it.name == "agents" }
+
+        compose.onNodeWithTag("board_refresh_root").performTouchInput { swipeDown() }
+
+        compose.waitUntil(5_000) { fake.calls.count { it.name == "agents" } > callsBeforeSwipe }
+        assertTrue("pulling down should request a fresh board", fake.calls.count { it.name == "agents" } > callsBeforeSwipe)
     }
 
     private fun staticBoardViewModel(ui: BoardUiState): BoardViewModel {

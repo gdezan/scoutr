@@ -22,6 +22,8 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -46,6 +48,8 @@ import dev.cockpit.app.data.UsageWindow
 import dev.cockpit.app.state.UsageUiState
 import dev.cockpit.app.state.UsageViewModel
 import dev.cockpit.app.state.Loadable
+import dev.cockpit.app.ui.components.PullRefreshIndicator
+import dev.cockpit.app.ui.components.pullRefreshSemantics
 import java.text.NumberFormat
 import java.util.Currency
 import java.util.Locale
@@ -60,7 +64,7 @@ fun UsageScreen(
 ) {
     val ui by viewModel.ui.collectAsState()
     val nowMillis = rememberMinuteClock()
-    UsageContent(ui = ui, onRefresh = viewModel::refresh, nowMillis = nowMillis, modifier = modifier)
+    UsageContent(ui = ui, onRefresh = viewModel::refreshUsage, nowMillis = nowMillis, modifier = modifier)
 }
 
 @Composable
@@ -82,24 +86,36 @@ internal fun UsageContent(
     nowMillis: Long,
     modifier: Modifier = Modifier,
 ) {
-    Column(
-        modifier
+    val refreshState = rememberPullToRefreshState()
+    PullToRefreshBox(
+        isRefreshing = ui.isRefreshing,
+        onRefresh = onRefresh,
+        modifier = modifier
             .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
+            .pullRefreshSemantics(onRefresh)
+            .testTag("usage_refresh_root"),
+        state = refreshState,
+        indicator = { PullRefreshIndicator(refreshState, ui.isRefreshing) },
     ) {
-        when (val load = ui.providers) {
-            is Loadable.Loading -> UsageLoading()
-            is Loadable.Idle -> UsageEmpty(onRefresh)
-            is Loadable.Failed -> UsageError(load.reason, onRefresh)
-            is Loadable.Ready -> {
-                if (load.value.isEmpty()) {
-                    UsageEmpty(onRefresh)
-                } else {
-                    ui.error?.let { UsageError(it, onRefresh) }
-                    for (provider in load.value) {
-                        key(provider.provider) { ProviderCard(provider, nowMillis, onRefresh) }
+        Column(
+            Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            when (val load = ui.providers) {
+                is Loadable.Loading -> UsageLoading()
+                is Loadable.Idle -> UsageEmpty(onRefresh)
+                is Loadable.Failed -> UsageError(load.reason, onRefresh)
+                is Loadable.Ready -> {
+                    if (load.value.isEmpty()) {
+                        UsageEmpty(onRefresh)
+                    } else {
+                        ui.error?.let { UsageError(it, onRefresh) }
+                        for (provider in load.value) {
+                            key(provider.provider) { ProviderCard(provider, nowMillis, onRefresh) }
+                        }
                     }
                 }
             }

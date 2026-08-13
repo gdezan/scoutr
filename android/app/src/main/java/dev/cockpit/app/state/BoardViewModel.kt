@@ -15,6 +15,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.CancellationException
 import java.io.IOException
 import kotlin.time.Duration.Companion.seconds
@@ -22,6 +24,7 @@ import kotlin.time.Duration.Companion.seconds
 data class BoardUiState(
     val board: BoardState = BoardState(),
     val loading: Boolean = false,
+    val isRefreshing: Boolean = false,
     val connected: Boolean = false,
     val error: String? = null,
 )
@@ -38,6 +41,7 @@ class BoardViewModel(
     val ui: StateFlow<BoardUiState> = _ui.asStateFlow()
 
     private val poller = Poller(viewModelScope)
+    private val loadMutex = Mutex()
     private var ntfyJob: Job? = null
 
     val hasSavedConnection: Boolean get() = connectionStore.saved != null
@@ -70,7 +74,7 @@ class BoardViewModel(
                 _ui.update { it.copy(loading = false, connected = false, error = e.message ?: "connection failed") }
             }
             // Restart the loops after a config change only while the board
-            // is visible: refresh() flips `connected` itself, so a transient
+            // is visible: the board poll flips `connected` itself, so a transient
             // probe failure self-heals once the bridge is reachable again,
             // and a stop that raced this probe must not resurrect the loops.
             if (lifecycleActive) {
@@ -106,7 +110,7 @@ class BoardViewModel(
         // Poll the bridge for the latest board state. A long-lived WebSocket
         // is deliberately avoided here: an abrupt server close can crash the
         // OkHttp reader, and the bridge already caches + re-snapshots anyway.
-        poller.start(3.seconds) { refresh() }
+        poller.start(3.seconds) { loadBoard() }
     }
 
     /**
@@ -145,7 +149,20 @@ class BoardViewModel(
         }
     }
 
-    suspend fun refresh() {
+    /** Request an immediate board refresh and expose its progress to the pull gesture. */
+    fun refreshBoard() {
+        if (_ui.value.isRefreshing) return
+        _ui.update { it.copy(isRefreshing = true) }
+        viewModelScope.launch {
+            try {
+                loadBoard()
+            } finally {
+                _ui.update { it.copy(isRefreshing = false) }
+            }
+        }
+    }
+
+    private suspend fun loadBoard() = loadMutex.withLock {
         try {
             val response = bridge.agents()
             _ui.update {
