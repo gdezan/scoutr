@@ -41,7 +41,7 @@ All plans must preserve these settled Cockpit decisions:
 - Enter inserts a newline and never sends.
 - Chat opens at and follows the true bottom while pinned; tool calls stay collapsed and thinking is opt-in.
 - Model catalogs use provider as their only section hierarchy; capability filter chips are removed, while context/reasoning may remain compact row metadata.
-- Live Output remains an overflow-only escape hatch, not ambient chat chrome.
+- The planned Interactive Terminal will replace Live Output as a dedicated full-screen route; raw output must not return to ambient Chat chrome. Follow `.plans/full-screen-interactive-terminal.md`.
 - Board polling every three seconds is intentional.
 - Risk model: **Close is confirmation-gated; Delete is irreversible; Abort is deliberately ungated because it is recoverable.**
 
@@ -64,10 +64,10 @@ Runtime evidence uses only `adb -s emulator-5554`. Install the APK, drive with `
 - **Confirm Abort in the command palette** — rejected because Cockpit deliberately leaves recoverable Abort ungated. Plan 002 confirms Close only.
 - **Replace blue on selected chips and filters** — rejected as an audit defect because `Theme.kt:48-51` explicitly documents the current selected-chip treatment. Revisit only through a deliberate design-system decision, not an incidental screen fix.
 - **Replace Board polling with a WebSocket** — rejected; three-second polling is a settled architecture/product choice.
-- **Put live output on Chat** — rejected; Live Output is intentionally a dedicated overflow route.
+- **Put raw terminal output on Chat** — rejected; the planned Interactive Terminal remains its own full-screen route.
 - **Add a tablet master-detail shell now** — deferred. Plan 006 first fixes readability with bounded content; master-detail needs a separate navigation/state design if users still need it.
 - **Add provider billing links now** — deferred. Plan 004 first makes the negative state visible without introducing provider-specific contracts.
 
 ## Audit evidence summary
 
-The original audit visually inspected first-run Connect, Board, Sessions, Usage, Review picker/overview/diff, Settings, command palette, Chat, Conversation Setup, Live Output, new-session setup, folder/model pickers, plus phone and tablet layouts. Plans 007–011 were added from the user's reported gesture sequences and a source/test audit; the restored app was disconnected, so those timing-sensitive defects were not claimed as newly reproduced live. Temporary screenshots remain outside the repository under `/tmp/ux-audit-evidence`; every plan includes a written description so execution does not depend on those files.
+The original audit visually inspected first-run Connect, Board, Sessions, Usage, Review picker/overview/diff, Settings, command palette, Chat, Conversation Setup, the current Live Output screen, new-session setup, folder/model pickers, plus phone and tablet layouts. Live Output is scheduled for deletion by the terminal handoff. Plans 007–011 were added from the user's reported gesture sequences and a source/test audit; the restored app was disconnected, so those timing-sensitive defects were not claimed as newly reproduced live. Temporary screenshots remain outside the repository under `/tmp/ux-audit-evidence`; every plan includes a written description so execution does not depend on those files.

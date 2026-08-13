@@ -73,8 +73,7 @@ follows system light.
   while the user is at the bottom; any scroll up stops following and
   surfaces the FAB. Auto-scroll is index-bounded and exception-guarded —
   concurrent transcript growth can never crash it.
-- Board polls `/api/agents` every 3s; ntfy push polls separately; no
-  long-lived WebSockets (the EOF crash class).
+- Board polls `/api/agents` every 3s and ntfy polls separately. Long-lived sockets are not ambient infrastructure; the planned terminal uses dedicated sockets only while visible and contains abrupt closes.
 - Details toggle (eye) shows thinking blocks and expands all tool calls.
 
 ## Motion

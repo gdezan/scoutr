@@ -79,7 +79,7 @@ Start the second-terminal recorder before each gesture sequence. A timeout at th
 
 **Out of scope**:
 - Chat transcript parsing, polling cadence, or WebSocket behavior
-- Raw Live Output and its independent polling/scrolling
+- Current Live Output polling/scrolling and the planned Interactive Terminal lifecycle
 - Composer keyboard behavior: Enter must continue to insert a newline and never send
 - Working-indicator visuals or motion
 - Reintroducing raw output into Chat

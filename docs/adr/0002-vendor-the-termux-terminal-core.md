@@ -1,0 +1,3 @@
+# Vendor the Termux terminal core for remote rendering
+
+Cockpit will vendor only Termux `terminal-emulator` and `terminal-view` at commit `3df69d1da197dd9bd71a3bafd902dffd720576b4`, preserve their Apache-2.0 provenance, and adapt their session seam to Cockpit-provided remote bytes. Stock `TerminalSession`, Termux app/shared code, and local PTY/JNI paths are excluded because they couple the widget to an Android subprocess Cockpit does not own and add an unnecessary native runtime path to the x86_64 managed-device fixture. This accepts a maintained in-repository adaptation in exchange for Termux’s mature Android IME, key, selection, scrollback, mouse, and terminal-emulation behavior.

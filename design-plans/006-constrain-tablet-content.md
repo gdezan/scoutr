@@ -32,7 +32,7 @@ Reuse near-black background and current Material 3 surfaces. Add a small reusabl
 - Phone/compact width: layouts are pixel-equivalent to current 16dp horizontal insets.
 - Tablet/expanded width: primary list/form content is centered with a maximum width of **960dp** and at least 24dp side gutters. Board cards, Sessions search/tabs/list, and Review picker/path/list share this bound.
 - Tab app bar and bottom navigation remain full-width.
-- Raw diff and Live Output remain full-width because horizontal space benefits terminal content. Plan 005's diff file navigator follows the diff width, not the 960dp form bound.
+- Raw diff and the future full-screen Interactive Terminal remain full-width because horizontal space directly benefits code/terminal content. Plan 005's diff file navigator follows the diff width, not the 960dp form bound.
 - Sparse data stays top-aligned; do not fill empty space with decorative content.
 - Large fonts and landscape retain reachable controls with no clipping.
 
@@ -89,7 +89,7 @@ Each in-scope Compose test class owns deterministic populated fixture data and s
 
 **Out of scope**:
 - Bottom navigation/app-bar redesign
-- Chat, Live Output, raw diff width, Settings, Usage, Connect
+- Chat, the future Interactive Terminal, raw diff width, Settings, Usage, Connect
 - Master-detail navigation (future direction, not this plan)
 - Global theme/token changes
 

@@ -46,7 +46,7 @@ surprise; calm cards so a running agent's state is the visual anchor.
   disambiguator between agents.
 - Board cards: 6dp status dot, muted time-in-state pill, filled accent pill
   reserved for "needs you", workspace path in mono at 60% opacity.
-- Board polls /api/agents every 3s (no long-lived WS — crash class).
+- Board polls `/api/agents` every 3s; abrupt OkHttp closure made a long-lived Board feed unsafe. The planned terminal is the narrow exception: dedicated terminal/topology sockets run only while its full-screen route is visible and contain cancellation/errors.
 - Chat: pane-native sessions (new herdr workspace + pane + pi --model),
   JSONL transcript polling with a since cursor, dedupe by entryId,
   answer/steer unified composer.

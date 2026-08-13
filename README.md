@@ -35,7 +35,7 @@ Verified against herdr 0.8.0 (protocol 19) and pi (node 26 / mise).
 
 | Thing | Notes |
 |---|---|
-| herdr ≥ 0.8.0 running | `herdr --version`; socket at `~/.config/herdr/herdr.sock` |
+| herdr 0.8.0 (protocol 19) running | `herdr --version`; socket at `~/.config/herdr/herdr.sock`. The planned terminal capability gate rejects unverified versions until their controller contract is captured. |
 | pi installed | agent CLI for chat panes; `~/.local/bin/pi` or mise `node/26/bin/pi` |
 | Node ≥ 22 | tested on node 26 |
 | Tailscale | the phone and this machine on the same tailnet |
@@ -331,7 +331,7 @@ today looks like: `adb pair 100.78.204.15:<port> <code>` then
 
 ## 10. Known limits (v1)
 
-- No live terminal rendering (herdr `terminal observe/control` is the v2 path).
+- Interactive terminal rendering is planned as the current staged priority, not a v2-only path. It will replace Live Output after the Herdr controller contract is proven; see `.plans/full-screen-interactive-terminal.md`.
 - Claude Code: status, steer, and transcripts all work via herdr — the session
   path guard is multi-backend. Residual limits: no fork-at-path resume (use
   `/fork` inside the session), no model catalog (the app hides the model
