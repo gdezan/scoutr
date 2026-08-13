@@ -1,14 +1,17 @@
 package dev.cockpit.app.ui.motion
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.hapticfeedback.HapticFeedback
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
+import dev.cockpit.app.data.AppearancePreferencesStore
 
 /**
  * Semantic haptics: interactions map to meaning, not to raw motor calls, so
- * the whole app speaks one tactile vocabulary and a future settings toggle
- * can gate every haptic in one place.
+ * the whole app speaks one tactile vocabulary and the Settings switch gates
+ * every haptic in one place.
  */
 enum class HapticEvent {
     /** Cheap, low-stakes feedback: tab switch, palette row, filter chip. */
@@ -43,10 +46,24 @@ fun HapticEvent.toFeedbackType(): HapticFeedbackType = when (this) {
 /**
  * Returns a function that fires the given semantic event on the current
  * haptic feedback provider. Always safe to call; no-ops where the platform
- * has no haptics.
+ * has no haptics, and no-ops entirely while the Settings haptics switch is
+ * off.
+ *
+ * The preference is read when the event fires, not when the composable runs,
+ * so flipping the switch silences screens that are already composed (an open
+ * Terminal's BEL, the Board's needs-you nudge) without any invalidation.
+ * This is the only motor entry point in the app — never call
+ * `LocalHapticFeedback.performHapticFeedback` directly, or the switch will
+ * not reach it.
  */
 @Composable
 fun rememberHaptic(): (HapticEvent) -> Unit {
     val feedback: HapticFeedback = LocalHapticFeedback.current
-    return { event -> feedback.performHapticFeedback(event.toFeedbackType()) }
+    val context = LocalContext.current
+    val appearance = remember(context) { AppearancePreferencesStore(context) }
+    return remember(feedback, appearance) {
+        { event ->
+            if (appearance.hapticsEnabled) feedback.performHapticFeedback(event.toFeedbackType())
+        }
+    }
 }

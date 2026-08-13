@@ -97,6 +97,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import dev.cockpit.app.data.AppearancePreferencesStore
 import dev.cockpit.app.data.SessionAction
 import dev.cockpit.app.data.toSessionActions
 import dev.cockpit.app.data.ContentBlock
@@ -160,8 +161,13 @@ fun ChatScreen(
     LaunchedEffect(ui.sending) {
         if (!ui.sending) attachmentUploading = false
     }
-    var showThinking by rememberSaveable { mutableStateOf(true) }
-    var expandTools by rememberSaveable { mutableStateOf(false) }
+    // Settings supplies the seed; the header toggles below are the override for
+    // this visit. rememberSaveable captures the seed once per back-stack entry,
+    // so rotation keeps the override and a later Settings change never rewrites
+    // a chat that is already open.
+    val appearance = remember(context) { AppearancePreferencesStore(context) }
+    var showThinking by rememberSaveable { mutableStateOf(appearance.showThinkingDefault) }
+    var expandTools by rememberSaveable { mutableStateOf(appearance.expandToolsDefault) }
     var renameOpen by remember { mutableStateOf(false) }
     var closeOpen by rememberSaveable { mutableStateOf(false) }
     var configurationOpen by rememberSaveable { mutableStateOf(false) }

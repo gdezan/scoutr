@@ -28,6 +28,7 @@ import androidx.compose.ui.test.hasTestTag
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.test.assertContentDescriptionContains
+import dev.cockpit.app.data.AppearancePreferencesStore
 import dev.cockpit.app.data.ConnectionStore
 import dev.cockpit.app.net.BridgeClient
 import dev.cockpit.app.state.Loadable
@@ -61,8 +62,14 @@ class ChatControlsTest {
 
     @Before
     fun setUp() {
+        // Chat's header toggles are seeded from this device-global store, which
+        // outlives a test; the tests below assume the factory seeds.
+        InstrumentationRegistry.getInstrumentation().targetContext
+            .getSharedPreferences(AppearancePreferencesStore.FILE, android.content.Context.MODE_PRIVATE)
+            .edit().clear().commit()
         server = MockWebServer()
         controlBodies.clear()
+        richEntries = false
         agentStatus = "working"
         agentCardJson = null
         modelCatalogJson = null
@@ -262,6 +269,38 @@ class ChatControlsTest {
         compose.waitUntil(timeoutMillis = 5_000) {
             compose.onAllNodes(androidx.compose.ui.test.hasText("\u25B8 bash", substring = true)).fetchSemanticsNodes().isNotEmpty()
         }
+        compose.waitUntil(timeoutMillis = 5_000) {
+            compose.onAllNodes(hasTestTag("thinking_block")).fetchSemanticsNodes().isNotEmpty()
+        }
+    }
+
+    @Test
+    fun headerTogglesStartFromTheSettingsDefaultsNotTheOldLiterals() {
+        // Settings seeds a new visit; the header still overrides it locally.
+        // Inverted from the factory values so a hard-coded true/false fails.
+        val appearance = AppearancePreferencesStore(
+            InstrumentationRegistry.getInstrumentation().targetContext,
+        )
+        appearance.showThinkingDefault = false
+        appearance.expandToolsDefault = true
+
+        richEntries = true
+        val store = ConnectionStore(InstrumentationRegistry.getInstrumentation().targetContext)
+        store.save(server.url("/").toString().trimEnd('/'), "t", null, null)
+        val bridge = BridgeClient(OkHttpClient.Builder().readTimeout(5, TimeUnit.SECONDS).build(), store)
+        val vm = ChatViewModel(bridge, "w1:p1", null, "working")
+
+        compose.setContent { ChatScreen(viewModel = vm, onBack = {}) }
+
+        // Tools open ("▾"), thinking hidden — the seeded state, not the literals.
+        compose.waitUntil(timeoutMillis = 10_000) {
+            compose.onAllNodes(androidx.compose.ui.test.hasText("▾ bash", substring = true))
+                .fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithTag("thinking_block").assertDoesNotExist()
+
+        // The header still wins for this visit.
+        compose.onNodeWithTag("toggle_thinking").performClick()
         compose.waitUntil(timeoutMillis = 5_000) {
             compose.onAllNodes(hasTestTag("thinking_block")).fetchSemanticsNodes().isNotEmpty()
         }

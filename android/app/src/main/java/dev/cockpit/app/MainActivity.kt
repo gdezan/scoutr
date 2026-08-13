@@ -143,7 +143,7 @@ class MainActivity : ComponentActivity() {
 
         deepLink.value = parseCockpitUri(intent.dataString)
         // Resume background monitoring when the app starts if the user opted in.
-        val monitor = dev.cockpit.app.state.MonitoringStore(this)
+        val monitor = CockpitApp.container(this).monitoringStore
         if (monitor.enabled) {
             ContextCompat.startForegroundService(this, Intent(this, dev.cockpit.app.service.CockpitMonitorService::class.java))
         }
@@ -483,7 +483,25 @@ private fun CockpitAppNav(
                 )
             }
             composable(Routes.SETTINGS) {
-                SettingsScreen(onBack = { navController.popBackStack() })
+                SettingsScreen(
+                    onBack = { navController.popBackStack() },
+                    // Read once per visit, so re-pairing shows the new host
+                    // without Settings holding a stale copy.
+                    saved = remember { container.connectionStore.saved },
+                    terminalPreferences = container.terminalPreferences,
+                    onForget = {
+                        // One user-visible step: the pairing teardown (and its
+                        // ordering) belongs to the container; the activity-scoped
+                        // board VM is told to let go before the graph is rebuilt
+                        // Connect-only.
+                        container.forgetConnection()
+                        boardViewModel.disconnect()
+                        startDestination = Routes.CONNECT
+                        navController.navigate(Routes.CONNECT) {
+                            popUpTo(navController.graph.id) { inclusive = true }
+                        }
+                    },
+                )
             }
         }
         }

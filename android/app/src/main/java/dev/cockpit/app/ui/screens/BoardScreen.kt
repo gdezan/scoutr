@@ -58,8 +58,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
@@ -301,12 +299,12 @@ private fun AgentCardRow(
     val accent = statusColor(status)
     val scheme = MaterialTheme.colorScheme
     val clipboard = LocalClipboardManager.current
-    val haptic = LocalHapticFeedback.current
+    val haptic = rememberHaptic()
     val context = LocalContext.current
     var menuOpen by remember { mutableStateOf(false) }
     val copyPath = {
         clipboard.setText(AnnotatedString(agent.cwd ?: agent.workspaceId))
-        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+        haptic(HapticEvent.Confirm)
         Toast.makeText(context, "Copied path", Toast.LENGTH_SHORT).show()
     }
 

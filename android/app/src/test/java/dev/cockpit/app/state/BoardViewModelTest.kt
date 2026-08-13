@@ -107,6 +107,35 @@ class BoardViewModelTest {
         viewModel.stopPolling()
     }
 
+    @Test
+    fun disconnectStopsPollingAndClearsTheBoard() {
+        val connectionStore = ConnectionStore(RuntimeEnvironment.getApplication())
+        viewModel.reportError("stale")
+
+        // Park the loop inside its first tick so "did the poll die" is provable
+        // without waiting out the 3s interval.
+        val gate = CompletableDeferred<Unit>()
+        fake.gates["agents"] = gate
+        viewModel.startPolling()
+        shadowOf(Looper.getMainLooper()).idle()
+        assertEquals(1, fake.calls.count { it.name == "agents" })
+
+        // Forget's order: the pairing goes first, then the VM is told to let go.
+        connectionStore.clear()
+        viewModel.disconnect()
+        shadowOf(Looper.getMainLooper()).idle()
+
+        assertEquals(BoardUiState(), viewModel.ui.value)
+        assertTrue("hasSavedConnection must follow the cleared store", !viewModel.hasSavedConnection)
+
+        // The parked poll was cancelled: releasing it neither repopulates the
+        // board nor schedules another round against the cleared pairing.
+        gate.complete(Unit)
+        shadowOf(Looper.getMainLooper()).idle()
+        assertEquals(BoardUiState(), viewModel.ui.value)
+        assertEquals(1, fake.calls.count { it.name == "agents" })
+    }
+
     private fun waitUntil(condition: () -> Boolean) {
         val deadline = System.currentTimeMillis() + 5_000
         while (System.currentTimeMillis() < deadline && !condition()) {

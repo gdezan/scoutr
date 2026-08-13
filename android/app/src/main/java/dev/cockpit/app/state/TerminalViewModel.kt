@@ -241,8 +241,17 @@ class TerminalViewModel(
     val preferences: TerminalPreferencesStore.ConnectionPreferences?
         get() = connectionStore.saved?.let { preferencesStore.forConnection(it.host, it.token) }
 
+    /**
+     * Ticks when font size or extra-key visibility is written from anywhere —
+     * pinch, the extra-keys strip, or the Settings rows, which share this
+     * store. The screen re-reads [preferences] on each tick, so a Settings
+     * change lands on an already-open terminal.
+     */
+    val viewPreferencesRevision: StateFlow<Int> = preferencesStore.viewPreferencesRevision
+
     fun updateFontSize(sp: Float) {
-        preferences?.fontSizeSp = sp.coerceIn(MIN_FONT_SIZE_SP, MAX_FONT_SIZE_SP)
+        // The store clamps; pinch can hand it any accumulated scale.
+        preferences?.fontSizeSp = sp
     }
 
     fun updateExtraKeysVisible(visible: Boolean) {
@@ -624,9 +633,13 @@ class TerminalViewModel(
         /** Grid reporting coalesces IME/resize bursts to the latest cols/rows. */
         const val GRID_DEBOUNCE_MS = 150L
 
-        /** Font-size bounds for pinch (shared across panes for the saved connection). */
-        const val MIN_FONT_SIZE_SP = 8f
-        const val MAX_FONT_SIZE_SP = 24f
+        /**
+         * Font-size bounds for pinch (shared across panes for the saved
+         * connection). Re-exported from the store that enforces them, so the
+         * terminal and Settings cannot drift apart on the range.
+         */
+        const val MIN_FONT_SIZE_SP = TerminalPreferencesStore.ConnectionPreferences.MIN_FONT_SIZE_SP
+        const val MAX_FONT_SIZE_SP = TerminalPreferencesStore.ConnectionPreferences.MAX_FONT_SIZE_SP
     }
 }
 

@@ -106,6 +106,17 @@ class BoardViewModel(
         ntfyJob = null
     }
 
+    /**
+     * Forget: the pairing is gone, so stop both loops and drop the board we
+     * fetched under it. This VM is activity-scoped and is not recreated when
+     * nav resets to Connect, so without this it would keep polling a cleared
+     * store. Re-pairing calls [connect] again, which restarts everything.
+     */
+    fun disconnect() {
+        stopPolling()
+        _ui.value = BoardUiState()
+    }
+
     private fun startLive() {
         // Poll the bridge for the latest board state. A long-lived WebSocket
         // is deliberately avoided here: an abrupt server close can crash the

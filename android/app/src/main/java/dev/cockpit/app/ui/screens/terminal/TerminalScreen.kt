@@ -91,10 +91,17 @@ fun TerminalScreen(
     val writableRef = remember { mutableStateOf(false) }
     val fontSpRef = remember { mutableStateOf(TerminalPreferencesStore.ConnectionPreferences.DEFAULT_FONT_SIZE_SP) }
 
-    val fontSizeSp = viewModel.preferences?.fontSizeSp
-        ?: TerminalPreferencesStore.ConnectionPreferences.DEFAULT_FONT_SIZE_SP
-    val extraKeysVisible = viewModel.preferences?.extraKeysVisible
-        ?: TerminalPreferencesStore.ConnectionPreferences.DEFAULT_EXTRA_KEYS_VISIBLE
+    // Re-read on every write to the shared store, so pinch, the strip, and the
+    // Settings rows all land here without leaving the route.
+    val prefsRevision by viewModel.viewPreferencesRevision.collectAsState()
+    val fontSizeSp = remember(prefsRevision) {
+        viewModel.preferences?.fontSizeSp
+            ?: TerminalPreferencesStore.ConnectionPreferences.DEFAULT_FONT_SIZE_SP
+    }
+    val extraKeysVisible = remember(prefsRevision) {
+        viewModel.preferences?.extraKeysVisible
+            ?: TerminalPreferencesStore.ConnectionPreferences.DEFAULT_EXTRA_KEYS_VISIBLE
+    }
 
     SideEffect {
         writableRef.value = (ui.connection as? TerminalConnectionState.Ready)?.writable == true

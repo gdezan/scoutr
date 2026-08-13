@@ -68,6 +68,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.snapshotFlow
+import dev.cockpit.app.ui.motion.HapticEvent
+import dev.cockpit.app.ui.motion.rememberHaptic
 import kotlinx.coroutines.flow.first
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.Saver
@@ -80,8 +82,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalClipboardManager
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
@@ -499,11 +499,11 @@ private fun HistoryRow(
     var menuOpen by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val clipboard = LocalClipboardManager.current
-    val haptic = LocalHapticFeedback.current
+    val haptic = rememberHaptic()
     val context = LocalContext.current
     val copyPath = {
         clipboard.setText(AnnotatedString(session.cwd))
-        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+        haptic(HapticEvent.Confirm)
         Toast.makeText(context, "Copied path", Toast.LENGTH_SHORT).show()
     }
 

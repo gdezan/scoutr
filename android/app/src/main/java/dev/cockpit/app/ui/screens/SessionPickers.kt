@@ -46,8 +46,6 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -63,6 +61,8 @@ import dev.cockpit.app.ui.imeOrNavigationBarsPadding
 import dev.cockpit.app.state.ModelPickerMatch
 import dev.cockpit.app.state.NewSessionUiState
 import dev.cockpit.app.state.NewSessionViewModel
+import dev.cockpit.app.ui.motion.HapticEvent
+import dev.cockpit.app.ui.motion.rememberHaptic
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
 @Composable
@@ -72,7 +72,7 @@ internal fun ModelPickerDialog(
     modelListState: LazyListState = rememberLazyListState(),
     onDismiss: () -> Unit,
 ) {
-    val haptics = LocalHapticFeedback.current
+    val haptics = rememberHaptic()
     ResetLazyListOnQueryChange(
         query = ui.modelFilters.query,
         contentAvailable = !ui.loadingModels && ui.modelError == null && ui.modelMatches.isNotEmpty(),
@@ -113,7 +113,7 @@ internal fun ModelPickerDialog(
                         listState = modelListState,
                         selectedKey = ui.selectedModelKey,
                         onSelect = { match ->
-                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            haptics(HapticEvent.Select)
                             viewModel.selectModel(match.key)
                             onDismiss()
                         },

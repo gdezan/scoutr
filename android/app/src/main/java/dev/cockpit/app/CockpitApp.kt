@@ -19,8 +19,10 @@ import dev.cockpit.app.net.TerminalSocketClient
 import dev.cockpit.app.net.TerminalTransport
 import dev.cockpit.app.net.TopologyFeed
 import dev.cockpit.app.net.TopologyFeedClient
+import dev.cockpit.app.service.CockpitMonitorService
 import dev.cockpit.app.service.resolveNotificationLink
 import dev.cockpit.app.service.statusForTitle
+import dev.cockpit.app.state.MonitoringStore
 import okhttp3.OkHttpClient
 import java.util.concurrent.TimeUnit
 
@@ -53,6 +55,7 @@ class AppContainer(application: Application) {
     val launcherSettingsStore = SharedPreferencesLauncherSettingsStore(appContext)
     val sessionCatalogStore = SharedPreferencesSessionCatalogStore(appContext)
     val terminalPreferences = TerminalPreferencesStore(appContext)
+    val monitoringStore = MonitoringStore(appContext)
 
     private val okHttp = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
@@ -83,6 +86,22 @@ class AppContainer(application: Application) {
                 NotificationManager.IMPORTANCE_HIGH,
             ).apply { description = "Agents that need your attention" },
         )
+    }
+
+    /**
+     * Drop the saved pairing (Settings → Forget). Monitoring goes off first so
+     * the foreground service cannot re-read the pairing on its way down, and
+     * the token is gone before anything else observes the store.
+     *
+     * Device preferences deliberately survive: launcher, terminal, catalog,
+     * review, and appearance are how the user likes the app, not who they
+     * paired with. The caller still owns the UI half — stopping the board
+     * view model and resetting navigation to Connect.
+     */
+    fun forgetConnection() {
+        monitoringStore.enabled = false
+        appContext.stopService(Intent(appContext, CockpitMonitorService::class.java))
+        connectionStore.clear()
     }
 
     /** Show a heads-up notification for a pushed agent event. */
