@@ -150,7 +150,7 @@ export const AGY_CAPABILITIES: ReadonlySet<ControlAction> = new Set([
 
 export const agyBackend: AgentBackend = {
   id: "agy",
-  displayName: "Gemini (AGY)",
+  displayName: "Antigravity",
   capabilities: AGY_CAPABILITIES,
   hasModelCatalog: true,
   hasSlashCommands: true,
