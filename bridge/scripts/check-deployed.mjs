@@ -54,20 +54,50 @@ if (newestDist < newestSrc) {
 }
 
 // The running service must have started after the dist build, else it serves
-// the previous build even though dist/ on disk is current.
+// the previous build even though dist/ on disk is current. It must also be the
+// process that owns the configured listening socket; a stray manual bridge can
+// otherwise make the health probe succeed while systemd crash-loops.
+let serviceMainPid = "";
 try {
   const out = execFileSync(
     "systemctl",
-    ["--user", "show", "cockpit-bridge.service", "-p", "ExecMainStartTimestamp"],
+    [
+      "--user",
+      "show",
+      "cockpit-bridge.service",
+      "-p",
+      "ActiveState",
+      "-p",
+      "SubState",
+      "-p",
+      "MainPID",
+      "-p",
+      "ExecMainStartTimestamp",
+    ],
     { encoding: "utf8" },
   );
-  const stamp = out.split("=")[1]?.trim();
+  const values = Object.fromEntries(
+    out
+      .trim()
+      .split("\n")
+      .map((line) => line.split("="))
+      .filter(([key]) => key),
+  );
+  serviceMainPid = values.MainPID ?? "";
+  if (values.ActiveState !== "active" || values.SubState !== "running" || !serviceMainPid || serviceMainPid === "0") {
+    fail(
+      `cockpit-bridge.service is not running (state=${values.ActiveState ?? "unknown"}/${values.SubState ?? "unknown"}, pid=${serviceMainPid || "none"})`,
+    );
+  }
+  const stamp = values.ExecMainStartTimestamp?.trim();
   if (!stamp) {
     fail("cannot read cockpit-bridge.service start time");
   } else {
-    const started = Date.parse(stamp.replace(" ", "T"));
+    const started = Date.parse(stamp);
     console.log(`service started ${stamp}`);
-    if (started < newestDist) {
+    if (Number.isNaN(started)) {
+      fail(`cannot parse cockpit-bridge.service start time: ${stamp}`);
+    } else if (started < newestDist) {
       fail("cockpit-bridge.service started BEFORE dist/ was built — restart it (`npm run deploy`)");
     }
   }
@@ -80,6 +110,14 @@ try {
   const cfg = JSON.parse(readFileSync(join(homedir(), ".config/cockpit/config.json"), "utf8"));
   const port = cfg.port ?? 8737;
   const token = cfg.token;
+  const listeners = execFileSync("ss", ["-ltnp"], { encoding: "utf8" });
+  const serviceOwnsPort = listeners.split("\n").some((line) => {
+    const fields = line.trim().split(/\s+/);
+    return fields[0] === "LISTEN" && fields[3]?.endsWith(`:${port}`) && line.includes(`pid=${serviceMainPid},`);
+  });
+  if (!serviceOwnsPort) {
+    fail(`cockpit-bridge.service PID ${serviceMainPid || "none"} does not own listening port ${port}`);
+  }
   const resp = execFileSync(
     "curl",
     ["-s", "-m", "8", "-H", `Authorization: Bearer ${token}`, `http://127.0.0.1:${port}/api/health`],
