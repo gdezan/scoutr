@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
@@ -48,6 +47,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.compose.LifecycleStartEffect
 import com.termux.view.TerminalView
 import dev.cockpit.app.data.TerminalPreferencesStore
+import dev.cockpit.app.ui.imeOrNavigationBarsPadding
 import dev.cockpit.app.state.TerminalConnectionState
 import dev.cockpit.app.state.TerminalViewModel
 import dev.cockpit.app.ui.motion.HapticEvent
@@ -162,10 +162,10 @@ fun TerminalScreen(
             }
         },
     ) {
-        // imePadding, not the window inset alone: the grid must shrink to the
-        // space above the keyboard so the cursor row stays visible and the
-        // measured cols/rows the ViewModel reports match what the user sees.
-        Column(modifier.fillMaxSize().imePadding()) {
+        // Union, not ime then nav: the IME already sits above the nav bar,
+        // so stacking both leaves a nav-bar-tall gap above the keyboard.
+        // The grid must still shrink so the cursor row stays visible.
+        Column(modifier.fillMaxSize().imeOrNavigationBarsPadding()) {
             Surface(color = MaterialTheme.colorScheme.background) {
                 Row(
                     Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),

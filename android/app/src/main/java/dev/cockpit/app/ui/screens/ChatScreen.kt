@@ -18,7 +18,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.Spacer
@@ -102,6 +101,7 @@ import dev.cockpit.app.data.SessionEntry
 import dev.cockpit.app.data.QuestionEntry
 import dev.cockpit.app.data.SlashCommandInfo
 import dev.cockpit.app.data.entryText
+import dev.cockpit.app.ui.imeOrNavigationBarsPadding
 import dev.cockpit.app.ui.components.AssistantMarkdown
 import dev.cockpit.app.ui.components.QuestionCard
 import dev.cockpit.app.ui.components.WorkingIndicator
@@ -239,7 +239,7 @@ fun ChatScreen(
             }
         }
 
-        Column(Modifier.fillMaxWidth().imePadding()) {
+        Column(Modifier.fillMaxWidth().imeOrNavigationBarsPadding()) {
             val sendError = ui.sendError
             if (sendError != null) {
                 Text(

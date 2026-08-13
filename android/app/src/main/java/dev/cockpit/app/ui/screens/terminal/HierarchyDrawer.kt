@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -51,6 +50,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.cockpit.app.data.DirListingResponse
+import dev.cockpit.app.ui.imeOrNavigationBarsPadding
 import dev.cockpit.app.data.TerminalPane
 import dev.cockpit.app.data.TerminalSnapshot
 import dev.cockpit.app.ui.components.ConfirmDialog
@@ -99,7 +99,7 @@ internal fun HierarchyDrawer(
         if (name.toIntOrNull() != null) "Tab $name" else name
     } ?: id
 
-    Column(Modifier.fillMaxSize().imePadding()) {
+    Column(Modifier.fillMaxSize().imeOrNavigationBarsPadding()) {
         Row(
             Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 14.dp),
             verticalAlignment = Alignment.CenterVertically,

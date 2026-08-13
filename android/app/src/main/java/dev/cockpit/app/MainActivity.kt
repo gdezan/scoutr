@@ -22,7 +22,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -247,6 +250,12 @@ private fun CockpitAppNav(
 
     Box {
         Scaffold(
+        // Status/side bars only. Bottom is either the tab bar or each
+        // screen's ime.union(navigationBars) pad — including nav bars here
+        // stacks a nav-bar-tall gap above the keyboard.
+        contentWindowInsets = WindowInsets.systemBars.only(
+            WindowInsetsSides.Horizontal + WindowInsetsSides.Top,
+        ),
         bottomBar = {
             if (currentRoute in Destination.routes) {
                 CockpitBottomBar(

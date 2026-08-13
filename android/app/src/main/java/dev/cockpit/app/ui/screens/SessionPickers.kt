@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -60,6 +59,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import dev.cockpit.app.ui.imeOrNavigationBarsPadding
 import dev.cockpit.app.state.ModelPickerMatch
 import dev.cockpit.app.state.NewSessionUiState
 import dev.cockpit.app.state.NewSessionViewModel
@@ -81,7 +81,7 @@ internal fun ModelPickerDialog(
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Surface(
             color = MaterialTheme.colorScheme.background,
-            modifier = Modifier.fillMaxSize().navigationBarsPadding().testTag("model_picker"),
+            modifier = Modifier.fillMaxSize().imeOrNavigationBarsPadding().testTag("model_picker"),
         ) {
             Column {
                 PickerHeader("Choose a model", onDismiss)
@@ -138,7 +138,7 @@ internal fun FolderPickerDialog(
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Surface(
             color = MaterialTheme.colorScheme.background,
-            modifier = Modifier.fillMaxSize().navigationBarsPadding().testTag("folder_picker"),
+            modifier = Modifier.fillMaxSize().imeOrNavigationBarsPadding().testTag("folder_picker"),
         ) {
             Column {
                 PickerHeader("Choose a folder", onDismiss)
