@@ -9,6 +9,7 @@ import dev.cockpit.app.data.CommandsCatalogResponse
 import dev.cockpit.app.data.ControlResponse
 import dev.cockpit.app.data.CreatedSessionResponse
 import dev.cockpit.app.data.DirListingResponse
+import dev.cockpit.app.data.FileListingResponse
 import dev.cockpit.app.data.HealthResponse
 import dev.cockpit.app.data.ModelsCatalogResponse
 import dev.cockpit.app.data.RepoArtifactsResponse
@@ -58,6 +59,7 @@ class FakeCockpitApi : CockpitApi {
     var commandsResult: Result<CommandsCatalogResponse> = Result.success(CommandsCatalogResponse(ok = true))
     var agentKindsResult: Result<AgentKindsResponse> = Result.success(AgentKindsResponse())
     var dirsResult: Result<DirListingResponse> = Result.success(DirListingResponse(ok = true))
+    var filesResult: Result<FileListingResponse> = Result.success(FileListingResponse(ok = true))
     var repoOverviewResult: Result<RepoOverviewResponse> = Result.success(RepoOverviewResponse())
     var repoDiffResult: Result<RepoDiffResponse> = Result.success(RepoDiffResponse())
     var repoFileDiffResult: Result<RepoFileDiffResponse> = Result.success(RepoFileDiffResponse())
@@ -139,6 +141,9 @@ class FakeCockpitApi : CockpitApi {
 
     override suspend fun dirs(path: String?): DirListingResponse =
         record("dirs", mapOf("path" to path)) { dirsResult }
+
+    override suspend fun files(cwd: String): FileListingResponse =
+        record("files", mapOf("cwd" to cwd)) { filesResult }
 
     override suspend fun repoOverview(path: String): RepoOverviewResponse =
         record("repoOverview", mapOf("path" to path)) { repoOverviewResult }

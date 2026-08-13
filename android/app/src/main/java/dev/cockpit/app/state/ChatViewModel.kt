@@ -6,6 +6,7 @@ import dev.cockpit.app.data.SessionAction
 import dev.cockpit.app.data.ModelInfo
 import dev.cockpit.app.data.QuestionEntry
 import dev.cockpit.app.data.ModelProvider
+import dev.cockpit.app.data.FileListing
 import dev.cockpit.app.data.SessionEntry
 import dev.cockpit.app.data.SlashCommandInfo
 import dev.cockpit.app.data.entryText
@@ -242,6 +243,8 @@ data class ChatUiState(
     val configActionBusy: Boolean = false,
     val cwd: String? = null,
     val commands: Loadable<List<SlashCommandInfo>> = Loadable.Idle,
+    /** `@` mention candidates for [cwd]; refetched every time a mention opens. */
+    val files: Loadable<FileListing> = Loadable.Idle,
 ) {
     val lastUserMessage: String?
         get() = pendingMessages.lastOrNull()?.text
@@ -297,6 +300,7 @@ class ChatViewModel(
     private var commandCatalogCwd: String? = null
     private var configurationAgent: String? = null
     private var lastCommandRefreshAt = 0L
+    private var fileRequestGeneration = 0L
 
     /** True when the agent is blocked on a question the user should answer. */
     val waitingForAnswer: Boolean get() = _ui.value.agentStatus == "blocked"
@@ -364,6 +368,46 @@ class ChatViewModel(
                         error.failureKind(),
                     ),
                 )
+            }
+        }
+    }
+
+    /**
+     * Load the `@` mention candidates for the session's cwd. Called each time
+     * a mention opens (not on drill-down), so the menu always shows a fresh
+     * listing — a file the agent just wrote is mentionable immediately.
+     */
+    fun refreshFiles() {
+        val cwd = _ui.value.cwd
+        val requestGeneration = ++fileRequestGeneration
+        if (cwd.isNullOrBlank()) {
+            _ui.update { it.copy(files = Loadable.Failed("This session has no workspace", FailureKind.Server)) }
+            return
+        }
+        _ui.update { it.copy(files = Loadable.Loading) }
+        viewModelScope.launch {
+            try {
+                val response = bridge.files(cwd)
+                // The agent can cd mid-request; a listing for the old
+                // workspace must never populate the new one's menu.
+                if (fileRequestGeneration != requestGeneration || _ui.value.cwd != cwd) return@launch
+                val listing = response.listing
+                _ui.update {
+                    it.copy(
+                        files = if (listing == null) {
+                            Loadable.Failed(response.error ?: "Files unavailable", FailureKind.Server)
+                        } else {
+                            Loadable.Ready(listing)
+                        },
+                    )
+                }
+            } catch (c: CancellationException) {
+                throw c
+            } catch (error: Exception) {
+                if (fileRequestGeneration != requestGeneration || _ui.value.cwd != cwd) return@launch
+                _ui.update {
+                    it.copy(files = Loadable.Failed(error.message ?: "Files unavailable", error.failureKind()))
+                }
             }
         }
     }

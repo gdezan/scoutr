@@ -3,6 +3,7 @@ import { agentsRoutes } from "./agents.js";
 import { catalogRoutes } from "./catalog.js";
 import { commandsRoutes } from "./commands.js";
 import { dirsRoutes } from "./dirs.js";
+import { filesRoutes } from "./files.js";
 import { healthRoutes } from "./health.js";
 import { modelsRoutes } from "./models.js";
 import { reviewRoutes } from "./review.js";
@@ -23,6 +24,7 @@ export function buildRoutes(): Route[] {
     ...modelsRoutes,
     ...commandsRoutes,
     ...dirsRoutes,
+    ...filesRoutes,
     ...reviewRoutes,
     ...attachmentRoutes,
   ];

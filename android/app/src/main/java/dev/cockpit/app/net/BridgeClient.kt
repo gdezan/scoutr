@@ -10,6 +10,7 @@ import dev.cockpit.app.data.CommandsCatalogResponse
 import dev.cockpit.app.data.ControlResponse
 import dev.cockpit.app.data.CreatedSessionResponse
 import dev.cockpit.app.data.DirListingResponse
+import dev.cockpit.app.data.FileListingResponse
 import dev.cockpit.app.data.HealthResponse
 import dev.cockpit.app.data.ModelsCatalogResponse
 import dev.cockpit.app.data.RepoArtifactsResponse
@@ -153,6 +154,12 @@ class BridgeClient(
     override suspend fun dirs(path: String?): DirListingResponse =
         call("/api/dirs", query = if (path == null) emptyMap() else mapOf("path" to path)) {
             json.decodeFromString(DirListingResponse.serializer(), it)
+        }
+
+    /** Mention candidates for the composer: the session cwd's files, one level of trust below /api/dirs. */
+    override suspend fun files(cwd: String): FileListingResponse =
+        call("/api/files", query = mapOf("cwd" to cwd)) {
+            json.decodeFromString(FileListingResponse.serializer(), it)
         }
 
     /** Read-only git overview (branch, status, recent log) for an allowed repo. */

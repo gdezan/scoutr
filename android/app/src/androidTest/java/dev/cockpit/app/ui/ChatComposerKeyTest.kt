@@ -1,6 +1,7 @@
 package dev.cockpit.app.ui
 
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertTextEquals
@@ -33,7 +34,7 @@ class ChatComposerKeyTest {
     @OptIn(ExperimentalTestApi::class)
     @Test
     fun enterInsertsNewlineWithoutSending() {
-        val input = mutableStateOf("")
+        val input = mutableStateOf(TextFieldValue())
         var sends = 0
         compose.setContent {
             CockpitTheme {
@@ -52,7 +53,7 @@ class ChatComposerKeyTest {
         compose.onNodeWithTag("chat_input").performTextInput("def")
 
         compose.runOnIdle {
-            assertEquals("abc\ndef", input.value)
+            assertEquals("abc\ndef", input.value.text)
             assertEquals(0, sends)
         }
         compose.onNodeWithTag("chat_input").assertTextEquals("abc\ndef")
@@ -60,7 +61,7 @@ class ChatComposerKeyTest {
 
     @Test
     fun sendButtonStillSends() {
-        val input = mutableStateOf("")
+        val input = mutableStateOf(TextFieldValue())
         var sends = 0
         compose.setContent {
             CockpitTheme {
@@ -83,7 +84,7 @@ class ChatComposerKeyTest {
     @OptIn(ExperimentalTestApi::class)
     @Test
     fun slashCompletionEnterStillCompletes() {
-        val input = mutableStateOf("")
+        val input = mutableStateOf(TextFieldValue())
         var sends = 0
         compose.setContent {
             CockpitTheme {
@@ -109,7 +110,7 @@ class ChatComposerKeyTest {
         compose.onNodeWithTag("chat_input").performTextInput("/comp")
         compose.onNodeWithTag("chat_input").performKeyInput { pressKey(Key.Enter) }
         compose.runOnIdle {
-            assertEquals("/compact", input.value)
+            assertEquals("/compact", input.value.text)
             assertEquals(0, sends)
         }
     }
@@ -118,7 +119,7 @@ class ChatComposerKeyTest {
         compose.setContent {
             CockpitTheme {
                 ChatComposer(
-                    value = "hello",
+                    value = TextFieldValue("hello"),
                     onValueChange = {},
                     placeholder = "Steer the agent…",
                     enabled = true,

@@ -4,6 +4,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertTextEquals
@@ -38,7 +40,7 @@ class SlashCommandMenuTest {
 
     @Test
     fun filtersAndSelectsWithTouchOrKeyboard() {
-        var input by mutableStateOf("/")
+        var input by mutableStateOf(TextFieldValue("/", TextRange(1)))
         var sends = 0
         compose.setContent {
             CockpitTheme {
@@ -74,7 +76,7 @@ class SlashCommandMenuTest {
 
     @Test
     fun showsLoadingErrorEmptyAndNoMatchStates() {
-        var input by mutableStateOf("/")
+        var input by mutableStateOf(TextFieldValue("/", TextRange(1)))
         var currentCommands by mutableStateOf<Loadable<List<SlashCommandInfo>>>(Loadable.Idle)
         var retried = false
         compose.setContent {
@@ -99,13 +101,13 @@ class SlashCommandMenuTest {
 
         compose.runOnIdle { currentCommands = Loadable.Ready(emptyList()) }
         compose.onNodeWithText("No commands available").assertIsDisplayed()
-        compose.runOnIdle { currentCommands = Loadable.Ready(commands); input = "/zzz" }
+        compose.runOnIdle { currentCommands = Loadable.Ready(commands); input = TextFieldValue("/zzz", TextRange(4)) }
         compose.onNodeWithText("No commands match “zzz”").assertIsDisplayed()
     }
 
     @Test
     fun longCommandListsScroll() {
-        var input by mutableStateOf("/")
+        var input by mutableStateOf(TextFieldValue("/", TextRange(1)))
         val many = (1..30).map { SlashCommandInfo("skill:item-$it", "Skill $it", "skill", "<request>") }
         compose.setContent {
             CockpitTheme {

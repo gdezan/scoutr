@@ -1,0 +1,171 @@
+import { spawn } from "node:child_process";
+import { readdirSync, statSync } from "node:fs";
+import { join, resolve } from "node:path";
+import { BridgeError } from "./errors.js";
+
+/**
+ * File listing for the chat composer's `@` mention completion.
+ *
+ * Tracked *and* untracked-but-not-ignored files, so a file the agent wrote a
+ * moment ago is mentionable before it is staged. `git ls-files -C <dir>` scopes
+ * the listing to `dir` and prints paths relative to it, which is exactly the
+ * cwd-relative form the composer inserts — no rebasing needed even when the
+ * agent's cwd is a subdirectory of the repo root.
+ *
+ * Directories are not listed: the app derives them from these paths.
+ */
+export interface FileListing {
+  /** Absolute, resolved directory the listing is for. */
+  path: string;
+  /** Slash-separated paths relative to [path], sorted, no directories. */
+  files: string[];
+  /** True when the listing hit [MAX_FILES] and more paths exist. */
+  truncated: boolean;
+}
+
+export class FileListingError extends BridgeError {
+  constructor(message: string) {
+    super(message, 400);
+    this.name = "FileListingError";
+  }
+}
+
+/** Path cap shared by both the git and walk paths. */
+export const MAX_FILES = 20_000;
+
+/** Depth cap for the non-repo walk; `1` means the directory's own children. */
+const MAX_WALK_DEPTH = 6;
+
+/** Never worth walking, and never worth mentioning to an agent. */
+const SKIP_DIRS = new Set([".git", "node_modules", "build", "dist", "target"]);
+
+const GIT_TIMEOUT_MS = 5_000;
+
+/** Enough for MAX_FILES paths of ordinary length; the cap kills git early. */
+const GIT_MAX_BYTES = 4 * 1024 * 1024;
+
+export async function listFiles(requested: string): Promise<FileListing> {
+  const path = resolveDir(requested);
+  const tracked = await gitFiles(path);
+  const { files, truncated } = tracked ?? walkFiles(path);
+  return { path, files, truncated };
+}
+
+function resolveDir(requested: string): string {
+  let stat;
+  const target = resolve(requested);
+  try {
+    stat = statSync(target);
+  } catch {
+    throw new FileListingError("no such directory");
+  }
+  if (!stat.isDirectory()) throw new FileListingError("not a directory");
+  return target;
+}
+
+interface Collected {
+  files: string[];
+  truncated: boolean;
+}
+
+/**
+ * `git ls-files` output for `path`, or null when it is not a repository (or
+ * git is unavailable). Either way the caller falls back to walking, so a
+ * missing git degrades to a usable listing rather than an error.
+ */
+function gitFiles(path: string): Promise<Collected | null> {
+  return new Promise((settleWith) => {
+    const child = spawn(
+      "git",
+      ["-C", path, "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+      { env: { ...process.env, GIT_TERMINAL_PROMPT: "0" }, stdio: ["ignore", "pipe", "pipe"] },
+    );
+    const chunks: Buffer[] = [];
+    let total = 0;
+    let stoppedEarly = false;
+    let settled = false;
+    const settle = (value: Collected | null) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      settleWith(value);
+    };
+    const timeout = setTimeout(() => {
+      child.kill();
+      settle(null);
+    }, GIT_TIMEOUT_MS);
+    child.stdout.on("data", (chunk: Buffer) => {
+      if (settled) return;
+      const room = GIT_MAX_BYTES - total;
+      if (room <= 0) {
+        stoppedEarly = true;
+        child.kill();
+        return;
+      }
+      total += chunk.length;
+      chunks.push(room >= chunk.length ? chunk : chunk.subarray(0, room));
+      if (total >= GIT_MAX_BYTES) {
+        stoppedEarly = true;
+        child.kill();
+      }
+    });
+    child.on("error", () => settle(null)); // git not installed
+    child.on("close", (code) => {
+      if (settled) return;
+      if (code !== 0 && !stoppedEarly) return settle(null); // not a repository
+      // A byte-capped read can end mid-path; drop the trailing partial record
+      // (NUL-terminated output means a complete record always ends in NUL).
+      const text = Buffer.concat(chunks).toString("utf8");
+      const records = text.split("\0");
+      if (stoppedEarly) records.pop();
+      const files = records.filter((entry) => entry.length > 0);
+      const capped = files.length > MAX_FILES;
+      settle({
+        files: (capped ? files.slice(0, MAX_FILES) : files).sort((a, b) => a.localeCompare(b)),
+        truncated: capped || stoppedEarly,
+      });
+    });
+  });
+}
+
+/**
+ * Bounded recursive walk for directories that are not git repositories.
+ * Hidden entries and [SKIP_DIRS] are skipped, depth is capped, and the whole
+ * listing is capped at [MAX_FILES] so a pathological tree cannot hang the
+ * request.
+ */
+function walkFiles(root: string): Collected {
+  const files: string[] = [];
+  // `truncated` reports an incomplete listing (path cap *or* depth cap);
+  // `stopped` is the hard stop once no further file can be collected.
+  let truncated = false;
+  let stopped = false;
+  const visit = (dir: string, prefix: string, depth: number) => {
+    if (stopped) return;
+    let entries;
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return; // unreadable directory: skip, not fatal
+    }
+    for (const entry of entries) {
+      if (stopped) return;
+      if (entry.name.startsWith(".") || SKIP_DIRS.has(entry.name)) continue;
+      const relativePath = prefix ? `${prefix}/${entry.name}` : entry.name;
+      if (entry.isFile()) {
+        if (files.length >= MAX_FILES) {
+          stopped = true;
+          truncated = true;
+          return;
+        }
+        files.push(relativePath);
+      } else if (entry.isDirectory()) {
+        if (depth < MAX_WALK_DEPTH) visit(join(dir, entry.name), relativePath, depth + 1);
+        // Anything below the depth cap is unlisted, so the result is partial.
+        else truncated = true;
+      }
+    }
+  };
+  visit(root, "", 1);
+  return { files: files.sort((a, b) => a.localeCompare(b)), truncated };
+}

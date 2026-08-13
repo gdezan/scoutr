@@ -231,6 +231,31 @@ describe("cockpit bridge HTTP/WS API (offline)", () => {
     assert.equal(status, 403);
   });
 
+  test("files lists an active agent's workspace and guards every other cwd", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "cockpit-files-route-"));
+    await mkdir(join(workspace, "src"));
+    await writeFile(join(workspace, "src", "Screen.kt"), "");
+    await writeFile(join(workspace, "README.md"), "");
+    feed.setSnapshot(snapshotWithAgents([{ cwd: workspace, foreground_cwd: workspace }]));
+    try {
+      const { status, body } = await getJson(`/api/files?cwd=${encodeURIComponent(workspace)}`);
+      assert.equal(status, 200);
+      const listing = (body as { listing: { path: string; files: string[]; truncated: boolean } }).listing;
+      assert.deepEqual(listing.files, ["README.md", "src/Screen.kt"]);
+      assert.equal(listing.truncated, false);
+
+      // A cwd no live agent is attached to never lists, even though it exists.
+      const outside = await getJson("/api/files?cwd=%2Fetc");
+      assert.equal(outside.status, 403);
+
+      const missing = await getJson("/api/files");
+      assert.equal(missing.status, 400);
+    } finally {
+      feed.setSnapshot(snapshotWithAgents([]));
+      await rm(workspace, { recursive: true, force: true });
+    }
+  });
+
   test("sessions requires an allowed path", async () => {
     const { status } = await getJson("/api/sessions?path=/etc/passwd");
     assert.equal(status, 403); // path guard rejects outside the allow-list

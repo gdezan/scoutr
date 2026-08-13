@@ -70,11 +70,14 @@ import androidx.compose.runtime.produceState
 import androidx.compose.foundation.Image
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.draw.clip
@@ -99,6 +102,7 @@ import dev.cockpit.app.data.toSessionActions
 import dev.cockpit.app.data.ContentBlock
 import dev.cockpit.app.data.SessionEntry
 import dev.cockpit.app.data.QuestionEntry
+import dev.cockpit.app.data.FileListing
 import dev.cockpit.app.data.SlashCommandInfo
 import dev.cockpit.app.data.entryText
 import dev.cockpit.app.ui.imeOrNavigationBarsPadding
@@ -117,6 +121,10 @@ import dev.cockpit.app.state.ChatUiState
 import dev.cockpit.app.state.ChatViewModel
 import dev.cockpit.app.state.MessageDeliveryState
 import dev.cockpit.app.state.PendingUserMessage
+import dev.cockpit.app.state.FileCandidate
+import dev.cockpit.app.state.activeFileMention
+import dev.cockpit.app.state.completeFileMention
+import dev.cockpit.app.state.matchFileMentions
 import dev.cockpit.app.state.fillSlashCommand
 import dev.cockpit.app.state.matchSlashCommands
 import dev.cockpit.app.state.slashCommandQuery
@@ -142,7 +150,7 @@ fun ChatScreen(
     }
 
     val haptic = rememberHaptic()
-    var input by remember { mutableStateOf("") }
+    var input by remember { mutableStateOf(TextFieldValue()) }
     var attachment by remember { mutableStateOf<android.net.Uri?>(null) }
     var attachmentUploading by remember { mutableStateOf(false) }
     val context = LocalContext.current
@@ -256,12 +264,15 @@ fun ChatScreen(
                 enabled = !ui.sending,
                 commands = ui.commands,
                 onRetryCommands = viewModel::retryCommands,
+                files = ui.files,
+                onOpenMention = viewModel::refreshFiles,
+                onRetryFiles = viewModel::refreshFiles,
                 attachment = attachment,
                 attachmentUploading = attachmentUploading,
                 onPickAttachment = { pickImage.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
                 onClearAttachment = { attachment = null },
                 onSend = {
-                    val text = input
+                    val text = input.text
                     val current = attachment
                     if (text.isNotBlank() || current != null) {
                         haptic(HapticEvent.Confirm)
@@ -279,7 +290,7 @@ fun ChatScreen(
                         } else {
                             viewModel.send(text)
                         }
-                        input = ""
+                        input = TextFieldValue()
                         attachment = null
                     }
                 },
@@ -1036,33 +1047,68 @@ private fun ToolChipContainer(
 
 @Composable
 internal fun ChatComposer(
-    value: String,
-    onValueChange: (String) -> Unit,
+    value: TextFieldValue,
+    onValueChange: (TextFieldValue) -> Unit,
     placeholder: String,
     enabled: Boolean,
     commands: Loadable<List<SlashCommandInfo>> = Loadable.Idle,
     onRetryCommands: () -> Unit = {},
+    files: Loadable<FileListing> = Loadable.Idle,
+    onOpenMention: () -> Unit = {},
+    onRetryFiles: () -> Unit = {},
     attachment: android.net.Uri? = null,
     attachmentUploading: Boolean = false,
     onPickAttachment: () -> Unit = {},
     onClearAttachment: () -> Unit = {},
     onSend: () -> Unit,
 ) {
-    val query = slashCommandQuery(value)
+    val query = slashCommandQuery(value.text)
     val commandsValue = (commands as? Loadable.Ready)?.value.orEmpty()
     val matches = remember(commandsValue, query) { query?.let { matchSlashCommands(commandsValue, it) }.orEmpty() }
     val exactMatch = query?.let { typed -> matches.firstOrNull { it.name.equals(typed, ignoreCase = true) } }
-    val acceptingCompletion = query != null && matches.isNotEmpty() && exactMatch == null
+    val acceptingCommand = query != null && matches.isNotEmpty() && exactMatch == null
+
+    // A mention is a token around the caret, so it needs the selection, not
+    // just the text; a non-collapsed selection is a drag, not a caret.
+    val caret = value.selection.takeIf { it.collapsed }?.start
+    val mention = remember(value) { caret?.let { activeFileMention(value.text, it) } }
+    // Back dismisses the menu without touching the text; re-opening requires
+    // leaving the token and coming back, so the offset is the dismissal key.
+    var dismissedMentionAt by remember { mutableStateOf<Int?>(null) }
+    val mentionOpen = mention != null && mention.start != dismissedMentionAt
+    val listing = (files as? Loadable.Ready)?.value
+    val mentionMatches = remember(listing, mention?.query, mentionOpen) {
+        if (!mentionOpen || listing == null) emptyList()
+        else matchFileMentions(listing.files, mention!!.query)
+    }
+    val acceptingMention = mentionOpen && mentionMatches.isNotEmpty()
+    val acceptingCompletion = acceptingCommand || acceptingMention
     var selectedIndex by remember { mutableStateOf(0) }
-    LaunchedEffect(value, commandsValue) { selectedIndex = 0 }
+    LaunchedEffect(value, commandsValue, listing) { selectedIndex = 0 }
+    // Fetch once per mention: the key is the `@` offset, so typing and
+    // drilling into directories filter the list in hand, while leaving the
+    // token and returning to it loads a fresh one.
+    LaunchedEffect(mention?.start) {
+        if (mention != null && mention.start != dismissedMentionAt) onOpenMention()
+        if (mention == null) dismissedMentionAt = null
+    }
+    BackHandler(enabled = mentionOpen) { dismissedMentionAt = mention?.start }
 
     fun select(command: SlashCommandInfo) {
-        onValueChange(fillSlashCommand(command))
+        onValueChange(TextFieldValue(fillSlashCommand(command)).let { it.copy(selection = TextRange(it.text.length)) })
+    }
+
+    fun selectMention(candidate: FileCandidate) {
+        val current = mention ?: return
+        onValueChange(completeFileMention(value, current, candidate))
     }
 
     fun submit() {
-        if (acceptingCompletion) select(matches[selectedIndex.coerceIn(matches.indices)])
-        else onSend()
+        when {
+            acceptingCommand -> select(matches[selectedIndex.coerceIn(matches.indices)])
+            acceptingMention -> selectMention(mentionMatches[selectedIndex.coerceIn(mentionMatches.indices)])
+            else -> onSend()
+        }
     }
 
     Column {
@@ -1082,6 +1128,17 @@ internal fun ChatComposer(
                 selectedIndex = selectedIndex,
                 onSelect = ::select,
                 onRetry = onRetryCommands,
+            )
+        } else if (mentionOpen) {
+            FileMentionMenu(
+                candidates = mentionMatches,
+                query = mention!!.query,
+                loading = files is Loadable.Loading || files is Loadable.Idle,
+                error = (files as? Loadable.Failed)?.reason,
+                truncated = listing?.truncated == true,
+                selectedIndex = selectedIndex,
+                onSelect = ::selectMention,
+                onRetry = onRetryFiles,
             )
         }
         OutlinedTextField(
@@ -1123,12 +1180,16 @@ internal fun ChatComposer(
                     }
                     IconButton(
                         onClick = { submit() },
-                        enabled = enabled && (value.isNotBlank() || attachment != null),
+                        enabled = enabled && (value.text.isNotBlank() || attachment != null),
                     ) {
                         Icon(
                             imageVector = if (acceptingCompletion) Icons.AutoMirrored.Filled.KeyboardArrowRight else Icons.AutoMirrored.Filled.Send,
-                            contentDescription = if (acceptingCompletion) "Complete command" else "Send",
-                            tint = if (value.isBlank()) MaterialTheme.colorScheme.onSurfaceVariant
+                            contentDescription = when {
+                                acceptingMention -> "Complete path"
+                                acceptingCompletion -> "Complete command"
+                                else -> "Send"
+                            },
+                            tint = if (value.text.isBlank()) MaterialTheme.colorScheme.onSurfaceVariant
                             else MaterialTheme.colorScheme.primary,
                         )
                     }
@@ -1138,17 +1199,24 @@ internal fun ChatComposer(
                 .fillMaxWidth()
                 .padding(horizontal = 12.dp, vertical = 6.dp)
                 .onPreviewKeyEvent { event ->
-                    // Enter completes an accepting slash command; otherwise the field
-                    // itself inserts a newline (multiline + imeAction None) and the
-                    // empty KeyboardActions guarantee no editor action can send.
-                    if (event.type != KeyEventType.KeyDown || query == null || matches.isEmpty()) return@onPreviewKeyEvent false
+                    // Enter completes an accepting slash command or file mention;
+                    // with no menu open the field itself inserts a newline
+                    // (multiline + imeAction None) and the empty KeyboardActions
+                    // guarantee no editor action can send.
+                    if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                    val openMenuSize = when {
+                        query != null -> matches.size
+                        mentionOpen -> mentionMatches.size
+                        else -> 0
+                    }
+                    if (openMenuSize == 0) return@onPreviewKeyEvent false
                     when (event.key) {
                         Key.Enter, Key.NumPadEnter -> {
                             submit()
                             true
                         }
                         Key.DirectionDown -> {
-                            selectedIndex = (selectedIndex + 1).coerceAtMost(matches.lastIndex)
+                            selectedIndex = (selectedIndex + 1).coerceAtMost(openMenuSize - 1)
                             true
                         }
                         Key.DirectionUp -> {

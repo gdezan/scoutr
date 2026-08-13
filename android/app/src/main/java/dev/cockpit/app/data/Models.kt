@@ -320,6 +320,22 @@ data class DirListing(
     val dirs: List<String>,
 )
 
+/** Candidate paths for the composer's `@` mention completion. */
+@Serializable
+data class FileListingResponse(
+    val ok: Boolean,
+    val listing: FileListing? = null,
+    val error: String? = null,
+)
+
+@Serializable
+data class FileListing(
+    val path: String,
+    /** Slash-separated paths relative to [path]; directories are derived, not listed. */
+    val files: List<String>,
+    val truncated: Boolean = false,
+)
+
 @Serializable
 data class ModelsCatalogResponse(
     val ok: Boolean,
