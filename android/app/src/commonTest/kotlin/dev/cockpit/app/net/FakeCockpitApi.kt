@@ -16,6 +16,7 @@ import dev.cockpit.app.data.RepoDiffResponse
 import dev.cockpit.app.data.RepoOverviewResponse
 import dev.cockpit.app.data.SessionCatalogResponse
 import dev.cockpit.app.data.SessionReadResponse
+import dev.cockpit.app.data.SnapshotResponse
 import dev.cockpit.app.data.TerminalHierarchyCommand
 import dev.cockpit.app.data.TerminalHierarchyResponse
 import dev.cockpit.app.data.UsageResponse
@@ -151,6 +152,10 @@ class FakeCockpitApi : CockpitApi {
 
     override suspend fun terminalHierarchy(command: TerminalHierarchyCommand): TerminalHierarchyResponse =
         record("terminalHierarchy", mapOf("command" to command)) { terminalHierarchyResult }
+
+    var snapshotResult: Result<SnapshotResponse> = Result.success(SnapshotResponse(ok = true))
+
+    override suspend fun snapshot(): SnapshotResponse = record("snapshot") { snapshotResult }
 
     override suspend fun sendCommand(command: Map<String, String>): WsFrame {
         val json = buildJsonObject { for ((k, v) in command) put(k, JsonPrimitive(v)) }

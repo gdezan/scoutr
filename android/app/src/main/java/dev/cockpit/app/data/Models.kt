@@ -11,8 +11,23 @@ data class HealthResponse(
     val service: String? = null,
     val version: String? = null,
     val herdr: HerdrInfo? = null,
+    val terminal: TerminalCapabilityInfo? = null,
     val ntfy: NtfyInfo? = null,
 )
+
+/** The bridge's terminal capability cache entry (health surface). */
+@Serializable
+data class TerminalCapabilityInfo(
+    val status: String? = null,
+    val herdrVersion: String? = null,
+    val protocol: Int? = null,
+    val installedVersion: String? = null,
+    val required: String? = null,
+    val reason: String? = null,
+) {
+    /** Convenience: mirrors the bridge's `supported` status string. */
+    val isSupported: Boolean get() = status == "supported"
+}
 
 @Serializable
 data class NtfyInfo(

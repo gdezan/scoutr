@@ -17,6 +17,7 @@ import dev.cockpit.app.data.RepoDiffResponse
 import dev.cockpit.app.data.RepoOverviewResponse
 import dev.cockpit.app.data.SessionCatalogResponse
 import dev.cockpit.app.data.SessionReadResponse
+import dev.cockpit.app.data.SnapshotResponse
 import dev.cockpit.app.data.TerminalHierarchyCommand
 import dev.cockpit.app.data.TerminalHierarchyResponse
 import dev.cockpit.app.data.UsageResponse
@@ -187,6 +188,9 @@ class BridgeClient(
                 .toRequestBody("application/json".toMediaType()),
         ) { json.decodeFromString(TerminalHierarchyResponse.serializer(), it) }
 
+    /** Slice 6: fresh herdr hierarchy snapshot; 503 (no snapshot yet) surfaces as BridgeException(503). */
+    override suspend fun snapshot(): SnapshotResponse =
+        call("/api/snapshot") { json.decodeFromString(SnapshotResponse.serializer(), it) }
     /** Model catalog for a backend (defaults to pi); catalog-less backends return an empty catalog. */
     override suspend fun models(agent: String?): ModelsCatalogResponse =
         call("/api/models", query = if (agent == null) emptyMap() else mapOf("agent" to agent)) {

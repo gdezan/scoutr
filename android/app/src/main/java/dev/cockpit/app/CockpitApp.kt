@@ -11,9 +11,14 @@ import dev.cockpit.app.data.ConnectionStore
 import dev.cockpit.app.data.SharedPreferencesLauncherSettingsStore
 import dev.cockpit.app.data.SharedPreferencesSessionCatalogStore
 import dev.cockpit.app.data.NtfyMessage
+import dev.cockpit.app.data.TerminalPreferencesStore
 import dev.cockpit.app.net.BridgeClient
 import dev.cockpit.app.net.CockpitApi
 import dev.cockpit.app.net.NtfyClient
+import dev.cockpit.app.net.TerminalSocketClient
+import dev.cockpit.app.net.TerminalTransport
+import dev.cockpit.app.net.TopologyFeed
+import dev.cockpit.app.net.TopologyFeedClient
 import dev.cockpit.app.service.resolveNotificationLink
 import dev.cockpit.app.service.statusForTitle
 import okhttp3.OkHttpClient
@@ -47,6 +52,7 @@ class AppContainer(application: Application) {
     val connectionStore = ConnectionStore(appContext)
     val launcherSettingsStore = SharedPreferencesLauncherSettingsStore(appContext)
     val sessionCatalogStore = SharedPreferencesSessionCatalogStore(appContext)
+    val terminalPreferences = TerminalPreferencesStore(appContext)
 
     private val okHttp = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
@@ -61,6 +67,12 @@ class AppContainer(application: Application) {
     )
 
     val ntfy = NtfyClient(okHttp)
+
+    /** Slice 6: terminal route seams (one active pane socket + route-scoped topology feed). */
+    val terminalTransport: TerminalTransport = TerminalSocketClient(okHttp)
+    val terminalTopologyFeedFactory = TopologyFeed.Factory { listener ->
+        TopologyFeedClient(okHttp, connectionStore, listener)
+    }
 
     init {
         val manager = appContext.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager

@@ -16,6 +16,7 @@ import dev.cockpit.app.data.RepoDiffResponse
 import dev.cockpit.app.data.RepoOverviewResponse
 import dev.cockpit.app.data.SessionCatalogResponse
 import dev.cockpit.app.data.SessionReadResponse
+import dev.cockpit.app.data.SnapshotResponse
 import dev.cockpit.app.data.TerminalHierarchyCommand
 import dev.cockpit.app.data.TerminalHierarchyResponse
 import dev.cockpit.app.data.UsageResponse
@@ -60,6 +61,14 @@ interface CockpitApi {
      * close surfaces as BridgeException(409).
      */
     suspend fun terminalHierarchy(command: TerminalHierarchyCommand): TerminalHierarchyResponse
+
+    /**
+     * Slice 6: fresh herdr hierarchy snapshot (GET /api/snapshot). The
+     * terminal route refreshes this on entry, on topology-feed
+     * invalidation, and after hierarchy actions; 503 when the bridge has
+     * no snapshot yet surfaces as BridgeException(503).
+     */
+    suspend fun snapshot(): SnapshotResponse
 
     /** Opens a short-lived WS, sends one command, and waits for the first ack frame. */
     suspend fun sendCommand(command: Map<String, String>): WsFrame
