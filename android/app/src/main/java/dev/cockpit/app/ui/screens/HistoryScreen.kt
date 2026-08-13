@@ -24,6 +24,8 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -58,12 +60,17 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.lifecycle.compose.LifecycleStartEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.snapshotFlow
+import kotlinx.coroutines.flow.first
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -103,6 +110,9 @@ fun HistoryScreen(
     onOpenSession: (ResumedSession) -> Unit,
     viewModel: SessionHistoryViewModel = rememberHistoryViewModel(),
     onReview: (HistoryItem) -> Unit = {},
+    // rememberLazyListState keeps the raw position across recreation; the per-tab
+    // anchors cover tab switches where the position must not leak across views.
+    historyListState: LazyListState = rememberLazyListState(),
     modifier: Modifier = Modifier,
 ) {
     val ui by viewModel.ui.collectAsState()
@@ -119,6 +129,39 @@ fun HistoryScreen(
     var pendingDelete by remember { mutableStateOf<HistoryItem?>(null) }
     var renaming by remember { mutableStateOf<HistoryItem?>(null) }
     val scope = rememberCoroutineScope()
+    var anchors by rememberSaveable(stateSaver = HistoryAnchorMapSaver) {
+        mutableStateOf(emptyMap())
+    }
+    val sortedItems = remember(ui.items, view) { sortedHistoryItems(ui.items, view) }
+    var pendingTabRestore by remember { mutableStateOf<HistoryView?>(null) }
+    var anchorCaptureEnabled by remember { mutableStateOf(true) }
+
+    // Tabs are parallel places: capture by stable path, then restore the tab's own anchor.
+    val latestSortedItems by rememberUpdatedState(sortedItems)
+    LaunchedEffect(view, sortedItems) {
+        if (sortedItems.isNotEmpty() && pendingTabRestore == view) {
+            val target = resolveHistoryAnchor(anchors[view], sortedItems)
+            anchorCaptureEnabled = false
+            historyListState.scrollToItem(
+                index = target?.index?.plus(if (ui.truncated) 1 else 0) ?: 0,
+                scrollOffset = target?.scrollOffset ?: 0,
+            )
+            anchorCaptureEnabled = true
+            pendingTabRestore = null
+        }
+    }
+    LaunchedEffect(view, anchorCaptureEnabled, pendingTabRestore) {
+        if (!anchorCaptureEnabled || pendingTabRestore != null) return@LaunchedEffect
+        snapshotFlow { historyListState.firstVisibleItemIndex to historyListState.firstVisibleItemScrollOffset }
+            .first { latestSortedItems.isNotEmpty() }
+        snapshotFlow {
+            historyListState.firstVisibleItemIndex to historyListState.firstVisibleItemScrollOffset
+        }.collect {
+            captureHistoryAnchor(historyListState, latestSortedItems)?.let { anchor ->
+                anchors = anchors + (view to anchor)
+            }
+        }
+    }
 
     ReadableContentColumn(
         modifier = modifier.fillMaxSize(),
@@ -131,7 +174,18 @@ fun HistoryScreen(
                 viewModel.setQuery(it)
             },
         )
-        ViewTabs(view = view, onSelect = { view = it })
+        ViewTabs(
+            view = view,
+            onSelect = { nextView ->
+                if (nextView != view) {
+                    captureHistoryAnchor(historyListState, sortedItems)?.let { anchor ->
+                        anchors = anchors + (view to anchor)
+                    }
+                    pendingTabRestore = nextView
+                    view = nextView
+                }
+            },
+        )
         if (!ui.connected && ui.error != null) {
             OfflineBanner(onRetry = viewModel::retry)
         }
@@ -145,6 +199,8 @@ fun HistoryScreen(
                 HistoryList(
                     ui = ui,
                     view = view,
+                    sorted = sortedItems,
+                    listState = historyListState,
                     onOpen = { item ->
                         if (viewModel.ui.value.busyPath == null) {
                             scope.launch { viewModel.resume(item)?.let(onOpenSession) }
@@ -256,6 +312,8 @@ private fun ViewTabs(view: HistoryView, onSelect: (HistoryView) -> Unit) {
 private fun HistoryList(
     ui: HistoryUiState,
     view: HistoryView,
+    sorted: List<HistoryItem>,
+    listState: LazyListState,
     onOpen: (HistoryItem) -> Unit,
     onFork: (HistoryItem) -> Unit,
     onRename: (HistoryItem) -> Unit,
@@ -265,18 +323,6 @@ private fun HistoryList(
     onToggleArchive: (HistoryItem) -> Unit,
     onReview: (HistoryItem) -> Unit,
 ) {
-    val visible = when (view) {
-        HistoryView.Active -> ui.items.filter { it.session.active && !it.archived }
-        HistoryView.Completed -> ui.items.filter { !it.session.active && !it.archived }
-        HistoryView.Pinned -> ui.items.filter { it.pinned }
-        HistoryView.Archived -> ui.items.filter { it.archived }
-    }
-    val sorted = visible.sortedWith(
-        compareByDescending<HistoryItem> { it.pinned }
-            .thenByDescending { it.session.active }
-            .thenByDescending { it.session.updatedAt },
-    )
-
     if (sorted.isEmpty()) {
         Box(Modifier.fillMaxWidth().padding(vertical = 72.dp), contentAlignment = Alignment.Center) {
             Text(
@@ -294,7 +340,8 @@ private fun HistoryList(
     }
 
     LazyColumn(
-        modifier = Modifier.fillMaxSize(),
+        modifier = Modifier.fillMaxSize().testTag("history_list"),
+        state = listState,
         contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
@@ -324,6 +371,101 @@ private fun HistoryList(
             )
         }
     }
+}
+
+private data class HistoryAnchor(
+    val path: String,
+    val scrollOffset: Int,
+    /** The path's index in the old ordered list, used when path and neighbors all disappear. */
+    val index: Int,
+    val previousPath: String?,
+    val nextPath: String?,
+)
+
+private data class HistoryAnchorTarget(val index: Int, val scrollOffset: Int)
+
+private val HistoryAnchorMapSaver = Saver<Map<HistoryView, HistoryAnchor>, List<String>>(
+    save = { anchors ->
+        anchors.entries.flatMap { (view, anchor) ->
+            listOf(
+                view.name,
+                anchor.path,
+                anchor.scrollOffset.toString(),
+                anchor.index.toString(),
+                anchor.previousPath.orEmpty(),
+                anchor.nextPath.orEmpty(),
+            )
+        }
+    },
+    restore = { saved ->
+        saved.chunked(6).associate { fields ->
+            HistoryView.valueOf(fields[0]) to HistoryAnchor(
+                path = fields[1],
+                scrollOffset = fields[2].toInt(),
+                index = fields[3].toInt(),
+                previousPath = fields[4].ifEmpty { null },
+                nextPath = fields[5].ifEmpty { null },
+            )
+        }
+    }
+)
+
+private fun sortedHistoryItems(items: List<HistoryItem>, view: HistoryView): List<HistoryItem> {
+    val visible = when (view) {
+        HistoryView.Active -> items.filter { it.session.active && !it.archived }
+        HistoryView.Completed -> items.filter { !it.session.active && !it.archived }
+        HistoryView.Pinned -> items.filter { it.pinned }
+        HistoryView.Archived -> items.filter { it.archived }
+    }
+    return visible.sortedWith(
+        compareByDescending<HistoryItem> { it.pinned }
+            .thenByDescending { it.session.active }
+            .thenByDescending { it.session.updatedAt },
+    )
+}
+
+private fun captureHistoryAnchor(
+    listState: LazyListState,
+    items: List<HistoryItem>,
+): HistoryAnchor? {
+    val paths = items.map { it.session.path }
+    // Select the row at (or after) the state's first-visible index, not the
+    // layout's first visible key: an overscroll stretch at the list end can
+    // pull the previous row back into the layout while the state still points
+    // at the real top row, which would store the wrong anchor.
+    val item = listState.layoutInfo.visibleItemsInfo.firstOrNull {
+        it.index >= listState.firstVisibleItemIndex && it.key in paths
+    } ?: return null
+    val path = item.key as String
+    val index = paths.indexOf(path)
+    if (index < 0) return null
+    return HistoryAnchor(
+        path = path,
+        scrollOffset = if (item.index == listState.firstVisibleItemIndex) listState.firstVisibleItemScrollOffset else 0,
+        index = index,
+        previousPath = paths.getOrNull(index - 1),
+        nextPath = paths.getOrNull(index + 1),
+    )
+}
+
+private fun resolveHistoryAnchor(
+    anchor: HistoryAnchor?,
+    items: List<HistoryItem>,
+): HistoryAnchorTarget? {
+    if (anchor == null) return null
+    val paths = items.map { it.session.path }
+    val exactIndex = paths.indexOf(anchor.path)
+    if (exactIndex >= 0) return HistoryAnchorTarget(exactIndex, anchor.scrollOffset)
+
+    val nextIndex = anchor.nextPath?.let(paths::indexOf)?.takeIf { it >= 0 }
+    if (nextIndex != null) return HistoryAnchorTarget(nextIndex, 0)
+    // Anchor and its next neighbor are gone: the saved old ordered index prefers
+    // the next surviving item at the old slot. When the removals run to the tail,
+    // the clamp lands the prior item; an empty list falls back to the top.
+    // (previousPath stays in the snapshot to document the anchor's neighborhood,
+    // but the positional clamp subsumes the prior-item fallback.)
+    if (paths.isEmpty()) return null
+    return HistoryAnchorTarget(anchor.index.coerceIn(0, paths.lastIndex), 0)
 }
 
 /** Swipe-to-reveal anchor values for a session row. */

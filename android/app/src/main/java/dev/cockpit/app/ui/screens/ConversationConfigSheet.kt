@@ -13,8 +13,10 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
@@ -59,6 +61,7 @@ internal fun ConversationConfigSheet(
     ui: ChatUiState,
     onSelectModel: (String) -> Unit,
     onSelectThinking: (String) -> Unit,
+    modelListState: LazyListState = rememberLazyListState(),
     onDismiss: () -> Unit,
 ) {
     var query by remember { mutableStateOf("") }
@@ -72,6 +75,11 @@ internal fun ConversationConfigSheet(
             selectedKey = ui.model,
         )
     }
+    ResetLazyListOnQueryChange(
+        query = query,
+        contentAvailable = configuration is Loadable.Ready && models.isNotEmpty(),
+        listState = modelListState,
+    )
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     ModalBottomSheet(
@@ -192,6 +200,7 @@ internal fun ConversationConfigSheet(
                     )
                     else -> ProviderModelCatalog(
                         models = models,
+                        listState = modelListState,
                         selectedKey = ui.model,
                         onSelect = { match -> onSelectModel(match.key) },
                         onToggleFavorite = null,

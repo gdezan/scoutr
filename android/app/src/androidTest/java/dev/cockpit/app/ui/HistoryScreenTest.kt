@@ -3,6 +3,8 @@ package dev.cockpit.app.ui
 import android.graphics.Bitmap
 import android.provider.Settings
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.foundation.layout.width
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asAndroidBitmap
@@ -18,6 +20,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeLeft
+import androidx.compose.ui.test.swipeUp
 import android.content.ClipboardManager
 import androidx.test.platform.app.InstrumentationRegistry
 import dev.cockpit.app.data.ConnectionStore
@@ -130,6 +133,25 @@ class HistoryScreenTest {
         server.shutdown()
     }
 
+    private fun longCatalogBody(removed: Set<String> = emptySet()): String {
+        val sessions = buildList {
+            repeat(30) { index ->
+                val path = "/sessions/active-${index.toString().padStart(2, '0')}.jsonl"
+                if (path !in removed) add("""{"id":"active-$index","path":"$path","title":"Active $index","cwd":"/repo/active-$index","updatedAt":${100_000 - index}.0,"preview":"active preview $index","active":true,"paneId":"pane-active-$index","workspaceId":"ws"}""")
+            }
+            repeat(30) { index ->
+                val path = "/sessions/completed-${index.toString().padStart(2, '0')}.jsonl"
+                if (path !in removed) add("""{"id":"completed-$index","path":"$path","title":"Completed $index","cwd":"/repo/completed-$index","updatedAt":${90_000 - index}.0,"preview":"completed preview $index","active":false}""")
+            }
+        }
+        return """{"ok":true,"truncated":false,"sessions":[${sessions.joinToString(",")}] }"""
+    }
+
+    private fun firstVisibleSessionPath(listState: LazyListState): String? =
+        listState.layoutInfo.visibleItemsInfo
+            .firstOrNull { it.index == listState.firstVisibleItemIndex }
+            ?.key as? String
+
     private val catalogBody = """
         {"ok":true,"truncated":false,"sessions":[
           {"id":"abc","path":"/root/sessions/abc.jsonl","title":"Fix billing bug","cwd":"/repo/a","model":"openai-codex/gpt-5.4","updatedAt":${System.currentTimeMillis()}.0,"preview":"User asked to fix the billing math","active":true,"paneId":"pane1","workspaceId":"ws1","status":"blocked"},
@@ -137,13 +159,16 @@ class HistoryScreenTest {
         ]}
     """.trimIndent()
 
-    private fun stubCatalog(deleteOk: Boolean = true) {
+    private fun stubCatalog(
+        deleteOk: Boolean = true,
+        catalog: () -> String = { catalogBody },
+    ) {
         server.dispatcher = object : Dispatcher() {
             override fun dispatch(request: RecordedRequest): MockResponse {
                 val path = (request.path ?: "").substringBefore('?')
                 return when {
                     path == "/api/session-catalog" ->
-                        MockResponse().setResponseCode(200).setBody(catalogBody)
+                        MockResponse().setResponseCode(200).setBody(catalog())
                     path == "/api/session-catalog/delete" ->
                         MockResponse().setResponseCode(200).setBody("""{"ok":$deleteOk}""")
                     path == "/api/session-catalog/rename" ->
@@ -156,21 +181,22 @@ class HistoryScreenTest {
         }
     }
 
-    private fun viewModel(): SessionHistoryViewModel {
+    private fun viewModel(store: SessionCatalogStore = RecordingStore()): SessionHistoryViewModel {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val connection = ConnectionStore(context)
         connection.save(server.url("/").toString().trimEnd('/'), "test_token", null, null)
         val bridge = BridgeClient(OkHttpClient.Builder().readTimeout(5, TimeUnit.SECONDS).build(), connection)
-        return SessionHistoryViewModel(bridge, connection, RecordingStore())
+        return SessionHistoryViewModel(bridge, connection, store)
     }
 
-    private fun setContent(vm: SessionHistoryViewModel) {
+    private fun setContent(vm: SessionHistoryViewModel, listState: LazyListState? = null) {
         compose.setContent {
             CockpitTheme {
-                HistoryScreen(
-                    onOpenSession = {},
-                    viewModel = vm,
-                )
+                if (listState == null) {
+                    HistoryScreen(onOpenSession = {}, viewModel = vm)
+                } else {
+                    HistoryScreen(onOpenSession = {}, viewModel = vm, historyListState = listState)
+                }
             }
         }
     }
@@ -357,6 +383,171 @@ class HistoryScreenTest {
     }
 
     @Test
+    fun eachSessionsTabRestoresItsOwnStableAnchorAndOffset() {
+        val pinned = (0 until 15).map { "/sessions/active-${it.toString().padStart(2, '0')}.jsonl" }.toSet()
+        val archived = (15 until 30).map { "/sessions/completed-${it.toString().padStart(2, '0')}.jsonl" }.toSet()
+        stubCatalog(catalog = ::longCatalogBody)
+        val listState = LazyListState()
+        setContent(viewModel(RecordingStore(pinned = pinned, archived = archived)), listState)
+        compose.waitUntil(5_000) { firstVisibleSessionPath(listState) == "/sessions/active-00.jsonl" }
+
+        compose.onNodeWithTag("history_list").performTouchInput { swipeUp() }
+        compose.waitForIdle()
+        compose.waitUntil(2_000) { firstVisibleSessionPath(listState) != "/sessions/active-00.jsonl" }
+        compose.waitForIdle()
+        val activeAnchor = firstVisibleSessionPath(listState) to listState.firstVisibleItemScrollOffset
+
+        compose.onNodeWithText("Completed").performClick()
+        compose.waitForIdle()
+        compose.waitUntil(5_000) { firstVisibleSessionPath(listState) == "/sessions/completed-00.jsonl" }
+        compose.onNodeWithTag("history_list").performTouchInput { swipeUp() }
+        compose.waitUntil(2_000) { firstVisibleSessionPath(listState) != "/sessions/completed-00.jsonl" }
+        compose.waitForIdle()
+        val completedAnchor = firstVisibleSessionPath(listState) to listState.firstVisibleItemScrollOffset
+
+        compose.onNodeWithText("Active").performClick()
+        compose.waitUntil(5_000) { firstVisibleSessionPath(listState) == activeAnchor.first }
+        assertTrue(kotlin.math.abs(listState.firstVisibleItemScrollOffset - activeAnchor.second) <= 1)
+        compose.onNodeWithText("Completed").performClick()
+        compose.waitUntil(5_000) { firstVisibleSessionPath(listState) == completedAnchor.first }
+        assertTrue(kotlin.math.abs(listState.firstVisibleItemScrollOffset - completedAnchor.second) <= 1)
+
+        compose.onNodeWithText("Pinned").performClick()
+        compose.waitForIdle()
+        compose.waitUntil(5_000) { firstVisibleSessionPath(listState) == "/sessions/active-00.jsonl" }
+        compose.onNodeWithTag("history_list").performTouchInput { swipeUp() }
+        compose.waitUntil(2_000) { firstVisibleSessionPath(listState) != "/sessions/active-00.jsonl" }
+        compose.waitForIdle()
+        val pinnedAnchor = firstVisibleSessionPath(listState) to listState.firstVisibleItemScrollOffset
+
+        compose.onNodeWithText("Archived").performClick()
+        compose.waitForIdle()
+        compose.waitUntil(5_000) { firstVisibleSessionPath(listState) == "/sessions/completed-15.jsonl" }
+        compose.onNodeWithTag("history_list").performTouchInput { swipeUp() }
+        compose.waitUntil(2_000) { firstVisibleSessionPath(listState) != "/sessions/completed-15.jsonl" }
+        compose.waitForIdle()
+        val archivedAnchor = firstVisibleSessionPath(listState) to listState.firstVisibleItemScrollOffset
+
+        compose.onNodeWithText("Pinned").performClick()
+        compose.waitUntil(5_000) { firstVisibleSessionPath(listState) == pinnedAnchor.first }
+        compose.onNodeWithText("Archived").performClick()
+        compose.waitUntil(5_000) { firstVisibleSessionPath(listState) == archivedAnchor.first }
+    }
+
+    @Test
+    fun emptyTabRoundTripKeepsOutgoingAnchor() {
+        stubCatalog(catalog = ::longCatalogBody)
+        val listState = LazyListState()
+        setContent(viewModel(), listState)
+        compose.waitUntil(5_000) { firstVisibleSessionPath(listState) == "/sessions/active-00.jsonl" }
+        compose.onNodeWithTag("history_list").performTouchInput { swipeUp() }
+        compose.waitUntil(2_000) { firstVisibleSessionPath(listState) != "/sessions/active-00.jsonl" }
+        compose.waitForIdle()
+        val activeAnchor = firstVisibleSessionPath(listState)
+
+        compose.onNodeWithText("Archived").performClick()
+        compose.onNodeWithTag("history_empty").assertIsDisplayed()
+        compose.onNodeWithText("Active").performClick()
+        compose.waitUntil(5_000) { firstVisibleSessionPath(listState) == activeAnchor }
+    }
+
+    @Test
+    fun removedSessionsAnchorFallsForwardToNextStablePath() {
+        var removed = emptySet<String>()
+        stubCatalog(catalog = { longCatalogBody(removed) })
+        val listState = LazyListState()
+        val vm = viewModel()
+        setContent(vm, listState)
+        compose.waitUntil(5_000) { firstVisibleSessionPath(listState) == "/sessions/active-00.jsonl" }
+        compose.onNodeWithTag("history_list").performTouchInput { swipeUp() }
+        compose.waitUntil(2_000) { firstVisibleSessionPath(listState) != "/sessions/active-00.jsonl" }
+        compose.waitForIdle()
+        val removedPath = firstVisibleSessionPath(listState)!!
+        val removedIndex = removedPath.substringAfter("active-").substringBefore('.').toInt()
+        val expectedPath = "/sessions/active-${(removedIndex + 1).toString().padStart(2, '0')}.jsonl"
+        compose.onNodeWithText("Completed").performClick()
+        compose.waitForIdle()
+        compose.waitUntil(5_000) { firstVisibleSessionPath(listState) == "/sessions/completed-00.jsonl" }
+
+        removed = setOf(removedPath)
+        vm.retry()
+        compose.waitUntil(5_000) { vm.ui.value.items.none { it.session.path in removed } }
+        compose.waitForIdle()
+        compose.onNodeWithText("Active").performClick()
+        compose.waitForIdle()
+        compose.waitUntil(5_000) { firstVisibleSessionPath(listState) == expectedPath }
+        assertEquals(expectedPath, firstVisibleSessionPath(listState))
+    }
+
+    @Test
+    fun removedAnchorAndNeighborsFallBackToSavedIndex() {
+        var removed = emptySet<String>()
+        stubCatalog(catalog = { longCatalogBody(removed) })
+        val listState = LazyListState()
+        val vm = viewModel()
+        setContent(vm, listState)
+        compose.waitUntil(5_000) { firstVisibleSessionPath(listState) == "/sessions/active-00.jsonl" }
+        // Anchor deterministically a few rows in — away from the top and far from the
+        // end (scrollToItem cannot place a near-bottom index at the top: the list
+        // clamps) — then remove the anchor and both of its neighbors.
+        compose.onNodeWithTag("history_list").performScrollToIndex(5)
+        compose.waitForIdle()
+        val anchorPath = firstVisibleSessionPath(listState)!!
+        val anchorIndex = anchorPath.substringAfter("active-").substringBefore('.').toInt()
+        // Remove the anchor and both of its neighbors; the saved old index must
+        // then land on the next surviving item (old anchorIndex + removed count).
+        val removedIndexes = (anchorIndex - 1..anchorIndex + 1).filter { it in 0..29 }
+        val expectedIndex = (anchorIndex + removedIndexes.size).coerceAtMost(27)
+        val expectedPath = "/sessions/active-${expectedIndex.toString().padStart(2, '0')}.jsonl"
+        compose.onNodeWithText("Completed").performClick()
+        compose.waitForIdle()
+        compose.waitUntil(5_000) { firstVisibleSessionPath(listState) == "/sessions/completed-00.jsonl" }
+
+        removed = removedIndexes.map { "/sessions/active-${it.toString().padStart(2, '0')}.jsonl" }.toSet()
+        vm.retry()
+        compose.waitUntil(5_000) { vm.ui.value.items.none { it.session.path in removed } }
+        compose.waitForIdle()
+        compose.onNodeWithText("Active").performClick()
+        compose.waitForIdle()
+        compose.waitUntil(5_000) { firstVisibleSessionPath(listState) == expectedPath }
+        assertEquals(expectedPath, firstVisibleSessionPath(listState))
+    }
+
+    @Test
+    fun removedAnchorPrefersLaterSurvivorOverPreviousNeighbor() {
+        var removed = emptySet<String>()
+        stubCatalog(catalog = { longCatalogBody(removed) })
+        val listState = LazyListState()
+        val vm = viewModel()
+        setContent(vm, listState)
+        compose.waitUntil(5_000) { firstVisibleSessionPath(listState) == "/sessions/active-00.jsonl" }
+        compose.onNodeWithTag("history_list").performScrollToIndex(5)
+        compose.waitForIdle()
+        val anchorPath = firstVisibleSessionPath(listState)!!
+        val anchorIndex = anchorPath.substringAfter("active-").substringBefore('.').toInt()
+        assertEquals("fixture assumption: index 5 must be the anchored row", 5, anchorIndex)
+        // Remove the anchor and its next neighbor while the previous neighbor
+        // survives: the saved index must prefer the later surviving row over the prior.
+        val removedIndexes = setOf(anchorIndex, anchorIndex + 1)
+        val expectedIndex = anchorIndex + removedIndexes.size
+        val expectedPath = "/sessions/active-${expectedIndex.toString().padStart(2, '0')}.jsonl"
+        compose.onNodeWithText("Completed").performClick()
+        compose.waitForIdle()
+        compose.waitUntil(5_000) { firstVisibleSessionPath(listState) == "/sessions/completed-00.jsonl" }
+
+        removed = removedIndexes.map { "/sessions/active-${it.toString().padStart(2, '0')}.jsonl" }.toSet()
+        vm.retry()
+        compose.waitUntil(5_000) { vm.ui.value.items.none { it.session.path in removed } }
+        compose.waitForIdle()
+        compose.onNodeWithText("Active").performClick()
+        compose.waitForIdle()
+        compose.waitUntil(5_000) { firstVisibleSessionPath(listState) == expectedPath }
+        assertEquals(expectedPath, firstVisibleSessionPath(listState))
+    }
+
+
+
+    @Test
     fun emptyStateShowsForArchivedView() {
         stubCatalog()
         setContent(viewModel())
@@ -366,9 +557,12 @@ class HistoryScreenTest {
 }
 
 /** In-memory catalog store for instrumentation tests. */
-private class RecordingStore : SessionCatalogStore {
-    private val pinned = mutableSetOf<String>()
-    private val archived = mutableSetOf<String>()
+private class RecordingStore(
+    pinned: Set<String> = emptySet(),
+    archived: Set<String> = emptySet(),
+) : SessionCatalogStore {
+    private val pinned = pinned.toMutableSet()
+    private val archived = archived.toMutableSet()
 
     override fun pinnedPaths(): Set<String> = pinned.toSet()
     override fun archivedPaths(): Set<String> = archived.toSet()

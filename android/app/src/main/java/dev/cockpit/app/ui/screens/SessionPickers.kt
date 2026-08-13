@@ -14,7 +14,9 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -37,6 +39,11 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -56,14 +63,21 @@ import androidx.compose.ui.window.DialogProperties
 import dev.cockpit.app.state.ModelPickerMatch
 import dev.cockpit.app.state.NewSessionUiState
 import dev.cockpit.app.state.NewSessionViewModel
-
+import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.first
 @Composable
 internal fun ModelPickerDialog(
     ui: NewSessionUiState,
     viewModel: NewSessionViewModel,
+    modelListState: LazyListState = rememberLazyListState(),
     onDismiss: () -> Unit,
 ) {
     val haptics = LocalHapticFeedback.current
+    ResetLazyListOnQueryChange(
+        query = ui.modelFilters.query,
+        contentAvailable = !ui.loadingModels && ui.modelError == null && ui.modelMatches.isNotEmpty(),
+        listState = modelListState,
+    )
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Surface(
             color = MaterialTheme.colorScheme.background,
@@ -96,6 +110,7 @@ internal fun ModelPickerDialog(
                     ui.modelMatches.isEmpty() -> ModelPickerEmpty("No models match")
                     else -> ProviderModelCatalog(
                         models = ui.modelMatches,
+                        listState = modelListState,
                         selectedKey = ui.selectedModelKey,
                         onSelect = { match ->
                             haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
@@ -190,6 +205,7 @@ internal fun FolderPickerDialog(
 @Composable
 internal fun ProviderModelCatalog(
     models: List<ModelPickerMatch>,
+    listState: LazyListState,
     selectedKey: String?,
     onSelect: (ModelPickerMatch) -> Unit,
     modifier: Modifier = Modifier,
@@ -201,6 +217,7 @@ internal fun ProviderModelCatalog(
 ) {
     val providerGroups = models.groupBy { it.provider }
     LazyColumn(
+        state = listState,
         modifier = modifier.testTag(testTag),
         contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp),
@@ -221,6 +238,22 @@ internal fun ProviderModelCatalog(
                 )
             }
         }
+    }
+}
+
+/** Search starts a new result set at the top; same-query refreshes keep the current anchor. */
+@Composable
+internal fun ResetLazyListOnQueryChange(
+    query: String,
+    contentAvailable: Boolean,
+    listState: LazyListState,
+) {
+    val latestContentAvailable by rememberUpdatedState(contentAvailable)
+    LaunchedEffect(query) {
+        snapshotFlow { latestContentAvailable }
+            .filter { it }
+            .first()
+        listState.scrollToItem(0)
     }
 }
 

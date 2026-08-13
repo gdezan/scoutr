@@ -36,6 +36,12 @@ data class PaletteUiState(
     val results: List<PaletteResult> = emptyList(),
     val loading: Boolean = false,
     val error: String? = null,
+    /**
+     * Advances each time a search completes (success or error). The palette
+     * reset effect waits on this rather than a loading pulse, which a fast
+     * load can complete before the effect observes it.
+     */
+    val searchGeneration: Int = 0,
     /** Session path currently being resumed (busy state). */
     val busyPath: String? = null,
     /** Pane id currently being controlled (abort/close). */
@@ -102,13 +108,16 @@ class CommandPaletteViewModel(
                 it.copy(
                     loading = false,
                     results = agentResults(agents) + sessionResults(sessions),
+                    searchGeneration = it.searchGeneration + 1,
                 )
             }
         } catch (c: CancellationException) {
             throw c
         } catch (error: Exception) {
             if (queryGeneration != generation) return
-            _ui.update { it.copy(loading = false, error = error.message ?: "Search failed") }
+            _ui.update {
+                it.copy(loading = false, error = error.message ?: "Search failed", searchGeneration = it.searchGeneration + 1)
+            }
         }
     }
 
@@ -118,12 +127,14 @@ class CommandPaletteViewModel(
         try {
             val agents = bridge.agents().agents
             if (queryGeneration != generation) return
-            _ui.update { it.copy(loading = false, results = agentResults(agents)) }
+            _ui.update { it.copy(loading = false, results = agentResults(agents), searchGeneration = it.searchGeneration + 1) }
         } catch (c: CancellationException) {
             throw c
         } catch (error: Exception) {
             if (queryGeneration != generation) return
-            _ui.update { it.copy(loading = false, error = error.message ?: "Search failed") }
+            _ui.update {
+                it.copy(loading = false, error = error.message ?: "Search failed", searchGeneration = it.searchGeneration + 1)
+            }
         }
     }
 

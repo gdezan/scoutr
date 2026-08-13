@@ -2,20 +2,27 @@ package dev.cockpit.app.ui
 
 import android.graphics.Bitmap
 import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.assertContentDescriptionContains
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsFocused
+import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
+import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.unit.dp
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.compose.ui.test.onNodeWithContentDescription
 import org.junit.Assert.assertTrue
@@ -33,6 +40,7 @@ import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import java.io.File
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
 /**
@@ -62,37 +70,44 @@ class NewSessionSheetTest {
         dev: String,
         models: String,
         create: String? = null,
-        devDelayMillis: Long = 0,
+        devGate: CountDownLatch? = null,
     ) {
         server.dispatcher = object : okhttp3.mockwebserver.Dispatcher() {
             override fun dispatch(request: okhttp3.mockwebserver.RecordedRequest): MockResponse {
-                val path = (request.path ?: "").substringBefore('?')
-                val isDevRequest = path == "/api/dirs" && request.path?.contains("%2FDev") == true
+                val p = request.path ?: ""
+                val pathOnly = if (p.contains('?')) p.substringBefore('?') else p
+                val isDevRequest = pathOnly == "/api/dirs" && p.contains("%2FDev")
                 val body = when {
                     isDevRequest -> dev
-                    path == "/api/dirs" -> home
-                    path == "/api/agents/kinds" -> """{"ok":true,"kinds":[{"id":"pi","displayName":"Pi","capabilities":["abort","retry","compact","fork","rename","close","set_model","set_thinking"],"hasModelCatalog":true,"hasSlashCommands":true}]}"""
-                    path == "/api/models" -> models
-                    path == "/api/sessions" -> create ?: """{"ok":false,"error":"not stubbed"}"""
-                    else -> """{"ok":false,"error":"unexpected path $path"}"""
+                    pathOnly == "/api/dirs" -> home
+                    pathOnly == "/api/agents/kinds" -> """{"ok":true,"kinds":[{"id":"pi","displayName":"Pi","capabilities":["abort","retry","compact","fork","rename","close","set_model","set_thinking"],"hasModelCatalog":true,"hasSlashCommands":true}]}"""
+                    pathOnly == "/api/models" -> models
+                    pathOnly == "/api/sessions" -> create ?: """{"ok":false,"error":"not stubbed"}"""
+                    else -> """{"ok":false,"error":"unexpected path $pathOnly"}"""
                 }
                 return MockResponse()
                     .setHeader("content-type", "application/json")
                     .setBody(body)
                     .apply {
-                        if (isDevRequest && devDelayMillis > 0) {
-                            setBodyDelay(devDelayMillis, TimeUnit.MILLISECONDS)
+                        if (isDevRequest && devGate != null) {
+                            // Hold the listing open until the test has observed the
+                            // loading state; the gate is released explicitly, so the
+                            // observation never races a wall-clock response delay.
+                            devGate.await(15, TimeUnit.SECONDS)
                         }
                     }
             }
         }
     }
 
-    private fun bridge(): BridgeClient {
+    private fun bridge(readTimeoutSeconds: Long = 5): BridgeClient {
         val store = ConnectionStore(InstrumentationRegistry.getInstrumentation().targetContext)
         val host = server.url("/").toString().trimEnd('/')
         store.save(host, "test_token", null, null)
-        return BridgeClient(OkHttpClient.Builder().readTimeout(5, TimeUnit.SECONDS).build(), store)
+        return BridgeClient(
+            OkHttpClient.Builder().readTimeout(readTimeoutSeconds, TimeUnit.SECONDS).build(),
+            store,
+        )
     }
 
     private fun launcherSettingsStore(): SharedPreferencesLauncherSettingsStore {
@@ -119,6 +134,12 @@ class NewSessionSheetTest {
         println("SCREENSHOT[$name]=${file.absolutePath}")
     }
 
+    private fun longModelCatalog(): String {
+        fun models(provider: String, count: Int) = (0 until count).joinToString(",") { index ->
+            """{"id":"model-${index.toString().padStart(2, '0')}","name":"Model $index","provider":"$provider","reasoning":true,"thinkingLevels":["low","high"],"contextWindow":128000}"""
+        }
+        return """{"ok":true,"catalog":{"providers":[{"name":"alpha","models":[${models("alpha", 20)}]},{"name":"omega","models":[${models("omega", 15)}]}]}}"""
+    }
     @Test
     fun folderPickerKeepsConfirmationVisibleWhileDirectoryListScrolls() {
         val directories = (1..24).joinToString(",") { "\"folder-$it\"" }
@@ -167,26 +188,32 @@ class NewSessionSheetTest {
 
     @Test
     fun folderPickerLoadingStateKeepsDisabledConfirmationVisible() {
+        val devGate = CountDownLatch(1)
         stubEndpoints(
             home = """{"ok":true,"listing":{"path":"/home/gdezan","dirs":["Dev"]}}""",
             dev = """{"ok":true,"listing":{"path":"/home/gdezan/Dev","dirs":["agents-mobile"]}}""",
             models = """{"ok":true,"catalog":{"providers":[]}}""",
-            devDelayMillis = 5_000,
+            devGate = devGate,
         )
-        val vm = NewSessionViewModel(bridge(), launcherSettingsStore())
+        val vm = NewSessionViewModel(bridge(readTimeoutSeconds = 30), launcherSettingsStore())
         compose.setContent { NewSessionSheet(viewModel = vm, onDismiss = {}, onCreated = {}) }
-
-        waitFor("open_folder_picker")
-        compose.onNodeWithTag("open_folder_picker").performScrollTo().performClick()
-        waitFor("folder_item_Dev")
-        compose.onNodeWithTag("folder_item_Dev").performClick()
-        compose.waitUntil(timeoutMillis = 2_000) {
-            vm.ui.value.loadingDirs && runCatching {
-                compose.onNodeWithTag("use_folder").assertIsNotEnabled()
-            }.isSuccess
+        try {
+            waitFor("open_folder_picker")
+            compose.onNodeWithTag("open_folder_picker").performScrollTo().performClick()
+            waitFor("folder_item_Dev")
+            compose.onNodeWithTag("folder_item_Dev").performScrollTo().performClick()
+            // The response is gated, so the loading state persists until the gate
+            // is released below; wait for the disabled confirmation to actually
+            // compose instead of racing a wall-clock response delay.
+            compose.waitUntil(timeoutMillis = 10_000) {
+                val node = compose.onAllNodesWithTag("use_folder").fetchSemanticsNodes().firstOrNull()
+                vm.ui.value.loadingDirs && node != null && node.config.getOrNull(SemanticsProperties.Disabled) != null
+            }
+            compose.onNodeWithTag("use_folder").assertIsDisplayed().assertIsNotEnabled()
+            capture("folder-picker-loading", "folder_picker")
+        } finally {
+            devGate.countDown()
         }
-        compose.onNodeWithTag("use_folder").assertIsDisplayed()
-        capture("folder-picker-loading", "folder_picker")
     }
 
     @Test
@@ -331,5 +358,37 @@ class NewSessionSheetTest {
         // Selection still lands and closes the picker.
         compose.onNodeWithTag("model_item_anthropic/claude-sonnet-4.6").performClick()
         compose.waitUntil(timeoutMillis = 5_000) { vm.ui.value.selectedModelKey == "anthropic/claude-sonnet-4.6" }
+    }
+
+    @Test
+    fun modelSearchChangesResetToFirstProviderWithoutChangingSelection() {
+        stubEndpoints(
+            home = """{"ok":true,"listing":{"path":"/home/gdezan","dirs":["Dev"]}}""",
+            dev = """{"ok":true,"listing":{"path":"/home/gdezan/Dev","dirs":[]}}""",
+            models = longModelCatalog(),
+        )
+        val vm = NewSessionViewModel(bridge(), launcherSettingsStore())
+        compose.setContent { NewSessionSheet(viewModel = vm, onDismiss = {}, onCreated = {}) }
+        compose.onNodeWithTag("new_session_content").performScrollToNode(hasTestTag("open_model_picker"))
+        compose.onNodeWithTag("open_model_picker").performClick()
+        waitFor("model_item_alpha/model-00")
+        val selected = vm.ui.value.selectedModelKey
+
+        compose.onNodeWithTag("model_list").performScrollToNode(hasTestTag("model_item_omega/model-14"))
+        compose.onNodeWithTag("model_search").performTextInput("alpha/model-03")
+        waitFor("model_item_alpha/model-03")
+        val filteredListTop = compose.onNodeWithTag("model_list").getUnclippedBoundsInRoot().top
+        val filteredHeaderTop = compose.onNodeWithTag("provider_header_alpha").getUnclippedBoundsInRoot().top
+        assertTrue("query result must restart near the list top", filteredHeaderTop - filteredListTop < 64.dp)
+        compose.onNodeWithTag("model_search").assertIsFocused()
+        assertTrue("search must not change selection", vm.ui.value.selectedModelKey == selected)
+
+        compose.onNodeWithTag("model_search").performTextClearance()
+        waitFor("model_item_alpha/model-00")
+        val fullListTop = compose.onNodeWithTag("model_list").getUnclippedBoundsInRoot().top
+        val fullHeaderTop = compose.onNodeWithTag("provider_header_alpha").getUnclippedBoundsInRoot().top
+        assertTrue("clearing search must restart the full catalog near the top", fullHeaderTop - fullListTop < 64.dp)
+        compose.onNodeWithTag("model_search").assertIsFocused()
+        assertTrue("clearing search must not change selection", vm.ui.value.selectedModelKey == selected)
     }
 }

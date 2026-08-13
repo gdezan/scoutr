@@ -14,7 +14,9 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
@@ -30,11 +32,13 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -55,6 +59,8 @@ import dev.cockpit.app.data.SessionAction
 import dev.cockpit.app.state.CommandPaletteViewModel
 import dev.cockpit.app.state.PaletteResult
 import dev.cockpit.app.state.PaletteResultKind
+import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.first
 
 /**
  * Global command palette: search live agents and stored sessions from one
@@ -66,6 +72,7 @@ fun CommandPalette(
     viewModel: CommandPaletteViewModel,
     onOpenAgent: (paneId: String, sessionPath: String?) -> Unit,
     onOpenSession: (paneId: String, sessionPath: String?) -> Unit,
+    resultListState: LazyListState = rememberLazyListState(),
 
     onDismiss: () -> Unit = viewModel::close,
     modifier: Modifier = Modifier,
@@ -74,6 +81,19 @@ fun CommandPalette(
     val focusRequester = remember { FocusRequester() }
     var pendingClose by remember { mutableStateOf<PaletteResult?>(null) }
     LaunchedEffect(Unit) { focusRequester.requestFocus() }
+    // Search creates a new result set that starts at the top; refreshes for an
+    // unchanged query keep the current anchor. The reset waits for the search
+    // this query change triggered to COMPLETE (searchGeneration advances in the
+    // same state update that attaches the new results), so it never scrolls
+    // stale content or misses a fast load's loading pulse.
+    val latestUi by rememberUpdatedState(ui)
+    LaunchedEffect(ui.query) {
+        val generationAtStart = ui.searchGeneration
+        snapshotFlow { latestUi.searchGeneration }
+            .filter { it != generationAtStart }
+            .first()
+        resultListState.scrollToItem(0)
+    }
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -134,7 +154,10 @@ fun CommandPalette(
                     )
                 }
             } else {
-                LazyColumn(Modifier.fillMaxSize()) {
+                LazyColumn(
+                    Modifier.fillMaxSize().testTag("palette_results"),
+                    state = resultListState,
+                ) {
                     items(ui.results, key = { "${it.kind}-${it.paneId ?: it.sessionPath}" }) { result ->
                         PaletteRow(
                             result = result,

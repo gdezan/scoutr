@@ -14,6 +14,7 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
@@ -21,8 +22,11 @@ import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeDown
 import androidx.compose.ui.test.swipeUp
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsFocused
+import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.hasTestTag
 import androidx.test.platform.app.InstrumentationRegistry
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.test.assertContentDescriptionContains
 import dev.cockpit.app.data.ConnectionStore
 import dev.cockpit.app.net.BridgeClient
@@ -54,6 +58,7 @@ class ChatControlsTest {
     private val controlBodies = CopyOnWriteArrayList<String>()
     @Volatile private var agentStatus = "working"
     @Volatile private var agentCardJson: String? = null
+    @Volatile private var modelCatalogJson: String? = null
     /** Serve entries with a thinking block + tool call so the header toggles have an observable effect. */
     @Volatile private var richEntries = false
 
@@ -64,6 +69,7 @@ class ChatControlsTest {
         controlBodies.clear()
         agentStatus = "working"
         agentCardJson = null
+        modelCatalogJson = null
         server.start()
         server.dispatcher = object : okhttp3.mockwebserver.Dispatcher() {
             override fun dispatch(request: okhttp3.mockwebserver.RecordedRequest): MockResponse {
@@ -82,7 +88,8 @@ class ChatControlsTest {
                         if (request.requestUrl?.queryParameter("agent") == "claude")
                             """{"ok":true,"catalog":{"providers":[]}}"""
                         else
-                            """{"ok":true,"catalog":{"providers":[{"name":"openai-codex","models":[{"id":"gpt-5.4","name":"GPT-5.4","provider":"openai-codex","reasoning":true,"thinkingLevels":["off","low","high"],"contextWindow":200000},{"id":"gpt-5.3","name":"GPT-5.3","provider":"openai-codex","reasoning":true,"thinkingLevels":["off","low","high"],"contextWindow":128000},{"id":"gpt-5.2","name":"GPT-5.2","provider":"openai-codex","reasoning":true,"thinkingLevels":["off","low","high"],"contextWindow":128000},{"id":"gpt-5.1","name":"GPT-5.1","provider":"openai-codex","reasoning":true,"thinkingLevels":["off","low","high"],"contextWindow":128000},{"id":"gpt-5","name":"GPT-5","provider":"openai-codex","reasoning":true,"thinkingLevels":["off","low","high"],"contextWindow":128000}]},{"name":"anthropic","models":[{"id":"claude-sonnet-4.6","name":"Claude Sonnet 4.6","provider":"anthropic","reasoning":true,"thinkingLevels":["low","high"],"contextWindow":200000}]}]}}"""
+                            modelCatalogJson
+                                ?: """{"ok":true,"catalog":{"providers":[{"name":"openai-codex","models":[{"id":"gpt-5.4","name":"GPT-5.4","provider":"openai-codex","reasoning":true,"thinkingLevels":["off","low","high"],"contextWindow":200000},{"id":"gpt-5.3","name":"GPT-5.3","provider":"openai-codex","reasoning":true,"thinkingLevels":["off","low","high"],"contextWindow":128000},{"id":"gpt-5.2","name":"GPT-5.2","provider":"openai-codex","reasoning":true,"thinkingLevels":["off","low","high"],"contextWindow":128000},{"id":"gpt-5.1","name":"GPT-5.1","provider":"openai-codex","reasoning":true,"thinkingLevels":["off","low","high"],"contextWindow":128000},{"id":"gpt-5","name":"GPT-5","provider":"openai-codex","reasoning":true,"thinkingLevels":["off","low","high"],"contextWindow":128000}]},{"name":"anthropic","models":[{"id":"claude-sonnet-4.6","name":"Claude Sonnet 4.6","provider":"anthropic","reasoning":true,"thinkingLevels":["low","high"],"contextWindow":200000}]}]}}"""
                     path == "/api/agents" ->
                         agentCardJson
                             ?: """{"ok":true,"agents":[{"paneId":"w1:p1","workspaceId":"w1","tabId":"t1","agent":"pi","status":"$agentStatus","sessionPath":"/tmp/session.jsonl"}]}"""
@@ -119,6 +126,12 @@ class ChatControlsTest {
         println("SCREENSHOT[$name]=${file.absolutePath}")
     }
 
+    private fun longModelCatalog(): String {
+        fun models(provider: String, prefix: String, count: Int) = (0 until count).joinToString(",") { index ->
+            """{"id":"$prefix-${index.toString().padStart(2, '0')}","name":"$prefix $index","provider":"$provider","reasoning":true,"contextWindow":128000}"""
+        }
+        return """{"ok":true,"catalog":{"providers":[{"name":"alpha","models":[${models("alpha", "model", 20)}]},{"name":"omega","models":[${models("omega", "model", 15)}]}]}}"""
+    }
 
     @Test
     fun controlsMenuShowsLifecycleActionsAndOpensRenameDialog() {
@@ -378,6 +391,41 @@ class ChatControlsTest {
         compose.onNodeWithContentDescription("Close conversation setup").performClick()
     }
 
+    @Test
+    fun configurationSearchChangesResetToFirstProviderWithoutChangingSelection() {
+        modelCatalogJson = longModelCatalog()
+        val store = ConnectionStore(InstrumentationRegistry.getInstrumentation().targetContext)
+        store.save(server.url("/").toString().trimEnd('/'), "t", null, null)
+        val bridge = BridgeClient(OkHttpClient.Builder().readTimeout(5, TimeUnit.SECONDS).build(), store)
+        val vm = ChatViewModel(bridge, "w1:p1", null, "working")
+        compose.setContent { ChatScreen(viewModel = vm, onBack = {}) }
+        compose.waitUntil(10_000) { (vm.ui.value.configuration as? Loadable.Ready)?.value?.isNotEmpty() == true }
+
+        compose.onNodeWithTag("chat_model_config").performClick()
+        compose.onNodeWithTag("conversation_model_list")
+            .performScrollToNode(hasTestTag("conversation_model_omega/model-14"))
+        compose.onNodeWithTag("conversation_model_search").performTextInput("alpha/model-03")
+        compose.waitUntil(5_000) {
+            compose.onAllNodesWithTag("conversation_model_alpha/model-03").fetchSemanticsNodes().isNotEmpty()
+        }
+        val filteredListTop = compose.onNodeWithTag("conversation_model_list").getUnclippedBoundsInRoot().top
+        val filteredHeaderTop = compose.onNodeWithTag("provider_header_alpha").getUnclippedBoundsInRoot().top
+        assertTrue("query result must restart near the list top", filteredHeaderTop - filteredListTop < 64.dp)
+        compose.onNodeWithTag("conversation_model_search").assertIsFocused()
+        assertEquals("openai-codex/gpt-5.4", vm.ui.value.model)
+
+        compose.onNodeWithTag("conversation_model_list")
+            .performScrollToNode(hasTestTag("conversation_model_alpha/model-03"))
+        compose.onNodeWithTag("conversation_model_search").performTextClearance()
+        compose.waitUntil(5_000) {
+            compose.onAllNodesWithTag("conversation_model_alpha/model-00").fetchSemanticsNodes().isNotEmpty()
+        }
+        val fullHeaderTop = compose.onNodeWithTag("provider_header_alpha").getUnclippedBoundsInRoot().top
+        val fullListTop = compose.onNodeWithTag("conversation_model_list").getUnclippedBoundsInRoot().top
+        assertTrue("clearing search must restart the full catalog near the top", fullHeaderTop - fullListTop < 64.dp)
+        compose.onNodeWithTag("conversation_model_search").assertIsFocused()
+        assertEquals("openai-codex/gpt-5.4", vm.ui.value.model)
+    }
     @Test
     fun configurationSheetHidesThinkingForBackendsWithoutTheCapability() {
         agentCardJson = """{"ok":true,"agents":[{"paneId":"w1:p1","workspaceId":"w1","tabId":"t1","agent":"claude","agentKind":"claude","displayName":"Claude Code","capabilities":["abort","compact","close","set_model"],"status":"working","sessionPath":"/tmp/claude.jsonl"}]}"""

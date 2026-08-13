@@ -1,14 +1,20 @@
 package dev.cockpit.app.ui
 
 import android.graphics.Bitmap
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onFirst
+import androidx.compose.ui.test.onLast
+import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import dev.cockpit.app.data.ConnectionStore
@@ -54,6 +60,14 @@ class CommandPaletteTest {
         {"ok":true,"agents":[{"paneId":"pane1","workspaceId":"ws1","tabId":"t1","agent":"pi","status":"working","cwd":"/repo/a","title":"Fix billing bug","sessionPath":"/root/sessions/abc.jsonl"}]}
     """.trimIndent()
 
+    private fun manyAgentsBody(count: Int = 35): String = buildString {
+        append("{\"ok\":true,\"agents\":[")
+        repeat(count) { index ->
+            if (index > 0) append(',')
+            append("{\"paneId\":\"pane$index\",\"workspaceId\":\"ws1\",\"tabId\":\"t$index\",\"agent\":\"pi\",\"status\":\"blocked\",\"cwd\":\"/repo/$index\",\"title\":\"Agent $index\",\"sessionPath\":\"/sessions/$index.jsonl\"}")
+        }
+        append("]}")
+    }
     private fun capture(name: String, confirmation: Boolean = false) {
         val file = androidx.test.platform.app.InstrumentationRegistry.getInstrumentation()
             .targetContext.getExternalFilesDir(null)!!.resolve("$name.png")
@@ -92,6 +106,8 @@ class CommandPaletteTest {
             override fun dispatch(request: RecordedRequest): MockResponse = when {
                 request.path!!.startsWith("/api/agents") ->
                     MockResponse().setResponseCode(200).setBody(body)
+                request.path!!.startsWith("/api/session-catalog") ->
+                    MockResponse().setResponseCode(200).setBody("""{"ok":true,"truncated":false,"sessions":[]}""")
                 request.path!!.contains("/control") -> {
                     controlBodies += request.body.readUtf8()
                     MockResponse().setResponseCode(200).setBody("""{"ok":true}""")
@@ -159,6 +175,51 @@ class CommandPaletteTest {
         compose.onNodeWithText("Fix billing bug").assertIsDisplayed()
     }
 
+    @Test
+    fun queryChangesResetResultsButSameQueryRefreshKeepsPosition() {
+        stubAgents(body = manyAgentsBody())
+        val vm = viewModel()
+        val listState = LazyListState()
+        compose.setContent {
+            CockpitTheme {
+                CommandPalette(
+                    viewModel = vm,
+                    onOpenAgent = { _, _ -> },
+                    onOpenSession = { _, _ -> },
+                    resultListState = listState,
+                )
+            }
+        }
+        vm.open()
+        compose.waitUntil(5_000) { vm.ui.value.results.size == 35 }
+        compose.onNodeWithTag("palette_results").performScrollToNode(hasText("Agent 25"))
+        compose.onNodeWithText("Agent 25").assertIsDisplayed()
+
+        vm.open()
+        compose.waitUntil(5_000) { !vm.ui.value.loading }
+        compose.onNodeWithText("Agent 25").assertIsDisplayed()
+
+        compose.onNodeWithTag("palette_search").performTextInput("Agent 3")
+        compose.waitUntil(5_000) {
+            vm.ui.value.query == "Agent 3" && !vm.ui.value.loading && listState.firstVisibleItemIndex == 0
+        }
+        compose.onNodeWithTag("palette_search").assertIsFocused()
+        compose.onAllNodesWithText("Agent 3").onLast().assertIsDisplayed()
+
+        compose.onNodeWithTag("palette_results").performScrollToNode(hasText("Agent 34"))
+        compose.onNodeWithContentDescription("Clear search").performClick()
+        compose.waitUntil(5_000) {
+            vm.ui.value.query.isEmpty() && vm.ui.value.results.size == 35
+        }
+        // The reset fires when the clear's search completes and the full
+        // results attach: wait for the visible row, not just the VM state.
+        compose.waitUntil(5_000) {
+            listState.firstVisibleItemIndex == 0 &&
+                compose.onAllNodesWithText("Agent 0").fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithText("Agent 0").assertIsDisplayed()
+        compose.onNodeWithTag("palette_search").assertIsFocused()
+    }
     @Test
     fun closeIsConfirmedAndAbortRemainsDirect() {
         stubAgents(body = singleAgentBody)
