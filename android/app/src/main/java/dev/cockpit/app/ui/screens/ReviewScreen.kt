@@ -5,11 +5,13 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -20,11 +22,15 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.WrapText
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -34,6 +40,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.key
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -45,16 +52,22 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.cockpit.app.CockpitApp
+import dev.cockpit.app.data.RepoCommit
+import dev.cockpit.app.data.RepoDiffFileStat
+import dev.cockpit.app.state.DiffViewMode
 import dev.cockpit.app.state.Loadable
 import dev.cockpit.app.state.ReviewViewModel
 import dev.cockpit.app.ui.components.CockpitTextField
 import dev.cockpit.app.ui.components.ReadableContentColumn
 import dev.cockpit.app.ui.theme.DiffPalette
+import dev.snipme.highlights.model.SyntaxLanguage
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -235,6 +248,7 @@ private fun ReviewMode(
         }
         return
     }
+    var commitSheet by remember { mutableStateOf<RepoCommit?>(null) }
 
     if (diffOpen) {
         DiffMode(viewModel, ui, onBack = { onDiffChanged(false) }, modifier.testTag("review_capture_root"))
@@ -300,7 +314,7 @@ private fun ReviewMode(
                         subtitle = "${shortHash(commit.hash)} · ${commit.author} · ${commitDate(commit.date)}",
                         selected = ui.diffRef == commit.hash,
                         loading = ui.diff is Loadable.Loading && ui.diffRef == commit.hash,
-                        onClick = { viewModel.loadDiff(commit.hash, "commit"); onDiffChanged(true) },
+                        onClick = { commitSheet = commit },
                     )
                 }
                 if (overviewData.logTruncated) {
@@ -339,6 +353,61 @@ private fun ReviewMode(
                 }
                 item { Spacer(Modifier.height(24.dp)) }
             }
+    }
+    commitSheet?.let { commit ->
+        CommitSheet(
+            commit = commit,
+            onOpenDiff = {
+                viewModel.loadDiff(commit.hash, "commit")
+                onDiffChanged(true)
+                commitSheet = null
+            },
+            onDismiss = { commitSheet = null },
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun CommitSheet(
+    commit: RepoCommit,
+    onOpenDiff: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    ModalBottomSheet(onDismissRequest = onDismiss, modifier = Modifier.testTag("commit_sheet")) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp)
+                .verticalScroll(rememberScrollState())
+                .padding(bottom = 24.dp),
+        ) {
+            Text(commit.subject, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "${shortHash(commit.hash)} · ${commit.author} · ${commitDate(commit.date)}",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontFamily = FontFamily.Monospace,
+            )
+            Spacer(Modifier.height(12.dp))
+            if (commit.body.isBlank()) {
+                Text(
+                    "No commit message body",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else {
+                Text(
+                    commit.body,
+                    style = MaterialTheme.typography.bodySmall,
+                    fontFamily = FontFamily.Monospace,
+                    modifier = Modifier.testTag("commit_body"),
+                )
+            }
+            Spacer(Modifier.height(16.dp))
+            TextButton(onClick = onOpenDiff, modifier = Modifier.testTag("commit_diff_button")) { Text("Diff vs parent") }
+        }
     }
 }
 
@@ -440,6 +509,7 @@ private fun DiffRow(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun DiffMode(
     viewModel: ReviewViewModel,
@@ -449,17 +519,17 @@ private fun DiffMode(
 ) {
     val diffLoad = ui.diff
     val diffData = (diffLoad as? Loadable.Ready)?.value
-    var selectedIndex by rememberSaveable(ui.diffRef) { mutableStateOf(0) }
-    var fileMenuOpen by remember { mutableStateOf(false) }
-    val files = parseDiffFiles(diffData?.diff.orEmpty(), diffData?.stat.orEmpty(), diffData?.truncated == true)
-    val clampedIndex = selectedIndex.coerceIn(0, (files.size - 1).coerceAtLeast(0))
-    val selected = files.getOrNull(clampedIndex)
-    val verticalScroll = rememberScrollState()
-    val horizontalScroll = rememberScrollState()
-    LaunchedEffect(clampedIndex) {
-        selectedIndex = clampedIndex
-        verticalScroll.scrollTo(0)
-        horizontalScroll.scrollTo(0)
+    val stats = diffData?.stat.orEmpty()
+    var fileSheetOpen by rememberSaveable { mutableStateOf(false) }
+    var wrapLines by rememberSaveable { mutableStateOf(false) }
+    // Auto-open the first file once per diff session — not after the user
+    // closes the per-file view.
+    var autoOpenedForRef by rememberSaveable(ui.diffRef) { mutableStateOf<String?>(null) }
+    LaunchedEffect(diffData, ui.diffRef) {
+        if (diffData != null && autoOpenedForRef != ui.diffRef) {
+            autoOpenedForRef = ui.diffRef
+            if (stats.isNotEmpty()) viewModel.selectFile(stats.first().path)
+        }
     }
 
     Column(modifier.fillMaxSize()) {
@@ -477,109 +547,392 @@ private fun DiffMode(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.weight(1f),
             )
-            Text("${files.size} files", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            IconButton(
+                onClick = { wrapLines = !wrapLines },
+                modifier = Modifier.testTag("diff_wrap_toggle"),
+            ) {
+                Icon(
+                    Icons.Default.WrapText,
+                    contentDescription = "Wrap lines",
+                    tint = if (wrapLines) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Text(
+                if (diffData?.truncated == true) "≥ ${stats.size} files (truncated)" else "${stats.size} files",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
         HorizontalDivider()
-        if (diffLoad is Loadable.Loading) {
-            Box(Modifier.fillMaxWidth().padding(vertical = 48.dp), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator()
-            }
-        } else if (diffLoad is Loadable.Failed) {
-            Text(diffLoad.reason, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(16.dp))
-        } else if (files.isEmpty()) {
-            Box(Modifier.fillMaxWidth().padding(vertical = 48.dp), contentAlignment = Alignment.Center) {
-                Text("No changes", color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-        } else {
-            if (files.size > 1) {
-                Row(
-                    Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    TextButton(
-                        onClick = { selectedIndex = (clampedIndex - 1).coerceAtLeast(0) },
-                        enabled = clampedIndex > 0 && selected?.unavailable != true,
-                        modifier = Modifier.testTag("diff_previous"),
-                    ) { Text("‹ Previous", modifier = Modifier.testTag("diff_previous_label")) }
-                    Box(Modifier.weight(1f)) {
-                        TextButton(
-                            onClick = { fileMenuOpen = true },
-                            modifier = Modifier.fillMaxWidth().testTag("diff_file_selector"),
-                        ) {
-                            Text("${clampedIndex + 1} / ${files.size}  ${selected?.path ?: ""}", maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        }
-                        androidx.compose.material3.DropdownMenu(
-                            expanded = fileMenuOpen,
-                            onDismissRequest = { fileMenuOpen = false },
-                        ) {
-                            files.forEachIndexed { index, file ->
-                                androidx.compose.material3.DropdownMenuItem(
-                                    text = { Text("${index + 1} / ${files.size}  ${file.path}  +${file.stat?.additions ?: 0} −${file.stat?.deletions ?: 0}", maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                                    onClick = { selectedIndex = index; fileMenuOpen = false },
-                                    modifier = Modifier.testTag("diff_file_$index"),
-                                )
-                            }
-                        }
-                    }
-                    TextButton(
-                        onClick = { selectedIndex = (clampedIndex + 1).coerceAtMost(files.lastIndex) },
-                        enabled = clampedIndex < files.lastIndex && selected?.unavailable != true,
-                        modifier = Modifier.testTag("diff_next"),
-                    ) { Text("Next ›") }
-                }
-                HorizontalDivider()
-            } else {
+        if (diffData?.truncated == true) TruncatedNote("file list truncated to 64 KiB — files past the cap are not listed")
+        when {
+            diffLoad is Loadable.Loading -> CenteredSpinner()
+            diffLoad is Loadable.Failed ->
                 Text(
-                    "1 / 1  ${selected?.path ?: ""}  +${selected?.stat?.additions ?: 0} −${selected?.stat?.deletions ?: 0}",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp).testTag("diff_single_file_header"),
+                    diffLoad.reason,
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(16.dp),
                 )
-                HorizontalDivider()
-            }
-            Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(verticalScroll).horizontalScroll(horizontalScroll)) {
-                if (selected?.unavailable == true) {
-                    Text(
-                        "Content unavailable — diff truncated",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(16.dp).testTag("diff_unavailable"),
-                    )
-                } else {
-                    selected?.raw.orEmpty().split("\n").forEach { line -> DiffLine(line) }
+            stats.isEmpty() -> CenteredNote("No changes", "diff_no_changes")
+            else -> PerFileView(
+                viewModel = viewModel,
+                ui = ui,
+                stats = stats,
+                wrapLines = wrapLines,
+                onOpenPicker = { fileSheetOpen = true },
+            )
+        }
+    }
+    if (fileSheetOpen) {
+        FilePickerSheet(
+            stats = stats,
+            selectedPath = ui.selectedFile,
+            onPick = { path ->
+                viewModel.selectFile(path)
+                fileSheetOpen = false
+            },
+            onDismiss = { fileSheetOpen = false },
+        )
+    }
+}
+
+@Composable
+private fun PerFileView(
+    viewModel: ReviewViewModel,
+    ui: dev.cockpit.app.state.ReviewUiState,
+    stats: List<RepoDiffFileStat>,
+    wrapLines: Boolean,
+    onOpenPicker: () -> Unit,
+) {
+    val selectedFile = ui.selectedFile
+    val selectedIndex = stats.indexOfFirst { it.path == selectedFile }
+    if (selectedFile == null || selectedIndex < 0) {
+        Column(Modifier.fillMaxSize()) {
+            Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("Pick a file to review", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    TextButton(onClick = onOpenPicker, modifier = Modifier.testTag("diff_pick_file")) { Text("Browse files") }
                 }
             }
-            if (diffData?.truncated == true) {
-                TruncatedNote("diff truncated to 64 KiB")
+        }
+        return
+    }
+    Column(Modifier.fillMaxSize()) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            // Close (X), not a back arrow: the arrow is reserved for leaving
+            // DiffMode entirely, so the two affordances read differently.
+            IconButton(onClick = viewModel::closeFile, modifier = Modifier.testTag("diff_file_back")) {
+                Icon(Icons.Default.Close, contentDescription = "Close file")
             }
+            Column(Modifier.weight(1f)) {
+                Text(
+                    selectedFile.substringAfterLast('/'),
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                val dir = selectedFile.substringBeforeLast('/', missingDelimiterValue = "")
+                if (dir.isNotEmpty()) {
+                    Text(
+                        dir,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontFamily = FontFamily.Monospace,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+            ViewToggleButton("Diff", ui.viewMode == DiffViewMode.Diff, "diff_view_diff") {
+                viewModel.setViewMode(DiffViewMode.Diff)
+            }
+            ViewToggleButton("File", ui.viewMode == DiffViewMode.File, "diff_view_file") {
+                viewModel.setViewMode(DiffViewMode.File)
+            }
+        }
+        HorizontalDivider()
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            TextButton(
+                onClick = { viewModel.selectFile(stats[selectedIndex - 1].path) },
+                enabled = selectedIndex > 0,
+                modifier = Modifier.testTag("diff_previous"),
+            ) { Text("‹ Previous", modifier = Modifier.testTag("diff_previous_label")) }
+            Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                TextButton(
+                    onClick = onOpenPicker,
+                    modifier = Modifier.testTag("diff_file_selector"),
+                ) {
+                    Text("${selectedIndex + 1} / ${stats.size}  $selectedFile", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
+            TextButton(
+                onClick = { viewModel.selectFile(stats[selectedIndex + 1].path) },
+                enabled = selectedIndex < stats.lastIndex,
+                modifier = Modifier.testTag("diff_next"),
+            ) { Text("Next ›") }
+        }
+        HorizontalDivider()
+        when (ui.viewMode) {
+            DiffViewMode.Diff -> FileDiffContent(ui, selectedFile, wrapLines)
+            DiffViewMode.File -> FileContent(ui, selectedFile, wrapLines)
         }
     }
 }
 
 @Composable
-private fun DiffLine(line: String) {
+private fun ViewToggleButton(label: String, active: Boolean, tag: String, onClick: () -> Unit) {
+    TextButton(onClick = onClick, modifier = Modifier.testTag(tag)) {
+        Text(
+            label,
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal,
+            color = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+@Composable
+private fun ColumnScope.FileDiffContent(
+    ui: dev.cockpit.app.state.ReviewUiState,
+    selectedFile: String,
+    wrapLines: Boolean,
+) {
+    when (val load = ui.fileDiff) {
+        is Loadable.Loading -> CenteredSpinner()
+        is Loadable.Failed ->
+            Text(
+                load.reason,
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.padding(16.dp),
+            )
+        is Loadable.Ready -> {
+            val language = languageForPath(selectedFile)
+            key(selectedFile) {
+                LineBody(load.value.diff.split("\n"), wrapLines) { line ->
+                    DiffLine(line, language, wrapLines)
+                }
+            }
+            if (load.value.truncated) TruncatedNote("file diff truncated to 64 KiB")
+        }
+        Loadable.Idle -> Unit
+    }
+}
+
+@Composable
+private fun ColumnScope.FileContent(
+    ui: dev.cockpit.app.state.ReviewUiState,
+    selectedFile: String,
+    wrapLines: Boolean,
+) {
+    when (val load = ui.fileContent) {
+        is Loadable.Loading -> CenteredSpinner()
+        is Loadable.Failed ->
+            Text(
+                load.reason,
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.padding(16.dp),
+            )
+        is Loadable.Ready -> {
+            val body = load.value
+            when {
+                !body.exists -> CenteredNote("File does not exist at ${ui.diffRef?.take(12)}", "diff_file_missing")
+                body.binary -> CenteredNote("Binary file", "diff_file_binary")
+                else -> {
+                    val language = languageForPath(selectedFile)
+                    key(selectedFile) {
+                        LineBody(body.content.split("\n"), wrapLines) { line ->
+                            CodeLine(line, language, MaterialTheme.colorScheme.onSurface, Color.Transparent, 0, wrapLines)
+                        }
+                    }
+                    if (body.truncated) TruncatedNote("file truncated to 256 KiB")
+                }
+            }
+        }
+        Loadable.Idle -> Unit
+    }
+}
+
+/** Shared scrolling body for code lines; resets scroll position per file via [key]. */
+@Composable
+private fun ColumnScope.LineBody(
+    lines: List<String>,
+    wrapLines: Boolean,
+    content: @Composable (line: String) -> Unit,
+) {
+    val verticalScroll = rememberScrollState()
+    val horizontalScroll = rememberScrollState()
+    Column(
+        Modifier
+            .weight(1f)
+            .fillMaxWidth()
+            .verticalScroll(verticalScroll)
+            .then(if (wrapLines) Modifier else Modifier.horizontalScroll(horizontalScroll)),
+    ) {
+        lines.forEach { content(it) }
+    }
+}
+
+@Composable
+private fun DiffLine(line: String, language: SyntaxLanguage?, wrapLines: Boolean) {
     // gdezan-material version_control mapping: inserted cyan, deleted red,
     // hunk headers quiet muted; line backgrounds are the editor's faint tints.
-    val (color, background) = when {
-        line.startsWith("+++") -> DiffPalette.Added to DiffPalette.AddedBackground
-        line.startsWith("---") -> DiffPalette.Deleted to DiffPalette.DeletedBackground
-        line.startsWith('+') -> DiffPalette.Added to DiffPalette.AddedBackground
-        line.startsWith('-') -> DiffPalette.Deleted to DiffPalette.DeletedBackground
-        line.startsWith("@@") -> DiffPalette.Ignored to Color.Transparent
-        else -> MaterialTheme.colorScheme.onSurface to Color.Transparent
+    val (baseColor, background, codeOffset) = when {
+        line.startsWith("+++") -> Triple(DiffPalette.Added, DiffPalette.AddedBackground, -1)
+        line.startsWith("---") -> Triple(DiffPalette.Deleted, DiffPalette.DeletedBackground, -1)
+        line.startsWith('+') -> Triple(DiffPalette.Added, DiffPalette.AddedBackground, 1)
+        line.startsWith('-') -> Triple(DiffPalette.Deleted, DiffPalette.DeletedBackground, 1)
+        line.startsWith("@@") -> Triple(DiffPalette.Ignored, Color.Transparent, -1)
+        else -> Triple(MaterialTheme.colorScheme.onSurface, Color.Transparent, 0)
+    }
+    CodeLine(line, language, baseColor, background, codeOffset, wrapLines)
+}
+
+/**
+ * One code line as an [AnnotatedString]: the line color stays the diff
+ * identity and syntax token colors compose on top. [codeOffset] is the index
+ * where code starts (1 for +/- markers); -1 disables syntax spans.
+ */
+@Composable
+private fun CodeLine(
+    line: String,
+    language: SyntaxLanguage?,
+    baseColor: Color,
+    background: Color,
+    codeOffset: Int,
+    wrapLines: Boolean,
+) {
+    val spans = remember(line, language) { highlightLine(line, language) }
+    val annotated = remember(line, spans, codeOffset, baseColor) {
+        buildAnnotatedString {
+            append(line)
+            addStyle(SpanStyle(color = baseColor), 0, line.length)
+            if (codeOffset >= 0) {
+                spans.forEach { span ->
+                    val start = span.start.coerceAtLeast(codeOffset)
+                    if (span.end > start) addStyle(SpanStyle(color = span.color), start, span.end)
+                }
+            }
+        }
     }
     Row(
-        // Wrap content (not the viewport) so long lines extend past the right
-        // edge and the parent's horizontalScroll can pan to them.
-        Modifier.background(background).padding(horizontal = 16.dp, vertical = 1.dp),
+        Modifier
+            .background(background)
+            .then(if (wrapLines) Modifier.fillMaxWidth() else Modifier)
+            .padding(horizontal = 16.dp, vertical = 1.dp),
     ) {
         Text(
-            line,
+            annotated,
             style = MaterialTheme.typography.bodySmall,
             fontFamily = FontFamily.Monospace,
-            color = color,
-            maxLines = 1,
-            softWrap = false,
+            color = baseColor,
+            maxLines = if (wrapLines) Int.MAX_VALUE else 1,
+            softWrap = wrapLines,
         )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun FilePickerSheet(
+    stats: List<RepoDiffFileStat>,
+    selectedPath: String?,
+    onPick: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var filter by remember { mutableStateOf("") }
+    val filtered = remember(stats, filter) {
+        if (filter.isBlank()) stats else stats.filter { it.path.contains(filter, ignoreCase = true) }
+    }
+    ModalBottomSheet(onDismissRequest = onDismiss, modifier = Modifier.testTag("diff_file_sheet")) {
+        Column(Modifier.fillMaxWidth()) {
+            CockpitTextField(
+                value = filter,
+                onValueChange = { filter = it },
+                placeholder = "Filter files",
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp)
+                    .testTag("diff_file_filter"),
+            )
+            Spacer(Modifier.height(8.dp))
+            LazyColumn(Modifier.fillMaxWidth().heightIn(max = 420.dp)) {
+                items(filtered, key = { it.path }) { stat ->
+                    val index = stats.indexOfFirst { it.path == stat.path }
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clickable { onPick(stat.path) }
+                            .padding(horizontal = 16.dp, vertical = 10.dp)
+                            .testTag("diff_file_$index"),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                stat.path.substringAfterLast('/'),
+                                style = MaterialTheme.typography.bodyMedium,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            val dir = stat.path.substringBeforeLast('/', missingDelimiterValue = "")
+                            if (dir.isNotEmpty()) {
+                                Text(
+                                    dir,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    fontFamily = FontFamily.Monospace,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                        }
+                        Text(
+                            "+${stat.additions} −${stat.deletions}",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontFamily = FontFamily.Monospace,
+                            color = when {
+                                stat.additions > 0 && stat.deletions == 0 -> DiffPalette.Added
+                                stat.deletions > 0 && stat.additions == 0 -> DiffPalette.Deleted
+                                else -> DiffPalette.Modified
+                            },
+                        )
+                        if (stat.path == selectedPath) {
+                            Spacer(Modifier.width(8.dp))
+                            Icon(
+                                Icons.Default.Check,
+                                contentDescription = "Selected",
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.width(18.dp).height(18.dp),
+                            )
+                        }
+                    }
+                }
+            }
+            Spacer(Modifier.height(24.dp))
+        }
+    }
+}
+
+@Composable
+private fun CenteredSpinner() {
+    Box(Modifier.fillMaxWidth().padding(vertical = 48.dp), contentAlignment = Alignment.Center) {
+        CircularProgressIndicator()
+    }
+}
+
+@Composable
+private fun CenteredNote(text: String, tag: String) {
+    Box(Modifier.fillMaxWidth().padding(vertical = 48.dp), contentAlignment = Alignment.Center) {
+        Text(text, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.testTag(tag))
     }
 }
 

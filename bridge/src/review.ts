@@ -1,5 +1,5 @@
-import { execFile } from "node:child_process";
-import { readdirSync, realpathSync, statSync } from "node:fs";
+import { execFile, spawn } from "node:child_process";
+import { closeSync, openSync, readSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve, sep } from "node:path";
 import { BridgeError } from "./errors.js";
@@ -20,6 +20,10 @@ import { BridgeError } from "./errors.js";
 
 export const REVIEW_DIFF_MAX_BYTES = 64 * 1024;
 export const REVIEW_DIFF_MAX_LINES = 800;
+/** Per-commit message body cap in the overview log; the subject is separate. */
+export const REVIEW_LOG_BODY_MAX_BYTES = 2048;
+/** Full-file view cap: the final version of one file, read head-first. */
+export const REVIEW_FILE_MAX_BYTES = 256 * 1024;
 export const REVIEW_STATUS_MAX_ENTRIES = 200;
 export const REVIEW_LOG_MAX = 50;
 export const REVIEW_COMMAND_TIMEOUT_MS = 8_000;
@@ -39,6 +43,8 @@ export interface ReviewStatusEntry {
 export interface ReviewCommit {
   hash: string;
   subject: string;
+  /** Full message body (everything below the subject line), byte-capped. */
+  body: string;
   author: string;
   /** Unix seconds. */
   date: number;
@@ -78,10 +84,24 @@ export interface ReviewDiffFileStat {
   deletions: number;
 }
 
+/** Stat-only diff listing: every file in the diff, without hunk content. */
 export interface ReviewDiffResult {
+  stat: ReviewDiffFileStat[];
+  truncated: boolean;
+}
+
+/** Bounded diff of a single file against the same range as [reviewDiff]. */
+export interface ReviewFileDiffResult {
   diff: string;
   truncated: boolean;
-  stat: ReviewDiffFileStat[];
+}
+
+/** Bounded final version of a single file at the ref (working tree or commit). */
+export interface ReviewFileContentResult {
+  content: string;
+  truncated: boolean;
+  binary: boolean;
+  exists: boolean;
 }
 
 const REF_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._/-]{0,200}$/;
@@ -166,6 +186,68 @@ function runGit(path: string, args: string[], maxBytes: number): Promise<string>
   });
 }
 
+/**
+ * Like [runGit] but streams stdout up to `maxBytes` and kills the child the
+ * moment the cap is reached, so arbitrarily large output degrades to a
+ * truncated result instead of an exec-buffer failure. stdout is not utf8-
+ * decoded until after capping (byte-exact).
+ */
+function runGitCapped(
+  path: string,
+  args: string[],
+  maxBytes: number,
+): Promise<{ text: string; stoppedEarly: boolean }> {
+  return new Promise((resolvePromise, reject) => {
+    const child = spawn("git", ["-C", path, ...args], {
+      env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    const chunks: Buffer[] = [];
+    let total = 0;
+    let stoppedEarly = false;
+    let stderr = "";
+    let settled = false;
+    const settle = (fn: () => void) => {
+      if (!settled) {
+        settled = true;
+        fn();
+      }
+    };
+    const timeout = setTimeout(() => {
+      child.kill();
+      settle(() => reject(new ReviewError("git command timed out", 502)));
+    }, REVIEW_COMMAND_TIMEOUT_MS);
+    child.stdout.on("data", (chunk: Buffer) => {
+      if (settled) return;
+      const room = maxBytes - total;
+      if (room <= 0) {
+        stoppedEarly = true;
+        child.kill();
+        return;
+      }
+      total += chunk.length;
+      chunks.push(room >= chunk.length ? chunk : chunk.subarray(0, room));
+      if (total >= maxBytes) {
+        stoppedEarly = true;
+        child.kill();
+      }
+    });
+    child.stderr.on("data", (chunk: Buffer) => {
+      if (stderr.length < 2048) stderr += chunk.toString("utf8");
+    });
+    child.on("error", () => settle(() => reject(new ReviewError("git is not installed", 500))));
+    child.on("close", (code) => {
+      clearTimeout(timeout);
+      if (settled) return;
+      if (code !== 0 && !stoppedEarly) {
+        return settle(() => reject(new ReviewError(stderr.trim() || "git failed", 502)));
+      }
+      const bytes = Buffer.concat(chunks);
+      settle(() => resolvePromise({ text: bytes.toString("utf8"), stoppedEarly }));
+    });
+  });
+}
+
 function isRepo(path: string): Promise<boolean> {
   return runGit(path, ["rev-parse", "--is-inside-work-tree"], 1024)
     .then((out) => out.trim() === "true")
@@ -240,14 +322,17 @@ function parsePorcelainStatus(output: string): {
 
 function parseLog(output: string): ReviewCommit[] {
   const commits: ReviewCommit[] = [];
-  for (const line of output.split("\n")) {
+  // Records are separated by \u001e because the body may contain newlines.
+  for (const record of output.split("\u001e")) {
+    const line = record.trimEnd(); // git ends each record with a newline
     if (!line) continue;
     const fields = line.split("\u001f");
-    if (fields.length < 4) continue;
-    const [hash, author, dateText, ...subjectParts] = fields;
+    if (fields.length < 5) continue;
+    const [hash, author, dateText, subject, ...bodyParts] = fields;
     const date = Number(dateText);
     if (!hash || !author || Number.isNaN(date)) continue;
-    commits.push({ hash, author, subject: subjectParts.join("\u001f").trim(), date });
+    const body = capUtf8(bodyParts.join("\u001f"), REVIEW_LOG_BODY_MAX_BYTES).text;
+    commits.push({ hash, author, subject: subject ?? "", body, date });
   }
   return commits;
 }
@@ -261,8 +346,8 @@ export async function reviewOverview(requestedPath: string, extraRoots: string[]
     runGit(path, ["status", "--porcelain=v1", "--branch"], REVIEW_STATUS_MAX_ENTRIES * 256 + 4096),
     runGit(
       path,
-      ["log", "--no-color", `--max-count=${REVIEW_LOG_MAX}`, "--pretty=format:%H\u001f%an\u001f%ct\u001f%s"],
-      REVIEW_LOG_MAX * 512 + 4096,
+      ["log", "--no-color", `--max-count=${REVIEW_LOG_MAX}`, "--pretty=format:%H\u001f%an\u001f%ct\u001f%s\u001f%b\u001e"],
+      REVIEW_LOG_MAX * (512 + REVIEW_LOG_BODY_MAX_BYTES) + 4096,
     ),
   ]);
 
@@ -295,20 +380,67 @@ function capLines(text: string, maxLines: number): { text: string; truncated: bo
   return { text: lines.slice(0, maxLines).join("\n"), truncated: true };
 }
 
-function parseDiffStat(output: string): ReviewDiffFileStat[] {
+/**
+ * Parses `git diff -z --numstat` output. Unlike `--stat`, numstat never
+ * abbreviates long paths, so every parsed path stays valid for the per-file
+ * endpoints. Rename/copy rows emit `add\tadd\t` + NUL + old + NUL + new; the
+ * last non-empty token is the current path.
+ */
+function parseDiffNumstat(output: string): ReviewDiffFileStat[] {
   const stats: ReviewDiffFileStat[] = [];
-  for (const line of output.split("\n")) {
-    const match = line.match(/^\s*(\S.*?)\s*\|\s*(\d+)\s*(.*)$/);
-    if (!match) continue;
-    const filePath = match[1]?.trim();
+  const tokens = output.split("\0");
+  let i = 0;
+  while (i < tokens.length) {
+    const token = tokens[i];
+    if (token === undefined) break;
+    if (!token.includes("\t")) {
+      i++;
+      continue;
+    }
+    const [addPart, delPart, pathPart] = token.split("\t", 3);
+    const extra: string[] = [];
+    let j = i + 1;
+    while (j < tokens.length && !(tokens[j] ?? "").includes("\t")) {
+      const candidate = tokens[j] ?? "";
+      if (candidate) extra.push(candidate);
+      j++;
+    }
+    i = j;
+    const filePath = extra.length > 0 ? extra[extra.length - 1] : pathPart;
     if (!filePath) continue;
-    const additions = (match[3]?.match(/\+/g) ?? []).length;
-    const deletions = (match[3]?.match(/-/g) ?? []).length;
+    const additions = addPart === "-" || addPart === undefined ? 0 : Number(addPart);
+    const deletions = delPart === "-" || delPart === undefined ? 0 : Number(delPart);
+    if (Number.isNaN(additions) || Number.isNaN(deletions)) continue;
     stats.push({ path: filePath, additions, deletions });
   }
   return stats;
 }
 
+/** The canonical empty-tree hash; used as the parent of a root commit. */
+const EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+
+/**
+ * Diff range for one session. "commit" diffs the commit against its parent
+ * (`ref^..ref`), falling back to the empty tree for root commits so "Diff vs
+ * parent" still works; "working" diffs the working tree against the ref.
+ * Always read-only.
+ */
+async function resolveCommitRange(path: string, safeRef: string, kind: "working" | "commit"): Promise<string[]> {
+  if (kind === "working") return [safeRef];
+  try {
+    await runGit(path, ["rev-parse", "--verify", "--quiet", `${safeRef}^`], 1024);
+    return [`${safeRef}^`, safeRef];
+  } catch {
+    // Root commit: diff against the empty tree so "Diff vs parent" still works.
+    return [EMPTY_TREE, safeRef];
+  }
+}
+
+/**
+ * Stat-only listing of the changed files in a diff. Hunk content is served
+ * per file by [reviewFileDiff] so no global byte/line cap can make the tail
+ * of a large diff unreachable.
+ */
 export async function reviewDiff(
   requestedPath: string,
   ref: string,
@@ -318,19 +450,55 @@ export async function reviewDiff(
   const path = resolveAllowedRepoPath(requestedPath, extraRoots);
   if (!(await isRepo(path))) throw new ReviewError("not a git repository", 404);
   const safeRef = validateRef(ref);
-  // "commit" diffs the commit against its parent (ref^..ref); "working"
-  // diffs the working tree against the ref. Both stay read-only.
-  const range = kind === "commit" ? [`${safeRef}^`, safeRef] : [safeRef];
+  const range = await resolveCommitRange(path, safeRef, kind);
 
-  const statOut = await runGit(path, ["diff", "--no-color", "--stat", ...range], REVIEW_DIFF_MAX_BYTES);
-  const diffOut = await runGit(
+  const statOut = await runGit(path, ["diff", "--no-color", "-z", "--numstat", ...range], REVIEW_DIFF_MAX_BYTES);
+  const statCapped = capUtf8(statOut, REVIEW_DIFF_MAX_BYTES);
+  return { stat: parseDiffNumstat(statCapped.text), truncated: statCapped.truncated };
+}
+
+/** File paths arrive from git's own stat output; reject pathspec magic and escapes. */
+function validateFilePath(file: string): string {
+  const trimmed = file.trim().replace(/^\.\/+/, "");
+  if (!trimmed || trimmed.length > 512) throw new ReviewError("invalid file path", 400);
+  if (/[\0\n\r]/.test(trimmed) || trimmed.startsWith("/")) throw new ReviewError("invalid file path", 400);
+  // A leading :, ! or ^ makes git treat the pathspec as magic ("glob", exclude).
+  if (trimmed[0] === ":" || trimmed[0] === "!" || trimmed[0] === "^") {
+    throw new ReviewError("invalid file path", 400);
+  }
+  if (trimmed.split("/").some((part) => part === "..")) throw new ReviewError("invalid file path", 400);
+  return trimmed;
+}
+
+/**
+ * Bounded diff of one file against the same range as [reviewDiff]. No
+ * realpath containment check is needed here (unlike the working-tree file
+ * read): git diff only reads git objects and the index for the validated
+ * pathspec, so there is no filesystem-escape surface.
+ */
+export async function reviewFileDiff(
+  requestedPath: string,
+  ref: string,
+  kind: "working" | "commit" = "working",
+  filePath: string,
+  extraRoots: string[] = [],
+): Promise<ReviewFileDiffResult> {
+  const path = resolveAllowedRepoPath(requestedPath, extraRoots);
+  if (!(await isRepo(path))) throw new ReviewError("not a git repository", 404);
+  const safeRef = validateRef(ref);
+  const file = validateFilePath(filePath);
+  const range = await resolveCommitRange(path, safeRef, kind);
+
+  // Stream-capped: a pathological per-file diff (e.g. a huge lockfile change)
+  // degrades to a truncated result instead of failing on an exec buffer.
+  const diffOut = await runGitCapped(
     path,
-    ["diff", "--no-color", "--unified=6", ...range],
-    REVIEW_DIFF_MAX_BYTES * 2,
+    ["diff", "--no-color", "--unified=6", ...range, "--", file],
+    REVIEW_DIFF_MAX_BYTES,
   );
 
-  let diff = diffOut;
-  let truncated = false;
+  let diff = diffOut.text;
+  let truncated = diffOut.stoppedEarly;
   const lineCapped = capLines(diff, REVIEW_DIFF_MAX_LINES);
   if (lineCapped.truncated) {
     diff = lineCapped.text;
@@ -341,7 +509,143 @@ export async function reviewDiff(
     diff = byteCapped.text;
     truncated = true;
   }
-  return { diff, truncated, stat: parseDiffStat(statOut) };
+  return { diff, truncated };
+}
+
+/**
+ * Final version of one file: the working-tree file itself for "working"
+ * diffs, or `git show <ref>:<path>` for a commit. Read-only, realpath-checked
+ * under the allowed repo, head-capped at [REVIEW_FILE_MAX_BYTES] bytes.
+ */
+export async function reviewFileContent(
+  requestedPath: string,
+  ref: string,
+  kind: "working" | "commit" = "working",
+  filePath: string,
+  extraRoots: string[] = [],
+): Promise<ReviewFileContentResult> {
+  const path = resolveAllowedRepoPath(requestedPath, extraRoots);
+  if (!(await isRepo(path))) throw new ReviewError("not a git repository", 404);
+  const safeRef = validateRef(ref);
+  const file = validateFilePath(filePath);
+  if (kind === "commit") return gitShowFile(path, safeRef, file);
+
+  // Working-tree kind: the final version is the file on disk. Symlinks must
+  // not resolve outside the allowed repo (same invariant as the path check).
+  let target: string;
+  try {
+    target = realpathSync(join(path, file));
+  } catch {
+    return { content: "", truncated: false, binary: false, exists: false };
+  }
+  if (target !== path && !target.startsWith(path + sep)) {
+    throw new ReviewError("file resolves outside the repository", 403);
+  }
+  return readFileHead(target);
+}
+
+/** True when the buffer holds binary data (NUL in the first 8 KiB). */
+function isBinaryBuffer(data: Buffer): boolean {
+  const probe = Math.min(data.length, 8192);
+  for (let i = 0; i < probe; i++) {
+    if (data[i] === 0) return true;
+  }
+  return false;
+}
+
+/** Head-read of a working-tree file, capped and binary-probed. */
+function readFileHead(file: string): ReviewFileContentResult {
+  let size: number;
+  try {
+    const stat = statSync(file);
+    if (!stat.isFile()) return { content: "", truncated: false, binary: false, exists: false };
+    size = stat.size;
+  } catch {
+    return { content: "", truncated: false, binary: false, exists: false };
+  }
+  const fd = openSync(file, "r");
+  try {
+    const data = Buffer.alloc(Math.min(size, REVIEW_FILE_MAX_BYTES + 1));
+    const read = readSync(fd, data, 0, data.length, 0);
+    const bytes = data.subarray(0, read);
+    if (isBinaryBuffer(bytes)) return { content: "", truncated: false, binary: true, exists: true };
+    const capped = capUtf8(bytes.toString("utf8"), REVIEW_FILE_MAX_BYTES);
+    return { content: capped.text, truncated: capped.truncated, binary: false, exists: true };
+  } finally {
+    closeSync(fd);
+  }
+}
+
+/**
+ * `git show <ref>:<path>` with streamed head-capping: the child is killed as
+ * soon as the cap is reached, so arbitrarily large blobs degrade to a
+ * truncated result instead of an unbounded buffer or a 502.
+ */
+function gitShowFile(path: string, ref: string, file: string): Promise<ReviewFileContentResult> {
+  return new Promise((resolvePromise, reject) => {
+    const child = spawn("git", ["-C", path, "show", `${ref}:${file}`], {
+      env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    const chunks: Buffer[] = [];
+    let total = 0;
+    let stoppedEarly = false;
+    let stderr = "";
+    let settled = false;
+    const settle = (fn: () => void) => {
+      if (!settled) {
+        settled = true;
+        fn();
+      }
+    };
+    const timeout = setTimeout(() => {
+      child.kill();
+      settle(() => reject(new ReviewError("git command timed out", 502)));
+    }, REVIEW_COMMAND_TIMEOUT_MS);
+
+    child.stdout.on("data", (chunk: Buffer) => {
+      if (settled) return;
+      const room = REVIEW_FILE_MAX_BYTES - total;
+      if (room <= 0) {
+        stoppedEarly = true;
+        child.kill();
+        return;
+      }
+      total += chunk.length;
+      chunks.push(room >= chunk.length ? chunk : chunk.subarray(0, room));
+      if (total >= REVIEW_FILE_MAX_BYTES) {
+        stoppedEarly = true;
+        child.kill();
+      }
+    });
+    child.stderr.on("data", (chunk: Buffer) => {
+      if (stderr.length < 2048) stderr += chunk.toString("utf8");
+    });
+    child.on("error", () => settle(() => reject(new ReviewError("git is not installed", 500))));
+    child.on("close", (code) => {
+      clearTimeout(timeout);
+      if (settled) return;
+      if (code !== 0 && !stoppedEarly) {
+        if (stderr.includes("does not exist") || stderr.includes("exists on disk, but not in")) {
+          return settle(() => resolvePromise({ content: "", truncated: false, binary: false, exists: false }));
+        }
+        return settle(() => reject(new ReviewError(stderr.trim() || "git failed", 502)));
+      }
+      const bytes = Buffer.concat(chunks);
+      if (isBinaryBuffer(bytes)) {
+        return settle(() => resolvePromise({ content: "", truncated: false, binary: true, exists: true }));
+      }
+      const capped = capUtf8(bytes.toString("utf8"), REVIEW_FILE_MAX_BYTES);
+      settle(() =>
+        resolvePromise({
+          content: capped.text,
+          truncated: capped.truncated || stoppedEarly,
+          binary: false,
+          exists: true,
+        }),
+      );
+    });
+  });
 }
 
 /**

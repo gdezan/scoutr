@@ -2,8 +2,12 @@ package dev.cockpit.app.ui
 
 import android.graphics.Bitmap
 import android.provider.Settings
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.width
+import org.json.JSONObject
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.test.assertIsDisplayed
@@ -48,8 +52,10 @@ class ReviewScreenTest {
         val vm = viewModel()
         compose.setContent {
             CockpitTheme {
-                Box(Modifier.width(320.dp)) {
-                    ReviewScreen(vm)
+                Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+                    Box(Modifier.width(320.dp)) {
+                        ReviewScreen(vm)
+                    }
                 }
             }
         }
@@ -67,7 +73,9 @@ class ReviewScreenTest {
         val vm = viewModel()
         compose.setContent {
             CockpitTheme {
-                ReviewScreen(vm)
+                Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+                    ReviewScreen(vm)
+                }
             }
         }
         compose.waitUntil(5_000) {
@@ -133,14 +141,41 @@ class ReviewScreenTest {
                         MockResponse().setResponseCode(200).setBody(
                             """{"ok":true,"path":"/home/user/worktrees/cockpit","root":"/home/user/worktrees/cockpit","branch":"main",
                                "status":[{"code":" M","path":"src/server.ts"},{"code":"??","path":"notes.txt"}],"statusTruncated":false,
-                               "log":[{"hash":"a1b2c3d4","subject":"feat: add review center","author":"Ada","date":${System.currentTimeMillis() / 1000}},
+                               "log":[{"hash":"a1b2c3d4","subject":"feat: add review center","author":"Ada","date":${System.currentTimeMillis() / 1000},"body":"Adds a read-only review center.\nShows status, log, and per-file diffs."},
                                       {"hash":"e5f6a7b8","subject":"fix: poll loop","author":"Bob","date":${System.currentTimeMillis() / 1000 - 3600}}],
                                "logTruncated":false}""",
                         )
                     path == "/api/repo/diff" ->
                         MockResponse().setResponseCode(200).setBody(
-                            """{"ok":true,"diff":"diff --git a/src/server.ts b/src/server.ts\n--- a/src/server.ts\n+++ b/src/server.ts\n@@ -1,3 +1,4 @@\n import x\n+new line\ndiff --git a/notes.txt b/notes.txt\n--- a/notes.txt\n+++ b/notes.txt\n@@ -0,0 +1 @@\n+note\n","truncated":false,"stat":[{"path":"src/server.ts","additions":1,"deletions":0},{"path":"notes.txt","additions":1,"deletions":0}]}""",
+                            """{"ok":true,"truncated":false,"stat":[{"path":"src/server.ts","additions":1,"deletions":0},{"path":"notes.txt","additions":1,"deletions":0}]}""",
                         )
+                    path == "/api/repo/diff/file" -> {
+                        val file = request.requestUrl?.queryParameter("file") ?: ""
+                        val diff = if (file == "notes.txt") {
+                            """--- a/notes.txt
++++ b/notes.txt
+@@ -0,0 +1 @@
++note
+"""
+                        } else {
+                            """--- a/src/server.ts
++++ b/src/server.ts
+@@ -1,3 +1,4 @@
+ import x
++new line
+"""
+                        }
+                        MockResponse().setResponseCode(200).setBody(
+                            """{"ok":true,"diff":${JSONObject.quote(diff)},"truncated":false}""",
+                        )
+                    }
+                    path == "/api/repo/file" -> {
+                        val file = request.requestUrl?.queryParameter("file") ?: ""
+                        val content = if (file == "notes.txt") "note\n" else "import x\nnew line\n"
+                        MockResponse().setResponseCode(200).setBody(
+                            """{"ok":true,"content":${JSONObject.quote(content)},"truncated":false,"binary":false,"exists":true}""",
+                        )
+                    }
                     else -> MockResponse().setResponseCode(404).setBody("""{"ok":false,"error":"not found"}""")
                 }
             }
@@ -162,7 +197,9 @@ class ReviewScreenTest {
         val vm = viewModel()
         compose.setContent {
             CockpitTheme {
-                ReviewScreen(vm)
+                Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+                    ReviewScreen(vm)
+                }
             }
         }
         compose.onNodeWithText("worktrees").assertIsDisplayed()
@@ -175,7 +212,9 @@ class ReviewScreenTest {
         val vm = viewModel()
         compose.setContent {
             CockpitTheme {
-                ReviewScreen(vm)
+                Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+                    ReviewScreen(vm)
+                }
             }
         }
         compose.onNodeWithText("worktrees").performClick()
@@ -209,7 +248,9 @@ class ReviewScreenTest {
         val vm = viewModel()
         compose.setContent {
             CockpitTheme {
-                ReviewScreen(vm)
+                Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+                    ReviewScreen(vm)
+                }
             }
         }
         // Drill to the repo dir and select it as the review target.
@@ -232,7 +273,9 @@ class ReviewScreenTest {
         val vm = viewModel()
         compose.setContent {
             CockpitTheme {
-                ReviewScreen(vm)
+                Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+                    ReviewScreen(vm)
+                }
             }
         }
         compose.onNodeWithText("worktrees").performClick()
@@ -248,5 +291,75 @@ class ReviewScreenTest {
         }
         compose.onNodeWithText("+new line").assertIsDisplayed()
         capture("diff-file-1")
+    }
+
+    @Test
+    fun filePickerSheetListsFilesAndSwitchesSelection() {
+        stubApi()
+        val vm = viewModel()
+        compose.setContent {
+            CockpitTheme {
+                Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+                    ReviewScreen(vm)
+                }
+            }
+        }
+        compose.onNodeWithText("worktrees").performClick()
+        compose.onNodeWithTag("review_select").performClick()
+        compose.waitUntil(5000) {
+            compose.onAllNodes(androidx.compose.ui.test.hasText("Working tree")).fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithText("diff vs HEAD").performClick()
+        compose.waitUntil(5000) {
+            compose.onAllNodes(androidx.compose.ui.test.hasTestTag("diff_file_selector")).fetchSemanticsNodes().isNotEmpty()
+        }
+
+        compose.onNodeWithTag("diff_file_selector").performClick()
+        compose.waitUntil(5000) {
+            compose.onAllNodes(androidx.compose.ui.test.hasTestTag("diff_file_sheet")).fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithTag("diff_file_0").assertIsDisplayed()
+        compose.onNodeWithTag("diff_file_1").assertIsDisplayed()
+
+        compose.onNodeWithTag("diff_file_1").performClick()
+        compose.waitUntil(5000) {
+            compose.onAllNodes(androidx.compose.ui.test.hasText("2 / 2  notes.txt", substring = true)).fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.waitUntil(5000) {
+            // The per-file fetch must actually swap the body to notes.txt's
+            // hunks — a stale-body regression would still show "+new line".
+            compose.onAllNodes(androidx.compose.ui.test.hasText("+note", substring = true)).fetchSemanticsNodes().isNotEmpty()
+        }
+        capture("diff-file-2")
+    }
+
+    @Test
+    fun commitSheetShowsBodyAndOpensDiff() {
+        stubApi()
+        val vm = viewModel()
+        compose.setContent {
+            CockpitTheme {
+                Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+                    ReviewScreen(vm)
+                }
+            }
+        }
+        compose.onNodeWithText("worktrees").performClick()
+        compose.onNodeWithTag("review_select").performClick()
+        compose.waitUntil(5000) {
+            compose.onAllNodes(androidx.compose.ui.test.hasText("Working tree")).fetchSemanticsNodes().isNotEmpty()
+        }
+
+        compose.onNodeWithText("feat: add review center").performClick()
+        compose.waitUntil(5000) {
+            compose.onAllNodes(androidx.compose.ui.test.hasTestTag("commit_body")).fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithText("Adds a read-only review center.", substring = true).assertIsDisplayed()
+        capture("commit-sheet", overlay = true)
+
+        compose.onNodeWithTag("commit_diff_button").performClick()
+        compose.waitUntil(5000) {
+            compose.onAllNodes(androidx.compose.ui.test.hasTestTag("diff_file_selector")).fetchSemanticsNodes().isNotEmpty()
+        }
     }
 }

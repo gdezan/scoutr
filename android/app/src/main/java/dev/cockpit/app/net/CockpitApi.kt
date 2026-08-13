@@ -13,6 +13,8 @@ import dev.cockpit.app.data.HealthResponse
 import dev.cockpit.app.data.ModelsCatalogResponse
 import dev.cockpit.app.data.RepoArtifactsResponse
 import dev.cockpit.app.data.RepoDiffResponse
+import dev.cockpit.app.data.RepoFileDiffResponse
+import dev.cockpit.app.data.RepoFileResponse
 import dev.cockpit.app.data.RepoOverviewResponse
 import dev.cockpit.app.data.SessionCatalogResponse
 import dev.cockpit.app.data.SessionReadResponse
@@ -51,6 +53,8 @@ interface CockpitApi {
     suspend fun dirs(path: String? = null): DirListingResponse
     suspend fun repoOverview(path: String): RepoOverviewResponse
     suspend fun repoDiff(path: String, base: String = "HEAD", kind: String = "working"): RepoDiffResponse
+    suspend fun repoFileDiff(path: String, base: String, kind: String, file: String): RepoFileDiffResponse
+    suspend fun repoFile(path: String, base: String, kind: String, file: String): RepoFileResponse
     suspend fun repoArtifacts(path: String): RepoArtifactsResponse
     suspend fun usage(): UsageResponse
     suspend fun uploadAttachment(name: String, mime: String, bytes: ByteArray): AttachmentResponse

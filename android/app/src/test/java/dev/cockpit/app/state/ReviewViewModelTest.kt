@@ -149,19 +149,144 @@ class ReviewViewModelTest {
         fake.repoDiffResult = Result.success(
             RepoDiffResponse(
                 ok = true,
-                diff = "--- a/a.txt\n+++ b/a.txt\n@@ -1 +1,2 @@\n hello\n+world\n",
                 truncated = false,
                 stat = listOf(RepoDiffFileStat(path = "a.txt", additions = 1, deletions = 0)),
             ),
+        )
+        fake.repoFileDiffResult = Result.success(
+            dev.cockpit.app.data.RepoFileDiffResponse(ok = true, diff = "+world\n", truncated = false),
         )
         viewModel.loadDiff("HEAD")
 
         val settled = waitFor { viewModel.ui.value.diff is Loadable.Ready }
         assertTrue("diff never loaded", settled)
         assertEquals("HEAD", viewModel.ui.value.diffRef)
-        val diff = readyOf(viewModel.ui.value.diff)
-        assertTrue(diff?.diff.orEmpty().contains("+world"))
-        assertEquals(1, diff?.stat?.size)
+        assertEquals(1, readyOf(viewModel.ui.value.diff)?.stat?.size)
+
+        // Selecting a file lazily fetches its per-file diff.
+        viewModel.selectFile("a.txt")
+        val fileSettled = waitFor { viewModel.ui.value.fileDiff is Loadable.Ready }
+        assertTrue("file diff never loaded", fileSettled)
+        assertTrue(readyOf(viewModel.ui.value.fileDiff)?.diff.orEmpty().contains("+world"))
+    }
+
+    @Test
+    fun selectFileCachesPerFileDiff() {
+        stubDirs(dirs = listOf("repo-a"))
+        viewModel.openPicker()
+        waitFor { readyOf(viewModel.ui.value.dirs)?.isNotEmpty() == true }
+        fake.repoOverviewResult = Result.success(
+            RepoOverviewResponse(ok = true, path = "/home/test/repo-a", root = "/home/test/repo-a", branch = "main"),
+        )
+        viewModel.selectRepo("/home/test/repo-a")
+        waitFor { viewModel.ui.value.overview is Loadable.Ready }
+
+        fake.repoDiffResult = Result.success(
+            RepoDiffResponse(
+                ok = true,
+                truncated = false,
+                stat = listOf(RepoDiffFileStat(path = "a.txt", additions = 1, deletions = 0)),
+            ),
+        )
+        viewModel.loadDiff("HEAD")
+        waitFor { viewModel.ui.value.diff is Loadable.Ready }
+
+        fake.repoFileDiffResult = Result.success(
+            dev.cockpit.app.data.RepoFileDiffResponse(ok = true, diff = "+world\n", truncated = false),
+        )
+        viewModel.selectFile("a.txt")
+        waitFor { viewModel.ui.value.fileDiff is Loadable.Ready }
+        val afterFirst = fake.calls.count { it.name == "repoFileDiff" }
+        assertEquals("first selection should fetch the file diff", 1, afterFirst)
+
+        viewModel.selectFile("a.txt")
+        waitFor { viewModel.ui.value.fileDiff is Loadable.Ready }
+        assertEquals("cached file diff should not refetch", afterFirst, fake.calls.count { it.name == "repoFileDiff" })
+    }
+
+    @Test
+    fun fileViewLazilyLoadsContentAndCloseResets() {
+        stubDirs(dirs = listOf("repo-a"))
+        viewModel.openPicker()
+        waitFor { readyOf(viewModel.ui.value.dirs)?.isNotEmpty() == true }
+        fake.repoOverviewResult = Result.success(
+            RepoOverviewResponse(ok = true, path = "/home/test/repo-a", root = "/home/test/repo-a", branch = "main"),
+        )
+        viewModel.selectRepo("/home/test/repo-a")
+        waitFor { viewModel.ui.value.overview is Loadable.Ready }
+
+        fake.repoDiffResult = Result.success(
+            RepoDiffResponse(
+                ok = true,
+                truncated = false,
+                stat = listOf(RepoDiffFileStat(path = "a.txt", additions = 1, deletions = 0)),
+            ),
+        )
+        fake.repoFileDiffResult = Result.success(
+            dev.cockpit.app.data.RepoFileDiffResponse(ok = true, diff = "+world\n", truncated = false),
+        )
+        fake.repoFileResult = Result.success(
+            dev.cockpit.app.data.RepoFileResponse(ok = true, content = "hello\nworld\n", truncated = false, binary = false, exists = true),
+        )
+        viewModel.loadDiff("HEAD")
+        waitFor { viewModel.ui.value.diff is Loadable.Ready }
+        viewModel.selectFile("a.txt")
+        waitFor { viewModel.ui.value.fileDiff is Loadable.Ready }
+        viewModel.setViewMode(DiffViewMode.File)
+        val contentSettled = waitFor { viewModel.ui.value.fileContent is Loadable.Ready }
+        assertTrue("file content never loaded", contentSettled)
+        assertEquals(DiffViewMode.File, viewModel.ui.value.viewMode)
+
+        viewModel.closeFile()
+        assertNull(viewModel.ui.value.selectedFile)
+        assertEquals(DiffViewMode.Diff, viewModel.ui.value.viewMode)
+    }
+
+    @Test
+    fun selectingAnotherFileRefetchesContentForTheNewFile() {
+        stubDirs(dirs = listOf("repo-a"))
+        viewModel.openPicker()
+        waitFor { readyOf(viewModel.ui.value.dirs)?.isNotEmpty() == true }
+        fake.repoOverviewResult = Result.success(
+            RepoOverviewResponse(ok = true, path = "/home/test/repo-a", root = "/home/test/repo-a", branch = "main"),
+        )
+        viewModel.selectRepo("/home/test/repo-a")
+        waitFor { viewModel.ui.value.overview is Loadable.Ready }
+
+        fake.repoDiffResult = Result.success(
+            RepoDiffResponse(
+                ok = true,
+                truncated = false,
+                stat = listOf(
+                    RepoDiffFileStat(path = "a.txt", additions = 1, deletions = 0),
+                    RepoDiffFileStat(path = "b.txt", additions = 1, deletions = 0),
+                ),
+            ),
+        )
+        fake.repoFileDiffResult = Result.success(
+            dev.cockpit.app.data.RepoFileDiffResponse(ok = true, diff = "+world\n", truncated = false),
+        )
+        viewModel.loadDiff("HEAD")
+        waitFor { viewModel.ui.value.diff is Loadable.Ready }
+
+        fake.repoFileResult = Result.success(
+            dev.cockpit.app.data.RepoFileResponse(ok = true, content = "content of a\n", truncated = false, binary = false, exists = true),
+        )
+        viewModel.selectFile("a.txt")
+        waitFor { viewModel.ui.value.fileDiff is Loadable.Ready }
+        viewModel.setViewMode(DiffViewMode.File)
+        waitFor { viewModel.ui.value.fileContent is Loadable.Ready }
+
+        fake.repoFileResult = Result.success(
+            dev.cockpit.app.data.RepoFileResponse(ok = true, content = "content of b\n", truncated = false, binary = false, exists = true),
+        )
+        viewModel.selectFile("b.txt")
+        waitFor { viewModel.ui.value.fileDiff is Loadable.Ready }
+        viewModel.setViewMode(DiffViewMode.File)
+        waitFor { viewModel.ui.value.fileContent is Loadable.Ready }
+
+        assertEquals("file view must show the newly selected file's content", "content of b\n", readyOf(viewModel.ui.value.fileContent)?.content)
+        assertEquals("each file selection should fetch its own content", 2, fake.calls.count { it.name == "repoFile" })
     }
 
     @Test

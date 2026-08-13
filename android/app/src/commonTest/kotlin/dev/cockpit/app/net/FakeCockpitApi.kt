@@ -13,6 +13,8 @@ import dev.cockpit.app.data.HealthResponse
 import dev.cockpit.app.data.ModelsCatalogResponse
 import dev.cockpit.app.data.RepoArtifactsResponse
 import dev.cockpit.app.data.RepoDiffResponse
+import dev.cockpit.app.data.RepoFileDiffResponse
+import dev.cockpit.app.data.RepoFileResponse
 import dev.cockpit.app.data.RepoOverviewResponse
 import dev.cockpit.app.data.SessionCatalogResponse
 import dev.cockpit.app.data.SessionReadResponse
@@ -58,6 +60,8 @@ class FakeCockpitApi : CockpitApi {
     var dirsResult: Result<DirListingResponse> = Result.success(DirListingResponse(ok = true))
     var repoOverviewResult: Result<RepoOverviewResponse> = Result.success(RepoOverviewResponse())
     var repoDiffResult: Result<RepoDiffResponse> = Result.success(RepoDiffResponse())
+    var repoFileDiffResult: Result<RepoFileDiffResponse> = Result.success(RepoFileDiffResponse())
+    var repoFileResult: Result<RepoFileResponse> = Result.success(RepoFileResponse())
     var repoArtifactsResult: Result<RepoArtifactsResponse> = Result.success(RepoArtifactsResponse())
     var usageResult: Result<UsageResponse> = Result.success(UsageResponse())
     var uploadResult: Result<AttachmentResponse> = Result.success(AttachmentResponse())
@@ -141,6 +145,12 @@ class FakeCockpitApi : CockpitApi {
 
     override suspend fun repoDiff(path: String, base: String, kind: String): RepoDiffResponse =
         record("repoDiff", mapOf("path" to path, "base" to base, "kind" to kind)) { repoDiffResult }
+
+    override suspend fun repoFileDiff(path: String, base: String, kind: String, file: String): RepoFileDiffResponse =
+        record("repoFileDiff", mapOf("path" to path, "base" to base, "kind" to kind, "file" to file)) { repoFileDiffResult }
+
+    override suspend fun repoFile(path: String, base: String, kind: String, file: String): RepoFileResponse =
+        record("repoFile", mapOf("path" to path, "base" to base, "kind" to kind, "file" to file)) { repoFileResult }
 
     override suspend fun repoArtifacts(path: String): RepoArtifactsResponse =
         record("repoArtifacts", mapOf("path" to path)) { repoArtifactsResult }
