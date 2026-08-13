@@ -1,12 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { getCodexAuth, getApiKeyAuth } from "../src/usage/auth.js";
+import { getCodexAuth, getApiKeyAuth, getOAuthAuth } from "../src/usage/auth.js";
 import { parseXaiUsage, UsageService, type UsageProvider } from "../src/usage/providers.js";
 
-test("auth helpers extract codex and api-key credentials", () => {
+test("auth helpers extract codex, oauth, and api-key credentials", () => {
   const store = {
     "openai-codex": { type: "oauth", access: "tok", refresh: "ref", expires: 123, accountId: "acc" },
     deepseek: { type: "api-key", key: "sk-123" },
+    xai: { type: "oauth", access: "xai-access", refresh: "xai-refresh", expires: 999 },
   };
   const codex = getCodexAuth(store);
   assert.equal(codex?.access, "tok");
@@ -14,6 +15,12 @@ test("auth helpers extract codex and api-key credentials", () => {
   const deepseek = getApiKeyAuth(store, "deepseek");
   assert.equal(deepseek?.key, "sk-123");
   assert.equal(getApiKeyAuth(store, "missing"), undefined);
+  const xai = getOAuthAuth(store, "xai");
+  assert.equal(xai?.access, "xai-access");
+  assert.equal(xai?.refresh, "xai-refresh");
+  assert.equal(getOAuthAuth(store, "missing"), undefined);
+  // xAI is OAuth — the api-key helper must not invent a key from the access token.
+  assert.equal(getApiKeyAuth(store, "xai"), undefined);
 });
 
 test("parseXaiUsage handles the monthly credits shape", () => {
@@ -28,6 +35,42 @@ test("parseXaiUsage handles the monthly credits shape", () => {
   assert.equal(snapshot.windows[0]?.usedPercent, 42.5);
   assert.equal(snapshot.windows[0]?.label, "mo");
   assert.ok(snapshot.windows[0]?.resetAt);
+});
+
+test("parseXaiUsage handles live SuperGrok weekly credits shape", () => {
+  const snapshot = parseXaiUsage({
+    config: {
+      currentPeriod: {
+        type: "USAGE_PERIOD_TYPE_WEEKLY",
+        start: "2026-08-11T02:26:29.391390+00:00",
+        end: "2026-08-18T02:26:29.391390+00:00",
+      },
+      creditUsagePercent: 10,
+      productUsage: [{ product: "GrokBuild", usagePercent: 10 }],
+      isUnifiedBillingUser: true,
+      prepaidBalance: { val: 0 },
+      billingPeriodStart: "2026-08-11T02:26:29.391390+00:00",
+      billingPeriodEnd: "2026-08-18T02:26:29.391390+00:00",
+    },
+  });
+  assert.equal(snapshot.windows[0]?.label, "wk");
+  assert.equal(snapshot.windows[0]?.usedPercent, 10);
+  assert.equal(snapshot.windows[0]?.windowSeconds, 7 * 24 * 60 * 60);
+  assert.ok(snapshot.windows[0]?.resetAt);
+});
+
+test("parseXaiUsage defaults omitted creditUsagePercent to 0 when a period is present", () => {
+  const snapshot = parseXaiUsage({
+    config: {
+      currentPeriod: {
+        type: "USAGE_PERIOD_TYPE_WEEKLY",
+        start: "2026-08-11T00:00:00Z",
+        end: "2026-08-18T00:00:00Z",
+      },
+    },
+  });
+  assert.equal(snapshot.windows[0]?.usedPercent, 0);
+  assert.equal(snapshot.windows[0]?.label, "wk");
 });
 
 test("parseXaiUsage falls back to products", () => {

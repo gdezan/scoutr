@@ -20,6 +20,14 @@ export interface ApiKeyAuth {
   key: string;
 }
 
+/** Generic OAuth entry (xAI, and any future bearer-access providers). */
+export interface OAuthAuth {
+  type?: string;
+  access: string;
+  refresh?: string;
+  expires?: number;
+}
+
 export type AuthStore = Record<string, unknown>;
 
 export function defaultAuthPath(): string {
@@ -42,6 +50,19 @@ export function getCodexAuth(store: AuthStore): CodexAuth | undefined {
     refresh: typeof auth.refresh === "string" ? auth.refresh : undefined,
     expires: typeof auth.expires === "number" ? auth.expires : undefined,
     accountId: typeof auth.accountId === "string" ? auth.accountId : undefined,
+  };
+}
+
+export function getOAuthAuth(store: AuthStore, providerKey: string): OAuthAuth | undefined {
+  const entry = store[providerKey];
+  if (!entry || typeof entry !== "object" || Array.isArray(entry)) return undefined;
+  const auth = entry as Record<string, unknown>;
+  if (typeof auth.access !== "string") return undefined;
+  return {
+    type: typeof auth.type === "string" ? auth.type : undefined,
+    access: auth.access,
+    refresh: typeof auth.refresh === "string" ? auth.refresh : undefined,
+    expires: typeof auth.expires === "number" ? auth.expires : undefined,
   };
 }
 

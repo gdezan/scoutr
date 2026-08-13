@@ -17,7 +17,10 @@ pi agents, as an alternative to Moshi's paid herdr integration.
 - **Chat**: steer live herdr pi panes — read the pi session JSONL, `agent.prompt`
   to steer, answer `ask_user_question` by sending the answer + Enter into the pane.
 - **Usage**: provider adapters ported from provider-usage.ts, reading
-  `~/.pi/agent/auth.json` read-only (Codex 5h/7d windows, DeepSeek balance).
+  `~/.pi/agent/auth.json` read-only (Codex OAuth 5h/7d windows, DeepSeek API-key
+  balance, xAI Grok-CLI OAuth weekly credits). The bridge never writes auth.json;
+  expired xAI access tokens are refreshed in memory only.
+
 - **Push**: self-hosted ntfy on the host, tailscale-served at `/ntfy`; the Android
   app polls the topic itself and shows a local notification (no separate ntfy app).
 - **Live terminal**: not in v1.
