@@ -4,10 +4,12 @@
  *
  * Covered providers (as configured on this machine):
  *   - openai-codex: rate-limit windows (5h / 7d) from the ChatGPT backend.
+ *   - claude: rate-limit windows from Claude Code's OAuth usage endpoint.
  *   - deepseek: wallet balance from the DeepSeek API.
  *   - xai: weekly credit usage via Grok CLI OAuth (access/refresh in auth.json).
  */
 
+import { fetchClaudeUsage } from "./claude.js";
 import { getCodexAuth, getApiKeyAuth, getOAuthAuth, readAuthStore, type AuthStore, type OAuthAuth } from "./auth.js";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -316,6 +318,7 @@ export interface UsageProvider {
 
 export const USAGE_PROVIDERS: UsageProvider[] = [
   { id: "codex", label: "Codex", fetch: fetchCodexUsage },
+  { id: "claude", label: "Claude", fetch: () => fetchClaudeUsage() },
   { id: "deepseek", label: "DeepSeek", fetch: fetchDeepseekUsage },
   { id: "xai", label: "xAI", fetch: fetchXaiUsage },
 ];
@@ -338,7 +341,8 @@ export class UsageService {
   }
 
   async all(): Promise<UsageSnapshot[]> {
-    const store = await readAuthStore(this.authPath);
+    // Claude owns a separate OAuth store, so a missing pi auth file must not hide it.
+    const store = await readAuthStore(this.authPath).catch(() => ({}));
     const results: UsageSnapshot[] = [];
     for (const provider of USAGE_PROVIDERS) {
       results.push(await this.get(provider, store));

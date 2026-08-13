@@ -52,7 +52,7 @@ surprise; calm cards so a running agent's state is the visual anchor.
   answer/steer unified composer.
 - Push: self-hosted ntfy, app-side polling, blocked + done notifications.
 - QR pairing (Moshi-style Easy Pair).
-- Usage: codex 5h/7d windows, deepseek balance; rings on the usage screen.
+- Usage: Codex and Claude quota windows, DeepSeek balance, and xAI weekly credits; rings on the usage screen.
 
 ## Constraints
 
