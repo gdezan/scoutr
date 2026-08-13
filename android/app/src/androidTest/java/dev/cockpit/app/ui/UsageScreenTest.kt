@@ -1,11 +1,15 @@
 package dev.cockpit.app.ui
 
+import android.graphics.Bitmap
+import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.captureToImage
+import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -20,10 +24,20 @@ import dev.cockpit.app.ui.theme.CockpitTheme
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
-
+import java.io.FileOutputStream
 class UsageScreenTest {
     @get:Rule
     val compose = createComposeRule()
+
+    private fun capture(name: String) {
+        val file = androidx.test.platform.app.InstrumentationRegistry.getInstrumentation()
+            .targetContext.getExternalFilesDir(null)!!.resolve("$name.png")
+        FileOutputStream(file).use { output ->
+            compose.onRoot().captureToImage().asAndroidBitmap()
+                .compress(Bitmap.CompressFormat.PNG, 100, output)
+        }
+        println("USAGE_SCREENSHOT=${file.absolutePath}")
+    }
 
     @Test
     fun showsQuotaBarsAndBalanceWithoutInventingABalanceLimit() {
@@ -44,15 +58,25 @@ class UsageScreenTest {
                             UsageSnapshot(
                                 provider = "deepseek",
                                 label = "DeepSeek",
-                                windows = listOf(UsageWindow(label = "USD", amount = 12.5, currency = "USD")),
+                                windows = listOf(UsageWindow(label = "USD", amount = -0.01, currency = "USD")),
                                 error = "Balance delayed",
                             ),
+                            UsageSnapshot(
+                                provider = "anthropic",
+                                label = "Anthropic",
+                                windows = listOf(UsageWindow(label = "USD", amount = 0.0, currency = "USD")),
+                            ),
+                            UsageSnapshot(
+                                provider = "google",
+                                label = "Google",
+                                windows = listOf(UsageWindow(label = "USD", amount = 12.5, currency = "USD")),
                             ),
                         ),
                     ),
-                    onRefresh = {},
-                    nowMillis = 0,
-                )
+                ),
+                onRefresh = {},
+                nowMillis = 0,
+            )
             }
         }
 
@@ -62,8 +86,14 @@ class UsageScreenTest {
         compose.onNodeWithContentDescription("5-hour limit, 82% used, $42.00 of $100.00").assertIsDisplayed()
         compose.onNodeWithContentDescription("7-day limit, 34% used, Limit $200.00").assertIsDisplayed()
         compose.onNodeWithText("Showing last known usage. Balance delayed").assertIsDisplayed()
-        compose.onNodeWithTag("usage_balance_USD").assertIsDisplayed()
-        compose.onNodeWithText("Available balance").assertIsDisplayed()
+        compose.onNodeWithTag("usage_deepseek").assertIsDisplayed()
+        compose.onNodeWithText("Balance below zero").assertIsDisplayed()
+        compose.onNodeWithText("Add credit before starting more work.").assertIsDisplayed()
+        compose.onNodeWithContentDescription("Balance below zero, USD, negative $0.01").assertIsDisplayed()
+        compose.onNodeWithTag("usage_anthropic").assertIsDisplayed()
+        compose.onNodeWithTag("usage_google").assertIsDisplayed()
+        compose.onNodeWithTag("usage_anthropic").assertIsDisplayed()
+        capture("usage-balances")
     }
 
     @Test

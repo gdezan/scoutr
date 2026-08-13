@@ -278,35 +278,57 @@ private fun UsageBar(window: UsageWindow, provider: String, nowSeconds: Long) {
 
 @Composable
 private fun BalanceRow(window: UsageWindow) {
-    Row(
+    val negative = window.amount?.let { it < 0.0 } == true
+    val amount = formatAmount(window.amount, window.currency)
+    val currency = window.currency ?: window.label
+    val description = if (negative) {
+        "Balance below zero, $currency, negative ${formatNegativeAmount(window.amount, window.currency)}"
+    } else {
+        "$currency balance, $amount"
+    }
+    Column(
         Modifier
             .fillMaxWidth()
-            .semantics(mergeDescendants = true) {
-                contentDescription = "${window.currency ?: window.label} balance, ${formatAmount(window.amount, window.currency)}"
-            }
+            .semantics(mergeDescendants = true) { contentDescription = description }
             .testTag("usage_balance_${window.label}"),
-        horizontalArrangement = Arrangement.spacedBy(16.dp),
-        verticalAlignment = Alignment.CenterVertically,
+        verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text("Available balance", style = MaterialTheme.typography.bodyMedium)
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(
+                    if (negative) "Balance below zero" else "Available balance",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Text(
+                    currency,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
             Text(
-                text = window.currency ?: window.label,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                text = amount,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = if (negative) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
+                textAlign = TextAlign.End,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
             )
         }
-        Text(
-            text = formatAmount(window.amount, window.currency),
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.SemiBold,
-            textAlign = TextAlign.End,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f),
-        )
+        if (negative) {
+            Text(
+                "Add credit before starting more work.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
     }
 }
 
@@ -425,6 +447,9 @@ private fun amountLabel(window: UsageWindow): String? {
         else -> null
     }
 }
+
+internal fun formatNegativeAmount(amount: Double?, currencyCode: String?): String =
+    formatAmount(amount?.let { -kotlin.math.abs(it) }, currencyCode).removePrefix("-").trim()
 
 internal fun formatAmount(amount: Double?, currencyCode: String?, locale: Locale = Locale.getDefault()): String {
     if (amount == null) return "Unknown"
