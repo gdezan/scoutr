@@ -1,7 +1,10 @@
 package dev.cockpit.app.ui
 
+import android.graphics.Bitmap
+import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -22,7 +25,7 @@ import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import java.util.concurrent.TimeUnit
-
+import java.io.FileOutputStream
 /**
  * Read-only review center against a local mock bridge: repo picker, branch +
  * status + log overview, and a bounded diff of the working tree.
@@ -31,6 +34,16 @@ class ReviewScreenTest {
 
     @get:Rule
     val compose = createComposeRule()
+
+    private fun capture(name: String) {
+        val file = InstrumentationRegistry.getInstrumentation().targetContext
+            .getExternalFilesDir(null)!!.resolve("$name.png")
+        FileOutputStream(file).use { output ->
+            compose.onNodeWithTag("review_capture_root").captureToImage().asAndroidBitmap()
+                .compress(Bitmap.CompressFormat.PNG, 100, output)
+        }
+        println("REVIEW_SCREENSHOT=${file.absolutePath}")
+    }
 
     private lateinit var server: MockWebServer
 
@@ -64,8 +77,7 @@ class ReviewScreenTest {
                         )
                     path == "/api/repo/diff" ->
                         MockResponse().setResponseCode(200).setBody(
-                            """{"ok":true,"diff":"--- a/src/server.ts\n+++ b/src/server.ts\n@@ -1,3 +1,4 @@\n import x\n+new line\n",
-                               "truncated":false,"stat":[{"path":"src/server.ts","additions":1,"deletions":0}]}""",
+                            """{"ok":true,"diff":"diff --git a/src/server.ts b/src/server.ts\n--- a/src/server.ts\n+++ b/src/server.ts\n@@ -1,3 +1,4 @@\n import x\n+new line\n","truncated":false,"stat":[{"path":"src/server.ts","additions":1,"deletions":0}]}""",
                         )
                     else -> MockResponse().setResponseCode(404).setBody("""{"ok":false,"error":"not found"}""")
                 }
@@ -115,6 +127,7 @@ class ReviewScreenTest {
         compose.onNodeWithText("src/server.ts").assertIsDisplayed()
         compose.onNodeWithText("notes.txt").assertIsDisplayed()
         compose.onNodeWithText("feat: add review center").assertIsDisplayed()
+        capture("diff-overview")
     }
 
     @Test
@@ -138,6 +151,6 @@ class ReviewScreenTest {
             compose.onAllNodes(androidx.compose.ui.test.hasText("+new line")).fetchSemanticsNodes().isNotEmpty()
         }
         compose.onNodeWithText("+new line").assertIsDisplayed()
-        compose.onNodeWithText("1 files").assertIsDisplayed()
+        capture("diff-file-1")
     }
 }
