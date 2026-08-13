@@ -1,12 +1,22 @@
 import { canonicalPath } from "../dirs.js";
 import type { SessionSnapshot } from "../herdr/types.js";
-import { gitRepoRoot, reviewArtifacts, reviewDiff, reviewOverview, ReviewError } from "../review.js";
+import {
+  gitRepoRoot,
+  reviewArtifacts,
+  reviewDiff,
+  reviewFileContent,
+  reviewFileDiff,
+  reviewOverview,
+  ReviewError,
+} from "../review.js";
 import { listSessionCatalog, sessionCatalogRoots } from "../session-catalog.js";
 import type { Route, RouteContext, RouteResult } from "./types.js";
 
 export const reviewRoutes: Route[] = [
   { method: "GET", path: "/api/repo", handle: repoOverview },
   { method: "GET", path: "/api/repo/diff", handle: repoDiff },
+  { method: "GET", path: "/api/repo/diff/file", handle: repoFileDiff },
+  { method: "GET", path: "/api/repo/file", handle: repoFile },
   { method: "GET", path: "/api/repo/artifacts", handle: repoArtifacts },
 ];
 
@@ -140,6 +150,36 @@ async function repoDiff(ctx: RouteContext): Promise<RouteResult> {
     return {
       status: 200,
       body: { ok: true, ...(await reviewDiff(requestedPath, base, kind, await reviewRoots(ctx))) },
+    };
+  } catch (error) {
+    return reviewError(error);
+  }
+}
+
+async function repoFileDiff(ctx: RouteContext): Promise<RouteResult> {
+  const requestedPath = ctx.query.get("path") ?? "";
+  try {
+    const base = ctx.query.get("base") ?? "HEAD";
+    const kind = ctx.query.get("kind") === "commit" ? "commit" : "working";
+    const file = ctx.query.get("file") ?? "";
+    return {
+      status: 200,
+      body: { ok: true, ...(await reviewFileDiff(requestedPath, base, kind, file, await reviewRoots(ctx))) },
+    };
+  } catch (error) {
+    return reviewError(error);
+  }
+}
+
+async function repoFile(ctx: RouteContext): Promise<RouteResult> {
+  const requestedPath = ctx.query.get("path") ?? "";
+  try {
+    const base = ctx.query.get("base") ?? "HEAD";
+    const kind = ctx.query.get("kind") === "commit" ? "commit" : "working";
+    const file = ctx.query.get("file") ?? "";
+    return {
+      status: 200,
+      body: { ok: true, ...(await reviewFileContent(requestedPath, base, kind, file, await reviewRoots(ctx))) },
     };
   } catch (error) {
     return reviewError(error);

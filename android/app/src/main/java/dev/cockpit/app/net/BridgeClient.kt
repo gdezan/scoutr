@@ -14,6 +14,8 @@ import dev.cockpit.app.data.HealthResponse
 import dev.cockpit.app.data.ModelsCatalogResponse
 import dev.cockpit.app.data.RepoArtifactsResponse
 import dev.cockpit.app.data.RepoDiffResponse
+import dev.cockpit.app.data.RepoFileDiffResponse
+import dev.cockpit.app.data.RepoFileResponse
 import dev.cockpit.app.data.RepoOverviewResponse
 import dev.cockpit.app.data.SessionCatalogResponse
 import dev.cockpit.app.data.SessionReadResponse
@@ -163,6 +165,18 @@ class BridgeClient(
     override suspend fun repoDiff(path: String, base: String, kind: String): RepoDiffResponse =
         call("/api/repo/diff", query = mapOf("path" to path, "base" to base, "kind" to kind)) {
             json.decodeFromString(RepoDiffResponse.serializer(), it)
+        }
+
+    /** Per-file diff (stat entry picked from the repoDiff listing); capped at 64 KiB / ~800 lines. */
+    override suspend fun repoFileDiff(path: String, base: String, kind: String, file: String): RepoFileDiffResponse =
+        call("/api/repo/diff/file", query = mapOf("path" to path, "base" to base, "kind" to kind, "file" to file)) {
+            json.decodeFromString(RepoFileDiffResponse.serializer(), it)
+        }
+
+    /** Complete file content at a ref (commit kind) or the working tree; capped at 256 KiB. */
+    override suspend fun repoFile(path: String, base: String, kind: String, file: String): RepoFileResponse =
+        call("/api/repo/file", query = mapOf("path" to path, "base" to base, "kind" to kind, "file" to file)) {
+            json.decodeFromString(RepoFileResponse.serializer(), it)
         }
 
     /** Bounded listing of generated artifacts (build outputs, deps, test reports). */

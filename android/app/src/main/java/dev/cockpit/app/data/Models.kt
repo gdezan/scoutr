@@ -436,14 +436,14 @@ data class RepoCommit(
     val subject: String = "",
     val author: String = "",
     val date: Long = 0,
+    val body: String = "",
 )
 
 @Serializable
 data class RepoDiffResponse(
     val ok: Boolean = true,
-    val diff: String = "",
-    val truncated: Boolean = false,
     val stat: List<RepoDiffFileStat> = emptyList(),
+    val truncated: Boolean = false,
     val error: String? = null,
 )
 
@@ -452,6 +452,24 @@ data class RepoDiffFileStat(
     val path: String = "",
     val additions: Int = 0,
     val deletions: Int = 0,
+)
+
+@Serializable
+data class RepoFileDiffResponse(
+    val ok: Boolean = true,
+    val diff: String = "",
+    val truncated: Boolean = false,
+    val error: String? = null,
+)
+
+@Serializable
+data class RepoFileResponse(
+    val ok: Boolean = true,
+    val content: String = "",
+    val truncated: Boolean = false,
+    val binary: Boolean = false,
+    val exists: Boolean = true,
+    val error: String? = null,
 )
 
 @Serializable
