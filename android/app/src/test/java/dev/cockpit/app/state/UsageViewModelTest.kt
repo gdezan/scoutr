@@ -1,10 +1,13 @@
 package dev.cockpit.app.state
 
+import android.os.Looper
+
 import dev.cockpit.app.data.UsageResponse
 import dev.cockpit.app.data.UsageSnapshot
 import dev.cockpit.app.data.UsageWindow
 import dev.cockpit.app.net.BridgeException
 import dev.cockpit.app.net.FakeCockpitApi
+import kotlinx.coroutines.CompletableDeferred
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -12,6 +15,7 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 
 /**
@@ -73,7 +77,7 @@ class UsageViewModelTest {
         fake.usageResult = Result.success(UsageResponse(usage = listOf(snapshot)))
         val viewModel = viewModelOf()
         fake.usageResult = Result.failure(BridgeException(503, "bridge unreachable"))
-        viewModel.refresh()
+        viewModel.refreshUsage()
         val providers = viewModel.ui.value.providers
         assertTrue("cached chart survives the failed poll", providers is Loadable.Ready)
         assertEquals(listOf(snapshot), (providers as Loadable.Ready).value)
@@ -85,10 +89,58 @@ class UsageViewModelTest {
         fake.usageResult = Result.success(UsageResponse(usage = listOf(snapshot)))
         val viewModel = viewModelOf()
         fake.usageResult = Result.failure(BridgeException(503, "bridge unreachable"))
-        viewModel.refresh()
+        viewModel.refreshUsage()
         fake.usageResult = Result.success(UsageResponse(usage = listOf(snapshot)))
-        viewModel.refresh()
+        viewModel.refreshUsage()
         assertNull("banner clears on the next success", viewModel.ui.value.error)
         assertTrue(viewModel.ui.value.providers is Loadable.Ready)
+    }
+
+    @Test
+    fun refreshUsageTracksProgressAndIgnoresDuplicatePulls() {
+        fake.usageResult = Result.success(UsageResponse(usage = listOf(snapshot)))
+        val viewModel = viewModelOf()
+        val callsBeforeRefresh = fake.calls.count { it.name == "usage" }
+        val gate = CompletableDeferred<Unit>()
+        fake.gates["usage"] = gate
+
+        viewModel.refreshUsage()
+        shadowOf(Looper.getMainLooper()).idle()
+        assertTrue("manual refresh should be visible while usage is loading", viewModel.ui.value.isRefreshing)
+
+        viewModel.refreshUsage()
+        shadowOf(Looper.getMainLooper()).idle()
+        assertEquals(callsBeforeRefresh + 1, fake.calls.count { it.name == "usage" })
+
+        gate.complete(Unit)
+        waitUntil { !viewModel.ui.value.isRefreshing }
+        assertTrue("manual refresh should settle after usage loads", !viewModel.ui.value.isRefreshing)
+    }
+
+    @Test
+    fun refreshUsageWaitsForInFlightInitialLoad() {
+        val gate = CompletableDeferred<Unit>()
+        fake.gates["usage"] = gate
+        val viewModel = viewModelOf()
+        shadowOf(Looper.getMainLooper()).idle()
+        assertEquals(1, fake.calls.count { it.name == "usage" })
+        assertTrue(viewModel.ui.value.providers is Loadable.Loading)
+
+        viewModel.refreshUsage()
+        shadowOf(Looper.getMainLooper()).idle()
+        assertTrue(viewModel.ui.value.isRefreshing)
+        assertEquals("manual refresh must not overlap the initial load", 1, fake.calls.count { it.name == "usage" })
+
+        gate.complete(Unit)
+        waitUntil { fake.calls.count { it.name == "usage" } == 2 && !viewModel.ui.value.isRefreshing }
+    }
+
+    private fun waitUntil(condition: () -> Boolean) {
+        val deadline = System.currentTimeMillis() + 5_000
+        while (System.currentTimeMillis() < deadline && !condition()) {
+            Thread.sleep(20)
+            shadowOf(Looper.getMainLooper()).idle()
+        }
+        assertTrue("condition did not become true before timeout", condition())
     }
 }

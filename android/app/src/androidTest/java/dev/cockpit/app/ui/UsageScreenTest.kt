@@ -6,6 +6,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.captureToImage
@@ -14,6 +15,9 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performCustomAccessibilityActionWithLabel
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipeDown
 import dev.cockpit.app.data.UsageSnapshot
 import dev.cockpit.app.data.UsageWindow
 import dev.cockpit.app.state.FailureKind
@@ -153,5 +157,41 @@ class UsageScreenTest {
         compose.runOnIdle { ui = ui.copy(error = "Showing cached usage") }
         compose.onNodeWithTag("usage_codex").assertIsDisplayed()
         compose.onNodeWithText("Showing cached usage").assertIsDisplayed()
+    }
+
+    @Test
+    fun swipeDownRequestsFreshUsage() {
+        var refreshes = 0
+        compose.setContent {
+            CockpitTheme {
+                UsageContent(
+                    ui = UsageUiState(providers = Loadable.Ready(listOf(UsageSnapshot(provider = "codex", label = "Codex")))),
+                    onRefresh = { refreshes += 1 },
+                    nowMillis = 0,
+                )
+            }
+        }
+
+        compose.onNodeWithTag("usage_refresh_root").performTouchInput { swipeDown() }
+        compose.runOnIdle { assertEquals(1, refreshes) }
+    }
+
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun refreshIsAvailableAsAccessibilityAction() {
+        var refreshes = 0
+        compose.setContent {
+            CockpitTheme {
+                UsageContent(
+                    ui = UsageUiState(providers = Loadable.Ready(emptyList())),
+                    onRefresh = { refreshes += 1 },
+                    nowMillis = 0,
+                )
+            }
+        }
+
+        compose.onNodeWithTag("usage_refresh_root")
+            .performCustomAccessibilityActionWithLabel("Refresh")
+        compose.runOnIdle { assertEquals(1, refreshes) }
     }
 }

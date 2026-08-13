@@ -36,6 +36,8 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -73,6 +75,8 @@ import dev.cockpit.app.state.BoardViewModel
 import dev.cockpit.app.state.viewModelFactory
 import dev.cockpit.app.ui.components.ConfirmDialog
 import dev.cockpit.app.ui.components.ReadableContentColumn
+import dev.cockpit.app.ui.components.PullRefreshIndicator
+import dev.cockpit.app.ui.components.pullRefreshSemantics
 import dev.cockpit.app.ui.motion.CockpitMotion
 import dev.cockpit.app.ui.motion.HapticEvent
 import dev.cockpit.app.ui.motion.rememberHaptic
@@ -133,39 +137,51 @@ fun BoardScreen(
         )
     }
 
-    ReadableContentColumn(
-        modifier = modifier.fillMaxSize(),
-        contentTag = "board_capture_root",
+    val refreshState = rememberPullToRefreshState()
+    PullToRefreshBox(
+        isRefreshing = ui.isRefreshing,
+        onRefresh = viewModel::refreshBoard,
+        modifier = modifier
+            .fillMaxSize()
+            .pullRefreshSemantics(viewModel::refreshBoard)
+            .testTag("board_refresh_root"),
+        state = refreshState,
+        indicator = { PullRefreshIndicator(refreshState, ui.isRefreshing) },
     ) {
-        LazyColumn(
+        ReadableContentColumn(
             modifier = Modifier.fillMaxSize(),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-            // Clear the board's FAB so it never covers the last card, even at
-            // large font scales.
-            contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 96.dp),
+            contentTag = "board_capture_root",
         ) {
-            item { Spacer(Modifier.height(8.dp)) }
-            if (!ui.connected) {
-                item { DisconnectedBanner(error = ui.error, onRetry = { viewModel.connect("", "") }) }
-            }
-
-            if (ui.board.total == 0) {
-                item {
-                    Box(
-                        Modifier.fillMaxWidth().padding(vertical = 80.dp),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text("No agents running", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                // Clear the board's FAB so it never covers the last card, even at
+                // large font scales.
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 96.dp),
+            ) {
+                item { Spacer(Modifier.height(8.dp)) }
+                if (!ui.connected) {
+                    item { DisconnectedBanner(error = ui.error, onRetry = { viewModel.connect("", "") }) }
                 }
-            } else {
-                boardSection("Needs you", ui.board.needsYou, onOpenAgent, reduceMotion, onReviewAgent, { pendingClose = it })
-                boardSection("Working", ui.board.working, onOpenAgent, reduceMotion, onReviewAgent, { pendingClose = it })
-                boardSection("Done", ui.board.done, onOpenAgent, reduceMotion, onReviewAgent, { pendingClose = it })
-                boardSection("Idle", ui.board.idle, onOpenAgent, reduceMotion, onReviewAgent, { pendingClose = it })
-                boardSection("Other", ui.board.unknown, onOpenAgent, reduceMotion, onReviewAgent, { pendingClose = it })
+
+                if (ui.board.total == 0) {
+                    item {
+                        Box(
+                            Modifier.fillMaxWidth().padding(vertical = 80.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text("No agents running", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                } else {
+                    boardSection("Needs you", ui.board.needsYou, onOpenAgent, reduceMotion, onReviewAgent, { pendingClose = it })
+                    boardSection("Working", ui.board.working, onOpenAgent, reduceMotion, onReviewAgent, { pendingClose = it })
+                    boardSection("Done", ui.board.done, onOpenAgent, reduceMotion, onReviewAgent, { pendingClose = it })
+                    boardSection("Idle", ui.board.idle, onOpenAgent, reduceMotion, onReviewAgent, { pendingClose = it })
+                    boardSection("Other", ui.board.unknown, onOpenAgent, reduceMotion, onReviewAgent, { pendingClose = it })
+                }
+                item { Spacer(Modifier.height(24.dp)) }
             }
-            item { Spacer(Modifier.height(24.dp)) }
         }
     }
 }

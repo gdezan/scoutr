@@ -6,6 +6,7 @@ import dev.cockpit.app.data.SessionAction
 import dev.cockpit.app.data.ConnectionStore
 import dev.cockpit.app.net.BridgeException
 import dev.cockpit.app.net.FakeCockpitApi
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -70,11 +71,48 @@ class BoardViewModelTest {
         )
     }
 
+    @Test
+    fun refreshBoardTracksProgressAndIgnoresDuplicatePulls() {
+        val gate = CompletableDeferred<Unit>()
+        fake.gates["agents"] = gate
+
+        viewModel.refreshBoard()
+        shadowOf(Looper.getMainLooper()).idle()
+        assertTrue("manual refresh should be visible while agents are loading", viewModel.ui.value.isRefreshing)
+
+        viewModel.refreshBoard()
+        shadowOf(Looper.getMainLooper()).idle()
+        assertEquals(1, fake.calls.count { it.name == "agents" })
+
+        gate.complete(Unit)
+        waitUntil { !viewModel.ui.value.isRefreshing }
+        assertTrue("manual refresh should settle after agents load", !viewModel.ui.value.isRefreshing)
+    }
+
+    @Test
+    fun refreshBoardWaitsForInFlightPoll() {
+        val gate = CompletableDeferred<Unit>()
+        fake.gates["agents"] = gate
+        viewModel.startPolling()
+        shadowOf(Looper.getMainLooper()).idle()
+        assertEquals(1, fake.calls.count { it.name == "agents" })
+
+        viewModel.refreshBoard()
+        shadowOf(Looper.getMainLooper()).idle()
+        assertTrue(viewModel.ui.value.isRefreshing)
+        assertEquals("manual refresh must not overlap the poll", 1, fake.calls.count { it.name == "agents" })
+
+        gate.complete(Unit)
+        waitUntil { fake.calls.count { it.name == "agents" } == 2 && !viewModel.ui.value.isRefreshing }
+        viewModel.stopPolling()
+    }
+
     private fun waitUntil(condition: () -> Boolean) {
         val deadline = System.currentTimeMillis() + 5_000
         while (System.currentTimeMillis() < deadline && !condition()) {
             Thread.sleep(20)
             shadowOf(Looper.getMainLooper()).idle()
         }
+        assertTrue("condition did not become true before timeout", condition())
     }
 }
