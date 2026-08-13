@@ -4,6 +4,7 @@ import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { execFileSync } from "node:child_process";
 import { createCockpitServer, type CockpitServer } from "../src/server.js";
 import { fakeHerdr } from "./support/fake-herdr.js";
+import { FakeTerminalLauncher } from "./support/fake-terminal.js";
 import { REVIEW_ROOTS_TTL_MS } from "../src/routes/review.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -286,6 +287,7 @@ describe("review roots TTL", () => {
         feed: feed as never,
         usage: { all: async () => ({}) } as never,
         config: { token: TOKEN, port: PORT },
+        terminal: new FakeTerminalLauncher(),
       },
       { listen: true },
     );

@@ -8,6 +8,7 @@ import { HerdrClient } from "../src/herdr/client.js";
 import { HerdrEventFeed } from "../src/herdr/feed.js";
 import { createCockpitServer, type CockpitServer } from "../src/server.js";
 import { UsageService } from "../src/usage/providers.js";
+import { FakeTerminalLauncher } from "./support/fake-terminal.js";
 
 // Live-herdr integration suite. Unlike the old skip-gate, this only runs when
 // HERDR_SOCKET_PATH is set EXPLICITLY — an opt-in, not a silent default-path
@@ -52,6 +53,7 @@ describe("cockpit bridge live herdr integration", { skip }, () => {
       feed,
       usage,
       config: { token: TOKEN, port: PORT },
+      terminal: new FakeTerminalLauncher(),
     });
   });
 

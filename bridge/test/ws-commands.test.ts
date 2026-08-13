@@ -4,6 +4,7 @@ import { handleCommand } from "../src/commands.js";
 import { fakeHerdr } from "./support/fake-herdr.js";
 import type { ServerDeps } from "../src/routes/types.js";
 import { fakeFeed } from "./support/fake-feed.js";
+import { FakeTerminalLauncher } from "./support/fake-terminal.js";
 import type { PaneInfo, SessionSnapshot } from "../src/herdr/types.js";
 
 /**
@@ -55,6 +56,7 @@ function makeDeps(agent?: "pi" | "claude"): { herdr: ReturnType<typeof fakeHerdr
       feed: fakeFeed(makeSnapshot(agent ?? null)),
       usage: {} as never,
       config: { token: "x".repeat(16), port: 1 },
+      terminal: new FakeTerminalLauncher(),
     },
   };
 }

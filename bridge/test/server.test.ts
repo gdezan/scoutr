@@ -10,6 +10,7 @@ import { REVIEW_ROOTS_TTL_MS } from "../src/routes/review.js";
 import type { AgentInfo, SessionSnapshot } from "../src/herdr/types.js";
 import { fakeHerdr } from "./support/fake-herdr.js";
 import { fakeFeed } from "./support/fake-feed.js";
+import { FakeTerminalLauncher } from "./support/fake-terminal.js";
 import type { FakeFeedExtras } from "./support/fake-feed.js";
 
 // Offline HTTP/WS suite: the real herdr is replaced by test/support/fakes, so
@@ -107,6 +108,7 @@ describe("cockpit bridge HTTP/WS API (offline)", () => {
       feed,
       usage: usage as never,
       config: { token: TOKEN, port: PORT },
+      terminal: new FakeTerminalLauncher(),
     });
   });
 

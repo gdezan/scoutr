@@ -105,6 +105,7 @@ async function main(): Promise<void> {
         const { createCockpitServer } = await import("./server.js");
         const { loadOrCreateConfig, defaultConfigPath } = await import("./config.js");
         const { UsageService } = await import("./usage/providers.js");
+        const { HerdrTerminalLauncher } = await import("./terminal/process.js");
         const { NtfyPublisher } = await import("./notify.js");
 
         const config = await loadOrCreateConfig();
@@ -114,6 +115,7 @@ async function main(): Promise<void> {
 
         const server = createCockpitServer({
           herdr: new HerdrClient({ socketPath }),
+          terminal: new HerdrTerminalLauncher({ socketPath }),
           feed,
           usage: new UsageService(),
           config,

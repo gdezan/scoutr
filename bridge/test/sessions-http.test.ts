@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 import { createCockpitServer, type CockpitServer } from "../src/server.js";
 import type { PaneInfo } from "../src/herdr/types.js";
 import { fakeHerdr, type SentInput } from "./support/fake-herdr.js";
+import { FakeTerminalLauncher } from "./support/fake-terminal.js";
 import WebSocket from "ws";
 
 const PORT = 8792;
@@ -44,6 +45,7 @@ function fakeDeps(sessionCatalogRoot?: string) {
       feed: feed as never,
       usage: usage as never,
       config: { token: TOKEN, port: PORT },
+      terminal: new FakeTerminalLauncher(),
       sessionCatalogRoot,
     },
     sent: fake.sent,

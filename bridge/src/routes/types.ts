@@ -5,6 +5,9 @@ import type { BridgeConfig } from "../config.js";
 import type { NtfyPublisher } from "../notify.js";
 import type { StatusTracker } from "../status.js";
 import type { BoardDetailCache } from "../board-detail.js";
+import type { TerminalLauncher } from "../terminal/types.js";
+import type { TerminalSessionBroker } from "../terminal/broker.js";
+import type { TerminalConnectionOptions } from "../terminal/websocket.js";
 
 /** JSON body of a POST request, after parsing and object validation. */
 export interface JsonBody {
@@ -25,6 +28,13 @@ export interface ServerDeps {
   feed: HerdrEventFeed;
   usage: UsageService;
   config: BridgeConfig;
+  /** Terminal child-process launcher (Slice 3 /ws/terminal route). */
+  terminal: TerminalLauncher;
+  /** Backpressure/grace tuning; defaults are provisional slice-8 constants. */
+  terminalOptions?: Pick<
+    TerminalConnectionOptions,
+    "highWaterBytes" | "lowWaterBytes" | "slowClientTimeoutMs" | "inputQueueMaxBytes"
+  > & { graceMs?: number };
   /** Push publisher for blocked-agent events (layer 5); optional. */
   publisher?: NtfyPublisher;
 }
@@ -37,6 +47,8 @@ export interface ServerDeps {
 export interface RouteDeps extends ServerDeps {
   tracker: StatusTracker;
   boardDetail: BoardDetailCache;
+  /** Server-owned terminal stream broker (health + upgrade path). */
+  terminalBroker: TerminalSessionBroker;
 }
 
 export interface RouteContext {

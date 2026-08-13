@@ -1,4 +1,5 @@
 import { createServer, type Server, type ServerResponse } from "node:http";
+import type { Duplex } from "node:stream";
 import { WebSocketServer, WebSocket } from "ws";
 import { HerdrEventFeed, type FeedMessage } from "./herdr/feed.js";
 import { StatusTracker } from "./status.js";
@@ -9,7 +10,8 @@ import { RouteTable, dispatchRoute, isAuthorized } from "./routes/dispatcher.js"
 import { buildRoutes } from "./routes/index.js";
 import type { RouteDeps, ServerDeps } from "./routes/types.js";
 import { type SessionSnapshot } from "./herdr/types.js";
-
+import { TerminalSessionBroker } from "./terminal/broker.js";
+import { attachTerminalSocket } from "./terminal/websocket.js";
 /**
  * Cockpit bridge HTTP + WebSocket API.
  *
@@ -58,7 +60,14 @@ export function createCockpitServer(deps: ServerDeps, options: CreateServerOptio
   const tracker = new StatusTracker();
   // Bounded per-agent model/latest-activity detail, memoized by file mtime.
   const boardDetail = new BoardDetailCache();
-  const routeDeps: RouteDeps = { ...deps, tracker, boardDetail };
+  // One terminal stream per bearer identity, owned here (Slice 3).
+  const terminalBroker = new TerminalSessionBroker({
+    launcher: deps.terminal,
+    feed,
+    graceMs: deps.terminalOptions?.graceMs,
+    log: (message) => console.error(`terminal: ${message}`),
+  });
+  const routeDeps: RouteDeps = { ...deps, tracker, boardDetail, terminalBroker };
   // herdr streams some event kinds with underscores and some with dots;
   // both spellings must be matched, so membership lives in explicit sets.
   const STATUS_KINDS = new Set(["pane_agent_status_changed", "pane.agent_status_changed"]);
@@ -122,9 +131,58 @@ export function createCockpitServer(deps: ServerDeps, options: CreateServerOptio
   });
 
   const wss = new WebSocketServer({ noServer: true });
+  const terminalWss = new WebSocketServer({ noServer: true });
+
+  /** Reject an upgrade attempt with a bare HTTP response. */
+  function rejectUpgrade(socket: Duplex, status: number, body?: unknown): void {
+    const payload = body === undefined ? "" : JSON.stringify(body);
+    socket.write(
+      `HTTP/1.1 ${status} ${status === 401 ? "Unauthorized" : "Service Unavailable"}\r\n` +
+        `Content-Type: application/json; charset=utf-8\r\n` +
+        `Content-Length: ${Buffer.byteLength(payload)}\r\n` +
+        "Connection: close\r\n\r\n" +
+        payload,
+    );
+    socket.destroy();
+  }
 
   server.on("upgrade", (request, socket, head) => {
     const url = new URL(request.url ?? "/", "http://localhost");
+    if (url.pathname === "/ws/terminal") {
+      // Terminal upgrade: header-only bearer auth. Query tokens are rejected
+      // even when correct (terminal URLs end up in app logs).
+      const authorized = isAuthorized(
+        {
+          method: "GET",
+          pathname: url.pathname,
+          search: url.searchParams,
+          authorization: request.headers.authorization,
+        },
+        token,
+      );
+      if (!authorized) {
+        rejectUpgrade(socket, 401);
+        return;
+      }
+      // Capability gate before the 101: a broken terminal surface answers
+      // with an actionable HTTP error instead of a failing WebSocket.
+      void terminalBroker
+        .ensureCapabilityForUpgrade()
+        .then((capability) => {
+          if (capability.status === "unsupported") {
+            rejectUpgrade(socket, 503, { ok: false, error: capability.reason, terminal: { capability } });
+            return;
+          }
+          terminalWss.handleUpgrade(request, socket, head, (ws) => {
+            terminalWss.emit("connection", ws, request);
+          });
+        })
+        .catch((error) => {
+          console.error(`terminal capability check failed: ${error instanceof Error ? error.message : String(error)}`);
+          rejectUpgrade(socket, 503, { ok: false, error: "terminal capability check failed" });
+        });
+      return;
+    }
     const authorized = isAuthorized(
       {
         method: "GET",
@@ -150,6 +208,21 @@ export function createCockpitServer(deps: ServerDeps, options: CreateServerOptio
 
   wss.on("error", (error) => {
     console.error(`websocket server error: ${error.message}`);
+  });
+
+  terminalWss.on("error", (error) => {
+    console.error(`terminal websocket server error: ${error.message}`);
+  });
+
+  terminalWss.on("connection", (ws: WebSocket) => {
+    attachTerminalSocket(ws, {
+      broker: terminalBroker,
+      identity: token,
+      highWaterBytes: deps.terminalOptions?.highWaterBytes,
+      lowWaterBytes: deps.terminalOptions?.lowWaterBytes,
+      slowClientTimeoutMs: deps.terminalOptions?.slowClientTimeoutMs,
+      inputQueueMaxBytes: deps.terminalOptions?.inputQueueMaxBytes,
+    });
   });
 
   wss.on("connection", (ws: WebSocket) => {
@@ -222,6 +295,10 @@ export function createCockpitServer(deps: ServerDeps, options: CreateServerOptio
   return {
     url: `http://127.0.0.1:${config.port}`,
     close: async () => {
+      // Release terminal children and cancel grace timers first; attached
+      // sockets get closed(shutdown) before the connection is torn down.
+      await terminalBroker.close();
+      for (const client of terminalWss.clients) client.terminate();
       for (const client of wss.clients) client.terminate();
       await new Promise<void>((resolveClose) => server.close(() => resolveClose()));
     },

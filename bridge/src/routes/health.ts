@@ -7,7 +7,7 @@ export const healthRoutes: Route[] = [
 ];
 
 async function health(ctx: RouteContext): Promise<RouteResult> {
-  const { herdr, config } = ctx.deps;
+  const { herdr, config, terminalBroker } = ctx.deps;
   let herdrConnected = false;
   let herdrVersion = "";
   let herdrProtocol: number | undefined;
@@ -26,6 +26,7 @@ async function health(ctx: RouteContext): Promise<RouteResult> {
       service: "cockpit-bridge",
       version: "0.1.0",
       herdr: { connected: herdrConnected, version: herdrVersion, protocol: herdrProtocol },
+      terminal: { capability: terminalBroker.capability() },
       ntfy: config.ntfyUrl && config.ntfyTopic ? { url: config.ntfyUrl, topic: config.ntfyTopic } : undefined,
     },
   };
