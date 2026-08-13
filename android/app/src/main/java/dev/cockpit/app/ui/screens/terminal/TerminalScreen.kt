@@ -101,13 +101,12 @@ fun TerminalScreen(
         fontSpRef.value = fontSizeSp
     }
 
-    // A writable terminal owns hardware input (plan "Terminal behavior"):
-    // without this the top bar's icon buttons keep focus, so Enter from a
-    // hardware keyboard re-triggers the drawer button instead of reaching the
-    // shell. Focus returns to the grid when the drawer closes. requestFocus
-    // alone never raises the soft keyboard — that still waits for a tap.
+    // A writable terminal owns hardware input. Keep focus across connection
+    // changes and return it after the hierarchy drawer closes; requestFocus
+    // alone never raises the soft keyboard, so tapping still controls whether
+    // the keyboard is shown.
     val writableNow = (ui.connection as? TerminalConnectionState.Ready)?.writable == true
-    LaunchedEffect(viewRef, writableNow, drawerState.isOpen) {
+    LaunchedEffect(viewRef, writableNow, ui.connection, drawerState.isOpen) {
         if (writableNow && !drawerState.isOpen) viewRef?.requestFocus()
     }
 

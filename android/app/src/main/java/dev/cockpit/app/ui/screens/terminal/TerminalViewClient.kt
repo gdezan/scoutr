@@ -1,5 +1,8 @@
 package dev.cockpit.app.ui.screens.terminal
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import android.util.Log
 import android.view.KeyEvent
 import android.view.MotionEvent
@@ -27,11 +30,11 @@ enum class ModifierKey(val label: String) {
 }
 
 class ExtraKeyModifierState {
-    var ctrl: ModifierMode = ModifierMode.OFF
+    var ctrl by mutableStateOf(ModifierMode.OFF)
         private set
-    var alt: ModifierMode = ModifierMode.OFF
+    var alt by mutableStateOf(ModifierMode.OFF)
         private set
-    var shift: ModifierMode = ModifierMode.OFF
+    var shift by mutableStateOf(ModifierMode.OFF)
         private set
 
     val ctrlActive: Boolean get() = ctrl != ModifierMode.OFF
