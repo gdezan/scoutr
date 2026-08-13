@@ -85,6 +85,8 @@ dependencies {
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.zxing.android.embedded)
     implementation(libs.markdown.renderer.m3)
+    // Vendored Termux terminal stack (see android/vendor/termux/UPSTREAM.md).
+    implementation(project(":vendor:termux:terminal-view"))
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)

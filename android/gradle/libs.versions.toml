@@ -11,6 +11,7 @@ mockwebserver = "4.12.0"
 robolectric = "4.14.1"
 kotlinxSerialization = "1.9.0"
 junit = "4.13.2"
+annotation = "1.9.0"
 androidxJunit = "1.2.1"
 espressoCore = "3.6.1"
 coroutines = "1.10.2"
@@ -41,11 +42,13 @@ zxing-android-embedded = { group = "com.journeyapps", name = "zxing-android-embe
 kotlinx-coroutines-test = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-test", version.ref = "coroutines" }
 markdown-renderer-m3 = { group = "com.mikepenz", name = "multiplatform-markdown-renderer-m3", version.ref = "markdownRenderer" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }
+androidx-annotation = { group = "androidx.annotation", name = "annotation", version.ref = "annotation" }
 androidx-junit = { group = "androidx.test.ext", name = "junit", version.ref = "androidxJunit" }
 androidx-espresso-core = { group = "androidx.test.espresso", name = "espresso-core", version.ref = "espressoCore" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
+android-library = { id = "com.android.library", version.ref = "agp" }
 kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
 kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
 kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }

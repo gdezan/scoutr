@@ -22,3 +22,5 @@ dependencyResolutionManagement {
 
 rootProject.name = "cockpit"
 include(":app")
+include(":vendor:termux:terminal-emulator")
+include(":vendor:termux:terminal-view")
