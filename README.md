@@ -11,17 +11,17 @@ subscriptions.
 └─────────────┘                         └──────┬───────┘               └─────────────┘
                                                │ creates a herdr pane
                                                ▼
-                                    ┌───────────────────────┐
-                                    │  herdr pane           │
-                                    │  (pi / claude agent)  │
-                                    └───────────────────────┘
+                                    ┌───────────────────────────────┐
+                                    │  herdr pane                   │
+                                    │  (pi / claude / agy agent)    │
+                                    └───────────────────────────────┘
 ```
 
 - **bridge/** — Node/TS daemon. Owns the herdr Unix socket (never exposes it
   raw), serves a token-authenticated HTTP + WebSocket API on localhost, fronted
   by `tailscale serve` TLS. Publishes blocked/done events to a self-hosted
   ntfy. New chats are herdr panes: the bridge creates the pane and the agent
-  CLI runs inside it (`pi --model …` or `claude …`); the bridge never spawns
+  CLI runs inside it (`pi --model …`, `claude …`, or `agy …`); the bridge never spawns
   agent processes itself.
 - **android/** — Kotlin + Jetpack Compose (Material 3, dark-first) app:
   live agent board, chat + steering of live panes, usage rings, ntfy push
@@ -349,6 +349,10 @@ today looks like: `adb pair 100.78.204.15:<port> <code>` then
   `/fork` inside the session), no model catalog (the app hides the model
   picker), and a smaller control set (`abort`, `compact`, `close`,
   `set_model`).
+- Antigravity / Gemini CLI (`agy`): full launch (`agy --model … --effort …`),
+  resume (`agy --conversation <id>`), transcript parsing under `brain/`, model catalog
+  (Gemini + thinking levels), slash commands & skills discovery, question/prompt handling,
+  and controls (`abort`, `compact`, `close`, `set_model`, `set_thinking`).
 - Time-in-state pills only track agents whose status events flow (pi panes).
 - Push to a **killed** app: messages accumulate on ntfy (48h) and are delivered
   on next launch via the `since` cursor. Instant delivery needs FCM or a

@@ -264,4 +264,28 @@ describe("session catalog", () => {
     const third = await listSessionCatalog({ roots: [root] });
     assert.deepEqual(third.sessions.map((s) => s.id), ["two", "one"]);
   });
+
+  it("discovers AGY sessions stored under brain/<conv-id>/.system_generated/logs/", async () => {
+    const agyBrainRoot = await mkdtemp(join(tmpdir(), "scoutr-agy-brain-"));
+    process.env.ANTIGRAVITY_CONFIG_DIR = agyBrainRoot;
+    const convDir = join(agyBrainRoot, "brain", "conv-999", ".system_generated", "logs");
+    await mkdir(convDir, { recursive: true });
+    const transcriptPath = join(convDir, "transcript.jsonl");
+    const jsonl = [
+      JSON.stringify({
+        step_index: 0,
+        source: "USER_EXPLICIT",
+        type: "USER_INPUT",
+        created_at: "2026-01-01T00:00:00.000Z",
+        content: "<USER_REQUEST>Fix bug in AGY</USER_REQUEST>",
+      }),
+    ].join("\n");
+    await writeFile(transcriptPath, `${jsonl}\n`);
+
+    const result = await listSessionCatalog({ roots: [join(agyBrainRoot, "brain")] });
+    assert.equal(result.sessions.length, 1);
+    assert.equal(result.sessions[0]?.id, "conv-999");
+    assert.equal(result.sessions[0]?.agentKind, "agy");
+    assert.equal(result.sessions[0]?.preview, "Fix bug in AGY");
+  });
 });

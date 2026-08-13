@@ -2,6 +2,7 @@ import type { AgentBackend } from "./types.js";
 import type { AgentSessionInfo, SessionSnapshot } from "../herdr/types.js";
 import { piBackend } from "./pi/index.js";
 import { claudeBackend } from "./claude/index.js";
+import { agyBackend } from "./agy/index.js";
 
 export function backendFor(agentId: string): AgentBackend {
   const backend = REGISTRY.get(agentId);
@@ -9,8 +10,11 @@ export function backendFor(agentId: string): AgentBackend {
   return backend;
 }
 
-export function registerBackend(backend: AgentBackend): void {
+export function registerBackend(backend: AgentBackend, aliases: string[] = []): void {
   REGISTRY.set(backend.id, backend);
+  for (const alias of aliases) {
+    REGISTRY.set(alias, backend);
+  }
 }
 
 export function getBackendOrNull(agentId: string): AgentBackend | null {
@@ -48,7 +52,7 @@ export function backendForSessionPath(path: string): AgentBackend | null {
 }
 
 export function knownBackends(): readonly AgentBackend[] {
-  return [...REGISTRY.values()];
+  return [...new Set(REGISTRY.values())];
 }
 
 const REGISTRY = new Map<string, AgentBackend>();
@@ -57,3 +61,4 @@ const REGISTRY = new Map<string, AgentBackend>();
 // lookup (directly or transitively) sees every registered backend.
 registerBackend(piBackend);
 registerBackend(claudeBackend);
+registerBackend(agyBackend, ["gemini", "antigravity_cli", "antigravity"]);

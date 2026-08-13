@@ -462,9 +462,10 @@ describe("route contracts", () => {
       assert.deepEqual(Object.keys(kind).sort(), [...WIRE_FIELDS].sort(), `kind ${kind.id} field set`);
       assert.ok(Array.isArray(kind.capabilities), "kind.capabilities must be an array");
     }
-    // NewSessionSheet.kt gates the agent choice on exactly these two kinds.
+    // NewSessionSheet.kt gates the agent choice on these kinds.
     assert.ok(ids.has("pi"), "pi kind missing");
     assert.ok(ids.has("claude"), "claude kind missing");
+    assert.ok(ids.has("agy"), "agy kind missing");
   });
 
   it("GET /api/dirs lists a directory and 400s on a missing one", async () => {

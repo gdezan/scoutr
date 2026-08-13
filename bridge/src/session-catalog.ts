@@ -230,6 +230,8 @@ async function scanRoot(root: string, files: SessionFile[], stopAt: number): Pro
       continue;
     }
     if (!entry.isDirectory()) continue;
+    // AGY stores sessions at <conversation-id>/.system_generated/logs/transcript.jsonl
+    await addSessionFile(root, resolve(path, ".system_generated", "logs", "transcript.jsonl"), files);
     let children: Dirent[];
     try {
       children = await readdir(path, { withFileTypes: true });
