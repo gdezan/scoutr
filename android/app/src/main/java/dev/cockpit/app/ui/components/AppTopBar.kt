@@ -3,6 +3,7 @@ package dev.cockpit.app.ui.components
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -20,6 +21,7 @@ internal fun AppTopBar(
     title: String,
     onSearch: (() -> Unit)? = null,
     onSettings: (() -> Unit)? = null,
+    onTerminal: (() -> Unit)? = null,
 ) {
     TopAppBar(
         title = { Text(title) },
@@ -32,6 +34,11 @@ internal fun AppTopBar(
             containerColor = MaterialTheme.colorScheme.background,
         ),
         actions = {
+            if (onTerminal != null) {
+                IconButton(onClick = onTerminal) {
+                    Icon(Icons.Default.Terminal, contentDescription = "Terminal")
+                }
+            }
             if (onSearch != null) {
                 IconButton(onClick = onSearch) {
                     Icon(Icons.Default.Search, contentDescription = "Search agents and sessions")

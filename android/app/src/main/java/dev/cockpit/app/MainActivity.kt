@@ -93,6 +93,8 @@ import dev.cockpit.app.ui.screens.UsageScreen
 import dev.cockpit.app.ui.screens.ReviewScreen
 import dev.cockpit.app.service.parseCockpitUri
 import dev.cockpit.app.ui.screens.SettingsScreen
+import dev.cockpit.app.state.TerminalViewModel
+import dev.cockpit.app.ui.screens.terminal.TerminalScreen
 
 import dev.cockpit.app.ui.nav.Destination
 import dev.cockpit.app.ui.nav.TabScaffold
@@ -109,9 +111,18 @@ private object Routes {
     const val CONNECT = "connect"
     const val CHAT = "chat/{paneId}?sessionPath={sessionPath}&status={status}"
     const val SETTINGS = "settings"
+    const val TERMINAL = "terminal?paneId={paneId}"
 
     fun chat(paneId: String, sessionPath: String?, status: String): String =
         "chat/$paneId?sessionPath=${sessionPath?.let { java.net.URLEncoder.encode(it, "UTF-8") } ?: ""}&status=$status"
+
+    /**
+     * Full-screen terminal. A null [paneId] lets the ViewModel resolve the
+     * pane (saved pane, then herdr's focused pane, then the first one), so the
+     * global top-bar action and the per-session "Open terminal" share a route.
+     */
+    fun terminal(paneId: String? = null): String =
+        "terminal?paneId=${paneId?.let { java.net.URLEncoder.encode(it, "UTF-8") } ?: ""}"
 }
 
 class MainActivity : ComponentActivity() {
@@ -228,6 +239,12 @@ private fun CockpitAppNav(
 
     val openSettings = { navController.navigate(Routes.SETTINGS) }
 
+    // Single-top so repeated taps on the top-bar terminal action reuse the live
+    // route (and its one socket) instead of stacking a second attached pane.
+    val openTerminal = {
+        navController.navigate(Routes.terminal()) { launchSingleTop = true }
+    }
+
     Box {
         Scaffold(
         bottomBar = {
@@ -297,6 +314,7 @@ private fun CockpitAppNav(
                     title = "Board",
                     onSearch = openPalette,
                     onSettings = openSettings,
+                    onTerminal = openTerminal,
                     floatingActionButton = {
                         FloatingActionButton(
                             onClick = { showNewSession = true },
@@ -348,6 +366,7 @@ private fun CockpitAppNav(
                     title = "Sessions",
                     onSearch = openPalette,
                     onSettings = openSettings,
+                    onTerminal = openTerminal,
                 ) { innerSessions ->
                     HistoryScreen(
                         onOpenSession = { resumed ->
@@ -388,6 +407,7 @@ private fun CockpitAppNav(
                 ChatScreen(
                     viewModel = chatViewModel,
                     onBack = { navController.popBackStack() },
+                    onOpenTerminal = { navController.navigate(Routes.terminal(paneId)) },
                 )
             }
             composable(Destination.Usage.route) {
@@ -400,6 +420,7 @@ private fun CockpitAppNav(
                     title = "Usage",
                     onSearch = openPalette,
                     onSettings = openSettings,
+                    onTerminal = openTerminal,
                 ) { innerUsage ->
                     UsageScreen(
                         viewModel = usageViewModel,
@@ -413,12 +434,44 @@ private fun CockpitAppNav(
                     title = "Review",
                     onSearch = openPalette,
                     onSettings = openSettings,
+                    onTerminal = openTerminal,
                 ) { innerReview ->
                     ReviewScreen(
                         viewModel = reviewViewModel,
                         modifier = Modifier.padding(innerReview),
                     )
                 }
+            }
+            composable(
+                route = Routes.TERMINAL,
+                arguments = listOf(
+                    androidx.navigation.navArgument("paneId") {
+                        type = androidx.navigation.NavType.StringType
+                        defaultValue = ""
+                    },
+                ),
+            ) { backStackEntry ->
+                val requestedPaneId = backStackEntry.arguments?.getString("paneId")?.takeIf { it.isNotBlank() }
+                // Scoped to the back-stack entry (the default), so leaving the
+                // route clears the ViewModel and its single pane socket; the
+                // key keeps a per-pane request from reusing another pane's VM.
+                val terminalViewModel: TerminalViewModel = viewModel(
+                    factory = viewModelFactory<TerminalViewModel> { app ->
+                        TerminalViewModel(
+                            api = app.container.bridge,
+                            transport = app.container.terminalTransport,
+                            feedFactory = app.container.terminalTopologyFeedFactory,
+                            connectionStore = app.container.connectionStore,
+                            preferencesStore = app.container.terminalPreferences,
+                            initialPaneId = requestedPaneId,
+                        )
+                    },
+                    key = "terminal_${requestedPaneId ?: "resolved"}",
+                )
+                TerminalScreen(
+                    viewModel = terminalViewModel,
+                    onBack = { navController.popBackStack() },
+                )
             }
             composable(Routes.SETTINGS) {
                 SettingsScreen(onBack = { navController.popBackStack() })

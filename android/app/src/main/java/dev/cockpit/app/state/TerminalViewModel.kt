@@ -63,8 +63,17 @@ class TerminalViewModel(
     private val feedFactory: TopologyFeed.Factory,
     private val connectionStore: ConnectionStore,
     private val preferencesStore: TerminalPreferencesStore,
+    initialPaneId: String? = null,
     injectedIo: CoroutineDispatcher? = null,
 ) : ViewModel() {
+
+    /**
+     * Pane the route was opened for (e.g. the Chat overflow's "Open terminal").
+     * Consumed by the first [resolvePaneId] so it outranks the saved pane once
+     * and never steers a later reconnect away from the pane the user attached
+     * to from the drawer.
+     */
+    private var pendingInitialPaneId: String? = initialPaneId
 
     private val _ui = MutableStateFlow(TerminalUiState())
     val ui: StateFlow<TerminalUiState> = _ui.asStateFlow()
@@ -216,6 +225,15 @@ class TerminalViewModel(
         activeSocket = null
         _ui.update { it.copy(paneClosedNotice = false, canTakeover = false) }
         openSocket(paneId, intent = TerminalIntent.TAKEOVER)
+    }
+
+    /**
+     * Decline the takeover offer: stay a read-only observer on this pane. Only
+     * the offer is cleared — the socket is untouched — so the next `ownership`
+     * message (a new owner, or the owner disconnecting) can offer again.
+     */
+    fun dismissTakeover() {
+        _ui.update { it.copy(canTakeover = false) }
     }
 
     /** Per-connection terminal preferences (font size, extra-key row, last pane). */
@@ -440,9 +458,15 @@ class TerminalViewModel(
         activeSocket = socket
     }
 
-    /** Last valid pane for this connection, then herdr's focused pane, then the first pane. */
+    /**
+     * The route's requested pane (once), then the last valid pane for this
+     * connection, then herdr's focused pane, then the first pane.
+     */
     private fun resolvePaneId(): String? {
         val state = _ui.value
+        val requested = pendingInitialPaneId
+        pendingInitialPaneId = null
+        if (requested != null && state.snapshot?.pane(requested) != null) return requested
         val prefsPane = connectionStore.saved?.let { preferencesStore.forConnection(it.host, it.token).lastPaneId }
         return when {
             prefsPane != null && state.snapshot?.pane(prefsPane) != null -> prefsPane

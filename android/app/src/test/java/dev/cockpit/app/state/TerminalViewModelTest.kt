@@ -79,12 +79,13 @@ class TerminalViewModelTest {
         ShadowLooper.runUiThreadTasksIncludingDelayedTasks()
     }
 
-    private fun vm(): TerminalViewModel = TerminalViewModel(
+    private fun vm(initialPaneId: String? = null): TerminalViewModel = TerminalViewModel(
         api = api,
         transport = transport,
         feedFactory = feedFactory,
         connectionStore = connectionStore,
         preferencesStore = preferencesStore,
+        initialPaneId = initialPaneId,
         injectedIo = Dispatchers.Unconfined,
     )
 
@@ -279,6 +280,97 @@ class TerminalViewModelTest {
         assertEquals(TerminalConnectionState.Connecting, vm.ui.value.connection)
         fresh.ready(generation = 2)
         assertEquals(TerminalConnectionState.Ready(generation = 2, writable = true), vm.ui.value.connection)
+    }
+
+    // --- Route pane targeting (slice 7 navigation) ---
+
+    @Test
+    fun route_pane_outranks_focused_and_saved_pane() {
+        api.snapshotResult = Result.success(snapshotWithPanes("w1:p1", "w1:p2", focused = "w1:p1"))
+        // The Chat overflow's "Open terminal" asks for this session's pane, not
+        // the one herdr happens to focus.
+        val vm = vm(initialPaneId = "w1:p2")
+        vm.start()
+        assertEquals("w1:p2", transport.openedRequests.single().paneId)
+        assertEquals("w1:p2", vm.ui.value.paneId)
+    }
+
+    @Test
+    fun unknown_route_pane_falls_back_to_normal_resolution() {
+        api.snapshotResult = Result.success(snapshotWithPanes("w1:p1", focused = "w1:p1"))
+        val vm = vm(initialPaneId = "w9:gone")
+        vm.start()
+        assertEquals("w1:p1", transport.openedRequests.single().paneId)
+    }
+
+    @Test
+    fun route_pane_is_consumed_once_and_does_not_steer_reconnect() {
+        api.snapshotResult = Result.success(snapshotWithPanes("w1:p1", "w1:p2", focused = "w1:p1"))
+        val vm = vm(initialPaneId = "w1:p2")
+        vm.start()
+        transport.lastSocket.ready(generation = 1)
+
+        // The user picks another pane in the hierarchy drawer.
+        vm.attach("w1:p1")
+        transport.lastSocket.ready(generation = 2)
+        assertEquals("w1:p1", vm.ui.value.paneId)
+
+        // A transport drop must reconnect to the attached pane, not bounce back
+        // to the pane the route was originally opened for.
+        transport.lastSocket.failure()
+        ShadowLooper.idleMainLooper(10, TimeUnit.SECONDS)
+        assertEquals("w1:p1", transport.openedRequests.last().paneId)
+    }
+
+    // --- Ownership ---
+
+    @Test
+    fun dismiss_takeover_clears_the_offer_without_touching_the_socket() {
+        val vm = vm()
+        vm.start()
+        transport.lastSocket.ready(generation = 1, mode = TerminalMode.OBSERVE)
+        transport.lastSocket.ownership(canTakeover = true)
+        assertTrue(vm.ui.value.canTakeover)
+
+        val socket = transport.lastSocket
+        vm.dismissTakeover()
+        assertFalse(vm.ui.value.canTakeover)
+        assertFalse(socket.released)
+        assertFalse(socket.cancelled)
+        // Still an observer on the same socket.
+        assertEquals(1, transport.openedRequests.size)
+        assertEquals(TerminalConnectionState.Ready(generation = 1, writable = false), vm.ui.value.connection)
+
+        // A later ownership message can offer again.
+        socket.ownership(canTakeover = true)
+        assertTrue(vm.ui.value.canTakeover)
+    }
+
+    @Test
+    fun takeover_reopens_the_same_pane_with_takeover_intent() {
+        val vm = vm()
+        vm.start()
+        transport.lastSocket.ready(generation = 1, mode = TerminalMode.OBSERVE)
+        transport.lastSocket.ownership(canTakeover = true)
+
+        vm.takeover()
+        val request = transport.openedRequests.last()
+        assertEquals("w1:p1", request.paneId)
+        assertEquals(TerminalIntent.TAKEOVER, request.intent)
+        assertFalse(vm.ui.value.canTakeover)
+    }
+
+    @Test
+    fun release_sends_release_and_settles_closed() {
+        val vm = vm()
+        vm.start()
+        val socket = transport.lastSocket
+        socket.ready(generation = 1)
+
+        vm.release()
+        assertTrue(socket.released)
+        assertFalse(socket.cancelled)
+        assertEquals(TerminalConnectionState.Closed, vm.ui.value.connection)
     }
 
     // --- Teardown ---

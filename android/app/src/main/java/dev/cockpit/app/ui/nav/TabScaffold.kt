@@ -18,12 +18,13 @@ internal fun TabScaffold(
     title: String,
     onSearch: () -> Unit,
     onSettings: () -> Unit,
+    onTerminal: (() -> Unit)? = null,
     floatingActionButton: @Composable () -> Unit = {},
     content: @Composable (PaddingValues) -> Unit,
 ) {
     Scaffold(
         contentWindowInsets = WindowInsets(0.dp),
-        topBar = { AppTopBar(title, onSearch = onSearch, onSettings = onSettings) },
+        topBar = { AppTopBar(title, onSearch = onSearch, onSettings = onSettings, onTerminal = onTerminal) },
         floatingActionButton = floatingActionButton,
     ) { inner ->
         content(inner)

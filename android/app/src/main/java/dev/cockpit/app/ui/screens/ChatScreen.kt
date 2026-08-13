@@ -131,6 +131,7 @@ fun ChatScreen(
     viewModel: ChatViewModel,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
+    onOpenTerminal: (() -> Unit)? = null,
 ) {
     val ui by viewModel.ui.collectAsState()
 
@@ -172,6 +173,7 @@ fun ChatScreen(
             onToggleTools = { expandTools = !expandTools },
             onOpenConfiguration = { configurationOpen = true },
             onBack = onBack,
+            onOpenTerminal = onOpenTerminal,
             onControl = { action ->
                 when (action) {
                     SessionAction.Rename -> renameOpen = true
@@ -367,6 +369,7 @@ private fun ChatHeader(
     onToggleTools: () -> Unit,
     onOpenConfiguration: () -> Unit,
     onBack: () -> Unit,
+    onOpenTerminal: (() -> Unit)?,
     onControl: (SessionAction) -> Unit,
 ) {
     Column(Modifier.fillMaxWidth()) {
@@ -420,6 +423,19 @@ private fun ChatHeader(
                     Icon(Icons.Default.MoreVert, contentDescription = "Session actions")
                 }
                 DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                    // Terminal for this pane: the chat transcript stays a
+                    // rendered transcript, and raw PTY output lives only on the
+                    // terminal route.
+                    if (onOpenTerminal != null) {
+                        DropdownMenuItem(
+                            text = { Text("Open terminal") },
+                            modifier = Modifier.testTag("chat_open_terminal"),
+                            onClick = {
+                                menuOpen = false
+                                onOpenTerminal()
+                            },
+                        )
+                    }
                     // Null capabilities mean the backend is unknown yet; show the
                     // full pi surface until the first agents poll names it.
                     // Rendered from the decoded set in enum declaration order
