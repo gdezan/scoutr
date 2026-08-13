@@ -63,6 +63,7 @@ review workflows below.
 
 ## Gotchas (read before touching)
 
+- **Avoid debugging loops:** before each new attempt, identify what new evidence it can produce or what hypothesis it can eliminate. If the attempt is materially similar to previous ones or only succeeds by chance, stop iterating, step back, reassess assumptions, and choose a different diagnostic path.
 - ViewModels talk to `CockpitApi` (`net/CockpitApi.kt`), implemented by `BridgeClient`; unit tests stub it with `FakeCockpitApi` (`app/src/commonTest/`, shared with the emulator suite). Emulator tests still use a real BridgeClient + a fresh **unsaved** ConnectionStore so ViewModels never start polling.
 - Tests run ONLY on the emulator — never install the APK or run instrumentation suites on the physical Pixel phone (it spazzes its screen). If `emulator-5554` is absent, boot the `cockpit` AVD: `$ANDROID_HOME/emulator/emulator -avd cockpit &` (only AVD, ~25-60s to boot; confirm via `adb devices`). Use the phone sparingly, for key integration walks only.
 - `MockWebServer.url()` does a reverse-DNS lookup — never call it on the main thread (build ViewModels before `setContent` in tests).
