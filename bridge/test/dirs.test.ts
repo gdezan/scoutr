@@ -9,7 +9,7 @@ describe("listDirs", () => {
   let root: string;
 
   before(() => {
-    root = mkdtempSync(join(tmpdir(), "cockpit-dirs-"));
+    root = mkdtempSync(join(tmpdir(), "scoutr-dirs-"));
     mkdirSync(join(root, "Dev", "agents-mobile"), { recursive: true });
     mkdirSync(join(root, "Dev", "pi-workflow"), { recursive: true });
     mkdirSync(join(root, ".hidden"), { recursive: true });

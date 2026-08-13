@@ -2,7 +2,7 @@
 
 > **Executor instructions**: Follow this plan step by step. After each step, run the stated verification and inspect the recording before continuing. If a STOP condition occurs, stop and report rather than improvising. When done, update this plan's row in `design-plans/README.md`.
 >
-> **Drift check (run first)**: `git diff --stat 0e67682..HEAD -- android/app/src/main/java/dev/cockpit/app/ui/screens/HistoryScreen.kt android/app/src/main/java/dev/cockpit/app/state/SessionHistoryViewModel.kt android/app/src/androidTest/java/dev/cockpit/app/ui/HistoryScreenTest.kt android/app/src/test/java/dev/cockpit/app/state/SessionHistoryViewModelTest.kt`
+> **Drift check (run first)**: `git diff --stat 0e67682..HEAD -- android/app/src/main/java/dev/scoutr/app/ui/screens/HistoryScreen.kt android/app/src/main/java/dev/scoutr/app/state/SessionHistoryViewModel.kt android/app/src/androidTest/java/dev/scoutr/app/ui/HistoryScreenTest.kt android/app/src/test/java/dev/scoutr/app/state/SessionHistoryViewModelTest.kt`
 > If Plan 009 is incomplete or Sessions sorting/list ownership changed, stop and reconcile before editing.
 
 ## Status
@@ -24,7 +24,7 @@ Sessions is a live operational list, but it must remain readable while data chan
 
 `SessionHistoryViewModel.kt:78-105` refreshes every eight seconds. `togglePin` at lines 108-124 changes local flags immediately, which recomputes the sort. In Pinned, unpinning intentionally removes the row from the current tab; in Active/Completed, pinning can send it to index 0.
 
-Reuse the established Board pattern at `BoardScreen.kt:190-199`: `Modifier.animateItem` with `CockpitMotion.itemSpec(reduceMotion)` and `itemPlacementSpec(reduceMotion)`. It is no-bounce and collapses to zero duration under `LocalReduceMotion`.
+Reuse the established Board pattern at `BoardScreen.kt:190-199`: `Modifier.animateItem` with `ScoutrMotion.itemSpec(reduceMotion)` and `itemPlacementSpec(reduceMotion)`. It is no-bounce and collapses to zero duration under `LocalReduceMotion`.
 
 ## Intended result
 
@@ -44,7 +44,7 @@ ANDROID_HOME=$HOME/Android/sdk timeout 300 ./gradlew testDebugUnitTest --rerun-t
 ANDROID_HOME=$HOME/Android/sdk timeout 300 ./gradlew pixel2api36DebugAndroidTest --rerun-tasks
 ANDROID_HOME=$HOME/Android/sdk timeout 300 ./gradlew assembleDebug
 ANDROID_SERIAL=emulator-5554 ANDROID_HOME=$HOME/Android/sdk timeout 180 ./gradlew connectedDebugAndroidTest --rerun-tasks \
-  -Pandroid.testInstrumentationRunnerArguments.class=dev.cockpit.app.ui.HistoryScreenTest
+  -Pandroid.testInstrumentationRunnerArguments.class=dev.scoutr.app.ui.HistoryScreenTest
 ```
 
 Use an emulator-only deterministic fixture with at least 20 Active and 10 Completed sessions. Provide a controllable test refresh that reorders, inserts, and removes rows without waiting eight real seconds. Capture a bounded recording during pin and refresh sequences:
@@ -61,10 +61,10 @@ Never run device commands without `-s emulator-5554`; bound each standalone `adb
 ## Scope
 
 **In scope**:
-- `android/app/src/main/java/dev/cockpit/app/ui/screens/HistoryScreen.kt`
-- `android/app/src/androidTest/java/dev/cockpit/app/ui/HistoryScreenTest.kt`
-- `android/app/src/main/java/dev/cockpit/app/state/SessionHistoryViewModel.kt` only if a deterministic refresh seam is required
-- `android/app/src/test/java/dev/cockpit/app/state/SessionHistoryViewModelTest.kt` only for that seam or mutation ordering
+- `android/app/src/main/java/dev/scoutr/app/ui/screens/HistoryScreen.kt`
+- `android/app/src/androidTest/java/dev/scoutr/app/ui/HistoryScreenTest.kt`
+- `android/app/src/main/java/dev/scoutr/app/state/SessionHistoryViewModel.kt` only if a deterministic refresh seam is required
+- `android/app/src/test/java/dev/scoutr/app/state/SessionHistoryViewModelTest.kt` only for that seam or mutation ordering
 
 **Out of scope**:
 - Sort order, tab definitions, polling interval, or catalog API

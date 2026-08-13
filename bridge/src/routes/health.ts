@@ -23,7 +23,7 @@ async function health(ctx: RouteContext): Promise<RouteResult> {
     status: 200,
     body: {
       ok: true,
-      service: "cockpit-bridge",
+      service: "scoutr-bridge",
       version: "0.1.0",
       herdr: { connected: herdrConnected, version: herdrVersion, protocol: herdrProtocol },
       terminal: { capability: terminalBroker.capability() },

@@ -28,7 +28,7 @@ function sequencedSnapshots(fake: FakeHerdr, pre: SessionSnapshot, post: Session
 }
 
 function depsFor(fake: HerdrPort): RouteContext["deps"] {
-  return { herdr: fake, config: { token: TOKEN } } as unknown as RouteContext["deps"];
+  return { herdr: fake, config: { configDir: "/tmp/scoutr-test-config", token: TOKEN } } as unknown as RouteContext["deps"];
 }
 
 function streamOf(chunks: Buffer[]): AsyncIterable<Buffer> {
@@ -224,7 +224,7 @@ describe("create_tab", () => {
 
 describe("create_workspace", () => {
   test("resolves cwd inside home and sends exact herdr params with focus:false", async () => {
-    const dir = mkdtempSync(join(homedir(), ".cockpit-hierarchy-"));
+    const dir = mkdtempSync(join(homedir(), ".scoutr-hierarchy-"));
     try {
       const pre = snapshot([pane({ pane_id: "p-sel" })], [tab()], [workspace()]);
       const post = snapshot([pane({ pane_id: "p-new" })], [tab()], [workspace()]);
@@ -246,7 +246,7 @@ describe("create_workspace", () => {
   });
 
   test("omits label when absent", async () => {
-    const dir = mkdtempSync(join(homedir(), ".cockpit-hierarchy-"));
+    const dir = mkdtempSync(join(homedir(), ".scoutr-hierarchy-"));
     try {
       const fake = fakeHerdr(snapshot([pane()], [tab()], [workspace()]));
       const result = await postHierarchy(depsFor(fake), { operation: "create_workspace", cwd: dir });

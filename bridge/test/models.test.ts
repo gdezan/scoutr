@@ -15,7 +15,7 @@ describe("readModelsCatalog", () => {
   let dir: string;
 
   before(() => {
-    dir = mkdtempSync(join(tmpdir(), "cockpit-models-"));
+    dir = mkdtempSync(join(tmpdir(), "scoutr-models-"));
     writeFileSync(
       join(dir, "models-store.json"),
       JSON.stringify({
@@ -75,7 +75,7 @@ describe("readModelsCatalog", () => {
   });
 
   it("throws on a missing file so the HTTP layer can report it", () => {
-    const empty = mkdtempSync(join(tmpdir(), "cockpit-models-empty-"));
+    const empty = mkdtempSync(join(tmpdir(), "scoutr-models-empty-"));
     try {
       assert.throws(() => readModelsCatalog(empty));
     } finally {

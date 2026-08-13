@@ -25,8 +25,8 @@ export class AttachmentError extends BridgeError {
   }
 }
 
-export function uploadsDir(configPath: string): string {
-  return join(configPath, "..", "uploads");
+export function uploadsDir(configDir: string): string {
+  return join(configDir, "uploads");
 }
 
 function sanitizeName(name: string): string {

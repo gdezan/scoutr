@@ -2,7 +2,7 @@
 
 > **Executor instructions**: Follow this plan step by step. After each step, run the stated verification and inspect the screenshots/recording before continuing. If a STOP condition occurs, stop and report rather than improvising. When done, update this plan's row in `design-plans/README.md`.
 >
-> **Drift check (run first)**: `git diff --stat 0e67682..HEAD -- android/app/src/main/java/dev/cockpit/app/ui/screens/ConversationConfigSheet.kt android/app/src/main/java/dev/cockpit/app/ui/screens/SessionPickers.kt android/app/src/main/java/dev/cockpit/app/state/ModelPickerSearch.kt android/app/src/main/java/dev/cockpit/app/state/NewSessionViewModel.kt android/app/src/test/java/dev/cockpit/app/state/ModelPickerSearchTest.kt android/app/src/test/java/dev/cockpit/app/state/NewSessionViewModelTest.kt android/app/src/androidTest/java/dev/cockpit/app/ui/NewSessionSheetTest.kt android/app/src/androidTest/java/dev/cockpit/app/ui/ChatControlsTest.kt`
+> **Drift check (run first)**: `git diff --stat 0e67682..HEAD -- android/app/src/main/java/dev/scoutr/app/ui/screens/ConversationConfigSheet.kt android/app/src/main/java/dev/scoutr/app/ui/screens/SessionPickers.kt android/app/src/main/java/dev/scoutr/app/state/ModelPickerSearch.kt android/app/src/main/java/dev/scoutr/app/state/NewSessionViewModel.kt android/app/src/test/java/dev/scoutr/app/state/ModelPickerSearchTest.kt android/app/src/test/java/dev/scoutr/app/state/NewSessionViewModelTest.kt android/app/src/androidTest/java/dev/scoutr/app/ui/NewSessionSheetTest.kt android/app/src/androidTest/java/dev/scoutr/app/ui/ChatControlsTest.kt`
 > If either picker, its search state, or its tests changed materially, compare the live screens with this plan before editing.
 
 ## Status
@@ -16,7 +16,7 @@
 
 ## Why this matters
 
-Cockpit currently asks users to learn two different interfaces for the same decision. New Session uses a full-screen, provider-grouped catalog crowded by reasoning/context/thinking filter chips, while Conversation Setup uses a flat list inside a draggable bottom sheet. In the latter, scrolling back to the top can transfer the gesture to the sheet and make the entire surface collapse or snap. Model selection should have one hierarchy—provider—one predictable search behavior, and one gesture owner.
+Scoutr currently asks users to learn two different interfaces for the same decision. New Session uses a full-screen, provider-grouped catalog crowded by reasoning/context/thinking filter chips, while Conversation Setup uses a flat list inside a draggable bottom sheet. In the latter, scrolling back to the top can transfer the gesture to the sheet and make the entire surface collapse or snap. Model selection should have one hierarchy—provider—one predictable search behavior, and one gesture owner.
 
 ## Current state
 
@@ -76,7 +76,7 @@ ANDROID_HOME=$HOME/Android/sdk timeout 300 ./gradlew pixel2api36DebugAndroidTest
 ANDROID_HOME=$HOME/Android/sdk timeout 300 ./gradlew assembleDebug
 timeout 30 adb -s emulator-5554 install -r app/build/outputs/apk/debug/app-debug.apk
 ANDROID_SERIAL=emulator-5554 ANDROID_HOME=$HOME/Android/sdk timeout 180 ./gradlew connectedDebugAndroidTest --rerun-tasks \
-  -Pandroid.testInstrumentationRunnerArguments.class=dev.cockpit.app.ui.NewSessionSheetTest,dev.cockpit.app.ui.ChatControlsTest
+  -Pandroid.testInstrumentationRunnerArguments.class=dev.scoutr.app.ui.NewSessionSheetTest,dev.scoutr.app.ui.ChatControlsTest
 ```
 
 Add deterministic screenshot fixtures to the two existing instrumentation classes. Capture the New Session picker and Conversation Setup with the same multi-provider catalog, including a provider with enough models to overflow. Print each absolute PNG path, then pull using that exact path. Record the down-list → back-to-top → extra downward-swipe sequence:
@@ -91,14 +91,14 @@ timeout 30 adb -s emulator-5554 pull /sdcard/model-picker-scroll.mp4 /tmp/model-
 ## Scope
 
 **In scope**:
-- `android/app/src/main/java/dev/cockpit/app/ui/screens/ConversationConfigSheet.kt`
-- `android/app/src/main/java/dev/cockpit/app/ui/screens/SessionPickers.kt`
-- `android/app/src/main/java/dev/cockpit/app/state/ModelPickerSearch.kt`
-- `android/app/src/main/java/dev/cockpit/app/state/NewSessionViewModel.kt`
-- `android/app/src/test/java/dev/cockpit/app/state/ModelPickerSearchTest.kt`
-- `android/app/src/test/java/dev/cockpit/app/state/NewSessionViewModelTest.kt`
-- `android/app/src/androidTest/java/dev/cockpit/app/ui/NewSessionSheetTest.kt`
-- `android/app/src/androidTest/java/dev/cockpit/app/ui/ChatControlsTest.kt`
+- `android/app/src/main/java/dev/scoutr/app/ui/screens/ConversationConfigSheet.kt`
+- `android/app/src/main/java/dev/scoutr/app/ui/screens/SessionPickers.kt`
+- `android/app/src/main/java/dev/scoutr/app/state/ModelPickerSearch.kt`
+- `android/app/src/main/java/dev/scoutr/app/state/NewSessionViewModel.kt`
+- `android/app/src/test/java/dev/scoutr/app/state/ModelPickerSearchTest.kt`
+- `android/app/src/test/java/dev/scoutr/app/state/NewSessionViewModelTest.kt`
+- `android/app/src/androidTest/java/dev/scoutr/app/ui/NewSessionSheetTest.kt`
+- `android/app/src/androidTest/java/dev/scoutr/app/ui/ChatControlsTest.kt`
 
 **Out of scope**:
 - Provider/model catalog API and bridge behavior

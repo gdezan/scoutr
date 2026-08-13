@@ -13,7 +13,7 @@ afterEach(async () => {
 });
 
 async function fixture(): Promise<{ agentDir: string; cwd: string }> {
-  const root = await mkdtemp(join(tmpdir(), "cockpit-commands-"));
+  const root = await mkdtemp(join(tmpdir(), "scoutr-commands-"));
   roots.push(root);
   const agentDir = join(root, "agent");
   const cwd = join(root, "project");

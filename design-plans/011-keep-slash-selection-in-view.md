@@ -2,7 +2,7 @@
 
 > **Executor instructions**: Follow this plan step by step. After each step, run the stated verification and inspect the recording before continuing. If a STOP condition occurs, stop and report rather than improvising. When done, update this plan's row in `design-plans/README.md`.
 >
-> **Drift check (run first)**: `git diff --stat 0e67682..HEAD -- android/app/src/main/java/dev/cockpit/app/ui/screens/SlashCommandMenu.kt android/app/src/main/java/dev/cockpit/app/ui/screens/ChatScreen.kt android/app/src/androidTest/java/dev/cockpit/app/ui/SlashCommandMenuTest.kt`
+> **Drift check (run first)**: `git diff --stat 0e67682..HEAD -- android/app/src/main/java/dev/scoutr/app/ui/screens/SlashCommandMenu.kt android/app/src/main/java/dev/scoutr/app/ui/screens/ChatScreen.kt android/app/src/androidTest/java/dev/scoutr/app/ui/SlashCommandMenuTest.kt`
 > If menu row height, keyboard selection, or list behavior changed materially, stop and reconcile before editing.
 
 ## Status
@@ -47,7 +47,7 @@ ANDROID_HOME=$HOME/Android/sdk timeout 300 ./gradlew testDebugUnitTest --rerun-t
 ANDROID_HOME=$HOME/Android/sdk timeout 300 ./gradlew pixel2api36DebugAndroidTest --rerun-tasks
 ANDROID_HOME=$HOME/Android/sdk timeout 300 ./gradlew assembleDebug
 ANDROID_SERIAL=emulator-5554 ANDROID_HOME=$HOME/Android/sdk timeout 180 ./gradlew connectedDebugAndroidTest --rerun-tasks \
-  -Pandroid.testInstrumentationRunnerArguments.class=dev.cockpit.app.ui.SlashCommandMenuTest
+  -Pandroid.testInstrumentationRunnerArguments.class=dev.scoutr.app.ui.SlashCommandMenuTest
 ```
 
 Use a deterministic list of at least 12 commands and record a bounded emulator sequence while pressing Down through row 8 and Up through row 1:
@@ -64,9 +64,9 @@ All device work targets only `emulator-5554`; bound every standalone `adb` comma
 ## Scope
 
 **In scope**:
-- `android/app/src/main/java/dev/cockpit/app/ui/screens/SlashCommandMenu.kt`
-- `android/app/src/main/java/dev/cockpit/app/ui/screens/ChatScreen.kt` only if selection visibility needs a callback/seam from the composer
-- `android/app/src/androidTest/java/dev/cockpit/app/ui/SlashCommandMenuTest.kt`
+- `android/app/src/main/java/dev/scoutr/app/ui/screens/SlashCommandMenu.kt`
+- `android/app/src/main/java/dev/scoutr/app/ui/screens/ChatScreen.kt` only if selection visibility needs a callback/seam from the composer
+- `android/app/src/androidTest/java/dev/scoutr/app/ui/SlashCommandMenuTest.kt`
 
 **Out of scope**:
 - Slash-command search/ranking, loading, retry, and source labels

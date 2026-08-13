@@ -55,7 +55,7 @@ export interface CommandsCatalog {
 }
 
 /**
- * One coding-agent implementation behind Cockpit's backend seam. Herdr owns
+ * One coding-agent implementation behind Scoutr's backend seam. Herdr owns
  * detection and lifecycle state; this adapter owns the agent's CLI grammar,
  * transcript format, filesystem boundary, catalogs, questions, and controls.
  */

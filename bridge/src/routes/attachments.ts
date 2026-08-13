@@ -1,6 +1,5 @@
-import { defaultConfigPath } from "../config.js";
-import { readAttachmentBody, storeAttachment, uploadsDir } from "../attachments.js";
 import type { Route } from "./types.js";
+import { readAttachmentBody, storeAttachment, uploadsDir } from "../attachments.js";
 
 /**
  * POST /api/attachments — raw binary image upload for the chat composer.
@@ -16,7 +15,7 @@ export const attachmentRoutes: Route[] = [
     async handle(ctx) {
       const body = await readAttachmentBody(ctx.rawBody ?? noBody());
       const name = ctx.query.get("name") ?? "image.png";
-      const filePath = storeAttachment(uploadsDir(defaultConfigPath()), name, body, ctx.contentType ?? "");
+      const filePath = storeAttachment(uploadsDir(ctx.deps.config.configDir), name, body, ctx.contentType ?? "");
       return { status: 201, body: { ok: true, path: filePath } };
     },
   },

@@ -79,7 +79,7 @@ test("Claude follows Codex in the usage provider registry", () => {
 });
 
 test("fetchClaudeUsage authenticates as Claude Code and keeps stale Claude cache on failure", { concurrency: false }, async () => {
-  const configDir = await mkdtemp(join(tmpdir(), "cockpit-claude-usage-"));
+  const configDir = await mkdtemp(join(tmpdir(), "scoutr-claude-usage-"));
   const statePath = `${configDir}.json`;
   const originalConfigDir = process.env.CLAUDECONFIGDIR;
   const originalFetch = globalThis.fetch;

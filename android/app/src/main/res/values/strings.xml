@@ -1,12 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Cockpit</string>
+    <string name="app_name">Scoutr</string>
     <string name="connect_title">Connect to your agents</string>
-    <string name="connect_subtitle">Point Cockpit at your bridge on the tailnet.</string>
+    <string name="connect_subtitle">Point Scoutr at your bridge on the tailnet.</string>
     <string name="connect_host_label">Bridge address</string>
     <string name="connect_host_hint">https://artemis.tail…ts.net</string>
     <string name="connect_token_label">Pairing token</string>
-    <string name="connect_token_hint">cockpit_…</string>
+    <string name="connect_token_hint">scoutr_…</string>
     <string name="connect_button">Connect</string>
     <string name="connect_testing">Checking connection…</string>
     <string name="connect_failed">Could not reach the bridge</string>

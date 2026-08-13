@@ -2,7 +2,7 @@
 
 > **Executor instructions**: Follow and visually verify each step. Stop on any mismatch or unclear provider semantics. Update `design-plans/README.md` when complete.
 >
-> **Drift check (run first)**: `git diff --stat 0e67682..HEAD -- android/app/src/main/java/dev/cockpit/app/ui/screens/UsageScreen.kt android/app/src/androidTest/java/dev/cockpit/app/ui/UsageScreenTest.kt`
+> **Drift check (run first)**: `git diff --stat 0e67682..HEAD -- android/app/src/main/java/dev/scoutr/app/ui/screens/UsageScreen.kt android/app/src/androidTest/java/dev/scoutr/app/ui/UsageScreenTest.kt`
 
 ## Status
 
@@ -49,7 +49,7 @@ This plan is self-contained; target only the emulator and bound all commands:
 cd android
 ANDROID_HOME=$HOME/Android/sdk timeout 300 ./gradlew testDebugUnitTest --rerun-tasks
 ANDROID_SERIAL=emulator-5554 ANDROID_HOME=$HOME/Android/sdk timeout 180 ./gradlew connectedDebugAndroidTest --rerun-tasks \
-  -Pandroid.testInstrumentationRunnerArguments.class=dev.cockpit.app.ui.UsageScreenTest
+  -Pandroid.testInstrumentationRunnerArguments.class=dev.scoutr.app.ui.UsageScreenTest
 ANDROID_HOME=$HOME/Android/sdk timeout 300 ./gradlew pixel2api36DebugAndroidTest --rerun-tasks
 ANDROID_HOME=$HOME/Android/sdk timeout 300 ./gradlew assembleDebug
 ```
@@ -57,15 +57,15 @@ ANDROID_HOME=$HOME/Android/sdk timeout 300 ./gradlew assembleDebug
 Use `UsageScreenTest`'s fake usage response to render three provider cards together: amount below zero, zero, and positive. Add a test-only `captureToImage()` helper, save `usage-balances.png` under `targetContext.getExternalFilesDir(null)`, print the path, then pull and inspect it:
 
 ```bash
-timeout 30 adb -s emulator-5554 pull /sdcard/Android/data/dev.cockpit.app/files/usage-balances.png /tmp/
+timeout 30 adb -s emulator-5554 pull /sdcard/Android/data/dev.scoutr.app/files/usage-balances.png /tmp/
 ```
 
 Add a separate unavailable-amount fixture if the DTO supports it. Use the exact printed path if the external-files path differs.
 ## Scope
 
 **In scope**:
-- `android/app/src/main/java/dev/cockpit/app/ui/screens/UsageScreen.kt`
-- `android/app/src/androidTest/java/dev/cockpit/app/ui/UsageScreenTest.kt`
+- `android/app/src/main/java/dev/scoutr/app/ui/screens/UsageScreen.kt`
+- `android/app/src/androidTest/java/dev/scoutr/app/ui/UsageScreenTest.kt`
 
 **Out of scope**:
 - Usage API/data contracts and provider authentication

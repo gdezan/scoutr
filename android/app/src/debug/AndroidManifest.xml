@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <!-- Debug only: allow cleartext to the host loopback so the emulator can
-         reach the local cockpit bridge at http://10.0.2.2:8737. -->
+         reach the local scoutr bridge at http://10.0.2.2:8737. -->
     <application android:networkSecurityConfig="@xml/network_security_config" />
 </manifest>

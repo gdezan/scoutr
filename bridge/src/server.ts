@@ -13,7 +13,7 @@ import { type SessionSnapshot } from "./herdr/types.js";
 import { TerminalSessionBroker } from "./terminal/broker.js";
 import { attachTerminalSocket } from "./terminal/websocket.js";
 /**
- * Cockpit bridge HTTP + WebSocket API.
+ * Scoutr bridge HTTP + WebSocket API.
  *
  * Design (grounded in the goal + research):
  *   - The bridge owns the herdr socket (never exposed raw).
@@ -29,7 +29,7 @@ import { attachTerminalSocket } from "./terminal/websocket.js";
  * authenticated client, i.e. the user acting through the app.
  */
 
-export interface CockpitServer {
+export interface ScoutrServer {
   url: string;
   close: () => Promise<void>;
 }
@@ -48,7 +48,7 @@ function sendJson(response: ServerResponse, status: number, body: unknown): void
   response.end(payload);
 }
 
-export function createCockpitServer(deps: ServerDeps, options: CreateServerOptions = {}): CockpitServer {
+export function createScoutrServer(deps: ServerDeps, options: CreateServerOptions = {}): ScoutrServer {
   const { herdr, feed, usage, config, publisher } = deps;
   const token = config.token;
   const listen = options.listen ?? true;
@@ -283,7 +283,7 @@ export function createCockpitServer(deps: ServerDeps, options: CreateServerOptio
   if (listen) {
     server.on("error", (error) => {
       if (error instanceof Error && "code" in error && error.code === "EADDRINUSE") {
-        console.error(`port ${config.port} already in use; is another cockpit-bridge running?`);
+        console.error(`port ${config.port} already in use; is another scoutr-bridge running?`);
       } else {
         console.error(`server error: ${error.message}`);
       }

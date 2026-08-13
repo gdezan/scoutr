@@ -8,20 +8,20 @@ plugins {
 }
 
 android {
-    namespace = "dev.cockpit.app"
+    namespace = "dev.scoutr.app"
     compileSdk = 36
 
     testOptions {
         unitTests.isIncludeAndroidResources = true
     }
     defaultConfig {
-        applicationId = "dev.cockpit.app"
+        applicationId = "dev.scoutr.app"
         minSdk = 26
         targetSdk = 36
         versionCode = 1
         versionName = "0.1.0"
-        // Zeroes animation scales before Espresso runs; see CockpitTestRunner.
-        testInstrumentationRunner = "dev.cockpit.app.CockpitTestRunner"
+        // Zeroes animation scales before Espresso runs; see ScoutrTestRunner.
+        testInstrumentationRunner = "dev.scoutr.app.ScoutrTestRunner"
     }
 
     buildTypes {
@@ -40,7 +40,7 @@ android {
         compose = true
     }
 
-    // FakeCockpitApi lives in src/commonTest/kotlin, shared by the local
+    // FakeScoutrApi lives in src/commonTest/kotlin, shared by the local
     // unit tests and the emulator suite so both can stub the bridge.
     sourceSets {
         getByName("test") { java.srcDir("src/commonTest/kotlin") }

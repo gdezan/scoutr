@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 /**
- * cockpit-bridge CLI — development and ops surface.
+ * scoutr-bridge CLI — development and ops surface.
  *
- *   cockpit-bridge herdr status          → ping + server info
- *   cockpit-bridge herdr snapshot        → print the full session snapshot as JSON
- *   cockpit-bridge herdr watch           → stream live events (Ctrl-C to stop)
- *   cockpit-bridge pair                  → print the QR code the app scans to connect
- *   cockpit-bridge serve                 → run the bridge daemon (layer 2)
+ *   scoutr-bridge herdr status          → ping + server info
+ *   scoutr-bridge herdr snapshot        → print the full session snapshot as JSON
+ *   scoutr-bridge herdr watch           → stream live events (Ctrl-C to stop)
+ *   scoutr-bridge pair                  → print the QR code the app scans to connect
+ *   scoutr-bridge serve                 → run the bridge daemon (layer 2)
  */
 import { HerdrClient, defaultSocketPath, HerdrError } from "./herdr/client.js";
 import { HerdrEventFeed } from "./herdr/feed.js";
@@ -54,7 +54,7 @@ async function main(): Promise<void> {
             });
           });
         } else {
-          console.error("usage: cockpit-bridge herdr <status|snapshot|watch>");
+          console.error("usage: scoutr-bridge herdr <status|snapshot|watch>");
           process.exitCode = 2;
         }
         break;
@@ -69,9 +69,9 @@ async function main(): Promise<void> {
         if (!config.ntfyUrl || !config.ntfyTopic) {
           console.error("warning: ntfy not configured — push will not work until it is");
         }
-        // Public host resolution order: config.publicHost > COCKPIT_PUBLIC_HOST
+        // Public host resolution order: config.publicHost > SCOUTR_PUBLIC_HOST
         // > the tailnet MagicDNS name (tailscale status) > loopback fallback.
-        let host = config.publicHost ?? process.env.COCKPIT_PUBLIC_HOST;
+        let host = config.publicHost ?? process.env.SCOUTR_PUBLIC_HOST;
         if (!host) {
           host = await new Promise<string>((resolve) => {
             execFile("tailscale", ["status", "--json"], { timeout: 5000 }, (err, stdout) => {
@@ -92,17 +92,17 @@ async function main(): Promise<void> {
           ntfyTopic: config.ntfyTopic,
         });
         qr.generate(payload, { small: true }, (out: string) => console.log(out));
-        console.error("\nScan this QR with the Cockpit app (Connect → Scan QR code).");
+        console.error("\nScan this QR with the Scoutr app (Connect → Scan QR code).");
         if (!host) {
           console.error("warning: could not detect the tailnet hostname — the QR points at 127.0.0.1.");
-          console.error("set publicHost in ~/.config/cockpit/config.json (or COCKPIT_PUBLIC_HOST) first.");
+          console.error("set publicHost in ~/.config/scoutr/config.json (or SCOUTR_PUBLIC_HOST) first.");
         }
         console.error("If scanning fails, type the fields below into the app:");
         console.log(payload);
         break;
       }
       case "serve": {
-        const { createCockpitServer } = await import("./server.js");
+        const { createScoutrServer } = await import("./server.js");
         const { loadOrCreateConfig, defaultConfigPath } = await import("./config.js");
         const { UsageService } = await import("./usage/providers.js");
         const { HerdrTerminalLauncher } = await import("./terminal/process.js");
@@ -113,7 +113,7 @@ async function main(): Promise<void> {
         await feed.start();
         console.error(`connected to herdr at ${socketPath}`);
 
-        const server = createCockpitServer({
+        const server = createScoutrServer({
           herdr: new HerdrClient({ socketPath }),
           terminal: new HerdrTerminalLauncher({ socketPath }),
           feed,
@@ -124,9 +124,9 @@ async function main(): Promise<void> {
               ? new NtfyPublisher({ baseUrl: config.ntfyUrl, topic: config.ntfyTopic })
               : undefined,
         });
-        console.error(`cockpit bridge listening on ${server.url}`);
+        console.error(`scoutr bridge listening on ${server.url}`);
         // Never print the token: the credential would persist in journald.
-        console.error(`token: run 'cockpit-bridge pair' or read ${defaultConfigPath()}`);
+        console.error(`token: run 'scoutr-bridge pair' or read ${defaultConfigPath()}`);
         if (config.ntfyUrl && config.ntfyTopic) {
           console.error(`push: ntfy at ${config.ntfyUrl}/topic/${config.ntfyTopic}`);
         }
@@ -156,7 +156,7 @@ async function main(): Promise<void> {
       case "-h":
       default: {
         console.error(
-          "usage: cockpit-bridge <herdr status|herdr snapshot|herdr watch|pair|serve>",
+          "usage: scoutr-bridge <herdr status|herdr snapshot|herdr watch|pair|serve>",
         );
         process.exitCode = 2;
       }

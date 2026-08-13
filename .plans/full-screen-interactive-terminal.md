@@ -2,29 +2,29 @@
 
 ## Current situation
 
-Cockpit currently offers agent chat plus a read-only **Live Output** escape hatch:
+Scoutr currently offers agent chat plus a read-only **Live Output** escape hatch:
 
-- `android/app/src/main/java/dev/cockpit/app/MainActivity.kt` routes `chat/{paneId}/live` to `LiveOutputScreen`.
-- `android/app/src/main/java/dev/cockpit/app/ui/screens/ChatScreen.kt` exposes “Live output…” in the session menu.
-- `LiveOutputViewModel`, `LiveOutputPanel.kt`, `CockpitApi.liveOutput`, and `BridgeClient.liveOutput` poll every 900 ms while that screen is visible.
+- `android/app/src/main/java/dev/scoutr/app/MainActivity.kt` routes `chat/{paneId}/live` to `LiveOutputScreen`.
+- `android/app/src/main/java/dev/scoutr/app/ui/screens/ChatScreen.kt` exposes “Live output…” in the session menu.
+- `LiveOutputViewModel`, `LiveOutputPanel.kt`, `ScoutrApi.liveOutput`, and `BridgeClient.liveOutput` poll every 900 ms while that screen is visible.
 - `bridge/src/routes/agents.ts` serves `GET /api/agents/:paneId/read` through `bridge/src/live-output.ts`, which performs a bounded `agent.read` and returns plain text.
 - This path is not interactive and is not a terminal emulator.
 
-The upstream foundations exist, but Cockpit does not expose them:
+The upstream foundations exist, but Scoutr does not expose them:
 
 - Herdr 0.8.0 / protocol 19 snapshots already carry workspace, tab, pane, `terminal_id`, names, cwd, titles, focused IDs, and topology events in `bridge/src/herdr/types.ts`.
-- `bridge/reference/herdr-schema.json` supports `workspace.create/rename/close`, `tab.create/rename/close`, and `pane.rename/close`; Cockpit’s `HerdrPort` lacks the tab and direct pane operations.
+- `bridge/reference/herdr-schema.json` supports `workspace.create/rename/close`, `tab.create/rename/close`, and `pane.rename/close`; Scoutr’s `HerdrPort` lacks the tab and direct pane operations.
 - Terminal streaming is outside that schema. The installed CLI exposes `herdr terminal session control|observe`, with NDJSON output and control records documented by Herdr.
 - `HerdrClient` supports one-shot JSONL-RPC and one-way `events.subscribe`; it is not the seam for a bidirectional terminal child process.
-- `createCockpitServer` owns one `/ws` server that permits query-token auth and treats every message as JSON. Terminal traffic needs a separately routed WebSocket with binary messages and header-only auth.
-- Android is a single `:app` Gradle project using Compose, manual DI in `CockpitApp.AppContainer`, and OkHttp. It has no `AndroidView` integration today.
+- `createScoutrServer` owns one `/ws` server that permits query-token auth and treats every message as JSON. Terminal traffic needs a separately routed WebSocket with binary messages and header-only auth.
+- Android is a single `:app` Gradle project using Compose, manual DI in `ScoutrApp.AppContainer`, and OkHttp. It has no `AndroidView` integration today.
 
 Named references:
 
 - Research and selected libraries: `docs/research/full-screen-interactive-terminal.md`
 - Architecture decisions: `docs/adr/0001-project-herdr-terminals-through-a-dedicated-websocket.md` and `docs/adr/0002-vendor-the-termux-terminal-core.md`
 - Herdr schema: `bridge/reference/herdr-schema.json`
-- Design rules: `android/app/src/main/java/dev/cockpit/app/ui/theme/DESIGN.md`
+- Design rules: `android/app/src/main/java/dev/scoutr/app/ui/theme/DESIGN.md`
 - Verification rules: `AGENTS.md`, `docs/dev-workflow.md`, and `scripts/verify.sh`
 
 ## Objective and why
@@ -56,7 +56,7 @@ Done is observable when:
 
 - Rendering multiple panes or Herdr splits on Android.
 - Moving panes, editing split topology, split creation, or synchronizing Herdr’s desktop focus with the mobile selection.
-- Creating Cockpit-owned shells or PTYs.
+- Creating Scoutr-owned shells or PTYs.
 - Mosh, predictive echo, state-diff transport, or UDP exposure.
 - Sixel, Kitty graphics, iTerm inline images, terminal-controlled HTML, or other graphics protocols.
 - User themes, customizable key rows, scrollback search/export, or terminal accessibility acceptance work in v1.
@@ -74,7 +74,7 @@ Done is observable when:
 
 ### Product and navigation
 
-- Terminal is a dedicated full-screen route with Android status/navigation bars visible and Cockpit bottom navigation hidden.
+- Terminal is a dedicated full-screen route with Android status/navigation bars visible and Scoutr bottom navigation hidden.
 - Every Herdr-managed pane is eligible, including panes with no recognized agent.
 - Add a Terminal icon to the shared primary-screen top bar beside Search and Settings.
 - Chat alone gets **Open in terminal**, replacing **Live output…**, and opens that pane directly.
@@ -89,7 +89,7 @@ Done is observable when:
 - Pane name precedence: user-assigned Herdr label, live OSC title, foreground cwd/cwd, pane ID.
 - Create offers primary **New tab** in the selected/current workspace and secondary **New workspace**.
 - New-tab cwd precedence: selected pane foreground cwd/cwd, another pane cwd in the workspace, then Herdr’s home default.
-- New workspace asks for directory plus optional name, reuses Cockpit’s directory picker, defaults the name from the folder, and relies on Herdr to create the initial root pane.
+- New workspace asks for directory plus optional name, reuses Scoutr’s directory picker, defaults the name from the folder, and relies on Herdr to create the initial root pane.
 - Rename and close work on any listed pane, tab, or workspace.
 - Pane close names the pane in confirmation. Tab/workspace close names the target and shows the exact pane termination count. A stale count refreshes and requires confirmation again.
 - Post-close selection is deterministic over the pre-close catalog order and fresh snapshot. Closing the active pane selects next then previous in its old tab, then old workspace, then globally. Closing the active tab skips the removed tab and selects next then previous tab in its old workspace, then globally. Closing the active workspace skips the removed workspace and selects next then previous workspace. Closing an unrelated target preserves the active pane if it still exists. Otherwise show the empty selector. Show a brief **Pane closed** message when the active pane disappears.
@@ -108,7 +108,7 @@ Done is observable when:
 ### Terminal behavior
 
 - V1 supports ANSI/VT text, Unicode including emoji/CJK/combining/wide cells, truecolor, alternate screen, bracketed paste, common mouse modes, Gboard composition, and hardware keyboards.
-- The measured phone grid is authoritative only while Cockpit controls the pane. Initial control, rotation, IME, insets, and font changes debounce to the latest `cols`/`rows`.
+- The measured phone grid is authoritative only while Scoutr controls the pane. Initial control, rotation, IME, insets, and font changes debounce to the latest `cols`/`rows`.
 - Observers cannot resize; a viewport change restarts observation as a fresh reset generation with the latest grid.
 - Android scrollback is local, bounded, selectable, copyable, and touch-scrollable for the active visit. Target roughly 10,000 rows, reducing only if measured Pixel memory requires it.
 - Two fixed compact extra-key pages:
@@ -388,12 +388,12 @@ Implement as small green commits on `main`. The first commit intentionally remov
 
 | Step | Files / symbols | Change and side effects | Proof |
 |---|---|---|---|
-| 1. Delete Live Output | Delete `bridge/src/live-output.ts`, `bridge/test/live-output.test.ts`, Android `LiveOutputViewModel.kt`, `LiveOutputPanel.kt`, `LiveOutputViewModelTest.kt`, and `LiveOutputScreenTest.kt`. Edit `routes/agents.ts`, `routes/types.ts` route examples, route/server/integration tests, `Models.kt`, `CockpitApi.kt`, `BridgeClient.kt`, `FakeCockpitApi.kt`, `MainActivity.kt`, `ChatScreen.kt`, and `ChatControlsTest.kt`. | Remove route, poll, DTOs, screen, wording, and fallback. Preserve unrelated `agent.read`, including review behavior. | `rg -i 'live.?output|/api/agents/.*/read' bridge android` has no feature references; bridge and Android unit gates pass. |
+| 1. Delete Live Output | Delete `bridge/src/live-output.ts`, `bridge/test/live-output.test.ts`, Android `LiveOutputViewModel.kt`, `LiveOutputPanel.kt`, `LiveOutputViewModelTest.kt`, and `LiveOutputScreenTest.kt`. Edit `routes/agents.ts`, `routes/types.ts` route examples, route/server/integration tests, `Models.kt`, `ScoutrApi.kt`, `BridgeClient.kt`, `FakeScoutrApi.kt`, `MainActivity.kt`, `ChatScreen.kt`, and `ChatControlsTest.kt`. | Remove route, poll, DTOs, screen, wording, and fallback. Preserve unrelated `agent.read`, including review behavior. | `rg -i 'live.?output|/api/agents/.*/read' bridge android` has no feature references; bridge and Android unit gates pass. |
 | 2. Prove Herdr controller | Create `bridge/src/terminal/process.ts`, capability probe/types, `bridge/test/terminal-process.test.ts`, and `bridge/test/support/fake-terminal.ts`. Wire launcher dependency from `cli.ts`; add a bounded spike command/script. | Establish exact process seam, parser, timeout, release, ownership-conflict classification, unsupported reason, phone-sized observation, and ownership-preserving grace replacement before network/UI work. | Fragmented parser/failure tests; against disposable panes, prove replay, input/resize/release, observer projection, conflict classification, then prove both grace phases: (a) simulate unexpected mobile disconnect while keeping controller stdin/process alive, discard output for 30 seconds, and verify a second non-takeover controller still conflicts; (b) close listeners/controller, immediately reopen without takeover, verify fresh current-screen replay, and record whether a contender can win. If these semantics cannot be defended, stop and revise ownership before Step 3. No child remains. |
-| 3. Add terminal WebSocket | Create `bridge/src/terminal/broker.ts`, `websocket.ts`, protocol types/tests, and `bridge/scripts/terminal-client.mts`. Route upgrade separately in `server.ts`; include terminal teardown in `CockpitServer.close`; extend health capability. | Add header-only binary transport, one-socket-per-generation resets, ownership fallback/takeover, 30-second grace, queue bounds, and structured logs. Existing `/ws` commands remain unchanged. | Contract tests cover auth, opcodes/order, old-socket callback suppression before new readiness, input, resize, observer fallback, takeover, same-token same/different-pane replacement, grace expiry, slow-client disconnect, malformed/oversized frames, pane close, and shutdown. Tiny client controls one real pane. |
-| 4. Add hierarchy management | Extend `HerdrPort`, `HerdrClient`, `FakeHerdr`; create `bridge/src/routes/terminal.ts` and tests; register in `routes/index.ts`. Add Android snapshot/hierarchy DTOs and `CockpitApi`/`BridgeClient` methods plus fake support. | Add create tab/workspace and rename/close pane/tab/workspace, stale-count protection, fresh reconciliation, and deterministic selection. | Route tests assert exact Herdr params, `focus:false`, cwd fallback, 400/404/409 mapping, counts, created-root selection, and fresh snapshots. |
+| 3. Add terminal WebSocket | Create `bridge/src/terminal/broker.ts`, `websocket.ts`, protocol types/tests, and `bridge/scripts/terminal-client.mts`. Route upgrade separately in `server.ts`; include terminal teardown in `ScoutrServer.close`; extend health capability. | Add header-only binary transport, one-socket-per-generation resets, ownership fallback/takeover, 30-second grace, queue bounds, and structured logs. Existing `/ws` commands remain unchanged. | Contract tests cover auth, opcodes/order, old-socket callback suppression before new readiness, input, resize, observer fallback, takeover, same-token same/different-pane replacement, grace expiry, slow-client disconnect, malformed/oversized frames, pane close, and shutdown. Tiny client controls one real pane. |
+| 4. Add hierarchy management | Extend `HerdrPort`, `HerdrClient`, `FakeHerdr`; create `bridge/src/routes/terminal.ts` and tests; register in `routes/index.ts`. Add Android snapshot/hierarchy DTOs and `ScoutrApi`/`BridgeClient` methods plus fake support. | Add create tab/workspace and rename/close pane/tab/workspace, stale-count protection, fresh reconciliation, and deterministic selection. | Route tests assert exact Herdr params, `focus:false`, cwd fallback, 400/404/409 mapping, counts, created-root selection, and fresh snapshots. |
 | 5. Vendor/adapt Termux | Add `android/vendor/termux/terminal-emulator`, `terminal-view`, module Gradle files, `UPSTREAM.md`, Apache-2.0 license/notices, settings inclusions, and app dependencies. Add app `terminal/RemoteTerminalSession.kt`. | Pin commit `3df69d1da197dd9bd71a3bafd902dffd720576b4`; retain `com.termux` provenance; omit local PTY/JNI process paths; adapt the view seam to remote bytes. No `termux-shared` or Termux app code. | Provenance audit, Gradle dependency report, no PTY/JNI load path, x86_64 managed-device class load, and retained emulator tests for ANSI/Unicode/modes/scrollback. |
-| 6. Add Android transport/state | Create terminal socket/topology clients, interfaces/fakes, protocol DTOs, `TerminalPreferencesStore`, `TerminalViewModel`, and tests. Wire through `CockpitApp.AppContainer`. | Add header-auth sockets, lifecycle containment, reset/reconnect, one active pane, topology invalidation, management reconciliation, preferences, controller resize, observer restart, and no-input-queue behavior. | Unit/Robolectric tests cover all states, stale generations, callback cancellation, background grace, release, ownership loss, pane disappearance, preference isolation, and abrupt OkHttp close without escaped exceptions. |
+| 6. Add Android transport/state | Create terminal socket/topology clients, interfaces/fakes, protocol DTOs, `TerminalPreferencesStore`, `TerminalViewModel`, and tests. Wire through `ScoutrApp.AppContainer`. | Add header-auth sockets, lifecycle containment, reset/reconnect, one active pane, topology invalidation, management reconciliation, preferences, controller resize, observer restart, and no-input-queue behavior. | Unit/Robolectric tests cover all states, stale generations, callback cancellation, background grace, release, ownership loss, pane disappearance, preference isolation, and abrupt OkHttp close without escaped exceptions. |
 | 7. Build Terminal UX | Add `TerminalScreen.kt` and focused terminal UI files. Add route/navigation in `MainActivity.kt`; extend `AppTopBar.kt`/`TabScaffold.kt`; replace Chat action. Add drawer/search, create/rename/close flows, takeover dialog, top bar, empty/unsupported states, `AndroidView`, extra keys, paste/link confirmation, and BEL haptic. | Terminal becomes app-level/contextual; bottom nav hides; drawer overlays without resize; all settled interaction rules apply. | Compose/Robolectric/instrumentation tests assert entry, selection, drawer, management confirmations, exceptional states, Back order, grid stability, input bytes, paste policy, title/BEL, and no edge swipe. Inspect screenshots directly. |
 | 8. Harden and set budgets | Add deterministic terminal traces/fixtures, benchmark scripts/tests, measured queue constants, scrollback evidence, lifecycle soak tests, and final docs. | Convert provisional finite bounds into measured production limits; validate TUIs and failure paths. | Acceptance and performance gates below pass; simplify, independent review, `scripts/verify.sh`, and final physical Pixel walk pass. |
 
@@ -489,7 +489,7 @@ Use focused classes while iterating; run broad gates once after material work st
 - Auto-control, observe fallback, takeover, ownership loss, same-token replacement/grace resume, grace expiry, explicit release, switch, and pane close.
 - Backpressure pause/resume and slow-client disconnect without unbounded retained bytes.
 - Hierarchy create/rename/close, cwd fallback, stale-count 409, deterministic selection, and fresh responses.
-- `createCockpitServer.close()` leaves no terminal child, WebSocket, timer, or listener.
+- `createScoutrServer.close()` leaves no terminal child, WebSocket, timer, or listener.
 
 ### Android functional matrix
 
@@ -609,16 +609,16 @@ An independent reviewer must verify:
 - `bridge/src/routes/health.ts`
 - `bridge/src/routes/agents.ts`
 - `bridge/test/support/fake-herdr.ts`
-- `android/app/src/main/java/dev/cockpit/app/MainActivity.kt`
-- `android/app/src/main/java/dev/cockpit/app/CockpitApp.kt`
-- `android/app/src/main/java/dev/cockpit/app/net/BridgeClient.kt`
-- `android/app/src/main/java/dev/cockpit/app/net/CockpitApi.kt`
-- `android/app/src/main/java/dev/cockpit/app/data/ConnectionStore.kt`
-- `android/app/src/main/java/dev/cockpit/app/ui/components/AppTopBar.kt`
-- `android/app/src/main/java/dev/cockpit/app/ui/nav/TabScaffold.kt`
-- `android/app/src/main/java/dev/cockpit/app/ui/screens/SessionPickers.kt`
-- `android/app/src/main/java/dev/cockpit/app/ui/motion/Haptics.kt`
-- `android/app/src/main/java/dev/cockpit/app/ui/theme/DESIGN.md`
+- `android/app/src/main/java/dev/scoutr/app/MainActivity.kt`
+- `android/app/src/main/java/dev/scoutr/app/ScoutrApp.kt`
+- `android/app/src/main/java/dev/scoutr/app/net/BridgeClient.kt`
+- `android/app/src/main/java/dev/scoutr/app/net/ScoutrApi.kt`
+- `android/app/src/main/java/dev/scoutr/app/data/ConnectionStore.kt`
+- `android/app/src/main/java/dev/scoutr/app/ui/components/AppTopBar.kt`
+- `android/app/src/main/java/dev/scoutr/app/ui/nav/TabScaffold.kt`
+- `android/app/src/main/java/dev/scoutr/app/ui/screens/SessionPickers.kt`
+- `android/app/src/main/java/dev/scoutr/app/ui/motion/Haptics.kt`
+- `android/app/src/main/java/dev/scoutr/app/ui/theme/DESIGN.md`
 - `docs/dev-workflow.md`
 - `scripts/verify.sh`
 - [Herdr direct terminal attach](https://herdr.dev/docs/persistence-remote/#direct-terminal-attach)

@@ -81,7 +81,7 @@ describe("BoardDetailCache", () => {
   let dir: string;
 
   beforeEach(async () => {
-    dir = await mkdtemp(join(tmpdir(), "cockpit-board-detail-"));
+    dir = await mkdtemp(join(tmpdir(), "scoutr-board-detail-"));
     process.env.PI_CODING_AGENT_SESSION_DIR = dir;
   });
 

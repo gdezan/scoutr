@@ -44,7 +44,7 @@ export class NtfyPublisher {
     // ntfy drops unknown JSON fields, so the deep link travels in its
     // documented `click` field; paneId is kept for callers that read the
     // publish payload directly (tests).
-    const click = `cockpit://chat/${paneId}?status=${status === "blocked" ? "blocked" : "working"}`;
+    const click = `scoutr://chat/${paneId}?status=${status === "blocked" ? "blocked" : "working"}`;
     await this.publish({ title: headline, message: title, priority: status === "blocked" ? 4 : 3, paneId, click });
     return true;
   }

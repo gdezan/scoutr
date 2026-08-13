@@ -7,7 +7,7 @@ import type { DispatchRequest, Route, RouteContext, RouteResult } from "../src/r
 const TOKEN = "dispatcher_test_token_0001";
 
 function deps(): RouteContext["deps"] {
-  return { config: { token: TOKEN, port: 1 } } as never;
+  return { config: { configDir: "/tmp/scoutr-test-config", token: TOKEN, port: 1 } } as never;
 }
 
 function request(overrides: Partial<DispatchRequest> = {}): DispatchRequest {

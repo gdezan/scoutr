@@ -2,7 +2,7 @@
 
 > **Executor instructions**: Follow this plan step by step. After each step, run the stated verification and inspect any screenshot or recording before continuing. If a STOP condition occurs, stop and report rather than improvising. When done, update this plan's row in `design-plans/README.md`.
 >
-> **Drift check (run first)**: `git diff --stat 0e67682..HEAD -- android/app/src/main/java/dev/cockpit/app/ui/screens/ChatScreen.kt android/app/src/androidTest/java/dev/cockpit/app/ui/ChatListTest.kt`
+> **Drift check (run first)**: `git diff --stat 0e67682..HEAD -- android/app/src/main/java/dev/scoutr/app/ui/screens/ChatScreen.kt android/app/src/androidTest/java/dev/scoutr/app/ui/ChatListTest.kt`
 > If the scroll implementation or tests changed materially, reproduce the live behavior and reconcile this plan before editing.
 
 ## Status
@@ -49,15 +49,15 @@ ANDROID_HOME=$HOME/Android/sdk timeout 300 ./gradlew testDebugUnitTest --rerun-t
 ANDROID_HOME=$HOME/Android/sdk timeout 300 ./gradlew pixel2api36DebugAndroidTest --rerun-tasks
 ANDROID_HOME=$HOME/Android/sdk timeout 300 ./gradlew assembleDebug
 timeout 30 adb -s emulator-5554 install -r app/build/outputs/apk/debug/app-debug.apk
-timeout 30 adb -s emulator-5554 shell am force-stop dev.cockpit.app
-timeout 30 adb -s emulator-5554 shell am start -n dev.cockpit.app/.MainActivity
+timeout 30 adb -s emulator-5554 shell am force-stop dev.scoutr.app
+timeout 30 adb -s emulator-5554 shell am start -n dev.scoutr.app/.MainActivity
 ```
 
 Run the focused instrumentation class with:
 
 ```bash
 ANDROID_SERIAL=emulator-5554 ANDROID_HOME=$HOME/Android/sdk timeout 180 ./gradlew connectedDebugAndroidTest --rerun-tasks \
-  -Pandroid.testInstrumentationRunnerArguments.class=dev.cockpit.app.ui.ChatListTest
+  -Pandroid.testInstrumentationRunnerArguments.class=dev.scoutr.app.ui.ChatListTest
 ```
 
 For visual verification, use a deterministic `ChatListTest` fixture containing at least 30 short entries and one tall final entry. Record the emulator during each gesture sequence with a bounded screen recording, then pull it for inspection:
@@ -74,8 +74,8 @@ Start the second-terminal recorder before each gesture sequence. A timeout at th
 ## Scope
 
 **In scope**:
-- `android/app/src/main/java/dev/cockpit/app/ui/screens/ChatScreen.kt`
-- `android/app/src/androidTest/java/dev/cockpit/app/ui/ChatListTest.kt`
+- `android/app/src/main/java/dev/scoutr/app/ui/screens/ChatScreen.kt`
+- `android/app/src/androidTest/java/dev/scoutr/app/ui/ChatListTest.kt`
 
 **Out of scope**:
 - Chat transcript parsing, polling cadence, or WebSocket behavior

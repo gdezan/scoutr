@@ -2,7 +2,7 @@
 
 > **Executor instructions**: Execute and visually verify each step. Stop rather than inventing a different interaction. Update `design-plans/README.md` when done.
 >
-> **Drift check (run first)**: `git diff --stat 0e67682..HEAD -- android/app/src/main/java/dev/cockpit/app/ui/screens/BoardScreen.kt android/app/src/androidTest/java/dev/cockpit/app/ui/BoardScreenTest.kt`
+> **Drift check (run first)**: `git diff --stat 0e67682..HEAD -- android/app/src/main/java/dev/scoutr/app/ui/screens/BoardScreen.kt android/app/src/androidTest/java/dev/scoutr/app/ui/BoardScreenTest.kt`
 
 ## Status
 
@@ -45,7 +45,7 @@ This plan is self-contained; target only the emulator and bound all commands:
 cd android
 ANDROID_HOME=$HOME/Android/sdk timeout 300 ./gradlew testDebugUnitTest --rerun-tasks
 ANDROID_SERIAL=emulator-5554 ANDROID_HOME=$HOME/Android/sdk timeout 180 ./gradlew connectedDebugAndroidTest --rerun-tasks \
-  -Pandroid.testInstrumentationRunnerArguments.class=dev.cockpit.app.ui.BoardScreenTest
+  -Pandroid.testInstrumentationRunnerArguments.class=dev.scoutr.app.ui.BoardScreenTest
 ANDROID_HOME=$HOME/Android/sdk timeout 300 ./gradlew pixel2api36DebugAndroidTest --rerun-tasks
 ANDROID_HOME=$HOME/Android/sdk timeout 300 ./gradlew assembleDebug
 ```
@@ -53,17 +53,17 @@ ANDROID_HOME=$HOME/Android/sdk timeout 300 ./gradlew assembleDebug
 Use `BoardScreenTest`'s existing `BoardViewModel initialState` seam to render a working card without a bridge. Add a test-only `captureToImage()` PNG helper and save three fixtures: normal card, open overflow menu, and Close confirmation. Pull them from the printed `targetContext.getExternalFilesDir(null)` path, normally:
 
 ```bash
-timeout 30 adb -s emulator-5554 pull /sdcard/Android/data/dev.cockpit.app/files/board-card.png /tmp/
-timeout 30 adb -s emulator-5554 pull /sdcard/Android/data/dev.cockpit.app/files/board-menu.png /tmp/
-timeout 30 adb -s emulator-5554 pull /sdcard/Android/data/dev.cockpit.app/files/board-close-confirm.png /tmp/
+timeout 30 adb -s emulator-5554 pull /sdcard/Android/data/dev.scoutr.app/files/board-card.png /tmp/
+timeout 30 adb -s emulator-5554 pull /sdcard/Android/data/dev.scoutr.app/files/board-menu.png /tmp/
+timeout 30 adb -s emulator-5554 pull /sdcard/Android/data/dev.scoutr.app/files/board-close-confirm.png /tmp/
 ```
 
 Inspect all PNGs directly. Use the exact printed path if it differs.
 ## Scope
 
 **In scope**:
-- `android/app/src/main/java/dev/cockpit/app/ui/screens/BoardScreen.kt`
-- `android/app/src/androidTest/java/dev/cockpit/app/ui/BoardScreenTest.kt`
+- `android/app/src/main/java/dev/scoutr/app/ui/screens/BoardScreen.kt`
+- `android/app/src/androidTest/java/dev/scoutr/app/ui/BoardScreenTest.kt`
 
 **Out of scope**:
 - Board polling/status grouping

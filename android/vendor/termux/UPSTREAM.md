@@ -1,7 +1,7 @@
 # Vendored: Termux terminal-emulator + terminal-view
 
 This directory vendors a minimal, adapted subset of the [Termux](https://github.com/termux/termux-app)
-terminal stack for Cockpit's full-screen interactive terminal. The upstream code is Apache-2.0
+terminal stack for Scoutr's full-screen interactive terminal. The upstream code is Apache-2.0
 licensed (see below); all adaptations are documented in this file.
 
 ## Upstream source
@@ -50,7 +50,7 @@ Excluded (local-process/PTY/JNI path, never part of the remote model):
 - Everything else in termux-app: `termux-shared`, `app`, `terminal-view`'s `text-selection`
   dependencies on app code, etc.
 
-## Adaptations (Cockpit)
+## Adaptations (Scoutr)
 
 Exactly two source files are modified from upstream; everything else in `src/` is byte-identical.
 
@@ -58,12 +58,12 @@ Exactly two source files are modified from upstream; everything else in `src/` i
 
 Upstream `TerminalSession` spawns a local shell subprocess on a PTY (`JNI.createSubprocess`,
 reader/writer/waiter threads, `finishIfRunning()`, `getPid()`, `getCwd()`, byte queues, a
-main-thread `Handler`, exit-status reporting). Cockpit's terminal has no local process: bytes come
+main-thread `Handler`, exit-status reporting). Scoutr's terminal has no local process: bytes come
 from and go to a remote transport. The adapted class:
 
 - keeps the name and `extends TerminalOutput`, so `TerminalView`'s contract is unchanged
   (`write`, `writeCodePoint`, `getEmulator`, `updateSize`);
-- drops `final` (Cockpit subclasses it as `RemoteTerminalSession` in the app module);
+- drops `final` (Scoutr subclasses it as `RemoteTerminalSession` in the app module);
 - constructor becomes `TerminalSession(Integer transcriptRows, TerminalSessionClient client)` —
   no shell path/cwd/args/env;
 - adds `appendOutput(byte[], int, int)` — remote output in, emulator `append()` + screen notify
@@ -78,7 +78,7 @@ from and go to a remote transport. The adapted class:
 
 ### `terminal-view/.../TerminalView.java` — `refreshEmulator()`
 
-Cockpit's `RemoteTerminalSession` replaces its `TerminalEmulator` on every remote stream generation
+Scoutr's `RemoteTerminalSession` replaces its `TerminalEmulator` on every remote stream generation
 (pane switch, reconnect, takeover; see `resetForGeneration` above), while upstream Termux never
 replaces an emulator inside a live session. The view's private `mEmulator` reference would
 otherwise stay stale and repaint the previous generation's content forever. Added one public
@@ -93,7 +93,7 @@ tests still pass unmodified.
 
 - OSC 52 (clipboard set) is decoded with `android.util.Base64` and delivered via
   `TerminalOutput.onCopyTextToClipboard` → `TerminalSessionClient.onCopyTextToClipboard`.
-  Cockpit blocks it in `RemoteTerminalSession` (see app `terminal/` package).
+  Scoutr blocks it in `RemoteTerminalSession` (see app `terminal/` package).
 - The pinned emulator has **no** OSC 8 / hyperlink parsing; link handling, when it arrives, must
   be app-side (documented in `.plans/full-screen-interactive-terminal.md`).
 - OSC 0/1/2 → `TerminalSessionClient.onTitleChanged`; BEL → `onBell`; OSC 4/10/11/12/104 →

@@ -34,7 +34,7 @@ function makeEnv(
   scenario: string,
   overrides: { handshakeTimeoutMs?: number; releaseGraceMs?: number; termGraceMs?: number } = {},
 ): Env {
-  const dir = mkdtempSync(join(tmpdir(), "cockpit-term-"));
+  const dir = mkdtempSync(join(tmpdir(), "scoutr-term-"));
   const argLog = join(dir, "args.log");
   const stdinLog = join(dir, "stdin.log");
   const launcher = new HerdrTerminalLauncher({

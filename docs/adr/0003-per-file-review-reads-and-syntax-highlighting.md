@@ -1,6 +1,6 @@
 # Per-file review reads and syntax highlighting
 
-Cockpit's review center moves from one globally truncated diff to a stat-first, per-file model served by three read-only bridge endpoints, and the Android DiffMode gains lazy per-file loading, a full-file view, wrapping, and syntax highlighting via the maintained `dev.snipme:highlights` library.
+Scoutr's review center moves from one globally truncated diff to a stat-first, per-file model served by three read-only bridge endpoints, and the Android DiffMode gains lazy per-file loading, a full-file view, wrapping, and syntax highlighting via the maintained `dev.snipme:highlights` library.
 
 ## Context
 
@@ -16,7 +16,7 @@ The bridge capped the whole combined diff at 64 KiB/800 lines; files past the ca
 - The commit log gains a `~2 KiB` bounded `body` field parsed from `%b`.
 - Android `DiffMode` lazy-fetches one file at a time through `ReviewViewModel` with per-(ref, kind, file) caches, auto-selects the first file per diff session, navigates via prev/next buttons plus a bottom-sheet picker with a filter and full path + stats, and toggles between Diff hunks and the final File content.
 - Line wrapping is a toggle in the diff header, default off (horizontal scroll).
-- Syntax highlighting uses `dev.snipme:highlights` v1.0.0, which returns token ranges rather than rendering; a custom `SyntaxTheme` carries Cockpit's own palette colors back through `ColorHighlight.rgb`. Diff identity colors stay on the line while token colors compose on top via `AnnotatedString` spans; `+++`/`---`/`@@` lines stay plain. JSON/Markdown/YAML/text get a tiny generic fallback tokenizer (strings, numbers, comments, keywords).
+- Syntax highlighting uses `dev.snipme:highlights` v1.0.0, which returns token ranges rather than rendering; a custom `SyntaxTheme` carries Scoutr's own palette colors back through `ColorHighlight.rgb`. Diff identity colors stay on the line while token colors compose on top via `AnnotatedString` spans; `+++`/`---`/`@@` lines stay plain. JSON/Markdown/YAML/text get a tiny generic fallback tokenizer (strings, numbers, comments, keywords).
 - Commit rows open a `ModalBottomSheet` with the full bounded body and a "Diff vs parent" action; the working-tree row keeps its direct diff.
 
 ## Why v1.0.0 of highlights

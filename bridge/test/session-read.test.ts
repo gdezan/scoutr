@@ -25,7 +25,7 @@ function fixtureJsonl(): string {
 }
 
 function fixtureDir(): { dir: string; agentDir: string; file: string } {
-  const dir = mkdtempSync(join(tmpdir(), "cockpit-session-"));
+  const dir = mkdtempSync(join(tmpdir(), "scoutr-session-"));
   const agentDir = join(dir, "agent");
   const sessionsDir = join(agentDir, "sessions");
   mkdirSync(sessionsDir, { recursive: true });

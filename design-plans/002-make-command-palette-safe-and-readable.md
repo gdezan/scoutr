@@ -2,7 +2,7 @@
 
 > **Executor instructions**: Follow this plan step by step and inspect each requested screenshot. Stop on any STOP condition. Update `design-plans/README.md` when done.
 >
-> **Drift check (run first)**: `git diff --stat 0e67682..HEAD -- android/app/src/main/java/dev/cockpit/app/ui/screens/CommandPalette.kt android/app/src/androidTest/java/dev/cockpit/app/ui/CommandPaletteTest.kt`
+> **Drift check (run first)**: `git diff --stat 0e67682..HEAD -- android/app/src/main/java/dev/scoutr/app/ui/screens/CommandPalette.kt android/app/src/androidTest/java/dev/scoutr/app/ui/CommandPaletteTest.kt`
 
 ## Status
 
@@ -15,7 +15,7 @@
 
 ## Why this matters
 
-The palette is used to act quickly on live agents. Its titles currently render nearly black on the near-black dialog, while Abort and Close remain legible; this makes the action target hard to identify. Close also executes immediately even though Cockpit's established risk model confirmation-gates pane closure. Abort is deliberately recoverable and must remain direct.
+The palette is used to act quickly on live agents. Its titles currently render nearly black on the near-black dialog, while Abort and Close remain legible; this makes the action target hard to identify. Close also executes immediately even though Scoutr's established risk model confirmation-gates pane closure. Abort is deliberately recoverable and must remain direct.
 
 ## Current state
 
@@ -61,7 +61,7 @@ This plan is self-contained; target only the emulator and bound all commands:
 cd android
 ANDROID_HOME=$HOME/Android/sdk timeout 300 ./gradlew testDebugUnitTest --rerun-tasks
 ANDROID_SERIAL=emulator-5554 ANDROID_HOME=$HOME/Android/sdk timeout 180 ./gradlew connectedDebugAndroidTest --rerun-tasks \
-  -Pandroid.testInstrumentationRunnerArguments.class=dev.cockpit.app.ui.CommandPaletteTest
+  -Pandroid.testInstrumentationRunnerArguments.class=dev.scoutr.app.ui.CommandPaletteTest
 ANDROID_HOME=$HOME/Android/sdk timeout 300 ./gradlew pixel2api36DebugAndroidTest --rerun-tasks
 ANDROID_HOME=$HOME/Android/sdk timeout 300 ./gradlew assembleDebug
 ```
@@ -69,17 +69,17 @@ ANDROID_HOME=$HOME/Android/sdk timeout 300 ./gradlew assembleDebug
 Make the populated-state tests visual fixtures using a test-only helper in `CommandPaletteTest.kt`: capture `compose.onRoot().captureToImage().asAndroidBitmap()`, save PNGs under `targetContext.getExternalFilesDir(null)`, and print their paths. The existing `viewModel()`/fake bridge seam supplies agent rows; add one fixture for the populated palette, one after tapping Close, and one busy row. Pull and inspect:
 
 ```bash
-timeout 30 adb -s emulator-5554 pull /sdcard/Android/data/dev.cockpit.app/files/palette-populated.png /tmp/
-timeout 30 adb -s emulator-5554 pull /sdcard/Android/data/dev.cockpit.app/files/palette-close-confirm.png /tmp/
-timeout 30 adb -s emulator-5554 pull /sdcard/Android/data/dev.cockpit.app/files/palette-busy.png /tmp/
+timeout 30 adb -s emulator-5554 pull /sdcard/Android/data/dev.scoutr.app/files/palette-populated.png /tmp/
+timeout 30 adb -s emulator-5554 pull /sdcard/Android/data/dev.scoutr.app/files/palette-close-confirm.png /tmp/
+timeout 30 adb -s emulator-5554 pull /sdcard/Android/data/dev.scoutr.app/files/palette-busy.png /tmp/
 ```
 
 Use the exact printed path if the external-files path differs.
 ## Scope
 
 **In scope**:
-- `android/app/src/main/java/dev/cockpit/app/ui/screens/CommandPalette.kt`
-- `android/app/src/androidTest/java/dev/cockpit/app/ui/CommandPaletteTest.kt`
+- `android/app/src/main/java/dev/scoutr/app/ui/screens/CommandPalette.kt`
+- `android/app/src/androidTest/java/dev/scoutr/app/ui/CommandPaletteTest.kt`
 
 **Out of scope**:
 - `CommandPaletteViewModel` control semantics

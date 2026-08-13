@@ -8,14 +8,14 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
 
     <application
-        android:name=".CockpitApp"
+        android:name=".ScoutrApp"
         android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:supportsRtl="true"
-        android:theme="@style/Theme.Cockpit"
+        android:theme="@style/Theme.Scoutr"
         android:usesCleartextTraffic="false">
 
         <activity
@@ -31,12 +31,12 @@
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="cockpit" />
+                <data android:scheme="scoutr" />
             </intent-filter>
         </activity>
 
         <service
-            android:name=".service.CockpitMonitorService"
+            android:name=".service.ScoutrMonitorService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
 

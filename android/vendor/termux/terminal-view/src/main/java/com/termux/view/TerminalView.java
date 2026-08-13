@@ -455,7 +455,7 @@ public final class TerminalView extends View {
     }
 
     /**
-     * Re-fetch the emulator from the attached session and repaint. Cockpit-only:
+     * Re-fetch the emulator from the attached session and repaint. Scoutr-only:
      * RemoteTerminalSession replaces its emulator on every remote stream
      * generation (resetForGeneration), so a view must re-fetch rather than keep
      * the previous emulator; upstream Termux never replaces an emulator inside a

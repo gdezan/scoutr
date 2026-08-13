@@ -1,4 +1,4 @@
-# Cockpit agent instructions
+# Scoutr agent instructions
 
 ## Git workflow
 
@@ -6,17 +6,17 @@
 
 ## Project map
 
-Cockpit is a self-hosted mobile cockpit for herdr panes and pi agents. A Node/TypeScript bridge daemon owns the herdr Unix socket and exposes a private HTTP/WS API; the Android app talks only to that API.
+Scoutr is a self-hosted mobile scoutr for herdr panes and pi agents. A Node/TypeScript bridge daemon owns the herdr Unix socket and exposes a private HTTP/WS API; the Android app talks only to that API.
 
-- `bridge/` — Node/TS daemon. Entry: `src/cli.ts serve`; `server.ts` only exports `createCockpitServer`.
+- `bridge/` — Node/TS daemon. Entry: `src/cli.ts serve`; `server.ts` only exports `createScoutrServer`.
   - `herdr/` owns socket client/feed and the `port.ts` seam.
   - `routes/` owns auth/body/error mapping.
   - Agent adapters live under `agents/`; shared JSONL parsing is in `transcript.ts`.
   - Terminal child-process transport belongs under `terminal/`; do not put it on `HerdrPort`.
   - Tests live in `bridge/test/`; offline HTTP tests use `bridge/test/support/fake-herdr.ts` and `fake-feed.ts`.
-- `android/` — Kotlin + Jetpack Compose Material 3, package `dev.cockpit.app`; manual DI via `CockpitApp.AppContainer` (no Hilt/Room).
+- `android/` — Kotlin + Jetpack Compose Material 3, package `dev.scoutr.app`; manual DI via `ScoutrApp.AppContainer` (no Hilt/Room).
   - `data/` DTOs + SharedPreferences stores
-  - `net/` `BridgeClient` behind `CockpitApi`, plus `NtfyClient`
+  - `net/` `BridgeClient` behind `ScoutrApi`, plus `NtfyClient`
   - `state/` ViewModels
   - `service/` monitor service, deep links, reply receiver
   - `ui/components/`, `ui/screens/`, `ui/theme/`, `ui/motion/`
@@ -25,12 +25,12 @@ Cockpit is a self-hosted mobile cockpit for herdr panes and pi agents. A Node/Ty
 
 Primary references:
 
-- Design contract: `android/app/src/main/java/dev/cockpit/app/ui/theme/DESIGN.md`
+- Design contract: `android/app/src/main/java/dev/scoutr/app/ui/theme/DESIGN.md`
 - Current UX work and execution order: `design-plans/README.md`
 - Interactive terminal handoff: `.plans/full-screen-interactive-terminal.md`
 - Durable architecture decisions: `docs/adr/`
 - Verification recipes, emulator workflow, and failure recovery: `docs/dev-workflow.md`
-- Verification skill: `skills/cockpit-verification/SKILL.md`
+- Verification skill: `skills/scoutr-verification/SKILL.md`
 - Herdr agent orchestration: global `herdr-agent-delegation` skill
 
 ## Operating rules
@@ -51,7 +51,7 @@ Primary references:
 - Verification must remain proportional to risk. Each additional suite or runtime check must cover a material risk not already addressed.
 - Prefer incremental builds; use `--rerun-tasks` only when stale Gradle output is suspected or a specific task must genuinely be forced.
 - For slow/noisy/device-bound checks inside Herdr, prefer a sibling pane and `pane wait-output` on an explicit unique completion condition rather than sleeps or guessed durations.
-- Use `skills/cockpit-verification/SKILL.md` for the phase boundary, targeted checks, final runtime evidence, and full-verification criteria.
+- Use `skills/scoutr-verification/SKILL.md` for the phase boundary, targeted checks, final runtime evidence, and full-verification criteria.
 
 ## Project invariants and traps
 
@@ -59,12 +59,12 @@ Primary references:
 - Motion does not bounce or spin. Agent-busy state uses the expanding-ripple `WorkingIndicator`; under `LocalReduceMotion` it becomes a static ring. Prefer it over `CircularProgressIndicator` for agent-busy states.
 - Status mapping is consistent across screens: `blocked/NeedsYou -> error`, `working -> primary`, `done -> secondary`.
 - Interactive terminal is one full-screen Herdr pane at a time with an overlay hierarchy selector; do not put raw terminal output back on Chat.
-- ViewModels talk to `CockpitApi`; `BridgeClient` implements it. Unit tests use `FakeCockpitApi`. Emulator tests use a real `BridgeClient` with a fresh **unsaved** `ConnectionStore` so ViewModels do not start polling.
-- Run instrumentation only on the emulator, never the physical Pixel. If `emulator-5554` is absent, boot the `cockpit` AVD and confirm the target with `adb devices`.
+- ViewModels talk to `ScoutrApi`; `BridgeClient` implements it. Unit tests use `FakeScoutrApi`. Emulator tests use a real `BridgeClient` with a fresh **unsaved** `ConnectionStore` so ViewModels do not start polling.
+- Run instrumentation only on the emulator, never the physical Pixel. If `emulator-5554` is absent, boot the `scoutr` AVD and confirm the target with `adb devices`.
 - `MockWebServer.url()` performs reverse DNS; never call it on the main thread.
 - Robolectric shares SharedPreferences across tests; explicitly save/clear connections.
 - readSeek anchors are invalid after editing the same file; re-grep/re-digest, or use plain `edit` for small changes.
-- `XDG_CONFIG_HOME` selects the bridge config dir; `COCKPIT_REPO_ROOTS` allow-lists review repos; config tokens must be at least 16 characters.
+- `XDG_CONFIG_HOME` selects the bridge config dir; `SCOUTR_REPO_ROOTS` allow-lists review repos; config tokens must be at least 16 characters.
 - ntfy drops custom JSON publish fields; deep links belong in ntfy's documented `click` field.
 - Composer contract: Enter inserts a newline and must never send; keep multiline + `ImeAction.None` + no-op `KeyboardActions`.
 - `pkill -f` / `pgrep -f` can match their own shell command. Use bracketed patterns or a pid mechanism.
@@ -73,9 +73,9 @@ Primary references:
 ## Task-specific workflows
 
 - **Herdr agent delegation:** use the global `herdr-agent-delegation` skill for sibling-pane agent start/prompt/wait/read/cleanup. Lifecycle state is the source of truth; do not replace it with sleep/poll/sentinel loops.
-- **Visual/UI evidence:** inspect screenshots or rendered UI directly when vision is available; otherwise use `skills/cockpit-vision/SKILL.md`. Do not infer visual correctness from code alone.
-- **Pre-commit review:** use `skills/cockpit-review/SKILL.md`. Every concrete finding must be fixed or consciously dismissed before committing.
-- **Verification/emulator work:** use `skills/cockpit-verification/SKILL.md` and `docs/dev-workflow.md` for the full procedure and recovery steps.
+- **Visual/UI evidence:** inspect screenshots or rendered UI directly when vision is available; otherwise use `skills/scoutr-vision/SKILL.md`. Do not infer visual correctness from code alone.
+- **Pre-commit review:** use `skills/scoutr-review/SKILL.md`. Every concrete finding must be fixed or consciously dismissed before committing.
+- **Verification/emulator work:** use `skills/scoutr-verification/SKILL.md` and `docs/dev-workflow.md` for the full procedure and recovery steps.
 
 ## Engineering principles
 

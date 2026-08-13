@@ -91,13 +91,13 @@ describe("sessionWorkspaceRoots", () => {
   let scratch: string;
 
   before(() => {
-    repoA = mkdtempSync(join(tmpdir(), "cockpit-roots-a-"));
-    repoB = mkdtempSync(join(tmpdir(), "cockpit-roots-b-"));
-    scratch = mkdtempSync(join(tmpdir(), "cockpit-roots-scratch-"));
+    repoA = mkdtempSync(join(tmpdir(), "scoutr-roots-a-"));
+    repoB = mkdtempSync(join(tmpdir(), "scoutr-roots-b-"));
+    scratch = mkdtempSync(join(tmpdir(), "scoutr-roots-scratch-"));
     for (const repo of [repoA, repoB]) {
       execFileSync("git", ["init", "-q", "-b", "main", repo]);
-      execFileSync("git", ["config", "user.email", "test@cockpit.dev"], { cwd: repo });
-      execFileSync("git", ["config", "user.name", "Cockpit Test"], { cwd: repo });
+      execFileSync("git", ["config", "user.email", "test@scoutr.dev"], { cwd: repo });
+      execFileSync("git", ["config", "user.name", "Scoutr Test"], { cwd: repo });
       execFileSync("git", ["commit", "-q", "--allow-empty", "-m", "initial"], { cwd: repo });
     }
   });

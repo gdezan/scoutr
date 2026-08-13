@@ -3,7 +3,7 @@ import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { createCockpitServer, type CockpitServer } from "../src/server.js";
+import { createScoutrServer, type ScoutrServer } from "../src/server.js";
 import type { PaneInfo } from "../src/herdr/types.js";
 import { fakeHerdr, type SentInput } from "./support/fake-herdr.js";
 import { FakeTerminalLauncher } from "./support/fake-terminal.js";
@@ -44,7 +44,7 @@ function fakeDeps(sessionCatalogRoot?: string) {
       herdr: fake,
       feed: feed as never,
       usage: usage as never,
-      config: { token: TOKEN, port: PORT },
+      config: { configDir: "/tmp/scoutr-test-config", token: TOKEN, port: PORT },
       terminal: new FakeTerminalLauncher(),
       sessionCatalogRoot,
     },
@@ -91,17 +91,17 @@ function lastLaunch(sent: readonly SentInput[]): string {
 }
 
 describe("POST /api/sessions and /api/sessions/:paneId/control", () => {
-  let server: CockpitServer;
+  let server: ScoutrServer;
   let sent: SentInput[];
   let snapshot: ReturnType<typeof fakeHerdr>;
   let sessionRoot: string;
   let sessionPath: string;
 
   before(async () => {
-    sessionRoot = await mkdtemp(join(homedir(), ".cockpit-session-http-"));
+    sessionRoot = await mkdtemp(join(homedir(), ".scoutr-session-http-"));
     process.env.PI_CODING_AGENT_SESSION_DIR = sessionRoot;
     // Isolate the claude backend's store so catalog scans stay hermetic.
-    process.env.CLAUDECONFIGDIR = await mkdtemp(join(tmpdir(), "cockpit-http-claude-"));
+    process.env.CLAUDECONFIGDIR = await mkdtemp(join(tmpdir(), "scoutr-http-claude-"));
     await mkdir(join(process.env.CLAUDECONFIGDIR, "projects"), { recursive: true });
     const project = join(sessionRoot, "project");
     await mkdir(project);
@@ -116,7 +116,7 @@ describe("POST /api/sessions and /api/sessions/:paneId/control", () => {
     const fake = fakeDeps(sessionRoot);
     sent = fake.sent;
     snapshot = fake.fake;
-    server = createCockpitServer(fake.deps, { listen: true });
+    server = createScoutrServer(fake.deps, { listen: true });
   });
 
   after(async () => {

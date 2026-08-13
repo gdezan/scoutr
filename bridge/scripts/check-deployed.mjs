@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
- * Deployment freshness gate for the self-hosted cockpit bridge.
+ * Deployment freshness gate for the self-hosted scoutr bridge.
  *
- * The Android/desktop apps talk to the systemd `cockpit-bridge.service`,
+ * The Android/desktop apps talk to the systemd `scoutr-bridge.service`,
  * which runs the COMPILED `dist/` output — NOT the `tsx src/cli.ts` scratch
  * bridge that development and tests use. A `dist/` built before a source
  * change, or a service that was never restarted after a build, silently
@@ -64,7 +64,7 @@ try {
     [
       "--user",
       "show",
-      "cockpit-bridge.service",
+      "scoutr-bridge.service",
       "-p",
       "ActiveState",
       "-p",
@@ -86,28 +86,28 @@ try {
   serviceMainPid = values.MainPID ?? "";
   if (values.ActiveState !== "active" || values.SubState !== "running" || !serviceMainPid || serviceMainPid === "0") {
     fail(
-      `cockpit-bridge.service is not running (state=${values.ActiveState ?? "unknown"}/${values.SubState ?? "unknown"}, pid=${serviceMainPid || "none"})`,
+      `scoutr-bridge.service is not running (state=${values.ActiveState ?? "unknown"}/${values.SubState ?? "unknown"}, pid=${serviceMainPid || "none"})`,
     );
   }
   const stamp = values.ExecMainStartTimestamp?.trim();
   if (!stamp) {
-    fail("cannot read cockpit-bridge.service start time");
+    fail("cannot read scoutr-bridge.service start time");
   } else {
     const started = Date.parse(stamp);
     console.log(`service started ${stamp}`);
     if (Number.isNaN(started)) {
-      fail(`cannot parse cockpit-bridge.service start time: ${stamp}`);
+      fail(`cannot parse scoutr-bridge.service start time: ${stamp}`);
     } else if (started < newestDist) {
-      fail("cockpit-bridge.service started BEFORE dist/ was built — restart it (`npm run deploy`)");
+      fail("scoutr-bridge.service started BEFORE dist/ was built — restart it (`npm run deploy`)");
     }
   }
 } catch (e) {
-  fail(`cannot query cockpit-bridge.service: ${e.message}`);
+  fail(`cannot query scoutr-bridge.service: ${e.message}`);
 }
 
 // Probe the real local bridge (the process the apps reach via tailscale serve).
 try {
-  const cfg = JSON.parse(readFileSync(join(homedir(), ".config/cockpit/config.json"), "utf8"));
+  const cfg = JSON.parse(readFileSync(join(homedir(), ".config/scoutr/config.json"), "utf8"));
   const port = cfg.port ?? 8737;
   const token = cfg.token;
   const listeners = execFileSync("ss", ["-ltnp"], { encoding: "utf8" });
@@ -116,7 +116,7 @@ try {
     return fields[0] === "LISTEN" && fields[3]?.endsWith(`:${port}`) && line.includes(`pid=${serviceMainPid},`);
   });
   if (!serviceOwnsPort) {
-    fail(`cockpit-bridge.service PID ${serviceMainPid || "none"} does not own listening port ${port}`);
+    fail(`scoutr-bridge.service PID ${serviceMainPid || "none"} does not own listening port ${port}`);
   }
   const resp = execFileSync(
     "curl",

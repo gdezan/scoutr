@@ -42,7 +42,7 @@ export interface ServerDeps {
 /**
  * Route deps: ServerDeps plus the per-server derived state the server owns
  * (status timestamps and the bounded board-detail cache). The server builds
- * these inside createCockpitServer and hands them to every handler.
+ * these inside createScoutrServer and hands them to every handler.
  */
 export interface RouteDeps extends ServerDeps {
   tracker: StatusTracker;

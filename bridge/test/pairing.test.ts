@@ -5,35 +5,35 @@ import { buildPairingPayload, parsePairingPayload } from "../src/pairing.js";
 test("buildPairingPayload emits compact v1 JSON with host + token", () => {
   const payload = buildPairingPayload({
     host: "https://artemis.tail7dc568.ts.net",
-    token: "cockpit_secret",
+    token: "scoutr_secret",
   });
-  assert.equal(payload, '{"v":1,"host":"https://artemis.tail7dc568.ts.net","token":"cockpit_secret"}');
+  assert.equal(payload, '{"v":1,"host":"https://artemis.tail7dc568.ts.net","token":"scoutr_secret"}');
 });
 
 test("buildPairingPayload includes ntfy when both url and topic are set", () => {
   const payload = buildPairingPayload({
     host: "https://artemis.tail7dc568.ts.net",
-    token: "cockpit_secret",
+    token: "scoutr_secret",
     ntfyUrl: "https://artemis.tail7dc568.ts.net/ntfy",
-    ntfyTopic: "cockpit_topic",
+    ntfyTopic: "scoutr_topic",
   });
   assert.deepEqual(parsePairingPayload(payload), {
     v: 1,
     host: "https://artemis.tail7dc568.ts.net",
-    token: "cockpit_secret",
-    ntfy: { url: "https://artemis.tail7dc568.ts.net/ntfy", topic: "cockpit_topic" },
+    token: "scoutr_secret",
+    ntfy: { url: "https://artemis.tail7dc568.ts.net/ntfy", topic: "scoutr_topic" },
   });
 });
 
 test("parsePairingPayload round-trips the builder output", () => {
   const built = buildPairingPayload({
     host: "http://127.0.0.1:8737",
-    token: "cockpit_abc",
+    token: "scoutr_abc",
   });
   assert.deepEqual(parsePairingPayload(built), {
     v: 1,
     host: "http://127.0.0.1:8737",
-    token: "cockpit_abc",
+    token: "scoutr_abc",
   });
 });
 

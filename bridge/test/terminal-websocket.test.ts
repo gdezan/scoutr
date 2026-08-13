@@ -1,7 +1,7 @@
 /**
  * Terminal WebSocket contract matrix (offline).
  *
- * Real HTTP upgrades + real `ws` clients against createCockpitServer with a
+ * Real HTTP upgrades + real `ws` clients against createScoutrServer with a
  * FakeTerminalLauncher, plus adapter-level slow-client/input-queue tests on a
  * scriptable fake socket. The broker's grace and slow-client bounds are
  * injected small so expiry tests run in milliseconds.
@@ -10,7 +10,7 @@
 import { test, describe, before, after } from "node:test";
 import assert from "node:assert/strict";
 import WebSocket from "ws";
-import { createCockpitServer, type CockpitServer } from "../src/server.js";
+import { createScoutrServer, type ScoutrServer } from "../src/server.js";
 import { TerminalSessionBroker } from "../src/terminal/broker.js";
 import { TerminalConnection } from "../src/terminal/websocket.js";
 import type { TerminalSocketLike } from "../src/terminal/websocket.js";
@@ -192,22 +192,22 @@ async function waitUntil(condition: () => boolean, timeoutMs = 3000): Promise<vo
 }
 
 describe("terminal websocket contract (offline)", () => {
-  let server: CockpitServer;
+  let server: ScoutrServer;
   let launcher: FakeTerminalLauncher;
   let feed: ReturnType<typeof fakeFeed>;
 
   before(async () => {
     launcher = new FakeTerminalLauncher();
     feed = fakeFeed(snapshotWithPanes(["w1:p1", "w1:p2"]));
-    server = createCockpitServer({
+    server = createScoutrServer({
       herdr: fakeHerdr(),
       feed,
       usage: { all: async () => ({}) } as never,
-      config: { token: TOKEN, port: PORT },
+      config: { configDir: "/tmp/scoutr-test-config", token: TOKEN, port: PORT },
       terminal: launcher,
       terminalOptions: { graceMs: 120 },
     });
-    // createCockpitServer listens synchronously (default listen: true).
+    // createScoutrServer listens synchronously (default listen: true).
   });
 
   after(async () => {

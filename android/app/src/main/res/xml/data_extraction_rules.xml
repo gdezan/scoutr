@@ -2,9 +2,9 @@
 <data-extraction-rules>
     <cloud-backup>
         <!-- The pairing token must not reach Google Drive backups. -->
-        <exclude domain="sharedpref" path="cockpit_connection.xml" />
+        <exclude domain="sharedpref" path="scoutr_connection.xml" />
     </cloud-backup>
     <device-transfer>
-        <exclude domain="sharedpref" path="cockpit_connection.xml" />
+        <exclude domain="sharedpref" path="scoutr_connection.xml" />
     </device-transfer>
 </data-extraction-rules>

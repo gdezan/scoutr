@@ -2,7 +2,7 @@
 
 > **Executor instructions**: Follow this plan step by step. After each step, run the stated verification and inspect screenshots before continuing. If a STOP condition occurs, stop and report rather than improvising. When done, update this plan's row in `design-plans/README.md`.
 >
-> **Drift check (run first)**: `git diff --stat 0e67682..HEAD -- android/app/src/main/java/dev/cockpit/app/ui/screens/SessionPickers.kt android/app/src/main/java/dev/cockpit/app/ui/screens/ConversationConfigSheet.kt android/app/src/main/java/dev/cockpit/app/ui/screens/CommandPalette.kt android/app/src/main/java/dev/cockpit/app/ui/screens/HistoryScreen.kt android/app/src/androidTest/java/dev/cockpit/app/ui/NewSessionSheetTest.kt android/app/src/androidTest/java/dev/cockpit/app/ui/ChatControlsTest.kt android/app/src/androidTest/java/dev/cockpit/app/ui/CommandPaletteTest.kt android/app/src/androidTest/java/dev/cockpit/app/ui/HistoryScreenTest.kt`
+> **Drift check (run first)**: `git diff --stat 0e67682..HEAD -- android/app/src/main/java/dev/scoutr/app/ui/screens/SessionPickers.kt android/app/src/main/java/dev/scoutr/app/ui/screens/ConversationConfigSheet.kt android/app/src/main/java/dev/scoutr/app/ui/screens/CommandPalette.kt android/app/src/main/java/dev/scoutr/app/ui/screens/HistoryScreen.kt android/app/src/androidTest/java/dev/scoutr/app/ui/NewSessionSheetTest.kt android/app/src/androidTest/java/dev/scoutr/app/ui/ChatControlsTest.kt android/app/src/androidTest/java/dev/scoutr/app/ui/CommandPaletteTest.kt android/app/src/androidTest/java/dev/scoutr/app/ui/HistoryScreenTest.kt`
 > If Plan 008 is not complete or any list ownership changed, stop and reconcile before editing.
 
 ## Status
@@ -47,7 +47,7 @@ ANDROID_HOME=$HOME/Android/sdk timeout 300 ./gradlew testDebugUnitTest --rerun-t
 ANDROID_HOME=$HOME/Android/sdk timeout 300 ./gradlew pixel2api36DebugAndroidTest --rerun-tasks
 ANDROID_HOME=$HOME/Android/sdk timeout 300 ./gradlew assembleDebug
 ANDROID_SERIAL=emulator-5554 ANDROID_HOME=$HOME/Android/sdk timeout 180 ./gradlew connectedDebugAndroidTest --rerun-tasks \
-  -Pandroid.testInstrumentationRunnerArguments.class=dev.cockpit.app.ui.NewSessionSheetTest,dev.cockpit.app.ui.ChatControlsTest,dev.cockpit.app.ui.CommandPaletteTest,dev.cockpit.app.ui.HistoryScreenTest
+  -Pandroid.testInstrumentationRunnerArguments.class=dev.scoutr.app.ui.NewSessionSheetTest,dev.scoutr.app.ui.ChatControlsTest,dev.scoutr.app.ui.CommandPaletteTest,dev.scoutr.app.ui.HistoryScreenTest
 ```
 
 All device work must target `emulator-5554` and every `adb` command must use `timeout 30`. Use deterministic fixtures with at least 30 rows so the start and restored positions are visually distinct. Add screenshot helpers to the existing classes only if semantics assertions cannot prove the visible anchor; print and use exact artifact paths.
@@ -55,14 +55,14 @@ All device work must target `emulator-5554` and every `adb` command must use `ti
 ## Scope
 
 **In scope**:
-- `android/app/src/main/java/dev/cockpit/app/ui/screens/SessionPickers.kt`
-- `android/app/src/main/java/dev/cockpit/app/ui/screens/ConversationConfigSheet.kt`
-- `android/app/src/main/java/dev/cockpit/app/ui/screens/CommandPalette.kt`
-- `android/app/src/main/java/dev/cockpit/app/ui/screens/HistoryScreen.kt`
-- `android/app/src/androidTest/java/dev/cockpit/app/ui/NewSessionSheetTest.kt`
-- `android/app/src/androidTest/java/dev/cockpit/app/ui/ChatControlsTest.kt`
-- `android/app/src/androidTest/java/dev/cockpit/app/ui/CommandPaletteTest.kt`
-- `android/app/src/androidTest/java/dev/cockpit/app/ui/HistoryScreenTest.kt`
+- `android/app/src/main/java/dev/scoutr/app/ui/screens/SessionPickers.kt`
+- `android/app/src/main/java/dev/scoutr/app/ui/screens/ConversationConfigSheet.kt`
+- `android/app/src/main/java/dev/scoutr/app/ui/screens/CommandPalette.kt`
+- `android/app/src/main/java/dev/scoutr/app/ui/screens/HistoryScreen.kt`
+- `android/app/src/androidTest/java/dev/scoutr/app/ui/NewSessionSheetTest.kt`
+- `android/app/src/androidTest/java/dev/scoutr/app/ui/ChatControlsTest.kt`
+- `android/app/src/androidTest/java/dev/scoutr/app/ui/CommandPaletteTest.kt`
+- `android/app/src/androidTest/java/dev/scoutr/app/ui/HistoryScreenTest.kt`
 
 **Out of scope**:
 - Search matching/ranking and provider grouping (Plan 008)

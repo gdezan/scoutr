@@ -1,13 +1,13 @@
-# Cockpit
+# Scoutr
 
-A self-hosted Android cockpit for your terminal agents (pi, herdr panes).
+A self-hosted Android scoutr for your terminal agents (pi, herdr panes).
 A free alternative to Moshi's paid herdr integration — no cloud, no
 subscriptions.
 
 ```
 ┌─────────────┐   HTTPS/WSS (tailnet)   ┌──────────────┐   JSONL-RPC   ┌─────────────┐
-│  Android    │ ──────────────────────► │  cockpit-    │ ────────────► │  herdr 0.8  │
-│  app (Cockpit)│                        │  bridge      │               │  (socket)   │
+│  Android    │ ──────────────────────► │  scoutr-    │ ────────────► │  herdr 0.8  │
+│  app (Scoutr)│                        │  bridge      │               │  (socket)   │
 └─────────────┘                         └──────┬───────┘               └─────────────┘
                                                │ creates a herdr pane
                                                ▼
@@ -57,7 +57,7 @@ npm run cli -- herdr status    # smoke: ping + version + protocol
 
 ### First run
 
-`serve` creates `~/.config/cockpit/config.json` (mode 0600) on first start and
+`serve` creates `~/.config/scoutr/config.json` (mode 0600) on first start and
 generates a random pairing token — print it with:
 
 ```bash
@@ -69,10 +69,10 @@ The file looks like:
 
 ```json
 {
-  "token": "cockpit_<random>",
+  "token": "scoutr_<random>",
   "port": 8737,
   "ntfyUrl": "https://artemis.tail7dc568.ts.net/ntfy",
-  "ntfyTopic": "cockpit_<random>"
+  "ntfyTopic": "scoutr_<random>"
 }
 ```
 
@@ -81,11 +81,11 @@ The file looks like:
 
 ### Run as a systemd user unit (recommended)
 
-`~/.config/systemd/user/cockpit-bridge.service`:
+`~/.config/systemd/user/scoutr-bridge.service`:
 
 ```ini
 [Unit]
-Description=Cockpit bridge (herdr socket -> local HTTP/WSS API)
+Description=Scoutr bridge (herdr socket -> local HTTP/WSS API)
 After=herdr.service ntfy.service
 
 [Service]
@@ -105,8 +105,8 @@ mise PATH. Then:
 
 ```bash
 systemctl --user daemon-reload
-systemctl --user enable --now cockpit-bridge
-systemctl --user status cockpit-bridge        # active; port 8737 open
+systemctl --user enable --now scoutr-bridge
+systemctl --user status scoutr-bridge        # active; port 8737 open
 loginctl enable-linger $USER                  # keep units running after logout
 ```
 
@@ -114,9 +114,9 @@ Verify:
 
 ```bash
 curl -s http://127.0.0.1:8737/api/health                    # -> {"ok":false,"error":"unauthorized"} (auth works)
-TOKEN=$(python3 -c "import json;print(json.load(open('$HOME/.config/cockpit/config.json'))['token'])")
+TOKEN=$(python3 -c "import json;print(json.load(open('$HOME/.config/scoutr/config.json'))['token'])")
 curl -s -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8737/api/health
-# {"ok":true,"service":"cockpit-bridge","herdr":{"connected":true,"version":"0.8.0","protocol":19},...}
+# {"ok":true,"service":"scoutr-bridge","herdr":{"connected":true,"version":"0.8.0","protocol":19},...}
 ```
 
 ### Expose on the tailnet
@@ -161,7 +161,7 @@ cache-duration: "48h"
 
 ```ini
 [Unit]
-Description=ntfy push server for cockpit
+Description=ntfy push server for scoutr
 After=network.target
 
 [Service]
@@ -182,7 +182,7 @@ curl -s https://<host>.ts.net/ntfy/v1/health     # healthy over the tailnet
 Restart the bridge so it discovers ntfy, then check health shows the topic:
 
 ```bash
-systemctl --user restart cockpit-bridge
+systemctl --user restart scoutr-bridge
 curl -s -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8737/api/health | python3 -m json.tool
 ```
 
@@ -220,20 +220,20 @@ cd android
 ### Emulator (headless)
 
 ```bash
-avdmanager create avd -n cockpit -k "system-images;android-36;google_apis;x86_64" -d pixel_5
-emulator -avd cockpit -no-window -no-audio -no-boot-anim -no-snapshot \
+avdmanager create avd -n scoutr -k "system-images;android-36;google_apis;x86_64" -d pixel_5
+emulator -avd scoutr -no-window -no-audio -no-boot-anim -no-snapshot \
   -gpu swiftshader_indirect -memory 3072 &
 adb wait-for-device
 # wait for: adb shell getprop sys.boot_completed -> 1
 adb install -r app/build/outputs/apk/debug/app-debug.apk
-adb shell am start -n dev.cockpit.app/.MainActivity
+adb shell am start -n dev.scoutr.app/.MainActivity
 ```
 
 Debug builds allow cleartext HTTP to `10.0.2.2` (the host loopback from the
 emulator), so on the **emulator** the Connect screen takes:
 
 - Bridge address: `http://10.0.2.2:8737`
-- Pairing token: from `~/.config/cockpit/config.json` on the host
+- Pairing token: from `~/.config/scoutr/config.json` on the host
 
 On a **physical phone** use `https://<host>.ts.net` + the same token (TLS, no
 cleartext).
@@ -243,7 +243,7 @@ cleartext).
 ## 5. Using the app
 
 - **Connect** — bridge address + pairing token, or **Scan QR code** to scan the
-  code printed by `cockpit-bridge pair` (fills both fields and connects
+  code printed by `scoutr-bridge pair` (fills both fields and connects
 automatically).
 - **Board** — live agent cards grouped Needs you / Working / Done / Idle with
   counts, status dots, and time-in-state pills. 3s polling; self-heals when the
@@ -284,7 +284,7 @@ scripts/release.sh         # deploy bridge + build + install in one go
 ```
 
 `install-app.sh` targets the single connected device; with several devices use
-`--serial <serial>` (or `COCKPIT_SERIAL`). Install on the S24 over wireless adb
+`--serial <serial>` (or `SCOUTR_SERIAL`). Install on the S24 over wireless adb
 today looks like: `adb pair 100.78.204.15:<port> <code>` then
 `scripts/install-app.sh`.
 
@@ -294,21 +294,21 @@ today looks like: `adb pair 100.78.204.15:<port> <code>` then
 
 | Item | Value |
 |---|---|
-| Bridge listen | `127.0.0.1:8737` (`port` in `~/.config/cockpit/config.json`) |
+| Bridge listen | `127.0.0.1:8737` (`port` in `~/.config/scoutr/config.json`) |
 | ntfy listen | `127.0.0.1:8382` |
 | Tailnet paths | `/` → bridge, `/ntfy` → ntfy |
-| Pairing token | `cockpit_<18 random bytes>` in config.json (0600) |
-| ntfy topic | `cockpit_<12 random bytes>` (shared secret, also in config.json) |
-| `XDG_CONFIG_HOME` | config dir for `config.json` (else `~/.config/cockpit/`) |
+| Pairing token | `scoutr_<18 random bytes>` in config.json (0600) |
+| ntfy topic | `scoutr_<12 random bytes>` (shared secret, also in config.json) |
+| `XDG_CONFIG_HOME` | config dir for `config.json` (else `~/.config/scoutr/`) |
 | `HERDR_SOCKET_PATH` | herdr Unix socket (else `~/.config/herdr/herdr.sock`) |
-| `COCKPIT_REPO_ROOTS` | allow-list of review roots (403 outside it; appears in the 403 message) |
+| `SCOUTR_REPO_ROOTS` | allow-list of review roots (403 outside it; appears in the 403 message) |
 | `PI_CODING_AGENT_DIR` | pi agent dir for usage/models (else `~/.pi/agent`) |
 | `CLAUDECONFIGDIR` | claude config dir (else `~/.claude`) |
 | `PI_CODING_AGENT_SESSION_DIR` | pi session dir for the catalog (else the agent dir's `sessions/`) |
 | `PI_BIN` | path to the pi script (else `~/.local/bin/pi`, mise paths, PATH) |
 | `PI_NODE_BIN` | node used to run pi (else the node next to pi, mise paths) |
-| `publicHost` / `COCKPIT_PUBLIC_HOST` | public bridge URL for QR pairing (else tailscale DNS name, else loopback) |
-| App data | SharedPreferences `cockpit_connection` (host, token, ntfy) |
+| `publicHost` / `SCOUTR_PUBLIC_HOST` | public bridge URL for QR pairing (else tailscale DNS name, else loopback) |
+| App data | SharedPreferences `scoutr_connection` (host, token, ntfy) |
 
 ---
 
@@ -329,7 +329,7 @@ today looks like: `adb pair 100.78.204.15:<port> <code>` then
 | Symptom | Fix |
 |---|---|
 | `serve` exits 127 | systemd unit must use the absolute node path (mise bin), not `node` |
-| stale API after code changes | `npm run build` first, then `systemctl --user restart cockpit-bridge` |
+| stale API after code changes | `npm run build` first, then `systemctl --user restart scoutr-bridge` |
 | 401 on curl/ws | export the token: `TOKEN=$(...); curl -H "Authorization: Bearer $TOKEN" ...` (a bare shell var is not exported to child processes) |
 | ntfy shows raw JSON as message | the bridge POSTs JSON to the ntfy root `/`; if you published to `/<topic>`, messages already stored that way stay raw |
 | push doesn't arrive on the phone | the app polls while a screen is visible (board 3s, chat 2.5s); check `https://<host>.ts.net/ntfy/v1/health`; grant POST_NOTIFICATIONS (Android 13+) |

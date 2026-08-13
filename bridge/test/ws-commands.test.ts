@@ -55,7 +55,7 @@ function makeDeps(agent?: "pi" | "claude"): { herdr: ReturnType<typeof fakeHerdr
       herdr,
       feed: fakeFeed(makeSnapshot(agent ?? null)),
       usage: {} as never,
-      config: { token: "x".repeat(16), port: 1 },
+      config: { configDir: "/tmp/scoutr-test-config", token: "x".repeat(16), port: 1 },
       terminal: new FakeTerminalLauncher(),
     },
   };

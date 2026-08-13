@@ -5,7 +5,7 @@ import java.nio.charset.StandardCharsets;
 /**
  * A terminal session coupled to a remote terminal transport instead of a local process.
  * <p>
- * ADAPTED for Cockpit from the Termux terminal-emulator library (see UPSTREAM.md in the vendor
+ * ADAPTED for Scoutr from the Termux terminal-emulator library (see UPSTREAM.md in the vendor
  * root). The upstream class spawned a local shell subprocess on a PTY via JNI
  * ({@code JNI.createSubprocess} + input/output/waiter threads, {@code finishIfRunning()},
  * {@code getPid()}, {@code getCwd()}, queues and a main-thread handler). This adaptation removes

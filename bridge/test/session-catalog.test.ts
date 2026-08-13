@@ -11,7 +11,7 @@ import {
 } from "../src/session-catalog.js";
 
 async function newCatalogRoot(): Promise<string> {
-  const root = await mkdtemp(join(tmpdir(), "cockpit-catalog-"));
+  const root = await mkdtemp(join(tmpdir(), "scoutr-catalog-"));
   process.env.PI_CODING_AGENT_SESSION_DIR = root;
   return root;
 }
@@ -100,7 +100,7 @@ describe("session catalog", () => {
       root,
       "project",
       "one.jsonl",
-      [sessionLine("one", "/repos/cockpit", "2026-01-01T00:00:00.000Z"), userLine("Fix Android navigation")],
+      [sessionLine("one", "/repos/scoutr", "2026-01-01T00:00:00.000Z"), userLine("Fix Android navigation")],
       "2026-01-02T00:00:00.000Z",
     );
     await writeSession(
@@ -121,7 +121,7 @@ describe("session catalog", () => {
 
   it("ignores malformed files and symlinks that escape the sessions root", async () => {
     const root = await newCatalogRoot();
-    const outside = await mkdtemp(join(tmpdir(), "cockpit-outside-"));
+    const outside = await mkdtemp(join(tmpdir(), "scoutr-outside-"));
     await mkdir(join(root, "project"), { recursive: true });
     await writeFile(join(root, "project", "malformed.jsonl"), "not json\n");
     const outsideSession = await writeSession(
@@ -160,9 +160,9 @@ describe("session catalog", () => {
     // Two registered stores: pi (scanned first) with more files than its half
     // of the global candidate cap, claude behind it with one session. The
     // claude root must still be scanned.
-    const piRoot = await mkdtemp(join(tmpdir(), "cockpit-catalog-pi-"));
+    const piRoot = await mkdtemp(join(tmpdir(), "scoutr-catalog-pi-"));
     process.env.PI_CODING_AGENT_SESSION_DIR = piRoot;
-    const claudeRoot = await mkdtemp(join(tmpdir(), "cockpit-catalog-claude-"));
+    const claudeRoot = await mkdtemp(join(tmpdir(), "scoutr-catalog-claude-"));
     process.env.CLAUDECONFIGDIR = claudeRoot;
 
     // One project dir with MAX_CANDIDATES/2 files (1000) exhausts pi's

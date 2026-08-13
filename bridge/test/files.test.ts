@@ -15,7 +15,7 @@ describe("listFiles", () => {
   let plain: string;
 
   before(() => {
-    repo = mkdtempSync(join(tmpdir(), "cockpit-files-repo-"));
+    repo = mkdtempSync(join(tmpdir(), "scoutr-files-repo-"));
     mkdirSync(join(repo, "src", "ui"), { recursive: true });
     mkdirSync(join(repo, "node_modules", "junk"), { recursive: true });
     writeFileSync(join(repo, "README.md"), "");
@@ -29,7 +29,7 @@ describe("listFiles", () => {
     // Untracked but not ignored: written after the commit, never staged.
     writeFileSync(join(repo, "src", "brand-new.ts"), "");
 
-    plain = mkdtempSync(join(tmpdir(), "cockpit-files-plain-"));
+    plain = mkdtempSync(join(tmpdir(), "scoutr-files-plain-"));
     mkdirSync(join(plain, "a", "b"), { recursive: true });
     mkdirSync(join(plain, ".hidden"), { recursive: true });
     mkdirSync(join(plain, "build"), { recursive: true });
@@ -76,7 +76,7 @@ describe("listFiles", () => {
   });
 
   it("flags a walk that was cut off by the depth cap", async () => {
-    const deep = mkdtempSync(join(tmpdir(), "cockpit-files-deep-"));
+    const deep = mkdtempSync(join(tmpdir(), "scoutr-files-deep-"));
     try {
       // One level past MAX_WALK_DEPTH, so the leaf file is never listed.
       const nested = join(deep, "a", "b", "c", "d", "e", "f", "g");

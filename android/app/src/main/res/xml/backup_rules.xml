@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <full-backup-content>
     <!-- The pairing token lives in this prefs file; never let it off-device. -->
-    <exclude domain="sharedpref" path="cockpit_connection.xml" />
+    <exclude domain="sharedpref" path="scoutr_connection.xml" />
 </full-backup-content>

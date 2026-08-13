@@ -147,7 +147,7 @@ describe("readTranscript", () => {
   let dir: string;
 
   beforeEach(async () => {
-    dir = await mkdtemp(join(tmpdir(), "cockpit-transcript-"));
+    dir = await mkdtemp(join(tmpdir(), "scoutr-transcript-"));
   });
 
   afterEach(async () => {
@@ -325,7 +325,7 @@ describe("writePiSessionTitle", () => {
   let dir: string;
 
   beforeEach(async () => {
-    dir = await mkdtemp(join(tmpdir(), "cockpit-transcript-write-"));
+    dir = await mkdtemp(join(tmpdir(), "scoutr-transcript-write-"));
   });
 
   afterEach(async () => {

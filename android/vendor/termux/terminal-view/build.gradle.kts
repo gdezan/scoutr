@@ -1,5 +1,5 @@
 // Vendored Termux terminal-view (com.termux.view) — see ../UPSTREAM.md.
-// Build file is new (Cockpit adaptation): upstream used Groovy DSL with
+// Build file is new (Scoutr adaptation): upstream used Groovy DSL with
 // maven-publish; sources themselves are byte-identical to upstream.
 plugins {
     alias(libs.plugins.android.library)

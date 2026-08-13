@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { symlinkSync } from "node:fs";
 import { execFileSync } from "node:child_process";
-import { createCockpitServer, type CockpitServer } from "../src/server.js";
+import { createScoutrServer, type ScoutrServer } from "../src/server.js";
 import { fakeHerdr } from "./support/fake-herdr.js";
 import { FakeTerminalLauncher } from "./support/fake-terminal.js";
 import { REVIEW_ROOTS_TTL_MS } from "../src/routes/review.js";
@@ -30,17 +30,17 @@ let plainRoot: string;
 let outsideRoot: string;
 let workspaceRoot: string;
 let sessionRepo: string;
-const originalRoots = process.env.COCKPIT_REPO_ROOTS;
+const originalRoots = process.env.SCOUTR_REPO_ROOTS;
 
 test.before(async () => {
-  repoRoot = await mkdtemp(join(tmpdir(), "cockpit-review-repo-"));
-  plainRoot = await mkdtemp(join(tmpdir(), "cockpit-review-plain-"));
-  outsideRoot = await mkdtemp(join(tmpdir(), "cockpit-review-outside-"));
-  process.env.COCKPIT_REPO_ROOTS = `${repoRoot},${plainRoot}`;
+  repoRoot = await mkdtemp(join(tmpdir(), "scoutr-review-repo-"));
+  plainRoot = await mkdtemp(join(tmpdir(), "scoutr-review-plain-"));
+  outsideRoot = await mkdtemp(join(tmpdir(), "scoutr-review-outside-"));
+  process.env.SCOUTR_REPO_ROOTS = `${repoRoot},${plainRoot}`;
 
   execFileSync("git", ["init", "-q", "-b", "main", repoRoot]);
-  execFileSync("git", ["config", "user.email", "test@cockpit.dev"], { cwd: repoRoot });
-  execFileSync("git", ["config", "user.name", "Cockpit Test"], { cwd: repoRoot });
+  execFileSync("git", ["config", "user.email", "test@scoutr.dev"], { cwd: repoRoot });
+  execFileSync("git", ["config", "user.name", "Scoutr Test"], { cwd: repoRoot });
   await writeFile(join(repoRoot, "a.txt"), "hello\n");
   execFileSync("git", ["add", "."], { cwd: repoRoot });
   execFileSync("git", ["commit", "-q", "-m", "initial commit"], { cwd: repoRoot });
@@ -49,23 +49,23 @@ test.before(async () => {
   execFileSync("git", ["add", "."], { cwd: repoRoot });
   execFileSync("git", ["commit", "-q", "-m", "add world and b"], { cwd: repoRoot });
 
-  // A session workspace that lives OUTSIDE COCKPIT_REPO_ROOTS, with the
+  // A session workspace that lives OUTSIDE SCOUTR_REPO_ROOTS, with the
   // session repo as a subdirectory — the fix-5 shape: the bridge must allow
   // it because an agent is running there, not because it was configured.
-  workspaceRoot = await mkdtemp(join(tmpdir(), "cockpit-review-workspace-"));
+  workspaceRoot = await mkdtemp(join(tmpdir(), "scoutr-review-workspace-"));
   sessionRepo = join(workspaceRoot, "repo");
   await mkdir(sessionRepo, { recursive: true });
   execFileSync("git", ["init", "-q", "-b", "main", sessionRepo]);
-  execFileSync("git", ["config", "user.email", "test@cockpit.dev"], { cwd: sessionRepo });
-  execFileSync("git", ["config", "user.name", "Cockpit Test"], { cwd: sessionRepo });
+  execFileSync("git", ["config", "user.email", "test@scoutr.dev"], { cwd: sessionRepo });
+  execFileSync("git", ["config", "user.name", "Scoutr Test"], { cwd: sessionRepo });
   await writeFile(join(sessionRepo, "x.txt"), "workspace file\n");
   execFileSync("git", ["add", "."], { cwd: sessionRepo });
   execFileSync("git", ["commit", "-q", "-m", "workspace initial"], { cwd: sessionRepo });
 });
 
 test.after(() => {
-  if (originalRoots === undefined) delete process.env.COCKPIT_REPO_ROOTS;
-  else process.env.COCKPIT_REPO_ROOTS = originalRoots;
+  if (originalRoots === undefined) delete process.env.SCOUTR_REPO_ROOTS;
+  else process.env.SCOUTR_REPO_ROOTS = originalRoots;
 });
 
 test("overview reports branch, status, and recent log", async () => {
@@ -228,7 +228,7 @@ test("403 message names the escape hatch", async () => {
   await assert.rejects(() => reviewOverview(outsideRoot), (error: unknown) => {
     assert.ok(error instanceof ReviewError);
     assert.equal(error.status, 403);
-    assert.match(error.message, /COCKPIT_REPO_ROOTS/);
+    assert.match(error.message, /SCOUTR_REPO_ROOTS/);
     return true;
   });
 });
@@ -420,24 +420,24 @@ test("per-file diff of an unknown path yields an empty diff", async () => {
 describe("review roots TTL", () => {
   const PORT = 8793;
   const TOKEN = "test_token_for_review_ttl_0001";
-  let server: CockpitServer;
+  let server: ScoutrServer;
   let sessionRoot: string;
   let repoDir: string;
 
   test.before(async () => {
-    // A real repo outside COCKPIT_REPO_ROOTS, allowed only through the
+    // A real repo outside SCOUTR_REPO_ROOTS, allowed only through the
     // implicit roots derived from a session workspace.
-    repoDir = await mkdtemp(join(tmpdir(), "cockpit-review-ttl-repo-"));
+    repoDir = await mkdtemp(join(tmpdir(), "scoutr-review-ttl-repo-"));
     execFileSync("git", ["init", "-q", "-b", "main", repoDir]);
-    execFileSync("git", ["config", "user.email", "test@cockpit.dev"], { cwd: repoDir });
-    execFileSync("git", ["config", "user.name", "Cockpit Test"], { cwd: repoDir });
+    execFileSync("git", ["config", "user.email", "test@scoutr.dev"], { cwd: repoDir });
+    execFileSync("git", ["config", "user.name", "Scoutr Test"], { cwd: repoDir });
     await writeFile(join(repoDir, "a.txt"), "hello\n");
     execFileSync("git", ["add", "."], { cwd: repoDir });
     execFileSync("git", ["commit", "-q", "-m", "initial"], { cwd: repoDir });
 
-    sessionRoot = await mkdtemp(join(tmpdir(), "cockpit-review-ttl-sessions-"));
+    sessionRoot = await mkdtemp(join(tmpdir(), "scoutr-review-ttl-sessions-"));
     process.env.PI_CODING_AGENT_SESSION_DIR = sessionRoot;
-    process.env.CLAUDECONFIGDIR = await mkdtemp(join(tmpdir(), "cockpit-review-ttl-claude-"));
+    process.env.CLAUDECONFIGDIR = await mkdtemp(join(tmpdir(), "scoutr-review-ttl-claude-"));
     const project = join(sessionRoot, "project");
     await mkdir(project, { recursive: true });
     await writeFile(
@@ -447,12 +447,12 @@ describe("review roots TTL", () => {
 
     const fake = fakeHerdr();
     const feed = { onMessage: () => {}, removeMessage: () => {}, stop: async () => {}, start: async () => {} };
-    server = createCockpitServer(
+    server = createScoutrServer(
       {
         herdr: fake,
         feed: feed as never,
         usage: { all: async () => ({}) } as never,
-        config: { token: TOKEN, port: PORT },
+        config: { configDir: "/tmp/scoutr-test-config", token: TOKEN, port: PORT },
         terminal: new FakeTerminalLauncher(),
       },
       { listen: true },
@@ -508,7 +508,7 @@ describe("review roots TTL", () => {
 describe("review file routes over HTTP", () => {
   const PORT = 8794;
   const TOKEN = "test_token_for_review_file_routes_0001";
-  let server: CockpitServer;
+  let server: ScoutrServer;
   let repoDir: string;
 
   test.before(async () => {
@@ -516,8 +516,8 @@ describe("review file routes over HTTP", () => {
     // reviewable without implicit session roots.
     repoDir = await mkdtemp(join(plainRoot, "wired-"));
     execFileSync("git", ["init", "-q", "-b", "main", repoDir]);
-    execFileSync("git", ["config", "user.email", "test@cockpit.dev"], { cwd: repoDir });
-    execFileSync("git", ["config", "user.name", "Cockpit Test"], { cwd: repoDir });
+    execFileSync("git", ["config", "user.email", "test@scoutr.dev"], { cwd: repoDir });
+    execFileSync("git", ["config", "user.name", "Scoutr Test"], { cwd: repoDir });
     await writeFile(join(repoDir, "route.txt"), "base\n");
     await writeFile(join(repoDir, "gone.txt"), "will be removed\n");
     execFileSync("git", ["add", "."], { cwd: repoDir });
@@ -528,12 +528,12 @@ describe("review file routes over HTTP", () => {
 
     const fake = fakeHerdr();
     const feed = { onMessage: () => {}, removeMessage: () => {}, stop: async () => {}, start: async () => {} };
-    server = createCockpitServer(
+    server = createScoutrServer(
       {
         herdr: fake,
         feed: feed as never,
         usage: { all: async () => ({}) } as never,
-        config: { token: TOKEN, port: PORT },
+        config: { configDir: "/tmp/scoutr-test-config", token: TOKEN, port: PORT },
         terminal: new FakeTerminalLauncher(),
       },
       { listen: true },

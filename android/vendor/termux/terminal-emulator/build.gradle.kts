@@ -1,5 +1,5 @@
 // Vendored Termux terminal-emulator (com.termux.terminal) — see ../UPSTREAM.md.
-// Build file is new (Cockpit adaptation): upstream used Groovy DSL with
+// Build file is new (Scoutr adaptation): upstream used Groovy DSL with
 // externalNativeBuild (ndkBuild) and maven-publish; the native PTY path
 // (JNI.java, src/main/jni/) is intentionally not vendored.
 plugins {

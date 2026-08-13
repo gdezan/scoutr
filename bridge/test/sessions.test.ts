@@ -187,7 +187,7 @@ describe("createSession", () => {
 
 describe("launchStoredSession", () => {
   it("opens or forks an allowed session with one quoted pi command", async () => {
-    const root = await mkdtemp(join(homedir(), ".cockpit-stored-session-"));
+    const root = await mkdtemp(join(homedir(), ".scoutr-stored-session-"));
     const path = join(root, "saved.jsonl");
     await writeFile(path, `${JSON.stringify({
       type: "session",
@@ -215,7 +215,7 @@ describe("launchStoredSession", () => {
   });
 
   it("rejects a session outside the configured store before any Herdr call", async () => {
-    const root = await mkdtemp(join(homedir(), ".cockpit-stored-session-"));
+    const root = await mkdtemp(join(homedir(), ".scoutr-stored-session-"));
     const herdr = fakeHerdr();
     process.env.PI_CODING_AGENT_SESSION_DIR = root;
     try {
@@ -232,9 +232,9 @@ describe("launchStoredSession", () => {
   it("resumes a session whose recorded cwd is outside the home directory", async () => {
     // Fix 7 (user decision): the cwd recorded in the session file is trusted,
     // so a session run in e.g. /tmp can be resumed from the app.
-    const root = await mkdtemp(join(homedir(), ".cockpit-stored-session-"));
+    const root = await mkdtemp(join(homedir(), ".scoutr-stored-session-"));
     process.env.PI_CODING_AGENT_SESSION_DIR = root;
-    const outsideCwd = await mkdtemp(join(tmpdir(), "cockpit-resume-cwd-"));
+    const outsideCwd = await mkdtemp(join(tmpdir(), "scoutr-resume-cwd-"));
     const path = join(root, "outside-cwd.jsonl");
     await writeFile(path, `${JSON.stringify({
       type: "session",
@@ -255,7 +255,7 @@ describe("launchStoredSession", () => {
   });
 
   it("falls back to the session store root when the recorded cwd is gone", async () => {
-    const root = await mkdtemp(join(homedir(), ".cockpit-stored-session-"));
+    const root = await mkdtemp(join(homedir(), ".scoutr-stored-session-"));
     process.env.PI_CODING_AGENT_SESSION_DIR = root;
     // Real pi session paths nest one level (encoded dir), so dirname alone
     // must not satisfy the fallback: the store root is the contract.
@@ -267,7 +267,7 @@ describe("launchStoredSession", () => {
       version: 3,
       id: "gone-cwd-session",
       timestamp: "2026-01-01T00:00:00.000Z",
-      cwd: join(tmpdir(), "cockpit-never-existed-", "nested"),
+      cwd: join(tmpdir(), "scoutr-never-existed-", "nested"),
     })}\n`);
     try {
       const herdr = fakeHerdr();
@@ -360,7 +360,7 @@ describe("controlSession", () => {
 
   it("sets a catalog model with pi's exact /model command", async () => {
     const herdr = fakeHerdr();
-    const agentDir = await mkdtemp(join(homedir(), ".cockpit-agent-"));
+    const agentDir = await mkdtemp(join(homedir(), ".scoutr-agent-"));
     await writeFile(join(agentDir, "models-store.json"), JSON.stringify({
       "openai-codex": { models: [{ id: "gpt-5.4", name: "GPT-5.4", reasoning: true }] },
     }));
@@ -379,7 +379,7 @@ describe("controlSession", () => {
   });
 
   it("sets thinking by cycling from the session's active level", async () => {
-    const sessionDir = await mkdtemp(join(homedir(), ".cockpit-session-"));
+    const sessionDir = await mkdtemp(join(homedir(), ".scoutr-session-"));
     const sessionPath = join(sessionDir, "session.jsonl");
     await writeFile(
       sessionPath,
@@ -389,7 +389,7 @@ describe("controlSession", () => {
         JSON.stringify({ type: "thinking_level_change", thinkingLevel: "medium" }),
       ].join("\n") + "\n",
     );
-    const agentDir = await mkdtemp(join(homedir(), ".cockpit-agent-"));
+    const agentDir = await mkdtemp(join(homedir(), ".scoutr-agent-"));
     await writeFile(join(agentDir, "models-store.json"), JSON.stringify({
       "openai-codex": { models: [{ id: "gpt-5.4", name: "GPT-5.4", reasoning: true, thinkingLevelMap: {
         off: "off", minimal: "minimal", low: "low", medium: "medium", high: "high", xhigh: "xhigh", max: "max",

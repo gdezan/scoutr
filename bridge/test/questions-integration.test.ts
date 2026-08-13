@@ -64,7 +64,7 @@ const SESSION_LINES = [
 ];
 
 test("readSession surfaces structured questions derived from session events", async () => {
-  const agentRoot = await mkdtemp(join(tmpdir(), "cockpit-agent-root-"));
+  const agentRoot = await mkdtemp(join(tmpdir(), "scoutr-agent-root-"));
   await mkdir(join(agentRoot, "int-project"));
   const path = join(agentRoot, "int-project", "session.jsonl");
   await writeFile(path, SESSION_LINES.join("\n"));
@@ -90,7 +90,7 @@ test("readSession surfaces structured questions derived from session events", as
 });
 
 test("readSession keeps pending questions pending when unanswered", async () => {
-  const agentRoot = await mkdtemp(join(tmpdir(), "cockpit-agent-root-"));
+  const agentRoot = await mkdtemp(join(tmpdir(), "scoutr-agent-root-"));
   await mkdir(join(agentRoot, "int-project"));
   const path = join(agentRoot, "int-project", "session.jsonl");
   await writeFile(path, SESSION_LINES.slice(0, 2).join("\n"));

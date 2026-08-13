@@ -9,7 +9,7 @@ import { BridgeError } from "./errors.js";
  *
  * Safety invariants:
  *  - Allow-list: the requested path must resolve (realpath, no symlink
- *    escape) under one of COCKPIT_REPO_ROOTS (default ~/.herdr/worktrees).
+ *    escape) under one of SCOUTR_REPO_ROOTS (default ~/.herdr/worktrees).
  *  - Fixed git subcommands with strictly validated arguments only: the path
  *    is passed via `-C`, and refs are matched against a conservative regex.
  *    No user input ever lands in a flag position and no shell is involved.
@@ -107,13 +107,13 @@ export interface ReviewFileContentResult {
 const REF_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._/-]{0,200}$/;
 
 /**
- * Allowed review roots: COCKPIT_REPO_ROOTS when set, else the default
+ * Allowed review roots: SCOUTR_REPO_ROOTS when set, else the default
  * worktree root, plus per-request extras. Extras are the live agent
  * workspaces (session cwds) — paths the user has already authorized an
  * agent to run in, so read-only git review of them adds no privilege.
  */
 function allowedRoots(extraRoots: string[] = []): string[] {
-  const configured = process.env.COCKPIT_REPO_ROOTS?.trim();
+  const configured = process.env.SCOUTR_REPO_ROOTS?.trim();
   const base = configured
     ? configured.split(",").map((root) => resolve(root.trim())).filter(Boolean)
     : [resolve(homedir(), ".herdr", "worktrees")];
@@ -122,7 +122,7 @@ function allowedRoots(extraRoots: string[] = []): string[] {
 
 /**
  * Resolve a requested path and require it to live under an allowed root.
- * @param extraRoots per-request roots beyond COCKPIT_REPO_ROOTS (e.g. live
+ * @param extraRoots per-request roots beyond SCOUTR_REPO_ROOTS (e.g. live
  *   agent workspaces); still realpath-checked like the configured roots.
  */
 export function resolveAllowedRepoPath(requested: string, extraRoots: string[] = []): string {
@@ -147,7 +147,7 @@ export function resolveAllowedRepoPath(requested: string, extraRoots: string[] =
   });
   if (!allowed) {
     throw new ReviewError(
-      "path outside allowed repo roots — review a running agent's workspace, or add the path to COCKPIT_REPO_ROOTS",
+      "path outside allowed repo roots — review a running agent's workspace, or add the path to SCOUTR_REPO_ROOTS",
       403,
     );
   }

@@ -1,4 +1,4 @@
-Cockpit — Vendored Termux terminal core
+Scoutr — Vendored Termux terminal core
 =======================================
 
 This directory contains a vendored, adapted subset of the Termux terminal stack:
@@ -13,7 +13,7 @@ Upstream license: Apache License 2.0 (see LICENSE and UPSTREAM.md)
 Copyright:        Copyright (C) The Termux Project contributors and the
                   original Android-Terminal-Emulator authors
 
-Adaptations by the Cockpit project:
+Adaptations by the Scoutr project:
   * TerminalSession.java was adapted into a transport-neutral session
     (local shell process / PTY / JNI support removed; remote input/output
     seams added). See UPSTREAM.md for the exact adaptation list.

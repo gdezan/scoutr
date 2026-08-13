@@ -14,7 +14,7 @@ import {
 let dir: string;
 
 test.before(async () => {
-  dir = join(await mkdtemp(join(tmpdir(), "cockpit-uploads-")), "uploads");
+  dir = join(await mkdtemp(join(tmpdir(), "scoutr-uploads-")), "uploads");
   await mkdir(dir, { recursive: true });
 });
 
@@ -28,7 +28,7 @@ function pngBytes(): Buffer {
 }
 
 test("uploadsDir sits next to the config file", () => {
-  assert.equal(uploadsDir("/home/u/.config/cockpit/config.json"), "/home/u/.config/cockpit/uploads");
+  assert.equal(uploadsDir("/home/u/.config/scoutr"), "/home/u/.config/scoutr/uploads");
 });
 
 test("storeAttachment saves an image and returns its host path", async () => {

@@ -1,4 +1,4 @@
-# Cockpit — product context
+# Scoutr — product context
 
 _Compiled by the agent from the accumulated project brief (goal, decisions,
 research, and user instructions). Where the original brief was explicit it is
@@ -6,7 +6,7 @@ labeled as such; inferences are labeled._
 
 ## What this is
 
-Cockpit is a native Android app (Kotlin + Jetpack Compose, Material 3) that
+Scoutr is a native Android app (Kotlin + Jetpack Compose, Material 3) that
 turns a phone into a remote supervision console for the user's AI coding
 agents. Agents run on a Linux host (herdr + pi); a local bridge daemon owns
 the herdr socket and exposes a token-authed HTTP/WSS API over the tailnet.

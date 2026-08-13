@@ -2,7 +2,7 @@
 
 > **Executor instructions**: Apply one shared responsive rule to the named tab surfaces, then verify phone and tablet screenshots after every step. Do not invent a full tablet navigation redesign. Update `design-plans/README.md` when done.
 >
-> **Drift check (run first)**: `git diff --stat 0e67682..HEAD -- android/app/src/main/java/dev/cockpit/app/ui/screens/BoardScreen.kt android/app/src/main/java/dev/cockpit/app/ui/screens/HistoryScreen.kt android/app/src/main/java/dev/cockpit/app/ui/screens/ReviewScreen.kt android/app/src/main/java/dev/cockpit/app/ui/components/ android/app/src/androidTest/java/dev/cockpit/app/ui/BoardScreenTest.kt android/app/src/androidTest/java/dev/cockpit/app/ui/HistoryScreenTest.kt android/app/src/androidTest/java/dev/cockpit/app/ui/ReviewScreenTest.kt`
+> **Drift check (run first)**: `git diff --stat 0e67682..HEAD -- android/app/src/main/java/dev/scoutr/app/ui/screens/BoardScreen.kt android/app/src/main/java/dev/scoutr/app/ui/screens/HistoryScreen.kt android/app/src/main/java/dev/scoutr/app/ui/screens/ReviewScreen.kt android/app/src/main/java/dev/scoutr/app/ui/components/ android/app/src/androidTest/java/dev/scoutr/app/ui/BoardScreenTest.kt android/app/src/androidTest/java/dev/scoutr/app/ui/HistoryScreenTest.kt android/app/src/androidTest/java/dev/scoutr/app/ui/ReviewScreenTest.kt`
 
 ## Status
 
@@ -61,30 +61,30 @@ timeout 30 adb -s emulator-5554 shell wm size 2560x1600
 timeout 30 adb -s emulator-5554 shell wm density 240
 for class in BoardScreenTest HistoryScreenTest ReviewScreenTest; do
   ANDROID_SERIAL=emulator-5554 ANDROID_HOME=$HOME/Android/sdk timeout 180 ./gradlew connectedDebugAndroidTest --rerun-tasks \
-    -Pandroid.testInstrumentationRunnerArguments.class="dev.cockpit.app.ui.$class" || exit 1
+    -Pandroid.testInstrumentationRunnerArguments.class="dev.scoutr.app.ui.$class" || exit 1
 done
-timeout 30 adb -s emulator-5554 shell am force-stop dev.cockpit.app
-timeout 30 adb -s emulator-5554 shell am start -n dev.cockpit.app/.MainActivity
+timeout 30 adb -s emulator-5554 shell am force-stop dev.scoutr.app
+timeout 30 adb -s emulator-5554 shell am start -n dev.scoutr.app/.MainActivity
 sleep 2
 timeout 30 adb -s emulator-5554 exec-out screencap -p > /tmp/board-wide-tablet.png
 TABLET
 # Pull every exact artifact path printed by the tests; for example:
-timeout 30 adb -s emulator-5554 pull /sdcard/Android/data/dev.cockpit.app/files/board-wide.png /tmp/
-timeout 30 adb -s emulator-5554 pull /sdcard/Android/data/dev.cockpit.app/files/sessions-wide.png /tmp/
-timeout 30 adb -s emulator-5554 pull /sdcard/Android/data/dev.cockpit.app/files/review-wide.png /tmp/
+timeout 30 adb -s emulator-5554 pull /sdcard/Android/data/dev.scoutr.app/files/board-wide.png /tmp/
+timeout 30 adb -s emulator-5554 pull /sdcard/Android/data/dev.scoutr.app/files/sessions-wide.png /tmp/
+timeout 30 adb -s emulator-5554 pull /sdcard/Android/data/dev.scoutr.app/files/review-wide.png /tmp/
 timeout 30 adb -s emulator-5554 shell wm size
 timeout 30 adb -s emulator-5554 shell wm density
-# Must report physical defaults, 1080x2340 and 440 on the cockpit AVD.
+# Must report physical defaults, 1080x2340 and 440 on the scoutr AVD.
 ```
 
 Each in-scope Compose test class owns deterministic populated fixture data and saves `captureToImage()` evidence under `targetContext.getExternalFilesDir(null)`. Assert bounds against the real widened root constraints; do not simulate a >1008dp child inside the normal phone-width device.
 ## Scope
 
 **In scope**:
-- `android/app/src/main/java/dev/cockpit/app/ui/screens/BoardScreen.kt`
-- `android/app/src/main/java/dev/cockpit/app/ui/screens/HistoryScreen.kt`
-- `android/app/src/main/java/dev/cockpit/app/ui/screens/ReviewScreen.kt`
-- One responsive container under `android/app/src/main/java/dev/cockpit/app/ui/components/` if shared
+- `android/app/src/main/java/dev/scoutr/app/ui/screens/BoardScreen.kt`
+- `android/app/src/main/java/dev/scoutr/app/ui/screens/HistoryScreen.kt`
+- `android/app/src/main/java/dev/scoutr/app/ui/screens/ReviewScreen.kt`
+- One responsive container under `android/app/src/main/java/dev/scoutr/app/ui/components/` if shared
 - Relevant `BoardScreenTest.kt`, `HistoryScreenTest.kt`, `ReviewScreenTest.kt`
 
 **Out of scope**:

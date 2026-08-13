@@ -2,7 +2,7 @@
 
 > **Executor instructions**: Follow this plan step by step. After each step, run the visual verification and inspect the screenshot before continuing. If a STOP condition occurs, stop and report rather than improvising. When done, update this plan's row in `design-plans/README.md`.
 >
-> **Drift check (run first)**: `git diff --stat 0e67682..HEAD -- android/app/src/main/java/dev/cockpit/app/ui/screens/SessionPickers.kt android/app/src/androidTest/java/dev/cockpit/app/ui/NewSessionSheetTest.kt`
+> **Drift check (run first)**: `git diff --stat 0e67682..HEAD -- android/app/src/main/java/dev/scoutr/app/ui/screens/SessionPickers.kt android/app/src/androidTest/java/dev/scoutr/app/ui/NewSessionSheetTest.kt`
 > If the live screen or excerpt below changed materially, stop and reconcile before editing.
 
 ## Status
@@ -64,27 +64,27 @@ ANDROID_HOME=$HOME/Android/sdk timeout 300 ./gradlew testDebugUnitTest --rerun-t
 ANDROID_HOME=$HOME/Android/sdk timeout 300 ./gradlew pixel2api36DebugAndroidTest --rerun-tasks
 ANDROID_HOME=$HOME/Android/sdk timeout 300 ./gradlew assembleDebug
 timeout 30 adb -s emulator-5554 install -r app/build/outputs/apk/debug/app-debug.apk
-timeout 30 adb -s emulator-5554 shell am force-stop dev.cockpit.app
-timeout 30 adb -s emulator-5554 shell am start -n dev.cockpit.app/.MainActivity
+timeout 30 adb -s emulator-5554 shell am force-stop dev.scoutr.app
+timeout 30 adb -s emulator-5554 shell am start -n dev.scoutr.app/.MainActivity
 ```
 
 For deterministic visual states, add a test-only screenshot helper in `NewSessionSheetTest.kt`: capture `compose.onRoot().captureToImage().asAndroidBitmap()`, compress it as PNG into `InstrumentationRegistry.getInstrumentation().targetContext.getExternalFilesDir(null)`, and print the absolute path. Render populated, empty, loading, and error fixtures in separate tests, run the class on the running emulator, then pull and inspect each PNG:
 
 ```bash
 ANDROID_SERIAL=emulator-5554 ANDROID_HOME=$HOME/Android/sdk timeout 180 ./gradlew connectedDebugAndroidTest --rerun-tasks \
-  -Pandroid.testInstrumentationRunnerArguments.class=dev.cockpit.app.ui.NewSessionSheetTest
-timeout 30 adb -s emulator-5554 pull /sdcard/Android/data/dev.cockpit.app/files/folder-picker-populated.png /tmp/
-timeout 30 adb -s emulator-5554 pull /sdcard/Android/data/dev.cockpit.app/files/folder-picker-empty.png /tmp/
-timeout 30 adb -s emulator-5554 pull /sdcard/Android/data/dev.cockpit.app/files/folder-picker-loading.png /tmp/
-timeout 30 adb -s emulator-5554 pull /sdcard/Android/data/dev.cockpit.app/files/folder-picker-error.png /tmp/
+  -Pandroid.testInstrumentationRunnerArguments.class=dev.scoutr.app.ui.NewSessionSheetTest
+timeout 30 adb -s emulator-5554 pull /sdcard/Android/data/dev.scoutr.app/files/folder-picker-populated.png /tmp/
+timeout 30 adb -s emulator-5554 pull /sdcard/Android/data/dev.scoutr.app/files/folder-picker-empty.png /tmp/
+timeout 30 adb -s emulator-5554 pull /sdcard/Android/data/dev.scoutr.app/files/folder-picker-loading.png /tmp/
+timeout 30 adb -s emulator-5554 pull /sdcard/Android/data/dev.scoutr.app/files/folder-picker-error.png /tmp/
 ```
 
 If the package-specific external path differs, use the exact path printed by the test; do not guess.
 ## Scope
 
 **In scope**:
-- `android/app/src/main/java/dev/cockpit/app/ui/screens/SessionPickers.kt`
-- `android/app/src/androidTest/java/dev/cockpit/app/ui/NewSessionSheetTest.kt`
+- `android/app/src/main/java/dev/scoutr/app/ui/screens/SessionPickers.kt`
+- `android/app/src/androidTest/java/dev/scoutr/app/ui/NewSessionSheetTest.kt`
 
 **Out of scope**:
 - Folder-loading and selection state in `NewSessionViewModel`

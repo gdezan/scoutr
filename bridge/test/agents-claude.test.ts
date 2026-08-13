@@ -18,7 +18,7 @@ import { fakeHerdr } from "./support/fake-herdr.js";
 
 /** CLAUDECONFIGDIR honing: point the claude adapter at a temp store. */
 async function claudeStore(): Promise<string> {
-  const config = await mkdtemp(join(tmpdir(), "cockpit-claude-"));
+  const config = await mkdtemp(join(tmpdir(), "scoutr-claude-"));
   process.env.CLAUDECONFIGDIR = config;
   await mkdir(join(config, "projects"), { recursive: true });
   return config;

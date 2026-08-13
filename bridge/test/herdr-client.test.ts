@@ -34,7 +34,7 @@ const skip = socketPath === null;
 if (skip) console.error("herdr-client live suite skipped: set HERDR_SOCKET_PATH to run it");
 
 test("a per-call timeout closes a stalled Herdr socket", { timeout: 1_000 }, async () => {
-  const directory = await mkdtemp(join(tmpdir(), "cockpit-herdr-timeout-"));
+  const directory = await mkdtemp(join(tmpdir(), "scoutr-herdr-timeout-"));
   const path = join(directory, "herdr.sock");
   let markDisconnected: () => void = () => undefined;
   const disconnected = new Promise<void>((resolve) => { markDisconnected = resolve; });
@@ -61,7 +61,7 @@ test("a per-call timeout closes a stalled Herdr socket", { timeout: 1_000 }, asy
 // against a live herdr (it refuses to die or be absent).
 
 test("herdrSubscribe rejects when the socket path does not exist", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "cockpit-herdr-missing-"));
+  const directory = await mkdtemp(join(tmpdir(), "scoutr-herdr-missing-"));
   try {
     await assert.rejects(
       herdrSubscribe(join(directory, "missing.sock"), [], {}),
@@ -73,7 +73,7 @@ test("herdrSubscribe rejects when the socket path does not exist", async () => {
 });
 
 test("herdrSubscribe rejects when the server closes before the ack", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "cockpit-herdr-noack-"));
+  const directory = await mkdtemp(join(tmpdir(), "scoutr-herdr-noack-"));
   const path = join(directory, "herdr.sock");
   const server = createServer((socket) => {
     socket.resume();
@@ -96,7 +96,7 @@ test("herdrSubscribe rejects when the server closes before the ack", async () =>
 });
 
 test("herdrSubscribe rejects after the ack timeout when the server stalls", { timeout: 8_000 }, async () => {
-  const directory = await mkdtemp(join(tmpdir(), "cockpit-herdr-stall-"));
+  const directory = await mkdtemp(join(tmpdir(), "scoutr-herdr-stall-"));
   const path = join(directory, "herdr.sock");
   const server = createServer((socket) => {
     socket.resume();
@@ -120,7 +120,7 @@ test("herdrSubscribe rejects after the ack timeout when the server stalls", { ti
 });
 
 test("herdrRequest rejects when the server closes without responding", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "cockpit-herdr-noreply-"));
+  const directory = await mkdtemp(join(tmpdir(), "scoutr-herdr-noreply-"));
   const path = join(directory, "herdr.sock");
   const server = createServer((socket) => {
     socket.resume();
@@ -142,7 +142,7 @@ test("herdrRequest rejects when the server closes without responding", async () 
 });
 
 test("a feed whose subscription fails emits feed_error and retries, never wedging", { timeout: 5_000 }, async () => {
-  const directory = await mkdtemp(join(tmpdir(), "cockpit-herdr-feed-"));
+  const directory = await mkdtemp(join(tmpdir(), "scoutr-herdr-feed-"));
   const path = join(directory, "herdr.sock");
   const server = createServer((socket) => {
     socket.resume();
@@ -199,7 +199,7 @@ test("a feed whose subscription fails emits feed_error and retries, never wedgin
 });
 
 test("herdrSubscribe rejects on a response that is not the subscription ack", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "cockpit-herdr-badack-"));
+  const directory = await mkdtemp(join(tmpdir(), "scoutr-herdr-badack-"));
   const path = join(directory, "herdr.sock");
   const server = createServer((socket) => {
     socket.resume();
@@ -225,7 +225,7 @@ test("herdrSubscribe rejects on a response that is not the subscription ack", as
 });
 
 test("a feed whose subscription ack arrives after stop() closes the late handle", { timeout: 8_000 }, async () => {
-  const directory = await mkdtemp(join(tmpdir(), "cockpit-herdr-lateack-"));
+  const directory = await mkdtemp(join(tmpdir(), "scoutr-herdr-lateack-"));
   const path = join(directory, "herdr.sock");
   let markSubscribeSeen: () => void = () => undefined;
   const subscribeSeen = new Promise<void>((resolve) => { markSubscribeSeen = resolve; });
@@ -286,7 +286,7 @@ test("a feed whose subscription ack arrives after stop() closes the late handle"
 });
 
 test("stop() clears delayed reconnect timers so a restarted feed is not rebuilt by stale timers", { timeout: 10_000 }, async () => {
-  const directory = await mkdtemp(join(tmpdir(), "cockpit-herdr-reconnect-"));
+  const directory = await mkdtemp(join(tmpdir(), "scoutr-herdr-reconnect-"));
   const path = join(directory, "herdr.sock");
   let subscribeCount = 0;
   let secondSubscribeClosed = false;

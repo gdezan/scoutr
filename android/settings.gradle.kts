@@ -20,7 +20,7 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "cockpit"
+rootProject.name = "scoutr"
 include(":app")
 include(":vendor:termux:terminal-emulator")
 include(":vendor:termux:terminal-view")

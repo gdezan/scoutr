@@ -9,9 +9,9 @@ import { defaultConfigPath, generateToken, loadOrCreateConfig } from "../src/con
 describe("defaultConfigPath", () => {
   test("honors XDG_CONFIG_HOME", () => {
     const previous = process.env.XDG_CONFIG_HOME;
-    process.env.XDG_CONFIG_HOME = "/tmp/cockpit-xdg-test";
+    process.env.XDG_CONFIG_HOME = "/tmp/scoutr-xdg-test";
     try {
-      assert.equal(defaultConfigPath(), join("/tmp/cockpit-xdg-test", "cockpit", "config.json"));
+      assert.equal(defaultConfigPath(), join("/tmp/scoutr-xdg-test", "scoutr", "config.json"));
     } finally {
       if (previous === undefined) delete process.env.XDG_CONFIG_HOME;
       else process.env.XDG_CONFIG_HOME = previous;
@@ -20,9 +20,9 @@ describe("defaultConfigPath", () => {
 });
 
 describe("generateToken", () => {
-  test("produces a long random token with the cockpit_ prefix", () => {
+  test("produces a long random token with the scoutr_ prefix", () => {
     const token = generateToken();
-    assert.ok(token.startsWith("cockpit_"));
+    assert.ok(token.startsWith("scoutr_"));
     assert.ok(token.length >= 16);
     assert.notEqual(token, generateToken());
   });
@@ -32,7 +32,7 @@ describe("loadOrCreateConfig", () => {
   let dir: string;
 
   before(() => {
-    dir = mkdtempSync(join(tmpdir(), "cockpit-config-"));
+    dir = mkdtempSync(join(tmpdir(), "scoutr-config-"));
   });
 
   after(() => {
@@ -44,7 +44,8 @@ describe("loadOrCreateConfig", () => {
     const config = await loadOrCreateConfig(path);
     assert.ok(config.token.length >= 16);
     assert.equal(config.port, 8737);
-    assert.ok(config.ntfyTopic?.startsWith("cockpit_"));
+    assert.ok(config.ntfyTopic?.startsWith("scoutr_"));
+    assert.equal(config.configDir, join(dir, "fresh"));
     // Written with owner-only permissions.
     assert.equal(statSync(path).mode & 0o777, 0o600);
   });
@@ -76,7 +77,7 @@ describe("loadOrCreateConfig", () => {
     );
     const config = await loadOrCreateConfig(path);
     assert.equal(config.ntfyUrl, "https://ntfy.example");
-    assert.ok(config.ntfyTopic?.startsWith("cockpit_"));
+    assert.ok(config.ntfyTopic?.startsWith("scoutr_"));
   });
 
   test("keeps the token when the parsed config cannot be re-persisted", { skip: process.getuid?.() === 0 }, async () => {

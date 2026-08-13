@@ -2,7 +2,7 @@
 
 > **Executor instructions**: Follow the specified incremental design; do not replace the raw diff renderer. Inspect each visual gate and update `design-plans/README.md` when done.
 >
-> **Drift check (run first)**: `git diff --stat 0e67682..HEAD -- android/app/src/main/java/dev/cockpit/app/ui/screens/ReviewScreen.kt android/app/src/androidTest/java/dev/cockpit/app/ui/ReviewScreenTest.kt android/app/src/test/java/dev/cockpit/app/ui/screens/`
+> **Drift check (run first)**: `git diff --stat 0e67682..HEAD -- android/app/src/main/java/dev/scoutr/app/ui/screens/ReviewScreen.kt android/app/src/androidTest/java/dev/scoutr/app/ui/ReviewScreenTest.kt android/app/src/test/java/dev/scoutr/app/ui/screens/`
 
 ## Status
 
@@ -64,7 +64,7 @@ This plan is self-contained; target only the emulator and bound all commands:
 cd android
 ANDROID_HOME=$HOME/Android/sdk timeout 300 ./gradlew testDebugUnitTest --rerun-tasks
 ANDROID_SERIAL=emulator-5554 ANDROID_HOME=$HOME/Android/sdk timeout 180 ./gradlew connectedDebugAndroidTest --rerun-tasks \
-  -Pandroid.testInstrumentationRunnerArguments.class=dev.cockpit.app.ui.ReviewScreenTest
+  -Pandroid.testInstrumentationRunnerArguments.class=dev.scoutr.app.ui.ReviewScreenTest
 ANDROID_HOME=$HOME/Android/sdk timeout 300 ./gradlew pixel2api36DebugAndroidTest --rerun-tasks
 ANDROID_HOME=$HOME/Android/sdk timeout 300 ./gradlew assembleDebug
 ```
@@ -72,19 +72,19 @@ ANDROID_HOME=$HOME/Android/sdk timeout 300 ./gradlew assembleDebug
 Use `ReviewScreenTest`'s fake API seam to drive the parent Review mode selection with deterministic two-file and single-file `RepoDiffResponse` values, plus rename/binary, malformed, globally truncated, loading, failed, and empty responses. The truncated fixture must include at least one stat-only file whose raw chunk falls beyond the 64KiB response. Add a test-only `captureToImage()` helper that saves under `targetContext.getExternalFilesDir(null)` and prints each path. At minimum pull and inspect:
 
 ```bash
-timeout 30 adb -s emulator-5554 pull /sdcard/Android/data/dev.cockpit.app/files/diff-file-1.png /tmp/
-timeout 30 adb -s emulator-5554 pull /sdcard/Android/data/dev.cockpit.app/files/diff-file-picker.png /tmp/
-timeout 30 adb -s emulator-5554 pull /sdcard/Android/data/dev.cockpit.app/files/diff-file-2.png /tmp/
-timeout 30 adb -s emulator-5554 pull /sdcard/Android/data/dev.cockpit.app/files/diff-truncated.png /tmp/
+timeout 30 adb -s emulator-5554 pull /sdcard/Android/data/dev.scoutr.app/files/diff-file-1.png /tmp/
+timeout 30 adb -s emulator-5554 pull /sdcard/Android/data/dev.scoutr.app/files/diff-file-picker.png /tmp/
+timeout 30 adb -s emulator-5554 pull /sdcard/Android/data/dev.scoutr.app/files/diff-file-2.png /tmp/
+timeout 30 adb -s emulator-5554 pull /sdcard/Android/data/dev.scoutr.app/files/diff-truncated.png /tmp/
 ```
 
 Save and inspect the remaining edge-state PNGs with matching names. Use the exact printed path if it differs.
 ## Scope
 
 **In scope**:
-- `android/app/src/main/java/dev/cockpit/app/ui/screens/ReviewScreen.kt`
-- `android/app/src/androidTest/java/dev/cockpit/app/ui/ReviewScreenTest.kt`
-- A small pure parser/test file under `android/app/src/main/java/dev/cockpit/app/ui/screens/` and matching unit test, if separation makes parsing clearer
+- `android/app/src/main/java/dev/scoutr/app/ui/screens/ReviewScreen.kt`
+- `android/app/src/androidTest/java/dev/scoutr/app/ui/ReviewScreenTest.kt`
+- A small pure parser/test file under `android/app/src/main/java/dev/scoutr/app/ui/screens/` and matching unit test, if separation makes parsing clearer
 
 **Out of scope**:
 - Bridge diff API and 64KiB limit

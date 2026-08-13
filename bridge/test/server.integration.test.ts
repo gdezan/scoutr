@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { HerdrClient } from "../src/herdr/client.js";
 import { HerdrEventFeed } from "../src/herdr/feed.js";
-import { createCockpitServer, type CockpitServer } from "../src/server.js";
+import { createScoutrServer, type ScoutrServer } from "../src/server.js";
 import { UsageService } from "../src/usage/providers.js";
 import { FakeTerminalLauncher } from "./support/fake-terminal.js";
 
@@ -32,27 +32,27 @@ async function getJson(path: string): Promise<{ status: number; body: unknown }>
   return { status: response.status, body: await response.json() };
 }
 
-describe("cockpit bridge live herdr integration", { skip }, () => {
+describe("scoutr bridge live herdr integration", { skip }, () => {
   let herdr: HerdrClient;
   let feed: HerdrEventFeed;
-  let server: CockpitServer;
+  let server: ScoutrServer;
 
   before(async () => {
     herdr = new HerdrClient({ socketPath: socketPath! });
     feed = new HerdrEventFeed(socketPath!);
     await feed.start();
     const usage = new UsageService({
-      authPath: join(await mkdtemp(join(tmpdir(), "cockpit-auth-")), "auth.json"),
+      authPath: join(await mkdtemp(join(tmpdir(), "scoutr-auth-")), "auth.json"),
     });
     await writeFile(
       usage["authPath"],
       JSON.stringify({ "openai-codex": { type: "oauth", access: "x", accountId: "y" } }),
     );
-    server = createCockpitServer({
+    server = createScoutrServer({
       herdr,
       feed,
       usage,
-      config: { token: TOKEN, port: PORT },
+      config: { configDir: "/tmp/scoutr-test-config", token: TOKEN, port: PORT },
       terminal: new FakeTerminalLauncher(),
     });
   });

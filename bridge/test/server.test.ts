@@ -5,7 +5,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import WebSocket from "ws";
-import { createCockpitServer, type CockpitServer } from "../src/server.js";
+import { createScoutrServer, type ScoutrServer } from "../src/server.js";
 import { REVIEW_ROOTS_TTL_MS } from "../src/routes/review.js";
 import type { AgentInfo, SessionSnapshot } from "../src/herdr/types.js";
 import { fakeHerdr } from "./support/fake-herdr.js";
@@ -66,17 +66,21 @@ async function postJson(path: string, body: unknown): Promise<{ status: number; 
   return { status: response.status, body: await response.json() };
 }
 
-describe("cockpit bridge HTTP/WS API (offline)", () => {
-  let server: CockpitServer;
+describe("scoutr bridge HTTP/WS API (offline)", () => {
+  let server: ScoutrServer;
   let feed: ReturnType<typeof fakeFeed>;
   let sessionRoot: string;
   let sessionPath: string;
+  let configDir: string;
 
   before(async () => {
+    // Uploads live next to the config; give the server a tmp config dir so
+    // the attachment route never touches the developer's real config.
+    configDir = await mkdtemp(join(tmpdir(), "scoutr-server-config-"));
     // Speed up the commands-catalog test: point the loader at an empty agent
     // dir ("compact" is a builtin command, so the catalog exists without the
     // real ~/.pi/agent resource tree).
-    const agentDir = await mkdtemp(join(tmpdir(), "cockpit-agent-dir-"));
+    const agentDir = await mkdtemp(join(tmpdir(), "scoutr-agent-dir-"));
     process.env.PI_CODING_AGENT_DIR = agentDir;
     // Seed a minimal model catalog so /api/models serves 200 offline (the
     // empty dir would otherwise make readModelsCatalog throw → 404).
@@ -87,11 +91,11 @@ describe("cockpit bridge HTTP/WS API (offline)", () => {
     const herdr = fakeHerdr();
     feed = fakeFeed();
     const usage = { all: async () => ({}) };
-    sessionRoot = await mkdtemp(join(tmpdir(), "cockpit-server-catalog-"));
+    sessionRoot = await mkdtemp(join(tmpdir(), "scoutr-server-catalog-"));
     process.env.PI_CODING_AGENT_SESSION_DIR = sessionRoot;
     // Isolate the claude backend's store too, or the catalog scans the
     // developer's real ~/.claude/projects in test runs.
-    process.env.CLAUDECONFIGDIR = await mkdtemp(join(tmpdir(), "cockpit-server-claude-"));
+    process.env.CLAUDECONFIGDIR = await mkdtemp(join(tmpdir(), "scoutr-server-claude-"));
     await mkdir(join(process.env.CLAUDECONFIGDIR, "projects"), { recursive: true });
     const projectDir = join(sessionRoot, "project");
     await mkdir(projectDir);
@@ -103,11 +107,11 @@ describe("cockpit bridge HTTP/WS API (offline)", () => {
       ].join("\n"),
     );
     sessionPath = join(projectDir, "session.jsonl");
-    server = createCockpitServer({
+    server = createScoutrServer({
       herdr,
       feed,
       usage: usage as never,
-      config: { token: TOKEN, port: PORT },
+      config: { configDir, token: TOKEN, port: PORT },
       terminal: new FakeTerminalLauncher(),
     });
   });
@@ -188,7 +192,7 @@ describe("cockpit bridge HTTP/WS API (offline)", () => {
   });
 
   test("agents enrich cards with bounded model and latest activity", async () => {
-    const liveDir = await mkdtemp(join(tmpdir(), "cockpit-agent-session-"));
+    const liveDir = await mkdtemp(join(tmpdir(), "scoutr-agent-session-"));
     const liveSession = join(liveDir, "session.jsonl");
     await writeFile(
       liveSession,
@@ -232,7 +236,7 @@ describe("cockpit bridge HTTP/WS API (offline)", () => {
   });
 
   test("files lists an active agent's workspace and guards every other cwd", async () => {
-    const workspace = await mkdtemp(join(tmpdir(), "cockpit-files-route-"));
+    const workspace = await mkdtemp(join(tmpdir(), "scoutr-files-route-"));
     await mkdir(join(workspace, "src"));
     await writeFile(join(workspace, "src", "Screen.kt"), "");
     await writeFile(join(workspace, "README.md"), "");
@@ -313,10 +317,10 @@ describe("cockpit bridge HTTP/WS API (offline)", () => {
     // A session's recorded cwd is an implicitly allowed review root even
     // after the session completed (no live agent). Non-repo cwds are
     // dropped, so a cwd=$HOME session never re-opens the whole home dir.
-    const repo = await mkdtemp(join(tmpdir(), "cockpit-review-catalog-"));
+    const repo = await mkdtemp(join(tmpdir(), "scoutr-review-catalog-"));
     execFileSync("git", ["init", "-q", "-b", "main", repo]);
-    execFileSync("git", ["config", "user.email", "test@cockpit.dev"], { cwd: repo });
-    execFileSync("git", ["config", "user.name", "Cockpit Test"], { cwd: repo });
+    execFileSync("git", ["config", "user.email", "test@scoutr.dev"], { cwd: repo });
+    execFileSync("git", ["config", "user.name", "Scoutr Test"], { cwd: repo });
     await writeFile(join(repo, "doc.txt"), "catalog session workspace\n");
     execFileSync("git", ["add", "."], { cwd: repo });
     execFileSync("git", ["commit", "-q", "-m", "initial"], { cwd: repo });
@@ -360,6 +364,11 @@ describe("cockpit bridge HTTP/WS API (offline)", () => {
     const parsed = JSON.parse(body) as { ok: boolean; path: string };
     assert.equal(parsed.ok, true);
     assert.ok(typeof parsed.path === "string" && parsed.path.endsWith("test.png"));
+    // The upload must land next to the SERVER's own config dir, never the
+    // developer's real ~/.config/scoutr (regression: this route used to
+    // hardcode defaultConfigPath() and pollute the live uploads dir).
+    assert.ok(parsed.path.startsWith(join(configDir, "uploads")), parsed.path);
+    await rm(parsed.path, { force: true });
   });
 
   test("unauthorized requests are rejected", async () => {
@@ -462,14 +471,14 @@ describe("route contracts", () => {
     // listDirs only serves paths inside the user's home, so the fixture must
     // live under homedir(), not /tmp. Removed afterwards so test runs do not
     // litter the developer's home.
-    const dir = await mkdtemp(join(homedir(), "cockpit-dirs-"));
+    const dir = await mkdtemp(join(homedir(), "scoutr-dirs-"));
     try {
     const { status, body } = await getJson(`/api/dirs?path=${encodeURIComponent(dir)}`);
     assert.equal(status, 200);
     const listing = (body as { ok: boolean; listing: { path: string; dirs: string[] } }).listing;
     assert.deepEqual(listing, { path: dir, dirs: [] });
 
-      const missing = await getJson("/api/dirs?path=/definitely/not/a/real/cockpit-dir");
+      const missing = await getJson("/api/dirs?path=/definitely/not/a/real/scoutr-dir");
       assert.equal(missing.status, 400);
     } finally {
       await rm(dir, { recursive: true, force: true });

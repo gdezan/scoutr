@@ -4,11 +4,13 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 /**
- * Cockpit bridge configuration. Stored in ~/.config/cockpit/config.json.
+ * Scoutr bridge configuration. Stored in ~/.config/scoutr/config.json.
  * The token authenticates every HTTP/WS request from the app.
  */
 
 export interface BridgeConfig {
+  /** Directory containing config.json; uploads and other sibling state live here. */
+  configDir: string;
   /** Bearer token shared with the app. */
   token: string;
   /** Loopback port the bridge listens on (tailscale serve fronts it with TLS). */
@@ -22,11 +24,11 @@ export interface BridgeConfig {
 }
 
 export function defaultConfigPath(): string {
-  return join(process.env.XDG_CONFIG_HOME?.trim() || join(homedir(), ".config"), "cockpit", "config.json");
+  return join(process.env.XDG_CONFIG_HOME?.trim() || join(homedir(), ".config"), "scoutr", "config.json");
 }
 
 export function generateToken(): string {
-  return `cockpit_${randomBytes(18).toString("base64url")}`;
+  return `scoutr_${randomBytes(18).toString("base64url")}`;
 }
 
 export async function loadOrCreateConfig(path = defaultConfigPath()): Promise<BridgeConfig> {
@@ -36,14 +38,15 @@ export async function loadOrCreateConfig(path = defaultConfigPath()): Promise<Br
     const raw = await readFile(path, "utf8");
     const parsed = JSON.parse(raw) as Partial<BridgeConfig>;
     if (typeof parsed.token !== "string" || parsed.token.length < 16 || typeof parsed.port !== "number") {
-      throw new Error("invalid cockpit config (token or port missing)");
+      throw new Error("invalid scoutr config (token or port missing)");
     }
     readOk = true;
     config = {
+      configDir: join(path, ".."),
       token: parsed.token,
       port: parsed.port,
       ntfyUrl: typeof parsed.ntfyUrl === "string" ? parsed.ntfyUrl : undefined,
-      ntfyTopic: typeof parsed.ntfyTopic === "string" ? parsed.ntfyTopic : `cockpit_${randomBytes(12).toString("base64url")}`,
+      ntfyTopic: typeof parsed.ntfyTopic === "string" ? parsed.ntfyTopic : `scoutr_${randomBytes(12).toString("base64url")}`,
       publicHost: typeof parsed.publicHost === "string" ? parsed.publicHost : undefined,
     };
   } catch {
@@ -52,9 +55,10 @@ export async function loadOrCreateConfig(path = defaultConfigPath()): Promise<Br
   }
   if (!config) {
     config = {
+      configDir: join(path, ".."),
       token: generateToken(),
       port: 8737,
-      ntfyTopic: `cockpit_${randomBytes(12).toString("base64url")}`,
+      ntfyTopic: `scoutr_${randomBytes(12).toString("base64url")}`,
     };
     await mkdir(join(path, ".."), { recursive: true });
   }
@@ -65,7 +69,7 @@ export async function loadOrCreateConfig(path = defaultConfigPath()): Promise<Br
     if (readOk) {
       // A parsed config that cannot be re-persisted is still valid; never
       // silently mint a new token over it (that would 401 every paired phone).
-      console.error(`cockpit config could not be persisted: ${error instanceof Error ? error.message : String(error)}`);
+      console.error(`scoutr config could not be persisted: ${error instanceof Error ? error.message : String(error)}`);
     } else {
       // A fresh config that cannot be persisted is fatal: nothing to pair against.
       throw error;

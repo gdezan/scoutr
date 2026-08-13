@@ -48,7 +48,7 @@ function gitRepoRootCached(cwd: string): Promise<string | null> {
  * bridge. These are the implicit review roots for fix 5: the user already
  * authorizes an agent to run in each, so read-only git review of the same
  * repo adds no privilege, and it removes the 403 that blocked reviewing
- * real repos without COCKPIT_REPO_ROOTS.
+ * real repos without SCOUTR_REPO_ROOTS.
  *
  * Least-privilege narrowing: each session cwd is resolved to its git
  * repository root (git rev-parse --show-toplevel); non-repo cwds — e.g.
@@ -122,7 +122,7 @@ async function computeReviewRoots(ctx: RouteContext): Promise<string[]> {
   // that cwd (active or historical), so read-only git review adds no
   // privilege. Each cwd is narrowed to its git repo root so a
   // cwd=/home/gdezan session never makes the whole home reviewable.
-  // COCKPIT_REPO_ROOTS still works and is joined in.
+  // SCOUTR_REPO_ROOTS still works and is joined in.
   let catalogCwds: string[] = [];
   try {
     const catalog = await listSessionCatalog({ roots: sessionCatalogRoots(), active: [] });
