@@ -72,6 +72,7 @@ import dev.cockpit.app.data.AgentStatus
 import dev.cockpit.app.state.BoardViewModel
 import dev.cockpit.app.state.viewModelFactory
 import dev.cockpit.app.ui.components.ConfirmDialog
+import dev.cockpit.app.ui.components.ReadableContentColumn
 import dev.cockpit.app.ui.motion.CockpitMotion
 import dev.cockpit.app.ui.motion.HapticEvent
 import dev.cockpit.app.ui.motion.rememberHaptic
@@ -132,35 +133,40 @@ fun BoardScreen(
         )
     }
 
-    LazyColumn(
-        modifier = modifier.fillMaxSize().padding(horizontal = 16.dp).testTag("board_capture_root"),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
-        // Clear the board's FAB so it never covers the last card, even at
-        // large font scales.
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 96.dp),
+    ReadableContentColumn(
+        modifier = modifier.fillMaxSize(),
+        contentTag = "board_capture_root",
     ) {
-        item { Spacer(Modifier.height(8.dp)) }
-        if (!ui.connected) {
-            item { DisconnectedBanner(error = ui.error, onRetry = { viewModel.connect("", "") }) }
-        }
-
-        if (ui.board.total == 0) {
-            item {
-                Box(
-                    Modifier.fillMaxWidth().padding(vertical = 80.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text("No agents running", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+            // Clear the board's FAB so it never covers the last card, even at
+            // large font scales.
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 96.dp),
+        ) {
+            item { Spacer(Modifier.height(8.dp)) }
+            if (!ui.connected) {
+                item { DisconnectedBanner(error = ui.error, onRetry = { viewModel.connect("", "") }) }
             }
-        } else {
-            boardSection("Needs you", ui.board.needsYou, onOpenAgent, reduceMotion, onReviewAgent, { pendingClose = it })
-            boardSection("Working", ui.board.working, onOpenAgent, reduceMotion, onReviewAgent, { pendingClose = it })
-            boardSection("Done", ui.board.done, onOpenAgent, reduceMotion, onReviewAgent, { pendingClose = it })
-            boardSection("Idle", ui.board.idle, onOpenAgent, reduceMotion, onReviewAgent, { pendingClose = it })
-            boardSection("Other", ui.board.unknown, onOpenAgent, reduceMotion, onReviewAgent, { pendingClose = it })
+
+            if (ui.board.total == 0) {
+                item {
+                    Box(
+                        Modifier.fillMaxWidth().padding(vertical = 80.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text("No agents running", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            } else {
+                boardSection("Needs you", ui.board.needsYou, onOpenAgent, reduceMotion, onReviewAgent, { pendingClose = it })
+                boardSection("Working", ui.board.working, onOpenAgent, reduceMotion, onReviewAgent, { pendingClose = it })
+                boardSection("Done", ui.board.done, onOpenAgent, reduceMotion, onReviewAgent, { pendingClose = it })
+                boardSection("Idle", ui.board.idle, onOpenAgent, reduceMotion, onReviewAgent, { pendingClose = it })
+                boardSection("Other", ui.board.unknown, onOpenAgent, reduceMotion, onReviewAgent, { pendingClose = it })
+            }
+            item { Spacer(Modifier.height(24.dp)) }
         }
-        item { Spacer(Modifier.height(24.dp)) }
     }
 }
 
@@ -502,8 +508,12 @@ internal fun timeInState(sinceMs: Double?, nowMs: Long = System.currentTimeMilli
 /** Stable skeleton rows (fixed geometry, no spinner flash) while first load runs. */
 @Composable
 private fun BoardSkeleton(modifier: Modifier = Modifier) {
+    ReadableContentColumn(
+        modifier = modifier.fillMaxSize().padding(top = 8.dp, bottom = 0.dp),
+        contentTag = "board_skeleton",
+    ) {
     Column(
-        modifier = modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 8.dp).testTag("board_skeleton"),
+        modifier = Modifier.fillMaxSize(),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         repeat(5) { index ->
@@ -558,6 +568,7 @@ private fun BoardSkeleton(modifier: Modifier = Modifier) {
             }
         }
     }
+}
 }
 
 @Composable

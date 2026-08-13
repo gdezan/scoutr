@@ -1,8 +1,11 @@
 package dev.cockpit.app.ui
 
 import android.graphics.Bitmap
+import android.provider.Settings
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.width
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asAndroidBitmap
-
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.filterToOne
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
@@ -18,6 +21,8 @@ import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeLeft
 import android.content.ClipboardManager
 import androidx.test.platform.app.InstrumentationRegistry
+import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.unit.dp
 import dev.cockpit.app.data.AgentCard
 import dev.cockpit.app.data.BoardState
 import dev.cockpit.app.data.ConnectionStore
@@ -51,6 +56,71 @@ class BoardScreenTest {
         }
         println("BOARD_SCREENSHOT=${file.absolutePath}")
     }
+
+    private fun largeFontEnabled(): Boolean {
+        val requested = InstrumentationRegistry.getArguments().getString("fontScale") == "1.3"
+        if (requested) {
+            val applied = Settings.System.getFloat(
+                InstrumentationRegistry.getInstrumentation().targetContext.contentResolver,
+                Settings.System.FONT_SCALE,
+            )
+            assertTrue("large-font evidence requires font_scale 1.3, was $applied", abs(applied - 1.3f) <= 0.01f)
+        }
+        return requested
+    }
+
+    @Test
+    fun compactBoardContentKeepsSixteenDpGutters() {
+        compose.setContent {
+            CockpitTheme {
+                Box(Modifier.width(320.dp)) {
+                    BoardScreen(
+                        onOpenAgent = {},
+                        viewModel = staticBoardViewModel(
+                            BoardUiState(
+                                board = BoardState.group(listOf(blockedAgent("p1", "Fix billing bug", "/repo/a", null, null))),
+                                connected = true,
+                            ),
+                        ),
+                    )
+                }
+            }
+        }
+        val contentBounds = compose.onNodeWithTag("board_capture_root").getUnclippedBoundsInRoot()
+        assertTrue("compact board should start at 16dp", abs(contentBounds.left.value - 16f) <= 1f)
+        assertTrue("compact board should be 288dp wide", abs((contentBounds.right - contentBounds.left).value - 288f) <= 1f)
+    }
+
+    @Test
+    fun wideBoardContentUsesReadableBound() {
+        compose.setContent {
+            CockpitTheme {
+                BoardScreen(
+                    onOpenAgent = {},
+                    viewModel = staticBoardViewModel(
+                        BoardUiState(
+                            board = BoardState.group(
+                                listOf(
+                                    blockedAgent("p1", "Fix billing bug", "/repo/a", "openai-codex/gpt-5.4", "Found it"),
+                                    workingAgent("p2", "Docs refresh", "/repo/b", "anthropic/claude-sonnet-4-6", "Updating docs"),
+                                ),
+                            ),
+                            connected = true,
+                        ),
+                    ),
+                )
+            }
+        }
+        val contentBounds = compose.onNodeWithTag("board_capture_root").getUnclippedBoundsInRoot()
+        val rootBounds = compose.onRoot().getUnclippedBoundsInRoot()
+        if (rootBounds.right - rootBounds.left > 1008.dp) {
+            assertTrue("wide board should be 960dp", abs((contentBounds.right - contentBounds.left).value - 960f) <= 1f)
+            assertTrue("wide board should be centered", abs(((contentBounds.left + contentBounds.right) - (rootBounds.left + rootBounds.right)).value) <= 2f)
+            assertTrue("wide Board overflow remains reachable", compose.onAllNodes(androidx.compose.ui.test.hasTestTag("agent_actions_p1")).fetchSemanticsNodes().isNotEmpty())
+            capture(if (largeFontEnabled()) "board-wide-large-font" else "board-wide")
+        }
+    }
+
 
     private fun blockedAgent(
         paneId: String,

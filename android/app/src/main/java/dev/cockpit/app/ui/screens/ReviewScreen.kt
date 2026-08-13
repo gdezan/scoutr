@@ -52,8 +52,8 @@ import androidx.compose.ui.unit.dp
 import dev.cockpit.app.CockpitApp
 import dev.cockpit.app.state.Loadable
 import dev.cockpit.app.state.ReviewViewModel
-
 import dev.cockpit.app.ui.components.CockpitTextField
+import dev.cockpit.app.ui.components.ReadableContentColumn
 import dev.cockpit.app.ui.theme.DiffPalette
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -97,14 +97,16 @@ private fun PickerMode(
     // reliable way to reach a repo.
     var pathText by rememberSaveable(ui.dirPath) { mutableStateOf(ui.dirPath) }
     LaunchedEffect(ui.dirPath) { pathText = ui.dirPath }
-
-    Column(modifier.fillMaxSize()) {
+    ReadableContentColumn(
+        modifier = modifier.fillMaxSize(),
+        contentTag = "review_picker_content",
+    ) {
         if (ui.lastRepoPath != null) {
             Row(
                 Modifier
                     .fillMaxWidth()
                     .clickable { viewModel.selectRepo(ui.lastRepoPath) }
-                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                    .padding(vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Icon(
@@ -133,7 +135,7 @@ private fun PickerMode(
             }
         }
         Row(
-            Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
+            Modifier.fillMaxWidth().padding(vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             IconButton(
@@ -188,7 +190,7 @@ private fun PickerMode(
                             Modifier
                                 .fillMaxWidth()
                                 .clickable { viewModel.browseInto(dir) }
-                                .padding(horizontal = 16.dp, vertical = 12.dp),
+                                .padding(vertical = 12.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Icon(
@@ -239,9 +241,12 @@ private fun ReviewMode(
         return
     }
 
-    Column(modifier.fillMaxSize().testTag("review_capture_root")) {
+    ReadableContentColumn(
+        modifier = modifier.fillMaxSize(),
+        contentTag = "review_capture_root",
+    ) {
         Row(
-            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+            Modifier.fillMaxWidth().padding(vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(Modifier.weight(1f)) {
@@ -308,7 +313,7 @@ private fun ReviewMode(
                     }
                     items(artifacts, key = { it.path }) { artifact ->
                         Row(
-                            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
+                            Modifier.fillMaxWidth().padding(vertical = 6.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Text(
@@ -343,14 +348,14 @@ private fun SectionLabel(title: String) {
         title,
         style = MaterialTheme.typography.labelSmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier.padding(start = 16.dp, top = 16.dp, bottom = 4.dp),
+        modifier = Modifier.padding(top = 16.dp, bottom = 4.dp),
     )
 }
 
 @Composable
 private fun StatusRow(code: String, path: String) {
     Row(
-        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
+        Modifier.fillMaxWidth().padding(vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
@@ -398,7 +403,7 @@ private fun DiffRow(
             .fillMaxWidth()
             .background(if (selected) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f) else Color.Transparent)
             .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 10.dp),
+            .padding(vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(

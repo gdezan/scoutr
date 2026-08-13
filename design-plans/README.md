@@ -13,7 +13,7 @@ Execute in the order below unless dependencies say otherwise. Each executor must
 | 003 | Expose Board card actions without requiring a hidden swipe | P1 | S | — | DONE |
 | 004 | Make negative provider balances unmistakable | P2 | S | — | DONE |
 | 005 | Navigate multi-file diffs by file | P2 | M | — | DONE |
-| 006 | Give tablet layouts readable content bounds | P3 | M | 003, 005 | TODO |
+| 006 | Give tablet layouts readable content bounds | P3 | M | 003, 005 | DONE |
 | 007 | Make Chat scrolling predictable under taps, appends, and drags | P1 | M | — | TODO |
 | 008 | Make model selection provider-first and gesture-stable | P1 | M | 001 | DONE |
 | 009 | Make search and tab position changes intentional | P2 | M | 002, 006, 008 | TODO |

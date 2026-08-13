@@ -95,6 +95,7 @@ import dev.cockpit.app.state.HistoryView
 import dev.cockpit.app.state.ResumedSession
 import dev.cockpit.app.state.SessionHistoryViewModel
 import dev.cockpit.app.state.viewModelFactory
+import dev.cockpit.app.ui.components.ReadableContentColumn
 
 /** The Sessions tab: catalog of stored and live pi sessions with lifecycle actions. */
 @Composable
@@ -119,7 +120,10 @@ fun HistoryScreen(
     var renaming by remember { mutableStateOf<HistoryItem?>(null) }
     val scope = rememberCoroutineScope()
 
-    Column(modifier.fillMaxSize()) {
+    ReadableContentColumn(
+        modifier = modifier.fillMaxSize(),
+        contentTag = "history_content",
+    ) {
         SearchField(
             query = query,
             onQuery = {
@@ -209,7 +213,7 @@ private fun SearchField(query: String, onQuery: (String) -> Unit) {
         leadingIcon = Icons.Default.Search,
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp)
+            .padding(vertical = 8.dp)
             .testTag("history_search"),
         trailingIcon = {
             if (query.isNotEmpty()) {
@@ -234,7 +238,7 @@ private fun ViewTabs(view: HistoryView, onSelect: (HistoryView) -> Unit) {
         Modifier
             .fillMaxWidth()
             .horizontalScroll(rememberScrollState())
-            .padding(horizontal = 16.dp),
+            .padding(horizontal = 0.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         HistoryView.entries.forEach { candidate ->
@@ -291,7 +295,7 @@ private fun HistoryList(
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         if (ui.truncated) {
@@ -645,7 +649,7 @@ private fun OfflineBanner(onRetry: () -> Unit) {
     Row(
         Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp)
+            .padding(horizontal = 0.dp)
             .background(MaterialTheme.colorScheme.errorContainer, RoundedCornerShape(12.dp))
             .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -670,7 +674,7 @@ private fun ErrorBanner(message: String, onDismiss: () -> Unit) {
     Row(
         Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp)
+            .padding(horizontal = 0.dp)
             .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(12.dp))
             .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -685,7 +689,7 @@ private fun ErrorBanner(message: String, onDismiss: () -> Unit) {
 @Composable
 private fun HistorySkeleton() {
     Column(
-        Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 8.dp),
+        Modifier.fillMaxSize().padding(vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         repeat(6) { index ->

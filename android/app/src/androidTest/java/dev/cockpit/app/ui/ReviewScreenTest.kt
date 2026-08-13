@@ -1,6 +1,10 @@
 package dev.cockpit.app.ui
 
 import android.graphics.Bitmap
+import android.provider.Settings
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.width
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -9,6 +13,9 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.test.platform.app.InstrumentationRegistry
+import androidx.compose.ui.test.getUnclippedBoundsInRoot
+import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.unit.dp
 import dev.cockpit.app.data.ConnectionStore
 import dev.cockpit.app.net.BridgeClient
 import dev.cockpit.app.state.ReviewStore
@@ -35,12 +42,67 @@ class ReviewScreenTest {
     @get:Rule
     val compose = createComposeRule()
 
-    private fun capture(name: String) {
+    @Test
+    fun compactReviewPickerKeepsSixteenDpGutters() {
+        stubApi()
+        val vm = viewModel()
+        compose.setContent {
+            CockpitTheme {
+                Box(Modifier.width(320.dp)) {
+                    ReviewScreen(vm)
+                }
+            }
+        }
+        compose.waitUntil(5_000) {
+            compose.onAllNodes(androidx.compose.ui.test.hasTestTag("review_picker_content")).fetchSemanticsNodes().isNotEmpty()
+        }
+        val contentBounds = compose.onNodeWithTag("review_picker_content").getUnclippedBoundsInRoot()
+        org.junit.Assert.assertTrue("compact review picker should start at 16dp", kotlin.math.abs(contentBounds.left.value - 16f) <= 1f)
+        org.junit.Assert.assertTrue("compact review picker should be 288dp wide", kotlin.math.abs((contentBounds.right - contentBounds.left).value - 288f) <= 1f)
+    }
+
+    @Test
+    fun wideReviewPickerUsesReadableBound() {
+        stubApi()
+        val vm = viewModel()
+        compose.setContent {
+            CockpitTheme {
+                ReviewScreen(vm)
+            }
+        }
+        compose.waitUntil(5_000) {
+            compose.onAllNodes(androidx.compose.ui.test.hasTestTag("review_picker_content")).fetchSemanticsNodes().isNotEmpty()
+        }
+        val contentBounds = compose.onNodeWithTag("review_picker_content").getUnclippedBoundsInRoot()
+        val rootBounds = compose.onRoot().getUnclippedBoundsInRoot()
+        if (rootBounds.right - rootBounds.left > 1008.dp) {
+            org.junit.Assert.assertTrue("wide review picker should be 960dp", kotlin.math.abs((contentBounds.right - contentBounds.left).value - 960f) <= 1f)
+            org.junit.Assert.assertTrue("wide review picker should be centered", kotlin.math.abs(((contentBounds.left + contentBounds.right) - (rootBounds.left + rootBounds.right)).value) <= 2f)
+            capture(if (largeFontEnabled()) "review-wide-large-font" else "review-wide", "review_picker_content")
+        }
+    }
+
+    private fun largeFontEnabled(): Boolean {
+        val requested = InstrumentationRegistry.getArguments().getString("fontScale") == "1.3"
+        if (requested) {
+            val applied = Settings.System.getFloat(
+                InstrumentationRegistry.getInstrumentation().targetContext.contentResolver,
+                Settings.System.FONT_SCALE,
+            )
+            org.junit.Assert.assertTrue("large-font evidence requires font_scale 1.3, was $applied", kotlin.math.abs(applied - 1.3f) <= 0.01f)
+        }
+        return requested
+    }
+    private fun capture(name: String, tag: String = "review_capture_root", overlay: Boolean = false) {
         val file = InstrumentationRegistry.getInstrumentation().targetContext
             .getExternalFilesDir(null)!!.resolve("$name.png")
         FileOutputStream(file).use { output ->
-            compose.onNodeWithTag("review_capture_root").captureToImage().asAndroidBitmap()
-                .compress(Bitmap.CompressFormat.PNG, 100, output)
+            val bitmap = if (overlay) {
+                InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot()
+            } else {
+                compose.onNodeWithTag(tag).captureToImage().asAndroidBitmap()
+            }
+            bitmap.compress(Bitmap.CompressFormat.PNG, 100, output)
         }
         println("REVIEW_SCREENSHOT=${file.absolutePath}")
     }
@@ -77,7 +139,7 @@ class ReviewScreenTest {
                         )
                     path == "/api/repo/diff" ->
                         MockResponse().setResponseCode(200).setBody(
-                            """{"ok":true,"diff":"diff --git a/src/server.ts b/src/server.ts\n--- a/src/server.ts\n+++ b/src/server.ts\n@@ -1,3 +1,4 @@\n import x\n+new line\n","truncated":false,"stat":[{"path":"src/server.ts","additions":1,"deletions":0}]}""",
+                            """{"ok":true,"diff":"diff --git a/src/server.ts b/src/server.ts\n--- a/src/server.ts\n+++ b/src/server.ts\n@@ -1,3 +1,4 @@\n import x\n+new line\ndiff --git a/notes.txt b/notes.txt\n--- a/notes.txt\n+++ b/notes.txt\n@@ -0,0 +1 @@\n+note\n","truncated":false,"stat":[{"path":"src/server.ts","additions":1,"deletions":0},{"path":"notes.txt","additions":1,"deletions":0}]}""",
                         )
                     else -> MockResponse().setResponseCode(404).setBody("""{"ok":false,"error":"not found"}""")
                 }
@@ -105,6 +167,40 @@ class ReviewScreenTest {
         }
         compose.onNodeWithText("worktrees").assertIsDisplayed()
         compose.onNodeWithText("projects").assertIsDisplayed()
+    }
+
+    @Test
+    fun wideReviewOverviewIsBoundedAndDiffStaysFullWidth() {
+        stubApi()
+        val vm = viewModel()
+        compose.setContent {
+            CockpitTheme {
+                ReviewScreen(vm)
+            }
+        }
+        compose.onNodeWithText("worktrees").performClick()
+        compose.onNodeWithTag("review_select").performClick()
+        compose.waitUntil(5_000) {
+            compose.onAllNodes(androidx.compose.ui.test.hasText("Working tree")).fetchSemanticsNodes().isNotEmpty()
+        }
+        val rootBounds = compose.onRoot().getUnclippedBoundsInRoot()
+        val overviewBounds = compose.onNodeWithTag("review_capture_root").getUnclippedBoundsInRoot()
+        if (rootBounds.right - rootBounds.left > 1008.dp) {
+            org.junit.Assert.assertTrue("wide review overview should be 960dp", kotlin.math.abs((overviewBounds.right - overviewBounds.left).value - 960f) <= 1f)
+        }
+
+        compose.onNodeWithText("diff vs HEAD").performClick()
+        compose.waitUntil(5_000) {
+            compose.onAllNodes(androidx.compose.ui.test.hasText("+new line")).fetchSemanticsNodes().isNotEmpty() &&
+                compose.onAllNodes(androidx.compose.ui.test.hasTestTag("diff_file_selector")).fetchSemanticsNodes().isNotEmpty()
+        }
+        val diffBounds = compose.onNodeWithTag("review_capture_root").getUnclippedBoundsInRoot()
+        if (rootBounds.right - rootBounds.left > 1008.dp) {
+            org.junit.Assert.assertTrue(
+                "Review diff should span the widened root",
+                kotlin.math.abs((diffBounds.right - diffBounds.left).value - (rootBounds.right - rootBounds.left).value) <= 1f,
+            )
+        }
     }
 
     @Test

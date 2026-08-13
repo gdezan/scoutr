@@ -1,8 +1,13 @@
 package dev.cockpit.app.ui
 
+import android.graphics.Bitmap
+import android.provider.Settings
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.width
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.ui.test.captureToImage
+import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
@@ -34,6 +39,7 @@ import kotlin.math.abs
 import org.junit.Rule
 import org.junit.Test
 import java.util.concurrent.TimeUnit
+import java.io.FileOutputStream
 
 /**
  * Session history surface against a local mock bridge: catalog rows, search,
@@ -43,6 +49,73 @@ class HistoryScreenTest {
 
     @get:Rule
     val compose = createComposeRule()
+
+    private fun capture(name: String, overlay: Boolean = false) {
+        val file = InstrumentationRegistry.getInstrumentation().targetContext
+            .getExternalFilesDir(null)!!.resolve("$name.png")
+        FileOutputStream(file).use { output ->
+            val bitmap = if (overlay) {
+                InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot()
+            } else {
+                compose.onNodeWithTag("history_content").captureToImage().asAndroidBitmap()
+            }
+            bitmap.compress(Bitmap.CompressFormat.PNG, 100, output)
+        }
+        println("HISTORY_SCREENSHOT=${file.absolutePath}")
+    }
+
+    private fun largeFontEnabled(): Boolean {
+        val requested = InstrumentationRegistry.getArguments().getString("fontScale") == "1.3"
+        if (requested) {
+            val applied = Settings.System.getFloat(
+                InstrumentationRegistry.getInstrumentation().targetContext.contentResolver,
+                Settings.System.FONT_SCALE,
+            )
+            assertTrue("large-font evidence requires font_scale 1.3, was $applied", abs(applied - 1.3f) <= 0.01f)
+        }
+        return requested
+    }
+
+
+    @Test
+    fun compactHistoryContentKeepsSixteenDpGutters() {
+        stubCatalog()
+        val vm = viewModel()
+        compose.setContent {
+            CockpitTheme {
+                Box(Modifier.width(320.dp)) {
+                    HistoryScreen(onOpenSession = {}, viewModel = vm)
+                }
+            }
+        }
+        compose.waitUntil(5_000) {
+            compose.onAllNodes(androidx.compose.ui.test.hasTestTag("history_row_abc")).fetchSemanticsNodes().isNotEmpty()
+        }
+        val contentBounds = compose.onNodeWithTag("history_content").getUnclippedBoundsInRoot()
+        assertTrue("compact sessions should start at 16dp", abs(contentBounds.left.value - 16f) <= 1f)
+        assertTrue("compact sessions should be 288dp wide", abs((contentBounds.right - contentBounds.left).value - 288f) <= 1f)
+    }
+
+    @Test
+    fun wideHistoryContentUsesReadableBound() {
+        stubCatalog()
+        val vm = viewModel()
+        compose.setContent {
+            CockpitTheme {
+                HistoryScreen(onOpenSession = {}, viewModel = vm)
+            }
+        }
+        compose.waitUntil(5_000) {
+            compose.onAllNodes(androidx.compose.ui.test.hasTestTag("history_row_abc")).fetchSemanticsNodes().isNotEmpty()
+        }
+        val contentBounds = compose.onNodeWithTag("history_content").getUnclippedBoundsInRoot()
+        val rootBounds = compose.onRoot().getUnclippedBoundsInRoot()
+        if (rootBounds.right - rootBounds.left > 1008.dp) {
+            assertTrue("wide sessions should be 960dp", abs((contentBounds.right - contentBounds.left).value - 960f) <= 1f)
+            assertTrue("wide sessions should be centered", abs(((contentBounds.left + contentBounds.right) - (rootBounds.left + rootBounds.right)).value) <= 2f)
+            capture(if (largeFontEnabled()) "sessions-wide-large-font" else "sessions-wide")
+        }
+    }
 
     private lateinit var server: MockWebServer
 
