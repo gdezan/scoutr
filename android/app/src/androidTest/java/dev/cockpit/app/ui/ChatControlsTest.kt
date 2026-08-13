@@ -196,8 +196,12 @@ class ChatControlsTest {
             allMenuLabels.filter { it !in present }.forEach { label ->
                 compose.onNodeWithText(label).assertDoesNotExist()
             }
-            // Dismiss the open menu before the next row.
-            androidx.test.espresso.Espresso.pressBack()
+            // Dismiss the open menu before the next row. Espresso.pressBack()
+            // matches the top window's root view, and the empty-capability row
+            // renders a zero-width PopupLayout that fails its non-empty-rect
+            // constraint; a global back action needs no view match.
+            InstrumentationRegistry.getInstrumentation().uiAutomation
+                .performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK)
             compose.waitForIdle()
         }
     }

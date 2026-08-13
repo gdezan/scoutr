@@ -20,7 +20,8 @@ android {
         targetSdk = 36
         versionCode = 1
         versionName = "0.1.0"
-        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        // Zeroes animation scales before Espresso runs; see CockpitTestRunner.
+        testInstrumentationRunner = "dev.cockpit.app.CockpitTestRunner"
     }
 
     buildTypes {

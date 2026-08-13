@@ -1,14 +1,19 @@
 package dev.cockpit.app.ui.screens.terminal
 
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
@@ -72,33 +77,45 @@ internal fun ExtraKeysRow(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 6.dp, vertical = 6.dp),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            if (page == 0) {
-                ExtraKey("Esc") { sendKey(view, KeyEvent.KEYCODE_ESCAPE, state) }
-                ModifierKeyButton(state, ModifierKey.CTRL)
-                ModifierKeyButton(state, ModifierKey.ALT)
-                ExtraKey("Tab") { sendKey(view, KeyEvent.KEYCODE_TAB, state) }
-                ExtraKey("↑") { sendKey(view, KeyEvent.KEYCODE_DPAD_UP, state) }
-                ExtraKey("↓") { sendKey(view, KeyEvent.KEYCODE_DPAD_DOWN, state) }
-                ExtraKey("←") { sendKey(view, KeyEvent.KEYCODE_DPAD_LEFT, state) }
-                ExtraKey("→") { sendKey(view, KeyEvent.KEYCODE_DPAD_RIGHT, state) }
-            } else {
-                ExtraKey("Home") { sendKey(view, KeyEvent.KEYCODE_MOVE_HOME, state) }
-                ExtraKey("End") { sendKey(view, KeyEvent.KEYCODE_MOVE_END, state) }
-                ExtraKey("PgUp") { sendKey(view, KeyEvent.KEYCODE_PAGE_UP, state) }
-                ExtraKey("PgDn") { sendKey(view, KeyEvent.KEYCODE_PAGE_DOWN, state) }
-                ExtraKey("Ins") { sendKey(view, KeyEvent.KEYCODE_INSERT, state) }
-                ExtraKey("Del") { sendKey(view, KeyEvent.KEYCODE_FORWARD_DEL, state) }
-                ExtraKey("|") { sendSymbol(view, '|'.code, state) }
-                ExtraKey("~") { sendSymbol(view, '~'.code, state) }
-                ExtraKey("&") { sendSymbol(view, '&'.code, state) }
-                ExtraKey(";") { sendSymbol(view, ';'.code, state) }
-                ExtraKey("<") { sendSymbol(view, '<'.code, state) }
-                ExtraKey(">") { sendSymbol(view, '>'.code, state) }
+            // Keys keep their natural width and scroll when a page is wider
+            // than the screen (page 2 has twelve keys); the page toggle stays
+            // pinned at the right. Without the scroll container the last keys
+            // overflow past the screen edge and the toggle lands off-screen,
+            // untappable.
+            Box(Modifier.weight(1f).clipToBounds()) {
+                Row(
+                    modifier = Modifier.horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    if (page == 0) {
+                        ExtraKey("Esc") { sendKey(view, KeyEvent.KEYCODE_ESCAPE, state) }
+                        ModifierKeyButton(state, ModifierKey.CTRL)
+                        ModifierKeyButton(state, ModifierKey.ALT)
+                        ExtraKey("Tab") { sendKey(view, KeyEvent.KEYCODE_TAB, state) }
+                        ExtraKey("↑") { sendKey(view, KeyEvent.KEYCODE_DPAD_UP, state) }
+                        ExtraKey("↓") { sendKey(view, KeyEvent.KEYCODE_DPAD_DOWN, state) }
+                        ExtraKey("←") { sendKey(view, KeyEvent.KEYCODE_DPAD_LEFT, state) }
+                        ExtraKey("→") { sendKey(view, KeyEvent.KEYCODE_DPAD_RIGHT, state) }
+                    } else {
+                        ExtraKey("Home") { sendKey(view, KeyEvent.KEYCODE_MOVE_HOME, state) }
+                        ExtraKey("End") { sendKey(view, KeyEvent.KEYCODE_MOVE_END, state) }
+                        ExtraKey("PgUp") { sendKey(view, KeyEvent.KEYCODE_PAGE_UP, state) }
+                        ExtraKey("PgDn") { sendKey(view, KeyEvent.KEYCODE_PAGE_DOWN, state) }
+                        ExtraKey("Ins") { sendKey(view, KeyEvent.KEYCODE_INSERT, state) }
+                        ExtraKey("Del") { sendKey(view, KeyEvent.KEYCODE_FORWARD_DEL, state) }
+                        ExtraKey("|") { sendSymbol(view, '|'.code, state) }
+                        ExtraKey("~") { sendSymbol(view, '~'.code, state) }
+                        ExtraKey("&") { sendSymbol(view, '&'.code, state) }
+                        ExtraKey(";") { sendSymbol(view, ';'.code, state) }
+                        ExtraKey("<") { sendSymbol(view, '<'.code, state) }
+                        ExtraKey(">") { sendSymbol(view, '>'.code, state) }
+                    }
+                }
             }
-            Box(Modifier.weight(1f))
+            Spacer(Modifier.width(6.dp))
             Surface(
                 onClick = { page = 1 - page },
                 color = Color.Transparent,

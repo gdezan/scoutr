@@ -454,6 +454,23 @@ public final class TerminalView extends View {
         onScreenUpdated(false);
     }
 
+    /**
+     * Re-fetch the emulator from the attached session and repaint. Cockpit-only:
+     * RemoteTerminalSession replaces its emulator on every remote stream
+     * generation (resetForGeneration), so a view must re-fetch rather than keep
+     * the previous emulator; upstream Termux never replaces an emulator inside a
+     * live session, so upstream code has no equivalent hook. See
+     * android/vendor/termux/UPSTREAM.md.
+     */
+    public void refreshEmulator() {
+        if (mTermSession == null) return;
+        mEmulator = mTermSession.getEmulator();
+        if (mTerminalCursorBlinkerRunnable != null) {
+            mTerminalCursorBlinkerRunnable.setEmulator(mEmulator);
+        }
+        onScreenUpdated();
+    }
+
     public void onScreenUpdated(boolean skipScrolling) {
         if (mEmulator == null) return;
 

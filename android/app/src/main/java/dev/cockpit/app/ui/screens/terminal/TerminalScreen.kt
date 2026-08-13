@@ -242,7 +242,11 @@ fun TerminalScreen(
                             ),
                         )
                         view.attachSession(viewModel.session)
-                        viewModel.session.callbacks.onScreenUpdated = { view.onScreenUpdated() }
+                        // Generation resets replace the session's emulator (see
+                        // RemoteTerminalSession.resetForGeneration); refreshEmulator
+                        // re-fetches it so the new generation's content renders
+                        // instead of the view repainting the stale emulator forever.
+                        viewModel.session.callbacks.onScreenUpdated = { view.refreshEmulator() }
                         viewRef = view
                         view
                     },
