@@ -23,6 +23,7 @@ import dev.cockpit.app.service.CockpitMonitorService
 import dev.cockpit.app.service.resolveNotificationLink
 import dev.cockpit.app.service.statusForTitle
 import dev.cockpit.app.state.MonitoringStore
+import dev.cockpit.app.ui.theme.TerminalPalette
 import okhttp3.OkHttpClient
 import java.util.concurrent.TimeUnit
 
@@ -36,6 +37,9 @@ class CockpitApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        // Terminal emulators copy the vendored scheme when created, so install
+        // the gdezan-material palette before any session can exist.
+        TerminalPalette.install()
         container = AppContainer(this)
     }
 
