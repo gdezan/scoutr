@@ -20,6 +20,8 @@ Cockpit is a self-hosted mobile cockpit for herdr panes and pi agents. A Node/Ty
   - `state/` ViewModels
   - `service/` monitor service, deep links, reply receiver
   - `ui/components/`, `ui/screens/`, `ui/theme/`, `ui/motion/`
+  - Terminal route: `terminal/RemoteTerminalSession.kt` (emulator seam, no PTY/JNI), `net/TerminalSocketClient.kt` + `TerminalTransport`, `state/TerminalViewModel.kt`, `ui/screens/terminal/`.
+  - `android/vendor/termux/` holds the pinned Apache-2.0 `terminal-emulator` and `terminal-view` subset; keep `UPSTREAM.md` accurate and do not vendor `termux-shared` or app code.
 
 Primary references:
 

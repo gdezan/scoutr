@@ -35,7 +35,7 @@ Verified against herdr 0.8.0 (protocol 19) and pi (node 26 / mise).
 
 | Thing | Notes |
 |---|---|
-| herdr 0.8.0 (protocol 19) running | `herdr --version`; socket at `~/.config/herdr/herdr.sock`. The planned terminal capability gate rejects unverified versions until their controller contract is captured. |
+| herdr 0.8.0 (protocol 19) running | `herdr --version`; socket at `~/.config/herdr/herdr.sock`. The terminal capability gate rejects unverified versions until their controller contract is captured. |
 | pi installed | agent CLI for chat panes; `~/.local/bin/pi` or mise `node/26/bin/pi` |
 | Node ≥ 22 | tested on node 26 |
 | Tailscale | the phone and this machine on the same tailnet |
@@ -260,6 +260,13 @@ automatically).
   offers Abort / Retry / Compact / Fork / Rename… / Cycle thinking, grounded in
   pi's TUI commands (escape, `/compact`, `/fork`, `shift+tab`, workspace
   label).
+- **Terminal** — the terminal icon in the top bar (or **Open terminal** in the
+  Chat **⋮** menu) opens one herdr pane full-screen, rendered by the vendored
+  Termux emulator over the bridge's `/ws/terminal` socket. An unowned pane opens
+  writable; a pane owned elsewhere opens read-only with **Take control** behind
+  a confirmation. The **☰** drawer lists workspaces → tabs → panes with search,
+  create, rename, and close; leaving the route keeps a 30s bridge grace window
+  so coming straight back lands on the same live pane.
 - **Usage** — Codex 5h/7d rate windows and DeepSeek balance from
   `~/.pi/agent/auth.json` (read-only).
 - **Push** — blocked → "π needs you" (high priority), done → "π finished",
@@ -331,7 +338,12 @@ today looks like: `adb pair 100.78.204.15:<port> <code>` then
 
 ## 10. Known limits (v1)
 
-- Interactive terminal rendering is planned as the current staged priority, not a v2-only path. It will replace Live Output after the Herdr controller contract is proven; see `.plans/full-screen-interactive-terminal.md`.
+- The interactive terminal ships and replaces Live Output, but its performance
+  budgets (queue high/low water marks, slow-client timeout, 10,000-row
+  scrollback cap) are still the provisional constants chosen during
+  implementation — no benchmark evidence has been recorded against them yet.
+  It has been exercised on the emulator only; no physical-phone walk has been
+  performed. See `.plans/full-screen-interactive-terminal.md`.
 - Claude Code: status, steer, and transcripts all work via herdr — the session
   path guard is multi-backend. Residual limits: no fork-at-path resume (use
   `/fork` inside the session), no model catalog (the app hides the model

@@ -25,8 +25,14 @@ data class TerminalCapabilityInfo(
     val required: String? = null,
     val reason: String? = null,
 ) {
-    /** Convenience: mirrors the bridge's `supported` status string. */
-    val isSupported: Boolean get() = status == "supported"
+    /**
+     * Only a settled `unsupported` blocks the terminal route. `unverified`
+     * (the bridge probed before herdr had a pane) is provisional: the bridge
+     * re-probes on the next `/ws/terminal` upgrade and answers a non-101 with
+     * the reason if it turns out to be unsupported, so the app must not
+     * pre-emptively refuse to connect on it.
+     */
+    val isUnsupported: Boolean get() = status == "unsupported"
 }
 
 @Serializable

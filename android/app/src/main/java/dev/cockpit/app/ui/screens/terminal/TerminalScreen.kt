@@ -101,6 +101,16 @@ fun TerminalScreen(
         fontSpRef.value = fontSizeSp
     }
 
+    // A writable terminal owns hardware input (plan "Terminal behavior"):
+    // without this the top bar's icon buttons keep focus, so Enter from a
+    // hardware keyboard re-triggers the drawer button instead of reaching the
+    // shell. Focus returns to the grid when the drawer closes. requestFocus
+    // alone never raises the soft keyboard — that still waits for a tap.
+    val writableNow = (ui.connection as? TerminalConnectionState.Ready)?.writable == true
+    LaunchedEffect(viewRef, writableNow, drawerState.isOpen) {
+        if (writableNow && !drawerState.isOpen) viewRef?.requestFocus()
+    }
+
     val haptic = rememberHaptic()
     LaunchedEffect(ui.bellAt) {
         if (ui.bellAt > 0L) haptic(HapticEvent.Warning)
@@ -133,9 +143,9 @@ fun TerminalScreen(
                     busy = ui.hierarchyBusy,
                     error = ui.hierarchyError,
                     activePaneId = ui.paneId,
-                    // The bridge's directory listing is not exposed by the
-                    // ViewModel yet; New-workspace falls back to manual paths.
-                    dirs = null,
+                    // New-workspace browses the bridge's allow-listed folders,
+                    // the same listing Cockpit's session directory picker uses.
+                    dirs = viewModel::browseDirs,
                     onCreateTab = viewModel::createTab,
                     onCreateWorkspace = viewModel::createWorkspace,
                     onRenamePane = viewModel::renamePane,
@@ -213,6 +223,8 @@ fun TerminalScreen(
                 AndroidView(
                     factory = { ctx ->
                         val view = TerminalView(ctx, null)
+                        view.isFocusable = true
+                        view.isFocusableInTouchMode = true
                         view.setTerminalViewClient(
                             TerminalViewClient(
                                 view = view,

@@ -5,10 +5,13 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.ViewModelStore
 import dev.cockpit.app.data.ConnectionStore
+import dev.cockpit.app.data.DirListing
+import dev.cockpit.app.data.DirListingResponse
 import dev.cockpit.app.data.HealthResponse
 import dev.cockpit.app.data.SnapshotResponse
 import dev.cockpit.app.data.TerminalCapabilityInfo
 import dev.cockpit.app.data.TerminalPreferencesStore
+import dev.cockpit.app.net.ApiCall
 import dev.cockpit.app.net.FakeCockpitApi
 import dev.cockpit.app.net.FakeTerminalTransport
 import dev.cockpit.app.net.TerminalIntent
@@ -16,6 +19,7 @@ import dev.cockpit.app.net.TerminalMode
 import dev.cockpit.app.net.TerminalProtocol
 import dev.cockpit.app.net.TopologyFeed
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
@@ -131,6 +135,25 @@ class TerminalViewModelTest {
         assertTrue(state is TerminalConnectionState.Unsupported)
         assertEquals("needs herdr 0.9", (state as TerminalConnectionState.Unsupported).explanation)
         assertEquals(0, transport.openedRequests.size)
+    }
+
+    @Test
+    fun unverified_capability_still_connects_because_the_upgrade_reprobes() {
+        // A bridge that started before herdr had a pane caches
+        // unverified/no-pane. That is provisional: the /ws/terminal upgrade
+        // re-probes and answers non-101 if it really is unsupported, so the
+        // route must attach instead of refusing.
+        api.healthResult = Result.success(
+            HealthResponse(
+                ok = true,
+                terminal = TerminalCapabilityInfo(status = "unverified", reason = "no-pane"),
+            ),
+        )
+        val vm = vm()
+        vm.start()
+
+        assertFalse(vm.ui.value.connection is TerminalConnectionState.Unsupported)
+        assertEquals(1, transport.openedRequests.size)
     }
 
     @Test
@@ -371,6 +394,21 @@ class TerminalViewModelTest {
         assertTrue(socket.released)
         assertFalse(socket.cancelled)
         assertEquals(TerminalConnectionState.Closed, vm.ui.value.connection)
+    }
+
+    // --- Hierarchy drawer ---
+
+    @Test
+    fun browseDirs_serves_the_new_workspace_picker_from_the_bridge_listing() = runBlocking {
+        api.dirsResult = Result.success(
+            DirListingResponse(ok = true, listing = DirListing(path = "/home/u/Dev", dirs = listOf("cockpit"))),
+        )
+        val vm = vm()
+
+        val response = vm.browseDirs("/home/u/Dev")
+
+        assertEquals(listOf("cockpit"), response.listing?.dirs)
+        assertEquals(ApiCall("dirs", mapOf("path" to "/home/u/Dev")), api.calls.last())
     }
 
     // --- Teardown ---

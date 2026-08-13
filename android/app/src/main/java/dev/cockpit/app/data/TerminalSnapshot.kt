@@ -28,13 +28,40 @@ data class TerminalSnapshot(
     @SerialName("focused_workspace_id") val focusedWorkspaceId: String? = null,
     @SerialName("focused_tab_id") val focusedTabId: String? = null,
     @SerialName("focused_pane_id") val focusedPaneId: String? = null,
+    val workspaces: List<TerminalWorkspace> = emptyList(),
+    val tabs: List<TerminalTab> = emptyList(),
     val panes: List<TerminalPane> = emptyList(),
 ) {
     fun pane(id: String): TerminalPane? = panes.firstOrNull { it.paneId == id }
 
     /** The pane herdr currently focuses, if the snapshot lists it. */
     fun focusedPane(): TerminalPane? = focusedPaneId?.let(::pane)
+
+    /**
+     * Drawer row names for the two levels above panes. herdr labels a
+     * workspace with its folder name and a tab with its number, so a rename
+     * has to be visible here — falling back to the raw id would make the
+     * rename look like it did nothing.
+     */
+    fun workspaceName(id: String): String =
+        workspaces.firstOrNull { it.workspaceId == id }?.label?.takeIf { it.isNotBlank() } ?: id
+
+    fun tabName(id: String): String =
+        tabs.firstOrNull { it.tabId == id }?.label?.takeIf { it.isNotBlank() } ?: id
 }
+
+@Serializable
+data class TerminalWorkspace(
+    @SerialName("workspace_id") val workspaceId: String,
+    val label: String? = null,
+)
+
+@Serializable
+data class TerminalTab(
+    @SerialName("tab_id") val tabId: String,
+    @SerialName("workspace_id") val workspaceId: String,
+    val label: String? = null,
+)
 
 @Serializable
 data class TerminalPane(

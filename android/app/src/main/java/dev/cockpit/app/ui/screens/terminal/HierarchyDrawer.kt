@@ -60,8 +60,8 @@ import kotlinx.coroutines.launch
  * Slice 7 hierarchy drawer: a button-only modal side drawer (edge-swipe
  * opening disabled, never resizes the grid), searchable, with a collapsible
  * workspace -> tab -> pane tree. Panes use the settled display-name
- * precedence (label -> OSC title -> cwd -> id); workspaces and tabs have no
- * snapshot names, so they show their short id in mono. Create offers New tab
+ * precedence (label -> OSC title -> cwd -> id); workspace and tab rows show
+ * their herdr label (folder name / tab number), falling back to the id. Create offers New tab
  * in the active workspace and New workspace (server-side directory browse +
  * optional name); rename and close work on any listed pane/tab/workspace.
  * Closing names the target and shows the exact pane termination count; a
@@ -91,6 +91,13 @@ internal fun HierarchyDrawer(
 
     val panes = snapshot?.panes.orEmpty()
     val workspaces = panes.groupBy { it.workspaceId }
+
+    // herdr names workspaces after their folder and tabs by number; a row that
+    // showed the raw id instead would make Rename look like a no-op.
+    fun workspaceName(id: String): String = snapshot?.workspaceName(id) ?: id
+    fun tabName(id: String): String = snapshot?.tabName(id)?.let { name ->
+        if (name.toIntOrNull() != null) "Tab $name" else name
+    } ?: id
 
     Column(Modifier.fillMaxSize().imePadding()) {
         Row(
@@ -158,15 +165,15 @@ internal fun HierarchyDrawer(
                 val isExpanded = workspaceId in expanded
                 item(key = "ws-$workspaceId") {
                     WorkspaceRow(
-                        label = shortId(workspaceId),
+                        label = workspaceName(workspaceId),
                         paneCount = panesInWorkspace.size,
                         isExpanded = isExpanded,
                         isActive = panesInWorkspace.any { it.paneId == activePaneId },
                         onToggle = {
                             expanded = if (isExpanded) expanded - workspaceId else expanded + workspaceId
                         },
-                        onRename = { dialog = DrawerDialog.RenameWorkspace(workspaceId, shortId(workspaceId)) },
-                        onClose = { dialog = DrawerDialog.CloseWorkspace(workspaceId, shortId(workspaceId), panesInWorkspace.size) },
+                        onRename = { dialog = DrawerDialog.RenameWorkspace(workspaceId, workspaceName(workspaceId)) },
+                        onClose = { dialog = DrawerDialog.CloseWorkspace(workspaceId, workspaceName(workspaceId), panesInWorkspace.size) },
                         onNewTab = { dialog = DrawerDialog.NewTab(workspaceId) },
                     )
                 }
@@ -176,11 +183,11 @@ internal fun HierarchyDrawer(
                         if (tabMatches.isEmpty()) return@forEach
                         item(key = "tab-$tabId") {
                             TabRow(
-                                label = shortId(tabId),
+                                label = tabName(tabId),
                                 paneCount = panesInTab.size,
                                 isActive = panesInTab.any { it.paneId == activePaneId },
-                                onRename = { dialog = DrawerDialog.RenameTab(tabId, shortId(tabId)) },
-                                onClose = { dialog = DrawerDialog.CloseTab(tabId, shortId(tabId), panesInTab.size) },
+                                onRename = { dialog = DrawerDialog.RenameTab(tabId, tabName(tabId)) },
+                                onClose = { dialog = DrawerDialog.CloseTab(tabId, tabName(tabId), panesInTab.size) },
                             )
                         }
                         items(tabMatches, key = { "pane-${it.paneId}" }) { pane ->
@@ -202,7 +209,7 @@ internal fun HierarchyDrawer(
         is DrawerDialog.NewTab -> TextInputDialog(
             title = "New tab",
             label = "Workspace",
-            initial = shortId(d.workspaceId),
+            initial = workspaceName(d.workspaceId),
             confirmLabel = "Create",
             onConfirm = { onCreateTab(d.workspaceId); dialog = DrawerDialog.None },
             onDismiss = { dialog = DrawerDialog.None },
@@ -282,8 +289,6 @@ private fun matches(pane: TerminalPane, query: String): Boolean {
 }
 
 /** Workspaces/tabs have no snapshot names; show the id tail as a mono handle. */
-private fun shortId(id: String): String = id.takeLast(12)
-
 private sealed interface DrawerDialog {
     data object None : DrawerDialog
     data class NewTab(val workspaceId: String) : DrawerDialog
@@ -327,7 +332,6 @@ private fun WorkspaceRow(
         Text(
             label,
             style = MaterialTheme.typography.bodyMedium,
-            fontFamily = FontFamily.Monospace,
             fontWeight = if (isActive) FontWeight.SemiBold else FontWeight.Normal,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
@@ -365,7 +369,6 @@ private fun TabRow(
         Text(
             label,
             style = MaterialTheme.typography.bodySmall,
-            fontFamily = FontFamily.Monospace,
             fontWeight = if (isActive) FontWeight.SemiBold else FontWeight.Normal,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,

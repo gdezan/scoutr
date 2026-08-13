@@ -3,6 +3,7 @@ package dev.cockpit.app.state
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dev.cockpit.app.data.ConnectionStore
+import dev.cockpit.app.data.DirListingResponse
 import dev.cockpit.app.data.SnapshotResponse
 import dev.cockpit.app.data.TerminalHierarchyCommand
 import dev.cockpit.app.data.TerminalHierarchyResponse
@@ -147,7 +148,7 @@ class TerminalViewModel(
         val saved = connectionStore.saved ?: return
         try {
             val health = api.health(host = saved.host, token = saved.token)
-            if (health.terminal?.isSupported != true) {
+            if (health.terminal?.isUnsupported == true) {
                 _ui.update {
                     it.copy(
                         connection = TerminalConnectionState.Unsupported(
@@ -303,6 +304,14 @@ class TerminalViewModel(
             session.emulator?.paste(text)
         }
     }
+
+    /**
+     * Server-side folder listing for the drawer's New-workspace dialog, so it
+     * browses the same allow-listed directories as Cockpit's existing picker
+     * (plan "Hierarchy UX": New workspace reuses the directory picker) rather
+     * than only accepting a typed path.
+     */
+    suspend fun browseDirs(path: String?): DirListingResponse = api.dirs(path)
 
     /** Hierarchy mutations (slice 7 drawer); busy/error surfaced in [TerminalUiState]. */
     fun createTab(workspaceId: String) =

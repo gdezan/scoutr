@@ -41,7 +41,7 @@ All plans must preserve these settled Cockpit decisions:
 - Enter inserts a newline and never sends.
 - Chat opens at and follows the true bottom while pinned; tool calls stay collapsed and thinking is opt-in.
 - Model catalogs use provider as their only section hierarchy; capability filter chips are removed, while context/reasoning may remain compact row metadata.
-- The planned Interactive Terminal will replace Live Output as a dedicated full-screen route; raw output must not return to ambient Chat chrome. Follow `.plans/full-screen-interactive-terminal.md`.
+- The Interactive Terminal replaced Live Output as a dedicated full-screen route; raw output must not return to ambient Chat chrome. Follow `.plans/full-screen-interactive-terminal.md`.
 - Board polling every three seconds is intentional.
 - Risk model: **Close is confirmation-gated; Delete is irreversible; Abort is deliberately ungated because it is recoverable.**
 
@@ -70,4 +70,4 @@ Runtime evidence uses only `adb -s emulator-5554`. Install the APK, drive with `
 
 ## Audit evidence summary
 
-The original audit visually inspected first-run Connect, Board, Sessions, Usage, Review picker/overview/diff, Settings, command palette, Chat, Conversation Setup, the current Live Output screen, new-session setup, folder/model pickers, plus phone and tablet layouts. Live Output is scheduled for deletion by the terminal handoff. Plans 007–011 were added from the user's reported gesture sequences and a source/test audit; the restored app was disconnected, so those timing-sensitive defects were not claimed as newly reproduced live. Temporary screenshots remain outside the repository under `/tmp/ux-audit-evidence`; every plan includes a written description so execution does not depend on those files.
+The original audit visually inspected first-run Connect, Board, Sessions, Usage, Review picker/overview/diff, Settings, command palette, Chat, Conversation Setup, the Live Output screen it then had, new-session setup, folder/model pickers, plus phone and tablet layouts. Live Output has since been deleted by the terminal handoff. Plans 007–011 were added from the user's reported gesture sequences and a source/test audit; the restored app was disconnected, so those timing-sensitive defects were not claimed as newly reproduced live. Temporary screenshots remain outside the repository under `/tmp/ux-audit-evidence`; every plan includes a written description so execution does not depend on those files.

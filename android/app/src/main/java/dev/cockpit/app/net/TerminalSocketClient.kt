@@ -114,8 +114,13 @@ class TerminalSocketClient(
                 if (ended) return
                 ended = true
                 writable = false
+                // A rejected upgrade (the bridge answers non-101 when the
+                // capability re-probe fails) arrives here as a plain protocol
+                // exception; keep the status code so the route can say more
+                // than "socket failed".
+                val rejection = response?.let { IOException("terminal unavailable (HTTP ${it.code})") }
                 transportListener.onFailure(
-                    if (t is IOException) t else IOException("terminal socket failure: ${t.message}", t),
+                    rejection ?: if (t is IOException) t else IOException("terminal socket failure: ${t.message}", t),
                 )
             }
 

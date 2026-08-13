@@ -24,7 +24,7 @@ pi agents, as an alternative to Moshi's paid herdr integration.
 
 - **Push**: self-hosted ntfy on the host, tailscale-served at `/ntfy`; the Android
   app polls the topic itself and shows a local notification (no separate ntfy app).
-- **Interactive terminal (current priority)**: replace Live Output with a full-screen, one-pane Herdr terminal. Deliver in stages: delete Live Output, prove the 0.8.0 controller contract, add the dedicated binary WebSocket and hierarchy API, then ship the pinned native Termux renderer. See `.plans/full-screen-interactive-terminal.md` and `docs/adr/`.
+- **Interactive terminal (shipped)**: Live Output is gone; a full-screen, one-pane Herdr terminal replaced it. Delivered in stages: delete Live Output, prove the 0.8.0 controller contract, add the dedicated binary `/ws/terminal` socket and hierarchy API, vendor the pinned Termux renderer, then the Android transport/state and the full-screen route. Herdr keeps owning processes, PTYs, and terminal state; the bridge owns capability, child lifecycle, and the 30s reconnect grace; Android owns the emulator, local scrollback, and input UX. Performance budgets remain provisional constants — see the limitations note in `.plans/full-screen-interactive-terminal.md` and `docs/adr/`.
 
 ## Decisions learned from live E2E
 
