@@ -4,9 +4,12 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dev.cockpit.app.data.ConnectionStore
 import dev.cockpit.app.data.SnapshotResponse
+import dev.cockpit.app.data.TerminalHierarchyCommand
+import dev.cockpit.app.data.TerminalHierarchyResponse
 import dev.cockpit.app.data.TerminalPreferencesStore
 import dev.cockpit.app.data.TerminalSnapshot
 import dev.cockpit.app.data.toTerminalSnapshot
+import dev.cockpit.app.net.BridgeException
 import dev.cockpit.app.net.CockpitApi
 import dev.cockpit.app.net.TerminalMode
 import dev.cockpit.app.net.TerminalOpenRequest
@@ -34,9 +37,10 @@ import java.util.concurrent.ThreadLocalRandom
 import java.util.concurrent.Executors
 
 /**
- * Slice 6: terminal state for exactly one active pane (plan
- * "TerminalViewModel / state"). No full-screen UI yet — this is the
- * attach/reconnect/detach lifecycle the future TerminalView binds to.
+ * Slice 6+7: terminal state for exactly one active pane (plan
+ * "TerminalViewModel / state") plus the slice 7 UI surface: measured
+ * grid reporting (controller resize / observer restart), hierarchy
+ * mutations, takeover, paste, and BEL/OSC-paste events.
  *
  * Contract highlights:
  *  - exactly one active socket at a time; callbacks are tagged by socket
@@ -85,14 +89,24 @@ class TerminalViewModel(
         terminalScope = CoroutineScope(SupervisorJob() + terminalIo)
         session.inputSink = { bytes -> forwardInput(bytes) }
         session.callbacks.onTitleChanged = { _ui.update { it.copy(title = session.getTitle()) } }
+        session.callbacks.onBell = { _ui.update { it.copy(bellAt = it.bellAt + 1L) } }
+        session.callbacks.onClipboardPasteRequest = { _ui.update { it.copy(pasteRequestAt = it.pasteRequestAt + 1L) } }
     }
 
     @Volatile private var started = false
     @Volatile private var activeSocket: TerminalSocket? = null
     private var reconnectJob: Job? = null
     private var snapshotDebounce: Job? = null
+    private var gridDebounce: Job? = null
     private var reconnectAttempt = 0
     private var feed: TopologyFeed? = null
+
+    /** Last grid measured by the view (main thread); used for hello/resize/observer restart. */
+    @Volatile private var measuredCols = 0
+    @Volatile private var measuredRows = 0
+
+    /** Grid the current socket's hello was opened with; observer restarts compare against it. */
+    @Volatile private var socketGrid: Pair<Int, Int>? = null
 
     /** The current generation, used to gate input (thread-safe via StateFlow). */
     private val currentConnection: TerminalConnectionState get() = _ui.value.connection
@@ -168,7 +182,7 @@ class TerminalViewModel(
         activeSocket?.release()
         activeSocket = null
         preferencesStore.forConnection(saved.host, saved.token).lastPaneId = paneId
-        _ui.update { it.copy(paneClosedNotice = false) }
+        _ui.update { it.copy(paneClosedNotice = false, canTakeover = false) }
         openSocket(paneId)
     }
 
@@ -186,6 +200,164 @@ class TerminalViewModel(
         if (currentConnection !is TerminalConnectionState.Ready) return
         socket.resize(cols, rows)
         terminalScope.launch { session.updateSize(cols, rows, NOMINAL_CELL_WIDTH, NOMINAL_CELL_HEIGHT) }
+    }
+
+    /**
+     * Take control of the active pane (ownership dialog, slice 7). A fresh
+     * confirmation is required every time; the bridge answers the TAKEOVER
+     * hello with control when the current owner is not connected, else with
+     * an error the broker resolves.
+     */
+    fun takeover() {
+        val paneId = _ui.value.paneId ?: return
+        if (!started) return
+        reconnectJob?.cancel()
+        activeSocket?.release()
+        activeSocket = null
+        _ui.update { it.copy(paneClosedNotice = false, canTakeover = false) }
+        openSocket(paneId, intent = TerminalIntent.TAKEOVER)
+    }
+
+    /** Per-connection terminal preferences (font size, extra-key row, last pane). */
+    val preferences: TerminalPreferencesStore.ConnectionPreferences?
+        get() = connectionStore.saved?.let { preferencesStore.forConnection(it.host, it.token) }
+
+    fun updateFontSize(sp: Float) {
+        preferences?.fontSizeSp = sp.coerceIn(MIN_FONT_SIZE_SP, MAX_FONT_SIZE_SP)
+    }
+
+    fun updateExtraKeysVisible(visible: Boolean) {
+        preferences?.extraKeysVisible = visible
+    }
+
+    /**
+     * The view measured a new grid (slice 7). While writable the resize is
+     * debounced to the latest cols/rows; while observing, a viewport change
+     * restarts observation as a fresh generation carrying the latest grid
+     * (observers cannot resize). Any other state just records the grid for
+     * the next hello. May be called from any thread.
+     */
+    fun reportGrid(cols: Int, rows: Int) {
+        if (cols <= 0 || rows <= 0) return
+        measuredCols = cols
+        measuredRows = rows
+        if (currentConnection is TerminalConnectionState.Ready) {
+            gridDebounce?.cancel()
+            gridDebounce = viewModelScope.launch {
+                delay(GRID_DEBOUNCE_MS)
+                applyGrid()
+            }
+        }
+    }
+
+    private suspend fun applyGrid() {
+        val connection = currentConnection
+        if (connection !is TerminalConnectionState.Ready) return
+        val cols = measuredCols
+        val rows = measuredRows
+        if (cols <= 0 || rows <= 0) return
+        if (connection.writable) {
+            val socket = activeSocket ?: return
+            // The view already resized the emulator with its real font
+            // metrics; only the transport needs the latest grid here.
+            socket.resize(cols, rows)
+        } else {
+            val openedWith = socketGrid ?: return
+            val paneId = _ui.value.paneId ?: return
+            if (openedWith.first != cols || openedWith.second != rows) {
+                activeSocket?.release()
+                activeSocket = null
+                openSocket(paneId)
+            }
+        }
+    }
+
+    /**
+     * Paste device-clipboard text chosen by the UI. Enters through the
+     * emulator so bracketed-paste mode is honored, and is gated on
+     * Ready(writable=true) like any other input — no paste queue exists.
+     */
+    fun paste(text: String) {
+        if (text.isEmpty()) return
+        val connection = currentConnection
+        if (connection !is TerminalConnectionState.Ready || !connection.writable) return
+        terminalScope.launch {
+            session.emulator?.paste(text)
+        }
+    }
+
+    /** Hierarchy mutations (slice 7 drawer); busy/error surfaced in [TerminalUiState]. */
+    fun createTab(workspaceId: String) =
+        mutate("create tab") { api.terminalHierarchy(TerminalHierarchyCommand.createTab(workspaceId, selectedPaneId())) }
+
+    fun createWorkspace(cwd: String, label: String?) =
+        mutate("create workspace") { api.terminalHierarchy(TerminalHierarchyCommand.createWorkspace(cwd, label, selectedPaneId())) }
+
+    fun renamePane(paneId: String, label: String) =
+        mutate("rename pane") { api.terminalHierarchy(TerminalHierarchyCommand.renamePane(paneId, label, selectedPaneId())) }
+
+    fun renameTab(tabId: String, label: String) =
+        mutate("rename tab") { api.terminalHierarchy(TerminalHierarchyCommand.renameTab(tabId, label, selectedPaneId())) }
+
+    fun renameWorkspace(workspaceId: String, label: String) =
+        mutate("rename workspace") { api.terminalHierarchy(TerminalHierarchyCommand.renameWorkspace(workspaceId, label, selectedPaneId())) }
+
+    fun closePane(paneId: String) =
+        mutate("close pane") { api.terminalHierarchy(TerminalHierarchyCommand.closePane(paneId, selectedPaneId())) }
+
+    fun closeTab(tabId: String, expectedPaneCount: Int) =
+        mutate("close tab") { api.terminalHierarchy(TerminalHierarchyCommand.closeTab(tabId, expectedPaneCount, selectedPaneId())) }
+
+    fun closeWorkspace(workspaceId: String, expectedPaneCount: Int) =
+        mutate("close workspace") { api.terminalHierarchy(TerminalHierarchyCommand.closeWorkspace(workspaceId, expectedPaneCount, selectedPaneId())) }
+
+    private fun selectedPaneId(): String? = _ui.value.paneId
+
+    private fun mutate(label: String, call: suspend () -> TerminalHierarchyResponse) {
+        if (_ui.value.hierarchyBusy) return
+        _ui.update { it.copy(hierarchyBusy = true, hierarchyError = null) }
+        viewModelScope.launch {
+            try {
+                applyHierarchyResponse(call(), label)
+            } catch (e: BridgeException) {
+                if (e.status == 409) {
+                    // Stale pane count: refresh the snapshot so the drawer shows
+                    // the new count and the user can confirm again.
+                    refreshSnapshot()
+                    _ui.update { it.copy(hierarchyError = "The pane count changed — confirm again") }
+                } else {
+                    _ui.update { it.copy(hierarchyError = e.message ?: "hierarchy $label failed") }
+                }
+            } catch (e: Exception) {
+                _ui.update { it.copy(hierarchyError = e.message ?: "hierarchy $label failed") }
+            } finally {
+                _ui.update { it.copy(hierarchyBusy = false) }
+            }
+        }
+    }
+
+    private suspend fun applyHierarchyResponse(response: TerminalHierarchyResponse, label: String) {
+        val snapshot = response.snapshot?.let { runCatching { it.toTerminalSnapshot() }.getOrNull() }
+        _ui.update {
+            it.copy(
+                snapshot = snapshot ?: it.snapshot,
+                snapshotError = if (response.ok) null else response.error,
+            )
+        }
+        if (!response.ok) {
+            _ui.update { it.copy(hierarchyError = response.error ?: "$label failed") }
+            return
+        }
+        val state = _ui.value
+        val selected = response.selectedPaneId
+        val active = state.paneId
+        when {
+            selected != null && selected != active -> attach(selected)
+            selected == null && active != null && state.snapshot?.panes?.isEmpty() != false ->
+                // The active pane was closed and nothing remains to select.
+                _ui.update { it.copy(connection = TerminalConnectionState.Closed, paneClosedNotice = true) }
+            // selected == active or nothing left: the fresh snapshot above is enough.
+        }
     }
 
     /** Force a snapshot refresh (e.g. hierarchy action result). Debounced callers use [scheduleSnapshotRefresh]. */
@@ -250,14 +422,16 @@ class TerminalViewModel(
             )
         }
         preferencesStore.forConnection(saved.host, saved.token).lastPaneId = targetPaneId
+        val grid = (if (measuredCols > 0 && measuredRows > 0) measuredCols to measuredRows else GRID_COLS to GRID_ROWS)
+        socketGrid = grid
         val ref = SocketRef()
         val socket = transport.open(
             TerminalOpenRequest(
                 host = saved.host,
                 token = saved.token,
                 paneId = targetPaneId,
-                cols = GRID_COLS,
-                rows = GRID_ROWS,
+                cols = grid.first,
+                rows = grid.second,
                 intent = intent,
             ),
             createListener(ref),
@@ -413,6 +587,13 @@ class TerminalViewModel(
         const val SNAPSHOT_DEBOUNCE_MS = 250L
         const val RECONNECT_BASE_MS = 500L
         const val RECONNECT_MAX_MS = 8_000L
+
+        /** Grid reporting coalesces IME/resize bursts to the latest cols/rows. */
+        const val GRID_DEBOUNCE_MS = 150L
+
+        /** Font-size bounds for pinch (shared across panes for the saved connection). */
+        const val MIN_FONT_SIZE_SP = 8f
+        const val MAX_FONT_SIZE_SP = 24f
     }
 }
 
@@ -437,7 +618,7 @@ sealed interface TerminalConnectionState {
     data object Closed : TerminalConnectionState
 }
 
-/** Slice 6 state surface; the future TerminalView binds to this. */
+/** Slice 6+7 state surface the TerminalView binds to. */
 data class TerminalUiState(
     val connection: TerminalConnectionState = TerminalConnectionState.Idle,
     val paneId: String? = null,
@@ -449,6 +630,14 @@ data class TerminalUiState(
     val rows: Int = 0,
     val title: String? = null,
     val paneClosedNotice: Boolean = false,
+    /** A hierarchy mutation is in flight; drawer confirmations are disabled while true. */
+    val hierarchyBusy: Boolean = false,
+    /** Last hierarchy mutation failure (stale counts, transport errors). Cleared on the next attempt. */
+    val hierarchyError: String? = null,
+    /** Monotonic BEL counter; the screen coalesces haptics from it. */
+    val bellAt: Long = 0L,
+    /** Monotonic device-paste request counter (selection toolbar Paste). */
+    val pasteRequestAt: Long = 0L,
 ) {
     val generation: Long?
         get() = when (val c = connection) {
