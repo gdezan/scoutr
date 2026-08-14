@@ -43,23 +43,29 @@ The menu is capped at 182dp with 52dp rows. Preserve this size, row visuals, Ent
 
 ```bash
 cd android
-ANDROID_HOME=$HOME/Android/sdk timeout 300 ./gradlew testDebugUnitTest --rerun-tasks
-ANDROID_HOME=$HOME/Android/sdk timeout 300 ./gradlew pixel2api36DebugAndroidTest --rerun-tasks
-ANDROID_HOME=$HOME/Android/sdk timeout 300 ./gradlew assembleDebug
-ANDROID_SERIAL=emulator-5554 ANDROID_HOME=$HOME/Android/sdk timeout 180 ./gradlew connectedDebugAndroidTest --rerun-tasks \
-  -Pandroid.testInstrumentationRunnerArguments.class=dev.scoutr.app.ui.SlashCommandMenuTest
+split=$(herdr pane split --current --direction right --cwd "$PWD" --no-focus)   # one pane per serial sequence (pattern: design-plans/README.md "Verification baseline")
+vp=$(printf '%s\n' "$split" | jq -r '.result.pane.pane_id')
+root="${PWD%/android}"
+m1="__SCOUTR_$(date +%s%N)_1__"
+herdr pane run "$vp" "(cd \"$root/android\" && ANDROID_HOME=\"$HOME/Android/sdk\" ./gradlew testDebugUnitTest --rerun-tasks); rc=\$?; printf '\n${m1}:%s\n' \"\$rc\"" && herdr pane wait-output "$vp" --regex "^${m1}:[0-9]+$"
+m2="__SCOUTR_$(date +%s%N)_2__"
+herdr pane run "$vp" "(cd \"$root/android\" && ANDROID_HOME=\"$HOME/Android/sdk\" ./gradlew pixel2api36DebugAndroidTest --rerun-tasks); rc=\$?; printf '\n${m2}:%s\n' \"\$rc\"" && herdr pane wait-output "$vp" --regex "^${m2}:[0-9]+$"
+m3="__SCOUTR_$(date +%s%N)_3__"
+herdr pane run "$vp" "(cd \"$root/android\" && ANDROID_HOME=\"$HOME/Android/sdk\" ./gradlew assembleDebug); rc=\$?; printf '\n${m3}:%s\n' \"\$rc\"" && herdr pane wait-output "$vp" --regex "^${m3}:[0-9]+$"
+m4="__SCOUTR_$(date +%s%N)_4__"
+herdr pane run "$vp" "(cd \"$root/android\" && ANDROID_SERIAL=emulator-5554 ANDROID_HOME=\"$HOME/Android/sdk\" ./gradlew connectedDebugAndroidTest --rerun-tasks -Pandroid.testInstrumentationRunnerArguments.class=dev.scoutr.app.ui.SlashCommandMenuTest); rc=\$?; printf '\n${m4}:%s\n' \"\$rc\"" && herdr pane wait-output "$vp" --regex "^${m4}:[0-9]+$"
 ```
 
 Use a deterministic list of at least 12 commands and record a bounded emulator sequence while pressing Down through row 8 and Up through row 1:
 
 ```bash
-# Run this bounded recorder in a second terminal while sending key events.
+# Run this bounded recorder in the verify pane ($vp) while sending key events.
 timeout 30 adb -s emulator-5554 shell screenrecord --time-limit 15 /sdcard/slash-navigation.mp4
 # After the recorder exits:
 timeout 30 adb -s emulator-5554 pull /sdcard/slash-navigation.mp4 /tmp/slash-navigation.mp4
 ```
 
-All device work targets only `emulator-5554`; bound every standalone `adb` command.
+All device work targets only `emulator-5554`; bound every standalone `adb` command with a short `timeout 30` ceiling. Slow Gradle gates run in the verify pane and finish on a completion marker (pattern: `design-plans/README.md` "Verification baseline"); close the pane when the sequence ends.
 
 ## Scope
 

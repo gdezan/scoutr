@@ -41,13 +41,19 @@ Reuse the existing `LazyListState`, `scroll_to_end_fab` semantics, `LocalReduceM
 
 ## Commands
 
-All device work targets the emulator explicitly; never use a physical phone. Bound every Gradle/device command:
+All device work targets the emulator explicitly; never use a physical phone. Quick `adb` calls get short `timeout 30` safety ceilings; slow Gradle gates run in a sibling pane and finish on a completion marker (pattern: `design-plans/README.md` "Verification baseline"):
 
 ```bash
 cd android
-ANDROID_HOME=$HOME/Android/sdk timeout 300 ./gradlew testDebugUnitTest --rerun-tasks
-ANDROID_HOME=$HOME/Android/sdk timeout 300 ./gradlew pixel2api36DebugAndroidTest --rerun-tasks
-ANDROID_HOME=$HOME/Android/sdk timeout 300 ./gradlew assembleDebug
+split=$(herdr pane split --current --direction right --cwd "$PWD" --no-focus)   # one pane per serial sequence
+vp=$(printf '%s\n' "$split" | jq -r '.result.pane.pane_id')
+root="${PWD%/android}"
+m1="__SCOUTR_$(date +%s%N)_1__"
+herdr pane run "$vp" "(cd \"$root/android\" && ANDROID_HOME=\"$HOME/Android/sdk\" ./gradlew testDebugUnitTest --rerun-tasks); rc=\$?; printf '\n${m1}:%s\n' \"\$rc\"" && herdr pane wait-output "$vp" --regex "^${m1}:[0-9]+$"
+m2="__SCOUTR_$(date +%s%N)_2__"
+herdr pane run "$vp" "(cd \"$root/android\" && ANDROID_HOME=\"$HOME/Android/sdk\" ./gradlew pixel2api36DebugAndroidTest --rerun-tasks); rc=\$?; printf '\n${m2}:%s\n' \"\$rc\"" && herdr pane wait-output "$vp" --regex "^${m2}:[0-9]+$"
+m3="__SCOUTR_$(date +%s%N)_3__"
+herdr pane run "$vp" "(cd \"$root/android\" && ANDROID_HOME=\"$HOME/Android/sdk\" ./gradlew assembleDebug); rc=\$?; printf '\n${m3}:%s\n' \"\$rc\"" && herdr pane wait-output "$vp" --regex "^${m3}:[0-9]+$"
 timeout 30 adb -s emulator-5554 install -r app/build/outputs/apk/debug/app-debug.apk
 timeout 30 adb -s emulator-5554 shell am force-stop dev.scoutr.app
 timeout 30 adb -s emulator-5554 shell am start -n dev.scoutr.app/.MainActivity
@@ -56,20 +62,20 @@ timeout 30 adb -s emulator-5554 shell am start -n dev.scoutr.app/.MainActivity
 Run the focused instrumentation class with:
 
 ```bash
-ANDROID_SERIAL=emulator-5554 ANDROID_HOME=$HOME/Android/sdk timeout 180 ./gradlew connectedDebugAndroidTest --rerun-tasks \
-  -Pandroid.testInstrumentationRunnerArguments.class=dev.scoutr.app.ui.ChatListTest
+m4="__SCOUTR_$(date +%s%N)_4__"
+herdr pane run "$vp" "(cd \"$root/android\" && ANDROID_SERIAL=emulator-5554 ANDROID_HOME=\"$HOME/Android/sdk\" ./gradlew connectedDebugAndroidTest --rerun-tasks -Pandroid.testInstrumentationRunnerArguments.class=dev.scoutr.app.ui.ChatListTest); rc=\$?; printf '\n${m4}:%s\n' \"\$rc\"" && herdr pane wait-output "$vp" --regex "^${m4}:[0-9]+$"
 ```
 
 For visual verification, use a deterministic `ChatListTest` fixture containing at least 30 short entries and one tall final entry. Record the emulator during each gesture sequence with a bounded screen recording, then pull it for inspection:
 
 ```bash
-# Run this bounded recorder in a second terminal while driving the gestures.
+# Run this bounded recorder in the verify pane ($vp) while driving the gestures.
 timeout 30 adb -s emulator-5554 shell screenrecord --time-limit 20 /sdcard/chat-scroll.mp4
 # After the recorder exits:
 timeout 30 adb -s emulator-5554 pull /sdcard/chat-scroll.mp4 /tmp/chat-scroll.mp4
 ```
 
-Start the second-terminal recorder before each gesture sequence. A timeout at the explicit limit is acceptable only if the output file exists and is playable.
+Start the recorder in the verify pane before each gesture sequence; wait for its own completion marker before pulling. A timeout at the explicit limit is acceptable only if the output file exists and is playable.
 
 ## Scope
 

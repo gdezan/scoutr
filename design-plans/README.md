@@ -49,12 +49,39 @@ Use existing tokens from `ui/theme/Theme.kt`, motion vocabulary from `ui/motion/
 
 ## Verification baseline
 
-Every device command targets `emulator-5554`; never run instrumentation on a physical phone. Bound all long-running commands:
+Every device command targets `emulator-5554`; never run instrumentation on a physical phone.
+
+**Wait on completion signals, not elapsed time.** Slow/noisy/device-bound checks run in a sibling Herdr pane and finish on an explicit completion marker (`herdr pane run` + `herdr pane wait-output`); recognized agents wait on lifecycle state (global `herdr-agent-delegation` skill). Short `timeout 30` ceilings on quick `adb` calls are fine. A long `timeout` is a last-resort safety ceiling only — never the completion mechanism (AGENTS.md).
+
+The pane shell persists its cwd across `pane run` calls, so every command self-locates via a subshell with an absolute path:
 
 ```bash
-(cd android && ANDROID_HOME=$HOME/Android/sdk timeout 300 ./gradlew testDebugUnitTest --rerun-tasks)
-(cd android && ANDROID_HOME=$HOME/Android/sdk timeout 300 ./gradlew pixel2api36DebugAndroidTest --rerun-tasks)
-(cd android && ANDROID_HOME=$HOME/Android/sdk timeout 300 ./gradlew assembleDebug)
+split=$(herdr pane split --current --direction right --cwd "$PWD" --no-focus)   # one pane per serial sequence
+vp=$(printf '%s\n' "$split" | jq -r '.result.pane.pane_id')
+root="${PWD%/android}"   # repo root whether $PWD is the repo or android/
+
+m1="__SCOUTR_$(date +%s%N)_1__"
+herdr pane run "$vp" \
+  "(cd \"$root/android\" && ANDROID_HOME=\"$HOME/Android/sdk\" ./gradlew testDebugUnitTest --rerun-tasks); rc=\$?; printf '\n${m1}:%s\n' \"\$rc\""
+result=$(herdr pane wait-output "$vp" --regex "^${m1}:[0-9]+$")
+rc=$(printf '%s\n' "$result" | jq -r '.result.matched_line | split(":")[-1] | tonumber')
+# rc != 0 means the gate failed; the marker only proves the command exited.
+```
+
+Rules:
+
+- one pane per serial sequence; unique marker per command — `wait-output` checks existing output first, so a reused marker can match stale output;
+- anchor the marker as a whole line (`^marker:rc$`): the pane echoes the command itself, and the echoed line must never satisfy the wait;
+- record the exit code and stop on non-zero; keep Gradle invocations serial in one checkout;
+- close the pane when the sequence ends: `herdr pane close "$vp"`; full recipe: `skills/scoutr-verification/SKILL.md` §4.
+
+When a command cannot emit a completion marker (long interactive walkthroughs), have it print a **heartbeat line after each stage** and wait on each successive heartbeat, so a stall surfaces at the next heartbeat instead of after a long blind timeout:
+
+```bash
+# inside the long script:  printf '\n__HB_<n>__\n'  after each stage
+herdr pane wait-output "$vp" --regex '^__HB_1__$'
+# ... run the next stage ...
+herdr pane wait-output "$vp" --regex '^__HB_2__$'
 ```
 
 Runtime evidence uses only `adb -s emulator-5554`. Install the APK, drive with `adb -s emulator-5554 shell input`, dump semantics with `uiautomator`, and capture with `adb -s emulator-5554 exec-out screencap -p`. Plan 006 uses a viewport wider than 1008dp to prove its 960dp bound and restores geometry with a shell trap.

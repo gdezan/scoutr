@@ -136,6 +136,15 @@ Rules:
 herdr pane close "$verify_pane"
 ```
 
+If a long command cannot emit a completion marker (interactive walkthroughs), have it print a **heartbeat line after each stage** and wait on each successive heartbeat. A stall then surfaces at the next heartbeat instead of after a long blind timeout:
+
+```bash
+# inside the long script:  printf '\n__HB_<n>__\n'  after each stage
+herdr pane wait-output "$verify_pane" --regex '^__HB_1__$'
+# ... run the next stage ...
+herdr pane wait-output "$verify_pane" --regex '^__HB_2__$'
+```
+
 For recognized coding agents, use the global `herdr-agent-delegation` skill and lifecycle state instead of output markers.
 
 ## 5. Runtime evidence

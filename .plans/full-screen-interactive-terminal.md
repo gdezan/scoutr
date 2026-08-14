@@ -473,10 +473,15 @@ cd bridge && npm run typecheck && npm test
 Android, one Gradle process at a time:
 
 ```bash
-cd android && timeout 300 env ANDROID_HOME="$HOME/Android/sdk" ./gradlew testDebugUnitTest
-cd android && timeout 300 env ANDROID_HOME="$HOME/Android/sdk" ./gradlew pixel2api36DebugAndroidTest
-cd android && timeout 300 env ANDROID_HOME="$HOME/Android/sdk" ./gradlew assembleDebug
-```
+split=$(herdr pane split --current --direction right --cwd "$PWD" --no-focus)
+vp=$(printf '%s\n' "$split" | jq -r '.result.pane.pane_id')
+root="${PWD%/android}"
+for gate in testDebugUnitTest pixel2api36DebugAndroidTest assembleDebug; do
+  m="__SCOUTR_$(date +%s%N)_${gate}__"
+  herdr pane run "$vp" "(cd \"$root/android\" && ANDROID_HOME=\"$HOME/Android/sdk\" ./gradlew $gate); rc=\$?; printf '\n${m}:%s\n' \"\$rc\""
+  herdr pane wait-output "$vp" --regex "^${m}:[0-9]+$"
+done
+herdr pane close "$vp"
 
 Use focused classes while iterating; run broad gates once after material work stabilizes.
 
