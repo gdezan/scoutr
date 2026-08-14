@@ -1,7 +1,9 @@
 # Scoutr performance and energy-efficiency study
 
-_Date: 2026-08-13_
-_Scope: static code study and external research. The first implementation slice applies the API 35+ monitoring recommendation below; no Scoutr-specific speed, memory, radio, or battery result is claimed._
+_Date: 2026-08-14_
+_Scope: static code study, external research, and incrementally verified implementation slices. Runtime results are labeled by target; no representative-device speed, memory, radio, or battery claim is made from the emulator run below._
+
+> **Maintenance rule:** update this document in the same change whenever a performance-study slice is implemented, verified, deferred, or superseded. Keep each item's status, evidence date, exact checks/results, remaining acceptance work, and the recommended next slice current. Distinguish observed facts, external facts, hypotheses, and measured results; never mark runtime work complete from compilation alone.
 
 ## Executive summary
 
@@ -17,8 +19,8 @@ A blanket “replace polling with WebSockets” migration is not recommended. We
 The most important findings are more specific:
 
 1. **The opt-in monitor service is not viable as an indefinite `dataSync` foreground service on the app’s current API target.** Android 15+ gives this service type only six background hours per 24 hours. Scoutr targets API 36 and does not implement `Service.onTimeout`. This is both a correctness and energy-design issue.
-2. **Usage polling remains active after visiting the Usage tab.** `UsageViewModel` starts a 10-second loop in `init`, while the activity navigation back stack retains that ViewModel. Board, Chat, History, and Terminal are correctly lifecycle-scoped.
-3. **Release optimization is disabled.** `isMinifyEnabled = false`, resource shrinking is absent, and there is no app-specific Baseline Profile or Macrobenchmark module.
+2. **Usage polling is now lifecycle-gated, but the ten-minute STOPPED-traffic acceptance check is still pending.** `UsageScreen` starts its 10-second loop only while STARTED and stops it when leaving; the retained ViewModel no longer owns an ambient poll loop.
+3. **Release optimization, cross-layer counters, and benchmark infrastructure are implemented; emulator benchmark acceptance passed.** Release enables R8/resource shrinking, the profileable minified benchmark target includes cold-start, Board, and deep-link Chat smoke journeys, and Android/bridge counters are wired for request and WebSocket lifecycle evidence. Results are emulator-only and not a representative-device performance claim.
 4. **Chat is the highest-value foreground loop and does redundant work.** It polls every 2.5 seconds, fetches the full enriched agent board to locate one pane, copies/scans the existing transcript list even when the incremental response is empty, and needs to coalesce its poll, post-action, resume, and pull-to-refresh paths.
 5. **The shared OkHttp client sends pings every 20 seconds on all WebSockets (and eligible HTTP/2 connections).** This may be justified for an active terminal, but it should be an explicit measured keepalive policy rather than a global default.
 6. **The bridge usage endpoint fetches four providers serially.** Four 10-second provider timeouts can exceed Android’s 30-second read timeout.
@@ -42,7 +44,7 @@ Scoutr is a self-hosted native Android console for supervising herdr panes and p
 | Chat, questions, steering | `ChatScreen`, `ChatViewModel` | `/api/sessions?since=`, `/ws` commands, `commands.ts`, agent adapters | 2.5 s HTTP incremental polling while Chat is STARTED; pull-to-refresh for an immediate user refresh; user actions on demand |
 | New sessions | `NewSessionSheet`, `NewSessionViewModel` | `POST /api/sessions`, `sessions.ts` | Demand-driven |
 | Session history | `HistoryScreen`, `SessionHistoryViewModel`, local pin/archive store | `/api/session-catalog`, `session-catalog.ts` | 8 s polling while History is STARTED; mutations on demand |
-| Provider usage | `UsageScreen`, `UsageViewModel` | `/api/usage`, `usage/providers.ts` | 10 s polling from ViewModel creation; bridge provider cache TTL 60 s |
+| Provider usage | `UsageScreen`, `UsageViewModel` | `/api/usage`, `usage/providers.ts` | 10 s polling only while Usage is STARTED; bridge provider cache TTL 60 s |
 | Read-only git review | `ReviewScreen`, `ReviewViewModel` | `/api/repo*`, `review.ts` | Demand-driven, bounded per-file reads and VM caching |
 | Full-screen terminal | `TerminalScreen`, `TerminalViewModel`, `RemoteTerminalSession`, vendored Termux core | `/ws/terminal`, `terminal/broker.ts`, `terminal/websocket.ts`, `terminal/process.ts` | Dedicated WebSocket only while route is STARTED |
 | Terminal hierarchy | `HierarchyDrawer`, `TopologyFeedClient` | `/api/snapshot`, `/api/terminal/hierarchy`, filtered `/ws` feed | Route-scoped filtered event invalidation plus HTTP reconciliation |
@@ -109,22 +111,26 @@ This architecture should be retained. Further batching or rendering changes are 
 The current implementation is not described as durable all-day monitoring on API 35+.
 
 ### P0 — create a production-like performance build
+**Status (2026-08-14): implementation complete; emulator Macrobenchmark acceptance passed; broader runtime acceptance remains pending.**
 
-**Observed:** `android/app/build.gradle.kts` disables R8 for release and does not enable resource shrinking. There is no Macrobenchmark/Baseline Profile module.
+The app now has a minified, resource-shrunk `benchmark` variant (`isProfileable = true`) and release enables R8 plus resource shrinking. The `android/benchmark` module contains Macrobenchmark smoke coverage for cold startup, Board tab navigation, and deep-link Chat opening. Process-local counters cover Android HTTP requests and both Android WebSocket lifecycle surfaces, plus bridge HTTP/WebSocket surfaces; they record request counts, statuses, response bytes, durations, active requests, and opened/closed/active sockets. The Usage producer is lifecycle-gated so leaving the retained Usage destination stops its 10-second polling loop. Bridge typecheck/full tests, Android `testDebugUnitTest`, targeted Usage/counter tests, release R8 packaging, benchmark APK compilation, and benchmark APK signature verification passed.
+**Previously observed:** `android/app/build.gradle.kts` disabled R8 for release and did not enable resource shrinking. There was no Macrobenchmark/Baseline Profile module.
 
 **External fact:** Android recommends enabling `isMinifyEnabled = true` and `isShrinkResources = true` for release. R8 removes unused code/resources and performs runtime optimizations. Android reports that Baseline Profiles commonly improve covered code paths by about 30% from first launch, but app-specific gains must be benchmarked. [R8 optimization](https://developer.android.com/topic/performance/app-optimization/enable-app-optimization) [Baseline Profiles](https://developer.android.com/topic/performance/baselineprofiles/overview)
 
-**Recommendation:** add a minified, profileable benchmark target; verify serialization, receivers, deep links, notification reply, and vendored terminal startup under R8; then generate an app-specific Baseline Profile for startup, opening a busy chat, transcript scrolling, terminal entry, and notification deep-link entry.
+**Runtime evidence (2026-08-14):** `cd android && ANDROID_SERIAL=emulator-5554 ./gradlew :benchmark:connectedBenchmarkAndroidTest` passed all three tests (`coldStartup`, `boardOpening`, `chatOpening`) with five iterations each on the API 36 x86_64 emulator. The output contained non-empty metrics: cold-start median time to initial display was 416.4 ms; Board median frame count was 15 with frame-duration CPU P50 22.9 ms; Chat median frame count was 10 with frame-duration CPU P50 20.9 ms. These are emulator observations for functional and regression evidence, not representative-device speed, thermal, radio, or energy results. The ignored raw JSON and Perfetto traces are under `android/benchmark/build/outputs/connected_android_test_additional_output/`.
 
-Because Scoutr is side-loaded rather than Play-distributed, verify that the profile is installed on the actual distribution path rather than only packaged in the APK.
+**Remaining verification:** exercise R8-sensitive serialization, manifest receivers, notification reply, and vendored terminal startup; demonstrate zero `/api/usage` calls for ten minutes after Usage is STOPPED; and rerun the managed-device instrumentation suite after its environment timeout is resolved. The attempted `pixel2api36DebugAndroidTest` run timed out after 10m46 before executing any tests (the report recorded zero tests), so it is not evidence about app behavior. No bridge load, heap, radio, battery, or energy result is claimed yet. Do not call these checks complete from compilation alone.
+
+**Recommendation:** after those runtime checks, generate an app-specific Baseline Profile for startup, opening a busy chat, transcript scrolling, terminal entry, and notification deep-link entry. Because Scoutr is side-loaded rather than Play-distributed, verify that the profile is installed on the actual distribution path rather than only packaged in the APK.
 
 ### P0 — fix hidden Usage polling
 
-**Observed:** `UsageViewModel` starts polling every 10 seconds in `init` and stops only in `onCleared`. `UsageScreen` uses `collectAsState()` rather than lifecycle-aware collection. The ViewModel remains on the navigation back stack after leaving the tab.
+**Observed before this slice:** `UsageViewModel` started polling every 10 seconds in `init` and stopped only in `onCleared`. `UsageScreen` used `collectAsState()` rather than lifecycle-aware collection. The ViewModel remains on the navigation back stack after leaving the tab.
+**Implemented (2026-08-14):** `UsageScreen` now uses `LifecycleStartEffect` to start/stop the retained ViewModel's poller and `collectAsStateWithLifecycle()` for UI collection. `UsageViewModel` loads immediately on start, polls every 10 seconds without overlapping requests, preserves cached data on refresh failure, and handles cancellation without publishing a false error. Unit coverage verifies immediate loading and that stopping the loop prevents another scheduled request.
 
-**Recommendation:** use the same `LifecycleStartEffect` start/stop ownership as Board, Chat, and History. The bridge’s 60-second usage cache limits provider traffic, but hidden requests still wake the app/network and parse/publish repeated payloads.
-
-**Acceptance:** zero `/api/usage` calls for ten minutes after the Usage screen is STOPPED.
+**Acceptance:** targeted unit tests passed. Runtime acceptance remains: demonstrate zero `/api/usage` calls for ten minutes after the Usage screen is STOPPED.
+**Recommendation for the next slice:** make Chat refresh single-flight; coalesce polling, pull-to-refresh, resume, and post-action reconciliation. Keep the remaining acceptance check above explicit until runtime evidence is recorded.
 
 ### P1 — make Chat refresh fast, coherent, and user-driven
 
@@ -278,8 +284,8 @@ Report request/event counts, bytes, connection reuse, p50/p95/p99 freshness, rec
 ## Recommended sequence
 
 1. **Complete:** decide the API 35+ monitoring architecture and add timeout-safe behavior.
-2. Add a minified benchmark target and basic cross-layer counters.
-3. Lifecycle-gate Usage polling.
+2. **Implementation complete / emulator benchmark accepted / broader runtime acceptance pending:** add a minified benchmark target and basic cross-layer counters; record the emulator benchmark evidence and finish R8-sensitive runtime journeys on approved acceptance targets.
+3. **Complete implementation / pending runtime acceptance:** lifecycle-gate Usage polling; verify no `/api/usage` traffic after STOPPED.
 4. Make Chat refresh single-flight; coalesce polling, pull-to-refresh, resume, and post-action reconciliation.
 5. Shorten Chat first paint, remove the empty incremental-list copy, and replace the full-board status lookup.
 6. Parallelize usage providers.
@@ -288,6 +294,7 @@ Report request/event counts, bytes, connection reuse, p50/p95/p99 freshness, rec
 9. Benchmark an optional foreground invalidation stream against that optimized baseline.
 10. Add the app Baseline Profile after critical journeys and performance targets stabilize.
 
+After every implementation or verification step, update this sequence and the relevant item's status/evidence before committing.
 ## Changes not recommended now
 
 - Replacing every HTTP poll with WebSockets.
@@ -323,4 +330,4 @@ Report request/event counts, bytes, connection reuse, p50/p95/p99 freshness, rec
 
 ## Bottom line
 
-Scoutr’s terminal WebSocket, shared bridge feed, caches, bounded reads, and mostly lifecycle-scoped producers are strong foundations. The next gains are not a protocol rewrite: fix the Android 15 foreground-service conflict, stop hidden Usage polling, enable production optimization, and make Chat refresh single-flight with a well-behaved pull-to-refresh path. After those changes are instrumented, compare adaptive conditional HTTP against one foreground invalidation stream. Keep whichever meets explicit freshness targets with the lowest measured energy and acceptable bridge cost.
+Scoutr’s terminal WebSocket, shared bridge feed, caches, bounded reads, and lifecycle-scoped producers are strong foundations. The monitoring timeout, lifecycle-gated Usage implementation, R8 configuration, cross-layer counters, and emulator Macrobenchmark slice are now recorded above with their remaining acceptance gaps. The next implementation slice is Chat refresh single-flight with a well-behaved pull-to-refresh path; after that, use the counters and approved runtime targets to compare adaptive conditional HTTP against one foreground invalidation stream. Keep whichever meets explicit freshness targets with the lowest measured energy and acceptable bridge cost.

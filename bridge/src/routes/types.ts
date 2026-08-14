@@ -8,6 +8,7 @@ import type { BoardDetailCache } from "../board-detail.js";
 import type { TerminalLauncher } from "../terminal/types.js";
 import type { TerminalSessionBroker } from "../terminal/broker.js";
 import type { TerminalConnectionOptions } from "../terminal/websocket.js";
+import type { BridgeMetrics } from "../metrics.js";
 
 /** JSON body of a POST request, after parsing and object validation. */
 export interface JsonBody {
@@ -28,6 +29,8 @@ export interface ServerDeps {
   feed: HerdrEventFeed;
   usage: UsageService;
   config: BridgeConfig;
+  /** Optional process-local counters for HTTP and WebSocket experiments. */
+  metrics?: BridgeMetrics;
   /** Terminal child-process launcher (Slice 3 /ws/terminal route). */
   terminal: TerminalLauncher;
   /** Backpressure/grace tuning; defaults are provisional slice-8 constants. */

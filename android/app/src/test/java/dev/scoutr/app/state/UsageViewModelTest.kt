@@ -19,16 +19,14 @@ import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 
 /**
- * UsageViewModel: the quota list is a Loadable that never blanked the chart —
+ * UsageViewModel: the quota list is a Loadable that never blanks the chart —
  * a failed poll after data keeps Ready and surfaces [UsageUiState.error].
- * The poller's immediate first tick means construction under Robolectric's
- * paused main looper runs the first refresh synchronously, so each test arms
- * the fake before building the ViewModel.
+ * Polling is lifecycle-owned by the Usage screen; tests explicitly start it
+ * before asserting the immediate first tick.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
 class UsageViewModelTest {
-
     private lateinit var fake: FakeScoutrApi
 
     private val snapshot = UsageSnapshot(
@@ -42,8 +40,7 @@ class UsageViewModelTest {
         fake = FakeScoutrApi()
     }
 
-    private fun viewModelOf() = UsageViewModel(fake)
-
+    private fun viewModelOf() = UsageViewModel(fake).also { it.startPolling() }
     @Test
     fun immediateFirstTickLoadsIntoReady() {
         fake.usageResult = Result.success(UsageResponse(usage = listOf(snapshot)))
@@ -142,5 +139,23 @@ class UsageViewModelTest {
             shadowOf(Looper.getMainLooper()).idle()
         }
         assertTrue("condition did not become true before timeout", condition())
+    }
+
+    @Test
+    fun stopPollingCancelsTheActiveLoop() {
+        val gate = CompletableDeferred<Unit>()
+        fake.gates["usage"] = gate
+        val viewModel = UsageViewModel(fake)
+
+        viewModel.startPolling()
+        shadowOf(Looper.getMainLooper()).idle()
+        assertEquals(1, fake.calls.count { it.name == "usage" })
+
+        viewModel.stopPolling()
+        gate.complete(Unit)
+        waitUntil { !viewModel.ui.value.isRefreshing }
+        shadowOf(Looper.getMainLooper()).idle()
+
+        assertEquals("stopped Usage must not schedule another request", 1, fake.calls.count { it.name == "usage" })
     }
 }

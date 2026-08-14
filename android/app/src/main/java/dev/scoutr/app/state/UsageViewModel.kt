@@ -39,12 +39,27 @@ class UsageViewModel(
     private val poller = Poller(viewModelScope)
     private val loadMutex = Mutex()
 
-    init {
+    // Usage is a retained navigation destination. The screen owns polling so
+    // leaving the tab stops provider/network work even while its ViewModel stays
+    // on the back stack.
+    private var lifecycleActive = false
+
+    /** Start the 10s usage poll; the immediate tick is the first screen load. */
+    fun startPolling() {
+        if (lifecycleActive) return
+        lifecycleActive = true
         poller.start(10.seconds) { loadUsage() }
     }
 
-    override fun onCleared() {
+    /** Stop the usage poll; an explicit one-shot refresh is left alone. */
+    fun stopPolling() {
+        if (!lifecycleActive) return
+        lifecycleActive = false
         poller.stop()
+    }
+
+    override fun onCleared() {
+        stopPolling()
         super.onCleared()
     }
 

@@ -2,6 +2,7 @@
 android/.gradle/
 android/build/
 android/app/build/
+android/benchmark/build/
 android/vendor/termux/terminal-emulator/build/
 android/vendor/termux/terminal-view/build/
 android/local.properties

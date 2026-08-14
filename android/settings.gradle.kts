@@ -22,5 +22,6 @@ dependencyResolutionManagement {
 
 rootProject.name = "scoutr"
 include(":app")
+include(":benchmark")
 include(":vendor:termux:terminal-emulator")
 include(":vendor:termux:terminal-view")

@@ -26,8 +26,9 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.lifecycle.compose.LifecycleStartEffect
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
@@ -56,13 +57,20 @@ import java.util.Locale
 import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
-
 @Composable
 fun UsageScreen(
     viewModel: UsageViewModel,
     modifier: Modifier = Modifier,
 ) {
-    val ui by viewModel.ui.collectAsState()
+    val ui by viewModel.ui.collectAsStateWithLifecycle()
+
+    // Usage owns a retained ViewModel, so its producer must follow the screen
+    // lifecycle rather than ViewModel lifetime.
+    LifecycleStartEffect(Unit) {
+        viewModel.startPolling()
+        onStopOrDispose { viewModel.stopPolling() }
+    }
+
     val nowMillis = rememberMinuteClock()
     UsageContent(ui = ui, onRefresh = viewModel::refreshUsage, nowMillis = nowMillis, modifier = modifier)
 }

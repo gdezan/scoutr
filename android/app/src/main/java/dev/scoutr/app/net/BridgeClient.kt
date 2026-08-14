@@ -69,6 +69,7 @@ class BridgeException(val status: Int, reason: String) : IOException("bridge $st
 class BridgeClient(
     private val okHttp: OkHttpClient,
     private val connectionStore: ConnectionStore,
+    private val performanceCounters: PerformanceCounters? = null,
 ) : ScoutrApi {
     private val json = Json { ignoreUnknownKeys = true }
 
@@ -127,23 +128,40 @@ class BridgeClient(
         decode: (String) -> T,
     ): T =
         suspendCancellableCoroutine { continuation ->
+            val requestMetric = performanceCounters?.beginHttpRequest(path)
             val call = okHttp.newCall(request(path, query, host, token, body))
-            continuation.invokeOnCancellation { call.cancel() }
+            continuation.invokeOnCancellation {
+                requestMetric?.fail(cancelled = true)
+                call.cancel()
+            }
             call.enqueue(object : Callback {
                 override fun onFailure(call: Call, e: IOException) {
+                    requestMetric?.fail(cancelled = call.isCanceled())
                     if (!continuation.isCancelled) continuation.resumeWithException(e)
                 }
 
                 override fun onResponse(call: Call, response: Response) {
                     response.use {
-                        if (!continuation.isCancelled) {
+                        try {
+                            val bodyText = it.body?.string()
+                            if (continuation.isCancelled) {
+                                requestMetric?.fail(cancelled = true)
+                                return
+                            }
+                            requestMetric?.complete(
+                                status = it.code,
+                                bodyBytes = bodyText?.toByteArray(Charsets.UTF_8)?.size?.toLong() ?: 0L,
+                            )
                             if (it.isSuccessful) {
-                                resumeDecoded(continuation, it.body?.string(), decode)
+                                resumeDecoded(continuation, bodyText, decode)
                             } else {
                                 continuation.resumeWithException(
-                                    BridgeException(it.code, bridgeReason(it, it.body?.string())),
+                                    BridgeException(it.code, bridgeReason(it, bodyText)),
                                 )
                             }
+                        } catch (error: Throwable) {
+                            requestMetric?.fail(cancelled = call.isCanceled())
+                            if (!continuation.isCancelled) continuation.resumeWithException(error)
                         }
                     }
                 }

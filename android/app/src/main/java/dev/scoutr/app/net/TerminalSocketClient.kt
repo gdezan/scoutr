@@ -35,6 +35,7 @@ import java.io.IOException
 class TerminalSocketClient(
     private val okHttp: OkHttpClient,
     private val outboundQueueMaxBytes: Long = DEFAULT_OUTBOUND_QUEUE_MAX_BYTES,
+    private val performanceCounters: PerformanceCounters? = null,
 ) : TerminalTransport {
 
     override fun open(request: TerminalOpenRequest, listener: TerminalTransportListener): TerminalSocket {
@@ -59,10 +60,10 @@ class TerminalSocketClient(
         @Volatile private var webSocket: WebSocket? = null
         @Volatile private var writable = false
         @Volatile private var ended = false
-
+        private var performanceSocket: PerformanceCounters.SocketHandle? = null
         internal val wsListener = object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
-                if (ended) {
+                if (!beginPerformanceSocket()) {
                     webSocket.close(NORMAL_CLOSE, "replaced")
                     return
                 }
@@ -112,8 +113,7 @@ class TerminalSocketClient(
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                 if (ended) return
-                ended = true
-                writable = false
+                endSocket()
                 // A rejected upgrade (the bridge answers non-101 when the
                 // capability re-probe fails) arrives here as a plain protocol
                 // exception; keep the status code so the route can say more
@@ -127,15 +127,13 @@ class TerminalSocketClient(
             override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
                 // Server-initiated close without a closed/error frame: treat as abrupt EOF.
                 if (ended) return
-                ended = true
-                writable = false
+                endSocket()
                 transportListener.onFailure(IOException("terminal socket closed (code $code)"))
             }
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
                 if (ended) return
-                ended = true
-                writable = false
+                endSocket()
                 if (code != NORMAL_CLOSE) {
                     transportListener.onFailure(IOException("terminal socket closed (code $code)"))
                 }
@@ -184,10 +182,18 @@ class TerminalSocketClient(
             webSocket?.cancel()
         }
 
+        private fun beginPerformanceSocket(): Boolean = synchronized(this) {
+            if (ended) return@synchronized false
+            performanceSocket = performanceCounters?.beginSocket(PerformanceCounters.SocketKind.Terminal)
+            true
+        }
+
+        @Synchronized
         private fun endSocket() {
-            if (ended) return
             ended = true
             writable = false
+            performanceSocket?.close()
+            performanceSocket = null
         }
     }
 

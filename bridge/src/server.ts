@@ -9,6 +9,7 @@ import { handleCommand, type CommandMessage } from "./commands.js";
 import { RouteTable, dispatchRoute, isAuthorized } from "./routes/dispatcher.js";
 import { buildRoutes } from "./routes/index.js";
 import type { RouteDeps, ServerDeps } from "./routes/types.js";
+import { BridgeMetrics } from "./metrics.js";
 import { type SessionSnapshot } from "./herdr/types.js";
 import { TerminalSessionBroker } from "./terminal/broker.js";
 import { attachTerminalSocket } from "./terminal/websocket.js";
@@ -31,6 +32,7 @@ import { attachTerminalSocket } from "./terminal/websocket.js";
 
 export interface ScoutrServer {
   url: string;
+  metrics: BridgeMetrics;
   close: () => Promise<void>;
 }
 
@@ -50,9 +52,9 @@ function sendJson(response: ServerResponse, status: number, body: unknown): void
 
 export function createScoutrServer(deps: ServerDeps, options: CreateServerOptions = {}): ScoutrServer {
   const { herdr, feed, usage, config, publisher } = deps;
+  const metrics = deps.metrics ?? new BridgeMetrics();
   const token = config.token;
   const listen = options.listen ?? true;
-
   // App-owned pane sessions are created via herdr directly (see the create
   // flow in layer 3); no pi --mode rpc processes live here anymore.
 
@@ -67,7 +69,7 @@ export function createScoutrServer(deps: ServerDeps, options: CreateServerOption
     graceMs: deps.terminalOptions?.graceMs,
     log: (message) => console.error(`terminal: ${message}`),
   });
-  const routeDeps: RouteDeps = { ...deps, tracker, boardDetail, terminalBroker };
+  const routeDeps: RouteDeps = { ...deps, metrics, tracker, boardDetail, terminalBroker };
   // herdr streams some event kinds with underscores and some with dots;
   // both spellings must be matched, so membership lives in explicit sets.
   const STATUS_KINDS = new Set(["pane_agent_status_changed", "pane.agent_status_changed"]);
@@ -101,8 +103,9 @@ export function createScoutrServer(deps: ServerDeps, options: CreateServerOption
   const routeTable = new RouteTable(buildRoutes());
 
   const server = createServer(async (request, response) => {
+    const url = new URL(request.url ?? "/", "http://localhost");
+    const requestMetric = metrics.beginRequest(request.method ?? "GET", url.pathname);
     try {
-      const url = new URL(request.url ?? "/", "http://localhost");
       const result = await dispatchRoute(
         routeTable,
         {
@@ -115,17 +118,24 @@ export function createScoutrServer(deps: ServerDeps, options: CreateServerOption
         },
         routeDeps,
       );
+      const payload = JSON.stringify(result.body);
       sendJson(response, result.status, result.body);
+      requestMetric.complete(result.status, Buffer.byteLength(payload));
     } catch (error) {
       // A route must never crash the process: log, then answer 500 unless the
       // client already went away.
       console.error(`route error: ${error instanceof Error ? error.message : String(error)}`);
+      const errorBody = { ok: false, error: "internal server error" };
+      const errorPayload = JSON.stringify(errorBody);
       if (!response.writableEnded) {
         try {
-          sendJson(response, 500, { ok: false, error: "internal server error" });
+          sendJson(response, 500, errorBody);
+          requestMetric.complete(500, Buffer.byteLength(errorPayload));
         } catch {
-          // Response already written or aborted; nothing more to send.
+          requestMetric.fail();
         }
+      } else {
+        requestMetric.fail();
       }
     }
   });
@@ -215,6 +225,9 @@ export function createScoutrServer(deps: ServerDeps, options: CreateServerOption
   });
 
   terminalWss.on("connection", (ws: WebSocket) => {
+    const closeMetrics = metrics.openSocket("terminal");
+    ws.once("close", closeMetrics);
+    ws.once("error", closeMetrics);
     attachTerminalSocket(ws, {
       broker: terminalBroker,
       identity: token,
@@ -226,6 +239,9 @@ export function createScoutrServer(deps: ServerDeps, options: CreateServerOption
   });
 
   wss.on("connection", (ws: WebSocket) => {
+    const closeMetrics = metrics.openSocket("feed");
+    ws.once("close", closeMetrics);
+    ws.once("error", closeMetrics);
     let closed = false;
     const filters: Set<string> = new Set();
 
@@ -294,6 +310,7 @@ export function createScoutrServer(deps: ServerDeps, options: CreateServerOption
 
   return {
     url: `http://127.0.0.1:${config.port}`,
+    metrics,
     close: async () => {
       // Release terminal children and cancel grace timers first; attached
       // sockets get closed(shutdown) before the connection is torn down.

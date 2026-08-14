@@ -43,11 +43,18 @@ class TopologyFeedClient(
     private val scope: CoroutineScope = CoroutineScope(Dispatchers.IO),
     private val backoffBaseMs: Long = 500L,
     private val backoffMaxMs: Long = 8_000L,
+    private val performanceCounters: PerformanceCounters? = null,
 ) : TopologyFeed {
 
     @Volatile private var started = false
     @Volatile private var closed = false
     @Volatile private var webSocket: WebSocket? = null
+    private data class PerformanceSocket(
+        val webSocket: WebSocket,
+        val handle: PerformanceCounters.SocketHandle,
+    )
+
+    private var performanceSocket: PerformanceSocket? = null
     private var reconnectJob: Job? = null
 
     override fun start(): Boolean {
@@ -61,11 +68,14 @@ class TopologyFeedClient(
     }
 
     override fun stop() {
-        started = false
-        closed = true
-        reconnectJob?.cancel()
-        webSocket?.cancel()
-        webSocket = null
+        val socket = synchronized(this) {
+            started = false
+            closed = true
+            reconnectJob?.cancel()
+            closePerformanceSocket()
+            webSocket.also { webSocket = null }
+        }
+        socket?.cancel()
     }
 
     private fun openSocket(saved: ConnectionStore.Saved) {
@@ -77,12 +87,42 @@ class TopologyFeedClient(
                 .build(),
             feedListener,
         )
-        webSocket = ws
+        val cancel = synchronized(this) {
+            if (!started || closed) {
+                true
+            } else {
+                webSocket = ws
+                false
+            }
+        }
+        if (cancel) ws.cancel()
+    }
+
+    @Synchronized
+    private fun beginPerformanceSocket(webSocket: WebSocket): Boolean {
+        if (closed || !started || this.webSocket !== webSocket) return false
+        if (performanceSocket?.webSocket === webSocket) return true
+        if (performanceSocket != null) return false
+        val handle = performanceCounters?.beginSocket(PerformanceCounters.SocketKind.Feed)
+            ?: return true
+        performanceSocket = PerformanceSocket(webSocket, handle)
+        return true
+    }
+
+    @Synchronized
+    private fun closePerformanceSocket(webSocket: WebSocket? = null) {
+        val current = performanceSocket ?: return
+        if (webSocket != null && current.webSocket !== webSocket) return
+        performanceSocket = null
+        current.handle.close()
     }
 
     private val feedListener = object : WebSocketListener() {
         override fun onOpen(webSocket: WebSocket, response: Response) {
-            if (closed) return
+            if (!beginPerformanceSocket(webSocket)) {
+                webSocket.cancel()
+                return
+            }
             webSocket.send(subscribeJson())
         }
 
@@ -92,33 +132,47 @@ class TopologyFeedClient(
         }
 
         override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+            closePerformanceSocket(webSocket)
             if (closed) return
             if (response != null) {
                 // The upgrade was rejected (401/403/503/...): retrying will not help.
-                closed = true
-                started = false
-                listener.onFeedFailure(IOException("terminal feed rejected: HTTP ${response.code}"))
+                val rejected = synchronized(this@TopologyFeedClient) {
+                    if (closed || this@TopologyFeedClient.webSocket !== webSocket) {
+                        false
+                    } else {
+                        closed = true
+                        started = false
+                        true
+                    }
+                }
+                if (rejected) {
+                    listener.onFeedFailure(IOException("terminal feed rejected: HTTP ${response.code}"))
+                }
             } else {
-                scheduleReconnect()
+                scheduleReconnect(webSocket)
             }
         }
 
         override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
             if (closed) return
             // Abrupt server close (no feed_error): reconnect.
-            scheduleReconnect()
+            closePerformanceSocket(webSocket)
+            scheduleReconnect(webSocket)
         }
 
         override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+            closePerformanceSocket(webSocket)
             if (closed) return
-            if (code != NORMAL_CLOSE) scheduleReconnect()
+            if (code != NORMAL_CLOSE) scheduleReconnect(webSocket)
         }
     }
 
     private var attempt = 0
 
-    private fun scheduleReconnect() {
+    @Synchronized
+    private fun scheduleReconnect(socket: WebSocket? = null) {
         if (!started || closed) return
+        if (socket != null && webSocket !== socket) return
         val saved = connectionStore.saved ?: return
         webSocket = null
         val nextDelay = backoffDelayMs(attempt++)

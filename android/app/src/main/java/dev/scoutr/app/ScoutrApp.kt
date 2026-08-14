@@ -13,6 +13,7 @@ import dev.scoutr.app.data.SharedPreferencesSessionCatalogStore
 import dev.scoutr.app.data.NtfyMessage
 import dev.scoutr.app.data.TerminalPreferencesStore
 import dev.scoutr.app.net.BridgeClient
+import dev.scoutr.app.net.PerformanceCounters
 import dev.scoutr.app.net.ScoutrApi
 import dev.scoutr.app.net.NtfyClient
 import dev.scoutr.app.net.TerminalSocketClient
@@ -60,6 +61,7 @@ class AppContainer(application: Application) {
     val sessionCatalogStore = SharedPreferencesSessionCatalogStore(appContext)
     val terminalPreferences = TerminalPreferencesStore(appContext)
     val monitoringStore = MonitoringStore(appContext)
+    val performanceCounters = PerformanceCounters()
 
     private val okHttp = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
@@ -71,14 +73,15 @@ class AppContainer(application: Application) {
     val bridge: ScoutrApi = BridgeClient(
         okHttp = okHttp,
         connectionStore = connectionStore,
+        performanceCounters = performanceCounters,
     )
 
     val ntfy = NtfyClient(okHttp)
 
     /** Slice 6: terminal route seams (one active pane socket + route-scoped topology feed). */
-    val terminalTransport: TerminalTransport = TerminalSocketClient(okHttp)
+    val terminalTransport: TerminalTransport = TerminalSocketClient(okHttp, performanceCounters = performanceCounters)
     val terminalTopologyFeedFactory = TopologyFeed.Factory { listener ->
-        TopologyFeedClient(okHttp, connectionStore, listener)
+        TopologyFeedClient(okHttp, connectionStore, listener, performanceCounters = performanceCounters)
     }
 
     init {
