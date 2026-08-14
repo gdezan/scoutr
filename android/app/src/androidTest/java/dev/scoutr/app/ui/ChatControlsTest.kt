@@ -438,15 +438,17 @@ class ChatControlsTest {
         // The header shows the backend identity, but no Thinking chip for an
         // agent without set_thinking.
         compose.onNodeWithTag("chat_agent_config").assertIsDisplayed()
-        compose.onNodeWithText("Claude Code").assertIsDisplayed()
+        // Label and value are one annotated string: "Agent Claude Code".
+        compose.onNodeWithText("Claude Code", substring = true).assertIsDisplayed()
         compose.onNodeWithTag("chat_thinking_config").assertDoesNotExist()
 
         // The conversation setup sheet skips the thinking section entirely.
         compose.onNodeWithTag("chat_model_config").performClick()
         compose.onNodeWithTag("conversation_config_sheet").assertIsDisplayed()
         compose.onNodeWithTag("thinking_level_options").assertDoesNotExist()
-        compose.onNodeWithText("Thinking level").assertDoesNotExist()
-        compose.onNodeWithText("Model").assertIsDisplayed()
+        compose.onNodeWithText("THINKING LEVEL").assertDoesNotExist()
+        // Section labels are mono caps app-wide now (§9a).
+        compose.onNodeWithText("MODEL").assertIsDisplayed()
         // An empty backend catalog hides the model search entirely.
         compose.onNodeWithTag("conversation_model_search").assertDoesNotExist()
         compose.onNodeWithContentDescription("Close conversation setup").performClick()

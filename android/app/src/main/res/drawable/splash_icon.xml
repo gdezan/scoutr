@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Splash safe area. With no `windowSplashScreenIconBackgroundColor` the system
+    hands the icon a 288dp canvas and masks it to a 192dp circle. `scoutr_icon.png`
+    is a rounded square, so it survives that mask whole only while its diagonal
+    fits the circle: 192 / sqrt(2) = 135dp. Centre it at 132dp for margin — close
+    to the 112dp icon the design system draws on this surface, and the reason the
+    limbs and groundline are no longer sliced.
+-->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item
+        android:gravity="center"
+        android:width="132dp"
+        android:height="132dp">
+        <bitmap
+            android:src="@drawable/scoutr_icon"
+            android:gravity="fill" />
+    </item>
+</layer-list>

@@ -165,10 +165,12 @@ private fun ConnectionSection(
             // ntfy is configured by the bridge during the health handshake, so
             // it is status, not a form. Either half missing means no push.
             val push = saved.ntfyUrl?.let { url -> saved.ntfyTopic?.let { topic -> "$url\n$topic" } }
+            // A URL and topic are machine facts; "not configured" is a sentence.
+            // Mono is for the former only — never as decoration (§9d).
             Text(
                 push ?: "Push not configured.",
-                style = MaterialTheme.typography.bodyMedium,
-                fontFamily = ScoutrMono,
+                style = if (push != null) MaterialTheme.typography.bodyMedium.copy(fontFamily = ScoutrMono)
+                else MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 overflow = TextOverflow.Ellipsis,
                 maxLines = 3,
@@ -376,10 +378,10 @@ private fun SettingsSection(
     footnote: String? = null,
     content: @Composable () -> Unit,
 ) {
-    SectionLabel(label, modifier = Modifier.padding(start = 4.dp, bottom = 8.dp))
+    SectionLabel(label, modifier = Modifier.padding(start = 4.dp, bottom = 6.dp))
     Card(
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        shape = RoundedCornerShape(8.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+        shape = RoundedCornerShape(4.dp),
         modifier = Modifier.fillMaxWidth(),
     ) {
         Column { content() }

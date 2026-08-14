@@ -491,12 +491,63 @@ class ChatListTest {
         composeRule.setContent {
             ScoutrTheme { ChatList(entries = listOf(entry)) }
         }
-        // Collapsed: the indented faint-fill result card shows the 2-line
-        // preview; tapping expands it (full output, no crash).
+        // This result has no tool call in the transcript to expand it from, so it
+        // shows unasked rather than becoming unreachable; tapping expands it to
+        // the full output (§7a gives collapsed calls "no tile of their own", but
+        // that rule only applies where a chevron exists).
         composeRule.onNodeWithTag("tool_result").assertIsDisplayed()
         composeRule.onNodeWithTag("tool_result").performClick()
         composeRule.waitForIdle()
         composeRule.onNodeWithText("line5", substring = true).assertIsDisplayed()
+    }
+
+    @Test
+    fun linkedToolResultStaysHiddenUntilItsCallIsExpanded() {
+        val assistant = SessionEntry(
+            entryId = "assistant-collapsed",
+            role = "assistant",
+            content = listOf(ContentBlock(type = "toolCall", name = "bash")),
+        )
+        val result = SessionEntry(
+            entryId = "result-collapsed",
+            parentId = "assistant-collapsed",
+            role = "toolResult",
+            toolName = "bash",
+            content = listOf(ContentBlock(type = "text", text = "quiet output")),
+        )
+        composeRule.setContent {
+            ScoutrTheme { ChatList(entries = listOf(assistant, result)) }
+        }
+        // §7a: a collapsed call is one mono line on the spine with no tile of its
+        // own. The chevron is what reveals the evidence.
+        composeRule.onNodeWithTag("tool_result").assertDoesNotExist()
+        composeRule.onNodeWithContentDescription("Expand bash").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("tool_result").assertIsDisplayed()
+    }
+
+    @Test
+    fun failedToolResultShowsWithoutExpanding() {
+        val assistant = SessionEntry(
+            entryId = "assistant-failed",
+            role = "assistant",
+            content = listOf(ContentBlock(type = "toolCall", name = "bash")),
+        )
+        val result = SessionEntry(
+            entryId = "result-failed",
+            parentId = "assistant-failed",
+            role = "toolResult",
+            toolName = "bash",
+            isError = true,
+            content = listOf(ContentBlock(type = "text", text = "2 tests failed")),
+        )
+        composeRule.setContent {
+            ScoutrTheme { ChatList(entries = listOf(assistant, result)) }
+        }
+        // A failure is the one result worth interrupting the scan for, so it
+        // breaks the collapsed pattern loudly and on its own (§7a).
+        composeRule.onNodeWithTag("tool_result").assertIsDisplayed()
+        composeRule.onNodeWithText("2 tests failed", substring = true).assertIsDisplayed()
     }
 
     @Test

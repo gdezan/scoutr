@@ -9,6 +9,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.requiredSize
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -36,6 +38,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -65,6 +68,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.runtime.produceState
 import androidx.compose.foundation.Image
@@ -80,9 +84,24 @@ import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.border
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
+import dev.scoutr.app.ui.components.AgentMark
+import dev.scoutr.app.ui.agentDisplayTitle
+import dev.scoutr.app.ui.theme.ScoutrType
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
@@ -180,6 +199,7 @@ fun ChatScreen(
             thinkingLevel = ui.thinkingLevel,
             capabilities = ui.capabilities,
             agentDisplayName = ui.agentDisplayName,
+            agentKind = ui.agentKind,
             status = if (viewModel.waitingForAnswer) "needs you" else ui.agentStatus,
             showThinking = showThinking,
             expandTools = expandTools,
@@ -379,6 +399,7 @@ private fun ChatHeader(
     thinkingLevel: String?,
     capabilities: List<String>?,
     agentDisplayName: String?,
+    agentKind: String?,
     status: String,
     showThinking: Boolean,
     expandTools: Boolean,
@@ -398,19 +419,23 @@ private fun ChatHeader(
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
             }
             Column(Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    AgentMark(agentKind, size = 14.dp)
+                    if (agentKind?.lowercase() == "claude") Spacer(Modifier.width(6.dp))
+                    Text(
+                        agentDisplayTitle(sessionTitle),
+                        // §7a header: 17/600/-.2, a step above the tile title.
+                        style = MaterialTheme.typography.headlineSmall,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
                 Text(
-                    sessionTitle,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    paneId,
-                    style = MaterialTheme.typography.bodySmall,
-                    fontFamily = ScoutrMono,
+                    listOfNotNull(paneId, model?.substringAfterLast('/')).joinToString(" · "),
+                    style = ScoutrType.monoMeta,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
             IconButton(onClick = onToggleThinking, modifier = Modifier.testTag("toggle_thinking")) {
@@ -476,11 +501,12 @@ private fun ChatHeader(
                 .fillMaxWidth()
                 .horizontalScroll(rememberScrollState())
                 .height(IntrinsicSize.Min)
-                .padding(start = 16.dp, end = 16.dp, bottom = 10.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                .padding(start = 12.dp, end = 12.dp, bottom = 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(2.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            HeaderStatusChip(status, Modifier.height(IntrinsicSize.Min))
+            // Status is not a chip: the working bar and the ring already carry it,
+            // and §7a's rail is configuration only — thinking, agent, model.
             if (capabilities == null || SessionAction.SetThinking.wire in capabilities) {
                 HeaderConfigurationChip(
                     label = "Thinking",
@@ -508,24 +534,11 @@ private fun ChatHeader(
     }
 }
 
-@Composable
-private fun HeaderStatusChip(status: String, modifier: Modifier = Modifier) {
-    Surface(
-        modifier = modifier,
-        shape = RoundedCornerShape(6.dp),
-        color = if (status == "needs you") MaterialTheme.colorScheme.errorContainer
-        else MaterialTheme.colorScheme.surfaceContainerHighest,
-    ) {
-        Text(
-            status,
-            style = MaterialTheme.typography.labelMedium,
-            color = if (status == "needs you") MaterialTheme.colorScheme.onErrorContainer
-            else MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
-        )
-    }
-}
-
+/**
+ * A configuration fact in the chat header rail: quiet label, emphatic value, one
+ * 4dp tile. Both halves are Space Grotesk — the reference keeps mono out of this
+ * rail even though the value is a machine identifier (§7a, §9b "CONTROLS").
+ */
 @Composable
 private fun HeaderConfigurationChip(
     label: String,
@@ -533,14 +546,29 @@ private fun HeaderConfigurationChip(
     onClick: (() -> Unit)?,
     testTag: String,
 ) {
-    val shape = RoundedCornerShape(6.dp)
+    val shape = RoundedCornerShape(4.dp)
     val color = MaterialTheme.colorScheme.surfaceContainer
     val modifier = Modifier.testTag(testTag)
     val content: @Composable () -> Unit = {
-        Row(Modifier.padding(horizontal = 12.dp, vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("$label  ", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text(value, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, fontFamily = ScoutrMono)
-        }
+        Text(
+            buildAnnotatedString {
+                withStyle(SpanStyle(color = MaterialTheme.colorScheme.onSurfaceVariant)) {
+                    append(label)
+                }
+                append(" ")
+                withStyle(
+                    SpanStyle(
+                        color = MaterialTheme.colorScheme.onSurface,
+                        fontWeight = FontWeight.SemiBold,
+                    ),
+                ) {
+                    append(value)
+                }
+            },
+            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium),
+            maxLines = 1,
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+        )
     }
     if (onClick != null) {
         Surface(onClick = onClick, shape = shape, color = color, modifier = modifier, content = content)
@@ -685,6 +713,7 @@ fun ChatList(
                         showThinking = showThinking,
                         toolExpanded = { toolId -> isToolExpanded(toolId) },
                         resultToolKey = { entry -> toolResultKey(entry, entries) },
+                        resultHasCall = { entry -> inferredToolCallKey(entry, entries) != null },
                         onToggleTool = { toolId -> toggleTool(toolId) },
                         modifier = Modifier.padding(top = entrySpacing(row.entry)).animateItem(
                             fadeInSpec = ScoutrMotion.itemSpec(reduceMotion),
@@ -808,6 +837,7 @@ private fun MessageRow(
     toolExpanded: (String) -> Boolean,
     onToggleTool: (String) -> Unit,
     resultToolKey: (SessionEntry) -> String,
+    resultHasCall: (SessionEntry) -> Boolean,
     modifier: Modifier = Modifier,
 ) {
     when (entry.role) {
@@ -823,6 +853,7 @@ private fun MessageRow(
             entry = entry,
             toolExpanded = toolExpanded,
             resultToolKey = resultToolKey,
+            hasCall = resultHasCall(entry),
             onToggleTool = onToggleTool,
             modifier = modifier,
         )
@@ -841,13 +872,22 @@ private fun UserBubble(entry: SessionEntry, modifier: Modifier = Modifier) {
                 .widthIn(max = 288.dp)
                 .background(
                     MaterialTheme.colorScheme.surfaceContainerHighest,
-                    RoundedCornerShape(8.dp),
+                    RoundedCornerShape(4.dp),
                 )
                 .padding(horizontal = 14.dp, vertical = 10.dp)
                 .testTag("user_bubble"),
         ) {
             SelectionContainer {
-                Text(text, color = MaterialTheme.colorScheme.onSurface)
+                // What you said sits a step under what the agent answered: 14/21
+                // against the transcript's 15/23 (§7a).
+                Text(
+                    text,
+                    style = MaterialTheme.typography.bodyLarge.copy(
+                        fontSize = 14.sp,
+                        lineHeight = 21.sp,
+                    ),
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
             }
         }
     }
@@ -875,6 +915,9 @@ private fun PendingUserBubble(
                 Text(message.text, color = MaterialTheme.colorScheme.onSurface)
             }
             when (message.state) {
+                // Accepted by the bridge: the row stays until the transcript
+                // echoes it, but it must not keep claiming to be queued.
+                MessageDeliveryState.SENT -> Unit
                 MessageDeliveryState.QUEUED -> Row(
                     modifier = Modifier.padding(end = 8.dp, top = 2.dp).testTag("pending_message_queued"),
                     verticalAlignment = Alignment.CenterVertically,
@@ -901,58 +944,94 @@ private fun AssistantBubble(
     onToggleTool: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Row(modifier.fillMaxWidth().testTag("assistant_bubble")) {
-        Box(
-            Modifier
-                .width(12.dp)
-                .fillMaxHeight()
-                .padding(start = 4.dp),
-            contentAlignment = Alignment.Center,
-        ) {
-            Box(
-                Modifier
-                    .width(1.dp)
-                    .fillMaxHeight()
-                    .background(MaterialTheme.colorScheme.outlineVariant)
-                    .testTag("assistant_spine"),
-            )
-        }
-        Column(Modifier.weight(1f)) {
-            for ((blockIndex, block) in entry.content.withIndex()) {
-                when (block.type) {
-                    "text" -> {
-                        val text = block.text?.trim()
-                        if (!text.isNullOrBlank()) {
-                            // Long-press selects, then the system toolbar offers Copy.
-                            // Only the prose is selectable — tool chips keep their
-                            // tap-to-expand gesture without selection fighting it.
-                            SelectionContainer(modifier = Modifier.padding(bottom = 4.dp)) {
-                                AssistantMarkdown(content = text)
-                            }
+    // Prose runs the full column width; only tool calls hang off the spine, and
+    // consecutive calls share one rail so the line is unbroken between them (§7a).
+    Column(modifier.fillMaxWidth().testTag("assistant_bubble")) {
+        var index = 0
+        while (index < entry.content.size) {
+            val block = entry.content[index]
+            when (block.type) {
+                "text" -> {
+                    val text = block.text?.trim()
+                    if (!text.isNullOrBlank()) {
+                        // Long-press selects, then the system toolbar offers Copy.
+                        // Only the prose is selectable — tool chips keep their
+                        // tap-to-expand gesture without selection fighting it.
+                        SelectionContainer(modifier = Modifier.padding(horizontal = 2.dp, vertical = 4.dp)) {
+                            AssistantMarkdown(content = text)
                         }
                     }
+                    index++
+                }
 
-                    "thinking" -> {
-                        val thinking = block.thinking
-                        if (!thinking.isNullOrBlank() && showThinking) {
-                            ThinkingBlock(thinking, Modifier.padding(top = 4.dp))
-                        }
+                "thinking" -> {
+                    val thinking = block.thinking
+                    if (!thinking.isNullOrBlank() && showThinking) {
+                        ThinkingBlock(thinking, Modifier.padding(top = 4.dp))
                     }
+                    index++
+                }
 
-                    "toolCall" -> {
-                        // Quiet one-line machine fact; tapping it expands the linked
-                        // result tile below.
-                        ToolCallChip(
-                            block = block,
-                            isExpanded = toolExpanded(toolCallKey(entry.entryId, block, blockIndex)),
-                            onToggle = { onToggleTool(toolCallKey(entry.entryId, block, blockIndex)) },
-                            modifier = Modifier.padding(top = 4.dp),
-                        )
+                "toolCall" -> {
+                    val start = index
+                    while (index < entry.content.size && entry.content[index].type == "toolCall") index++
+                    // Prose above means a fresh run (16dp); starting the turn on a
+                    // call means the rail is continuing from the entry before, so
+                    // it keeps the ordinary row gap.
+                    TimelineRail(topGap = if (start == 0) SPINE_ROW_GAP else SPINE_RUN_GAP) {
+                        for (i in start until index) {
+                            val call = entry.content[i]
+                            val key = toolCallKey(entry.entryId, call, i)
+                            ToolCallChip(
+                                block = call,
+                                isExpanded = toolExpanded(key),
+                                onToggle = { onToggleTool(key) },
+                                modifier = if (i == start) Modifier else Modifier.padding(top = SPINE_ROW_GAP),
+                            )
+                        }
                     }
                 }
+
+                else -> index++
             }
         }
     }
+}
+
+/**
+ * The tool-call spine: a hairline at 5dp with its content 15dp clear of it, so a
+ * 7dp node offset back by 19dp lands centred on the line (§7a).
+ *
+ * The line is drawn rather than laid out because a `fillMaxHeight` child of a
+ * wrap-content parent measures against infinite constraints and collapses to
+ * nothing; at draw time the rail's real height is known.
+ */
+@Composable
+private fun TimelineRail(
+    topGap: Dp,
+    modifier: Modifier = Modifier,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    val line = MaterialTheme.colorScheme.outlineVariant
+    Column(
+        modifier
+            .fillMaxWidth()
+            .drawBehind {
+                val x = SPINE_X.toPx()
+                drawLine(
+                    color = line,
+                    start = Offset(x, 0f),
+                    end = Offset(x, size.height),
+                    strokeWidth = 1.dp.toPx(),
+                )
+            }
+            // Only the top gap is the rail's; each row insets its own content, so
+            // a row's background and its node both stay inside its bounds — a
+            // clipping surface would otherwise eat a node hung out on the line.
+            .padding(top = topGap)
+            .testTag("assistant_spine"),
+        content = content,
+    )
 }
 
 @Composable
@@ -961,21 +1040,21 @@ private fun ThinkingBlock(text: String, modifier: Modifier = Modifier) {
         modifier
             .fillMaxWidth()
             .background(
-                MaterialTheme.colorScheme.surfaceContainerHighest,
-                RoundedCornerShape(8.dp),
+                MaterialTheme.colorScheme.surfaceContainer,
+                RoundedCornerShape(4.dp),
             )
-            .padding(horizontal = 12.dp, vertical = 8.dp)
+            .padding(horizontal = 12.dp, vertical = 10.dp)
             .testTag("thinking_block"),
     ) {
         Text(
             "thinking",
-            style = MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.Medium,
+            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium),
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+        Spacer(Modifier.height(4.dp))
         Text(
             text.trim(),
-            style = MaterialTheme.typography.bodySmall,
+            style = MaterialTheme.typography.bodyMedium,
             fontStyle = FontStyle.Italic,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -1052,9 +1131,13 @@ private fun inferredToolCallKey(entry: SessionEntry, entries: List<SessionEntry>
 
 
 /** Vertical rhythm: consecutive tool entries group at 4dp; prose gets air. */
+/**
+ * Entries that live on the tool rail carry their own gaps inside the rail, so the
+ * list must not add one — an outer gap is a gap in the drawn spine.
+ */
 private fun entrySpacing(entry: SessionEntry): Dp = when {
-    entry.role == "toolResult" -> 4.dp
-    entry.role == "assistant" && entry.content.none { it.type == "text" } -> 4.dp
+    entry.role == "toolResult" -> 0.dp
+    entry.role == "assistant" && entry.content.none { it.type == "text" } -> 0.dp
     else -> 14.dp
 }
 
@@ -1069,98 +1152,161 @@ private fun ToolCallChip(
     val command = toolCallCommand(block)
     val name = block.name ?: "tool"
     // Tool calls remain one-line machine facts; the linked result owns the
-    // expandable filled tile surface below.
-    PressTintSurface(
-        onClick = onToggle,
-        color = androidx.compose.ui.graphics.Color.Transparent,
-        pressedColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
-        modifier = modifier.fillMaxWidth().testTag("tool_chip"),
-    ) {
+    // expandable filled tile surface below. The row spans the rail so its node
+    // sits on the spine within its own bounds rather than outside the surface.
+    Box(modifier.fillMaxWidth()) {
+        PressTintSurface(
+            onClick = onToggle,
+            color = androidx.compose.ui.graphics.Color.Transparent,
+            pressedColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
+            modifier = Modifier.fillMaxWidth().testTag("tool_chip"),
+        ) {
         Row(
-            Modifier.fillMaxWidth().padding(vertical = 2.dp),
+            Modifier
+                .fillMaxWidth()
+                .padding(start = SPINE_CONTENT_INSET, top = 2.dp, bottom = 2.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                name,
-                style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
-                fontFamily = ScoutrMono,
-                fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
-            )
-            Spacer(Modifier.width(8.dp))
-            Text(
-                command,
-                style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
-                fontFamily = ScoutrMono,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                buildAnnotatedString {
+                    withStyle(SpanStyle(color = MaterialTheme.colorScheme.onSurfaceVariant)) {
+                        append(name)
+                    }
+                    append(" ")
+                    withStyle(
+                        SpanStyle(
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f),
+                            fontWeight = FontWeight.Normal,
+                        ),
+                    ) {
+                        append(command)
+                    }
+                },
+                style = ScoutrType.monoTool,
                 maxLines = 1,
                 overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
             )
+            Spacer(Modifier.width(8.dp))
             Icon(
                 imageVector = if (expanded) Icons.Filled.KeyboardArrowDown else Icons.AutoMirrored.Filled.KeyboardArrowRight,
                 contentDescription = if (expanded) "Collapse $name" else "Expand $name",
-                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                modifier = Modifier.size(18.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                modifier = Modifier.size(14.dp),
             )
         }
+        }
+        TimelineNode(
+            isError = false,
+            modifier = Modifier.align(Alignment.CenterStart).padding(start = SPINE_NODE_X),
+        )
     }
 }
+
+/**
+ * The 7dp node that pins one call to the spine. A settled call is canvas-filled
+ * with a hairline ring so it reads as a station on the line rather than a bullet
+ * in the text; a failed one goes solid red, because an error is the one thing on
+ * this rail that should stop the eye (§7a).
+ */
+@Composable
+private fun TimelineNode(isError: Boolean, modifier: Modifier = Modifier) {
+    // `requiredSize`, not `size`: the node is measured inside a zero-width box so
+    // it claims no room in the row, and `size` would coerce it to that 0.
+    val node = modifier.requiredSize(SPINE_NODE_SIZE)
+    if (isError) {
+        Box(node.background(MaterialTheme.colorScheme.error, CircleShape))
+    } else {
+        Box(
+            node
+                .background(MaterialTheme.colorScheme.surfaceVariant, CircleShape)
+                .border(1.dp, MaterialTheme.colorScheme.outline, CircleShape),
+        )
+    }
+}
+
+/** Spine geometry: 5dp margin, 1dp line, 15dp padding — content lands at 21dp. */
+private val SPINE_X = 5.5.dp
+private val SPINE_CONTENT_INSET = 21.dp
+private val SPINE_NODE_SIZE = 7.dp
+
+/** The node's left edge, so its 7dp centre lands on the 5.5dp line. */
+private val SPINE_NODE_X = 2.dp
+
+/** Gap between rows on the rail, and between the rail and the prose above it. */
+private val SPINE_ROW_GAP = 11.dp
+private val SPINE_RUN_GAP = 16.dp
 
 @Composable
 private fun ToolResultChip(
     entry: SessionEntry,
     toolExpanded: (String) -> Boolean,
     resultToolKey: (SessionEntry) -> String,
+    hasCall: Boolean,
     onToggleTool: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val expanded = toolExpanded(resultToolKey(entry))
     val output = entryText(entry.content)
+    val isError = entry.isError == true
     val tool = entry.toolName ?: "tool"
-    // Result = evidence: indented under its call, faint fill, no marker — the
-    // indent and fill already say "this belongs to the row above." Errors keep
-    // the explicit label so they break the pattern loudly.
-    ToolChipContainer(
-        onClick = { onToggleTool(resultToolKey(entry)) },
-        modifier = modifier.fillMaxWidth().padding(start = 14.dp).testTag("tool_result"),
-    ) {
-        if (entry.isError == true) {
-            Text(
-                "▸ $tool (error)",
-                style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
-                fontFamily = ScoutrMono,
-                fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.error,
-            )
-        }
-        if (output.isNotBlank()) {
-            Text(
-                output,
-                style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
-                fontFamily = ScoutrMono,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                maxLines = if (expanded) Int.MAX_VALUE else 2,
-                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-            )
+    // A collapsed call is one line on the spine with "no tile of their own" (§7a):
+    // the chevron is the affordance, and a preview under every call turns the rail
+    // into a ladder of boxes. Two results still show unasked — a failure, which is
+    // the one thing worth interrupting the scan for, and an orphan whose call is
+    // missing from the transcript, since nothing else could ever expand it.
+    if (!isError && !expanded && hasCall) return
+    if (output.isBlank() && !isError) return
+    // Result = evidence: it stays on the rail under the call it belongs to, so
+    // the indent and the continuing spine already say "this came from above."
+    TimelineRail(topGap = 7.dp, modifier = modifier) {
+        ToolChipContainer(
+            onClick = { onToggleTool(resultToolKey(entry)) },
+            isError = isError,
+            modifier = Modifier.padding(start = SPINE_CONTENT_INSET).testTag("tool_result"),
+        ) {
+            if (isError) {
+                Text(
+                    "▸ $tool (error)",
+                    style = ScoutrType.monoTool,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+            if (output.isNotBlank()) {
+                Text(
+                    output,
+                    style = ScoutrType.monoMeta,
+                    color = if (isError) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f)
+                    else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
+                    maxLines = if (expanded) Int.MAX_VALUE else 2,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                )
+            }
         }
     }
 }
 
+/**
+ * The inline result tile. The spine carries structure, so the tile surface is
+ * reserved for content: a 4dp fill under the call it belongs to, tinted red when
+ * the call failed so an error breaks the pattern loudly (§7a).
+ */
 @Composable
 private fun ToolChipContainer(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    isError: Boolean = false,
     content: @Composable () -> Unit,
 ) {
     PressTintSurface(
         onClick = onClick,
         shape = RoundedCornerShape(4.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+        color = if (isError) MaterialTheme.colorScheme.error.copy(alpha = 0.08f)
+        else MaterialTheme.colorScheme.surfaceContainer,
         pressedColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.65f),
         modifier = modifier.fillMaxWidth(),
     ) {
-        Column(Modifier.padding(horizontal = 10.dp, vertical = 6.dp)) {
+        Column(Modifier.padding(horizontal = 10.dp, vertical = 8.dp)) {
             content()
         }
     }
@@ -1262,77 +1408,69 @@ internal fun ChatComposer(
                 onRetry = onRetryFiles,
             )
         }
-        OutlinedTextField(
-            value = value,
-            onValueChange = onValueChange,
-            placeholder = { Text(placeholder) },
-            enabled = enabled,
-            minLines = 1,
-            maxLines = 6,
-            shape = RoundedCornerShape(6.dp),
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedBorderColor = MaterialTheme.colorScheme.outline,
-                unfocusedBorderColor = MaterialTheme.colorScheme.outline,
-                focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                cursorColor = MaterialTheme.colorScheme.primary,
-            ),
-            // Enter inserts a newline; sending happens only via the send button.
-            keyboardOptions = KeyboardOptions(imeAction = ImeAction.None),
-            keyboardActions = KeyboardActions(
-                onSend = {},
-                onDone = {},
-                onNext = {},
-                onPrevious = {},
-                onGo = {},
-                onSearch = {},
-            ),
-            // The M3 trailing slot stacks sibling icons on top of each other, so the
-            // two actions must live in an explicit Row to guarantee side-by-side
-            // placement (S24 feedback: attach and send buttons overlapped).
-            trailingIcon = {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(onClick = onPickAttachment, enabled = enabled) {
-                        Icon(
-                            Icons.Default.Image,
-                            contentDescription = "Attach image",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    Box(
-                        Modifier
-                            .size(40.dp)
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(
-                                if (enabled && (value.text.isNotBlank() || attachment != null)) {
-                                    MaterialTheme.colorScheme.primary
-                                } else {
-                                    MaterialTheme.colorScheme.surfaceVariant
-                                },
-                            )
-                            .clickable(enabled = enabled && (value.text.isNotBlank() || attachment != null)) { submit() },
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Icon(
-                            imageVector = if (acceptingCompletion) Icons.AutoMirrored.Filled.KeyboardArrowRight else Icons.AutoMirrored.Filled.Send,
-                            contentDescription = when {
-                                acceptingMention -> "Complete path"
-                                acceptingCompletion -> "Complete command"
-                                else -> "Send"
-                            },
-                            tint = if (enabled && (value.text.isNotBlank() || attachment != null)) {
-                                MaterialTheme.colorScheme.onPrimary
-                            } else {
-                                MaterialTheme.colorScheme.onSurfaceVariant
-                            },
-                        )
-                    }
-                }
-            },
+        // The composer owns its own border and lays the actions out itself.
+        // Material's trailing-icon slot sizes to the icon and leaves no room
+        // before the stroke, which put the filled send square on top of the
+        // field's own border; an explicit row makes the 4dp end inset
+        // structural (reference §7a).
+        val canSend = enabled && (value.text.isNotBlank() || attachment != null)
+        val interactionSource = remember { MutableInteractionSource() }
+        val focused by interactionSource.collectIsFocusedAsState()
+        Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 6.dp)
-                .onPreviewKeyEvent { event ->
+                .padding(horizontal = 12.dp, vertical = 8.dp)
+                .clip(RoundedCornerShape(6.dp))
+                .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                .border(
+                    width = 1.dp,
+                    // Focus is the one accent stroke allowed here; the filled
+                    // send square stays the only accent *surface*.
+                    color = if (focused) MaterialTheme.colorScheme.primary.copy(alpha = 0.55f)
+                    else MaterialTheme.colorScheme.outline,
+                    shape = RoundedCornerShape(6.dp),
+                )
+                .heightIn(min = 52.dp)
+                .padding(start = 14.dp, end = 4.dp),
+            verticalAlignment = Alignment.Bottom,
+        ) {
+            BasicTextField(
+                value = value,
+                onValueChange = onValueChange,
+                enabled = enabled,
+                minLines = 1,
+                maxLines = 6,
+                textStyle = MaterialTheme.typography.bodyLarge.copy(
+                    color = MaterialTheme.colorScheme.onSurface,
+                ),
+                cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                // Enter inserts a newline; sending happens only via the send button.
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.None),
+                keyboardActions = KeyboardActions(
+                    onSend = {},
+                    onDone = {},
+                    onNext = {},
+                    onPrevious = {},
+                    onGo = {},
+                    onSearch = {},
+                ),
+                interactionSource = interactionSource,
+                decorationBox = { inner ->
+                    Box(contentAlignment = Alignment.CenterStart) {
+                        if (value.text.isEmpty()) {
+                            Text(
+                                placeholder,
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                            )
+                        }
+                        inner()
+                    }
+                },
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(vertical = 15.dp)
+                    .onPreviewKeyEvent { event ->
                     // Enter completes an accepting slash command or file mention;
                     // with no menu open the field itself inserts a newline
                     // (multiline + imeAction None) and the empty KeyboardActions
@@ -1360,8 +1498,52 @@ internal fun ChatComposer(
                         else -> false
                     }
                 }
-                .testTag("chat_input"),
-        )
+                    .testTag("chat_input"),
+            )
+            // Both actions stay centred in one 52dp rail so they hold their
+            // alignment as the field grows to six lines.
+            Row(
+                modifier = Modifier.height(52.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                IconButton(
+                    onClick = onPickAttachment,
+                    enabled = enabled,
+                    modifier = Modifier.size(44.dp),
+                ) {
+                    Icon(
+                        Icons.Default.Image,
+                        contentDescription = "Attach image",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(22.dp),
+                    )
+                }
+                Box(
+                    Modifier
+                        .size(36.dp)
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(
+                            if (canSend) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.surfaceVariant,
+                        )
+                        .clickable(enabled = canSend) { submit() },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        // Send is an upward arrow, not a paper plane (§7a).
+                        imageVector = if (acceptingCompletion) Icons.AutoMirrored.Filled.KeyboardArrowRight else Icons.Filled.ArrowUpward,
+                        contentDescription = when {
+                            acceptingMention -> "Complete path"
+                            acceptingCompletion -> "Complete command"
+                            else -> "Send"
+                        },
+                        tint = if (canSend) MaterialTheme.colorScheme.onPrimary
+                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
+            }
+        }
     }
 }
 

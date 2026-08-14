@@ -132,7 +132,10 @@ class ChatPendingMessageTest {
         viewModel.send("Fix it")
 
         assertEquals("Fix it", viewModel.ui.value.pendingMessages.single().text)
-        assertEquals(MessageDeliveryState.QUEUED, viewModel.ui.value.pendingMessages.single().state)
+        // QUEUED only spans the request itself, so whether it has already
+        // flipped to SENT is a race; what matters is that the row is in flight
+        // rather than failed.
+        assertTrue(viewModel.ui.value.pendingMessages.single().state != MessageDeliveryState.FAILED)
         // The agent records the message only after the WS send lands; the
         // pending bubble confirms once the transcript shows the entry.
         stubSession(
@@ -158,7 +161,8 @@ class ChatPendingMessageTest {
 
         fake.wsFailure = null
         viewModel.retryPendingMessage(failed.localId)
-        assertEquals(MessageDeliveryState.QUEUED, viewModel.ui.value.pendingMessages.single().state)
+        // Retry puts it back in flight; it may already have been accepted.
+        assertTrue(viewModel.ui.value.pendingMessages.single().state != MessageDeliveryState.FAILED)
         // The agent records the message only once the retried WS send lands;
         // the pending bubble confirms once the transcript shows the entry.
         stubSession(
@@ -316,6 +320,74 @@ class ChatPendingMessageTest {
         )
 
         assertEquals(listOf(message), dropConfirmedMessages(listOf(message), listOf(oldEntry)))
+    }
+
+    @Test
+    fun sentMessageIsRetiredOnlyAfterTheEchoGracePeriod() {
+        // The agent recorded what it received in a form the text match cannot
+        // recognise. The row must outlive the burst of refreshes a send fires —
+        // counting polls retired it seconds after sending, which read as the
+        // message vanishing — and only go once the grace period is genuinely up.
+        val sentAt = 1_000_000L
+        val message = PendingUserMessage(
+            localId = "local-1",
+            text = "ship it",
+            state = MessageDeliveryState.SENT,
+            sentAtMs = sentAt,
+        )
+        val unrelated = SessionEntry(
+            entryId = "u-1",
+            role = "user",
+            content = listOf(ContentBlock(type = "text", text = "something else entirely")),
+        )
+
+        // A burst of polls right after sending must not consume the grace period.
+        repeat(10) {
+            assertEquals(
+                listOf(message),
+                dropConfirmedMessages(listOf(message), listOf(unrelated), nowMs = sentAt + 2_000),
+            )
+        }
+        assertEquals(
+            listOf(message),
+            dropConfirmedMessages(listOf(message), listOf(unrelated), nowMs = sentAt + ECHO_GRACE_MS - 1),
+        )
+        assertEquals(
+            emptyList<PendingUserMessage>(),
+            dropConfirmedMessages(listOf(message), listOf(unrelated), nowMs = sentAt + ECHO_GRACE_MS),
+        )
+    }
+
+    @Test
+    fun queuedMessageIsNeverRetiredOnAge() {
+        // Only a message the bridge has accepted may be retired on age; one
+        // still in flight must keep its row until it succeeds or fails.
+        val message = PendingUserMessage(
+            localId = "local-2",
+            text = "ship it",
+            state = MessageDeliveryState.QUEUED,
+        )
+        assertEquals(
+            listOf(message),
+            dropConfirmedMessages(listOf(message), emptyList(), nowMs = Long.MAX_VALUE / 2),
+        )
+    }
+
+    @Test
+    fun sentMessageStillReconcilesOnItsEcho() {
+        val message = PendingUserMessage(
+            localId = "local-3",
+            text = "ship it",
+            state = MessageDeliveryState.SENT,
+            sentAtMs = 1_000_000L,
+        )
+        val echo = SessionEntry(
+            entryId = "u-9",
+            role = "user",
+            content = listOf(ContentBlock(type = "text", text = "ship it")),
+        )
+
+        assertEquals(emptyList<PendingUserMessage>(), dropConfirmedMessages(listOf(message), listOf(echo)))
     }
 
     private fun viewModel(): ChatViewModel =

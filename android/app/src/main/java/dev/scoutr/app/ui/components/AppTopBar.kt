@@ -11,7 +11,12 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 
 /** The tab screens' top bar. */
@@ -22,8 +27,17 @@ internal fun AppTopBar(
     onSearch: (() -> Unit)? = null,
     onSettings: (() -> Unit)? = null,
     onTerminal: (() -> Unit)? = null,
+    showLockup: Boolean = false,
 ) {
     TopAppBar(
+        // The board is the app's front door, so it carries the lockup: the mark
+        // sits inline with the screen title rather than on a row of its own
+        // (reference §8b).
+        navigationIcon = {
+            if (showLockup) {
+                Box(Modifier.padding(start = 16.dp, end = 4.dp)) { ScoutrMark() }
+            }
+        },
         title = { Text(title) },
         // The outer Scaffold already consumes the status-bar inset for the whole
         // NavHost, so the bar must not add its own or the two stack into a ~48dp
@@ -32,23 +46,29 @@ internal fun AppTopBar(
         windowInsets = WindowInsets(0.dp),
         colors = TopAppBarDefaults.topAppBarColors(
             containerColor = MaterialTheme.colorScheme.background,
+            actionIconContentColor = MaterialTheme.colorScheme.onBackground,
         ),
         actions = {
             if (onTerminal != null) {
-                IconButton(onClick = onTerminal) {
-                    Icon(Icons.Default.Terminal, contentDescription = "Terminal")
-                }
+                BarAction(onTerminal, Icons.Default.Terminal, "Terminal")
             }
             if (onSearch != null) {
-                IconButton(onClick = onSearch) {
-                    Icon(Icons.Default.Search, contentDescription = "Search agents and sessions")
-                }
+                BarAction(onSearch, Icons.Default.Search, "Search agents and sessions")
             }
             if (onSettings != null) {
-                IconButton(onClick = onSettings) {
-                    Icon(Icons.Default.Settings, contentDescription = "Settings")
-                }
+                BarAction(onSettings, Icons.Default.Settings, "Settings")
             }
         },
     )
+}
+
+/**
+ * Header actions draw at 22dp inside the full 48dp touch target — the reference
+ * glyph size, which Material's own 24dp default overshoots.
+ */
+@Composable
+private fun BarAction(onClick: () -> Unit, icon: ImageVector, label: String) {
+    IconButton(onClick = onClick) {
+        Icon(icon, contentDescription = label, modifier = Modifier.size(22.dp))
+    }
 }

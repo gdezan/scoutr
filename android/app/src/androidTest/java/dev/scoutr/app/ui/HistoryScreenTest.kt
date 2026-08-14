@@ -96,8 +96,8 @@ class HistoryScreenTest {
             compose.onAllNodes(androidx.compose.ui.test.hasTestTag("history_row_abc")).fetchSemanticsNodes().isNotEmpty()
         }
         val contentBounds = compose.onNodeWithTag("history_content").getUnclippedBoundsInRoot()
-        assertTrue("compact sessions should start at 16dp", abs(contentBounds.left.value - 16f) <= 1f)
-        assertTrue("compact sessions should be 288dp wide", abs((contentBounds.right - contentBounds.left).value - 288f) <= 1f)
+        assertTrue("compact sessions should start at 12dp", abs(contentBounds.left.value - 12f) <= 1f)
+        assertTrue("compact sessions should be 296dp wide", abs((contentBounds.right - contentBounds.left).value - 296f) <= 1f)
     }
 
     @Test
@@ -224,9 +224,13 @@ class HistoryScreenTest {
             compose.onAllNodes(androidx.compose.ui.test.hasTestTag("history_row_abc")).fetchSemanticsNodes().isNotEmpty()
         }
         compose.onNodeWithText("Fix billing bug").assertIsDisplayed()
-        compose.onNodeWithText("Needs you").assertIsDisplayed()
-        compose.onNodeWithText("gpt-5.4").assertIsDisplayed()
-        assertEquals(2, compose.onAllNodesWithText("/repo/a").fetchSemanticsNodes().size)
+        // The status word gave way to the ring plus time-in-state, and the path
+        // and model are now one mono machine-fact line (§9c).
+        compose.onNodeWithText("/repo/a \u00b7 gpt-5.4").assertIsDisplayed()
+        // Only the tile carries the full path now — the repo filter chip is
+        // named for the repository, not its path (§9c).
+        assertEquals(1, compose.onAllNodesWithText("/repo/a", substring = true).fetchSemanticsNodes().size)
+        compose.onNodeWithTag("history_repo_/repo/a").assertIsDisplayed()
     }
 
     @Test
@@ -484,7 +488,12 @@ class HistoryScreenTest {
         val vm = viewModel()
         setContent(vm, listState)
         compose.waitUntil(5_000) { firstVisibleSessionPath(listState) == "/sessions/active-00.jsonl" }
-        compose.onNodeWithTag("history_list").performTouchInput { swipeUp() }
+        // Anchor by index, not by a pixel swipe: a swipe travels a fixed
+        // distance, so how many rows it crosses depends on row height, and the
+        // scroll landed deep enough after the tiles tightened that switching
+        // scopes no longer started at the top. The sibling anchor test scrolls
+        // by index for the same reason.
+        compose.onNodeWithTag("history_list").performScrollToIndex(6)
         compose.waitUntil(2_000) { firstVisibleSessionPath(listState) != "/sessions/active-00.jsonl" }
         compose.waitForIdle()
         val removedPath = firstVisibleSessionPath(listState)!!

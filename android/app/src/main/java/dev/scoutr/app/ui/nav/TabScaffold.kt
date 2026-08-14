@@ -16,15 +16,26 @@ import dev.scoutr.app.ui.components.AppTopBar
 @Composable
 internal fun TabScaffold(
     title: String,
-    onSearch: () -> Unit,
-    onSettings: () -> Unit,
+    // Each action is opt-in: the reference gives every tab its own header
+    // composition rather than one shared row (§8b, §9c).
+    onSearch: (() -> Unit)? = null,
+    onSettings: (() -> Unit)? = null,
     onTerminal: (() -> Unit)? = null,
+    showLockup: Boolean = false,
     floatingActionButton: @Composable () -> Unit = {},
     content: @Composable (PaddingValues) -> Unit,
 ) {
     Scaffold(
         contentWindowInsets = WindowInsets(0.dp),
-        topBar = { AppTopBar(title, onSearch = onSearch, onSettings = onSettings, onTerminal = onTerminal) },
+        topBar = {
+            AppTopBar(
+                title,
+                onSearch = onSearch,
+                onSettings = onSettings,
+                onTerminal = onTerminal,
+                showLockup = showLockup,
+            )
+        },
         floatingActionButton = floatingActionButton,
     ) { inner ->
         content(inner)

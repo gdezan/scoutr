@@ -1,4 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
-<bitmap xmlns:android="http://schemas.android.com/apk/res/android"
-    android:src="@drawable/scoutr_icon"
-    android:gravity="fill" />
+<!--
+    `scoutr_icon.png` is a finished icon: the mark already sits on its own
+    rounded-square ink tile. Drawn full-bleed it loses that silhouette, because
+    the adaptive-icon foreground canvas is 108dp and every launcher mask cuts
+    it back to at most the inner 72dp. Centre the tile at exactly that 72dp so
+    the mask trims only ink — which matches `ic_launcher_background` and is
+    therefore invisible — and the mark itself stays inside the 66dp safe circle.
+-->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item
+        android:gravity="center"
+        android:width="72dp"
+        android:height="72dp">
+        <bitmap
+            android:src="@drawable/scoutr_icon"
+            android:gravity="fill" />
+    </item>
+</layer-list>

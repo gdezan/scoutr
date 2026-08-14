@@ -96,7 +96,12 @@ import kotlin.math.roundToInt
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import dev.scoutr.app.ui.theme.ScoutrType
+import dev.scoutr.app.ui.agentDisplayTitle
+import dev.scoutr.app.ui.shortenHostPath
+import androidx.compose.ui.unit.sp
 import dev.scoutr.app.ui.components.ScoutrTextField
+import dev.scoutr.app.ui.components.AgentMark
 import dev.scoutr.app.ui.components.StatusRing
 import dev.scoutr.app.ui.components.StatusRingAnimation
 import dev.scoutr.app.ui.components.ConfirmDialog
@@ -346,23 +351,33 @@ private fun ScopeFilterMenu(selected: HistoryScope, onSelect: (HistoryScope) -> 
 private fun RepoTabs(selected: String, repositories: List<String>, onSelect: (String) -> Unit) {
     Row(
         Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         repositories.forEach { repository ->
+            val isSelected = selected == repository
             Box(
                 Modifier
                     .clip(RoundedCornerShape(6.dp))
                     .background(
-                        if (selected == repository) MaterialTheme.colorScheme.surfaceVariant else Color.Transparent,
+                        if (isSelected) MaterialTheme.colorScheme.primaryContainer
+                        else MaterialTheme.colorScheme.surfaceContainer,
                         RoundedCornerShape(6.dp),
                     )
                     .clickable { onSelect(repository) }
-                    .padding(horizontal = 12.dp, vertical = 8.dp)
+                    .padding(horizontal = 11.dp, vertical = 6.dp)
                     .testTag("history_repo_${repository.replace(' ', '_')}"),
             ) {
+                // A filter is a label, not a machine fact, so it stays in the UI
+                // face — and it is the repository's name, not its path: the full
+                // path pushes the rest of the row off-screen (§9c).
                 Text(
                     sessionRepoLabel(repository),
-                    style = MaterialTheme.typography.labelMedium.copy(fontFamily = ScoutrMono),
+                    style = MaterialTheme.typography.labelMedium.copy(
+                        fontSize = 11.sp,
+                        fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
+                    ),
+                    color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -407,7 +422,9 @@ private fun HistoryList(
         modifier = Modifier.fillMaxSize().testTag("history_list"),
         state = listState,
         contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        // Tiles in a day sit 2dp apart; the 14dp that separates days is carried by
+        // the date header's own top padding (§9c).
+        verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
         if (ui.truncated) {
             item {
@@ -423,14 +440,21 @@ private fun HistoryList(
         sorted.forEach { historyItem ->
             val dateKey = historyDateKey(historyItem.session.updatedAt)
             if (dateKey != previousDate) {
+                val isFirstDate = previousDate == null
                 previousDate = dateKey
                 item(key = "history_date_$dateKey") {
+                    // A date is a machine fact: mono caps, like the board's
+                    // section headers, so the two lists scan the same way (§9c).
                     Text(
-                        historyDateLabel(historyItem.session.updatedAt),
-                        style = MaterialTheme.typography.labelSmall.copy(fontFamily = ScoutrMono),
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp),
+                        historyDateLabel(historyItem.session.updatedAt).uppercase(),
+                        style = ScoutrType.monoSection,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                        modifier = Modifier.padding(
+                            start = 4.dp,
+                            end = 4.dp,
+                            top = if (isFirstDate) 0.dp else 14.dp,
+                            bottom = 6.dp,
+                        ),
                     )
                 }
             }
@@ -538,14 +562,15 @@ internal fun sessionRepoKey(cwd: String?): String {
     return if (segments.isEmpty()) "Other" else "/${segments.joinToString("/")}"
 }
 
+/**
+ * A filter chip is named for the repository, not its path: `scoutr`, not
+ * `/home/gdezan/Dev/scoutr` (§9c). The old `~` substitution could never fire —
+ * `HOME` on Android is the app sandbox, never the host's home — so every chip
+ * rendered its full path and pushed the row off-screen.
+ */
 private fun sessionRepoLabel(repository: String): String {
     if (repository == "Other") return repository
-    val home = System.getenv("HOME")?.trimEnd('/')
-    return if (!home.isNullOrBlank() && (repository == home || repository.startsWith("$home/"))) {
-        "~" + repository.removePrefix(home)
-    } else {
-        repository
-    }
+    return repository.trimEnd('/').substringAfterLast('/').ifEmpty { repository }
 }
 
 private fun historyDateKey(timestamp: Double): String =
@@ -764,13 +789,13 @@ private fun HistoryRow(
                 .offset { IntOffset(reveal.requireOffset().roundToInt(), 0) }
                 .anchoredDraggable(reveal, reverseDirection = false, orientation = Orientation.Horizontal)
                 .fillMaxWidth()
-                .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(8.dp))
+                .background(MaterialTheme.colorScheme.surfaceContainer, RoundedCornerShape(4.dp))
                 .clickable {
                     if (reveal.currentValue == RowReveal.Open) closeReveal() else onOpen()
                 }
                 .testTag("history_row_${session.id}"),
         ) {
-            Column(Modifier.padding(start = 16.dp, top = 12.dp, bottom = 12.dp, end = 4.dp)) {
+            Column(Modifier.padding(start = 14.dp, top = 11.dp, bottom = 11.dp, end = 4.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     StatusRing(
                         color = statusColor,
@@ -778,8 +803,10 @@ private fun HistoryRow(
                         modifier = Modifier.testTag("history_status_${session.id}"),
                     )
                     Spacer(Modifier.width(10.dp))
+                    AgentMark(session.agentKind)
+                    if (session.agentKind?.lowercase() == "claude") Spacer(Modifier.width(6.dp))
                     Text(
-                        text = session.title,
+                        text = agentDisplayTitle(session.title),
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold,
                         maxLines = 1,
@@ -787,10 +814,14 @@ private fun HistoryRow(
                         modifier = Modifier.weight(1f),
                     )
                     Spacer(Modifier.width(8.dp))
+                    // The ring already says running or settled, so the right-hand
+                    // fact is how long ago — the same glanceable column the board
+                    // uses (§9c, §9d "green is live, gray is done").
                     Text(
-                        text = menuOpenLabel(session, item),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = statusColor,
+                        text = relativeTime(session.updatedAt),
+                        style = ScoutrType.monoFact,
+                        color = if (session.active) MaterialTheme.colorScheme.onSurfaceVariant
+                        else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
                     )
                     Box {
                         Icon(
@@ -862,31 +893,18 @@ private fun HistoryRow(
                     )
                     Spacer(Modifier.height(4.dp))
                 }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = session.cwd,
-                        style = MaterialTheme.typography.labelSmall,
-                        fontFamily = ScoutrMono,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f),
-                    )
-                    if (session.model != null) {
-                        Spacer(Modifier.width(8.dp))
-                        Text(
-                            text = shortModel(session.model),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                        )
-                    }
-                    Spacer(Modifier.width(8.dp))
-                    Text(
-                        text = relativeTime(session.updatedAt),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                    )
-                }
+                // One mono line of machine facts, on the board's `~/repo · model`
+                // pattern — the full path is what forced this row to wrap (§9a).
+                Text(
+                    text = listOfNotNull(
+                        shortenHostPath(session.cwd),
+                        session.model?.let(::shortModel),
+                    ).joinToString(" · "),
+                    style = ScoutrType.monoMeta,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
                 if (busy) {
                     Spacer(Modifier.height(8.dp))
                     Row(verticalAlignment = Alignment.CenterVertically) {

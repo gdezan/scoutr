@@ -1,6 +1,7 @@
 package dev.scoutr.app.ui.screens
 
 import androidx.activity.compose.rememberLauncherForActivityResult
+import dev.scoutr.app.ui.components.ScoutrMark
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -86,11 +87,17 @@ fun ConnectScreen(
             .padding(horizontal = 24.dp, vertical = 32.dp),
         verticalArrangement = Arrangement.Center,
     ) {
-        Text(
-            text = "Scoutr",
-            style = MaterialTheme.typography.displaySmall,
-            color = MaterialTheme.colorScheme.primary,
-        )
+        // The wordmark is ink, not accent: green means live and AI-owned and
+        // nothing else, so a static brand label must not wear it (§9d, §8c).
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            ScoutrMark(size = 30.dp)
+            Spacer(Modifier.width(10.dp))
+            Text(
+                text = "Scoutr",
+                style = MaterialTheme.typography.displayLarge,
+                color = MaterialTheme.colorScheme.onBackground,
+            )
+        }
         Spacer(Modifier.height(8.dp))
         Text(
             text = "Your terminal agents, at a glance.",

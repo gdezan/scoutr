@@ -13,7 +13,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 
 /**
- * The one search/entry field shape in the app: 14dp radius, leading icon
+ * The one search/entry field shape in the app: 6dp radius, leading icon
  * inside the field, focused border in outline (not accent) so a focused field
  * never reads as an error. Used by the palette, session-history search, and
  * the review path picker so the surfaces share a vocabulary.

@@ -36,14 +36,35 @@ fun mergeSessionEntries(
     return existing + incoming.filter { it.entryId !in known }
 }
 
-enum class MessageDeliveryState { QUEUED, FAILED }
+/**
+ * QUEUED covers only the moment between tapping send and the bridge accepting
+ * the request. Once accepted the message is SENT — it is on the host whether or
+ * not the transcript has caught up — and the row stops claiming otherwise.
+ */
+enum class MessageDeliveryState { QUEUED, SENT, FAILED }
 
 data class PendingUserMessage(
     val localId: String,
     val text: String,
     val state: MessageDeliveryState,
     internal val baselineIds: Set<String> = emptySet(),
+    /** When the bridge accepted it; the echo grace period runs from here. */
+    internal val sentAtMs: Long? = null,
 )
+
+/**
+ * A sent message is reconciled by matching its text against the transcript, but
+ * an agent is free to record what it received in a form that never matches —
+ * rewritten, annotated, or folded into another entry. Without a bound the local
+ * row outlives its own delivery forever, which is the lie the row exists to
+ * prevent; with too tight a bound the row vanishes before the transcript catches
+ * up, which looks like the message was lost.
+ *
+ * So the bound is wall-clock, not poll count. Polls are not evenly spaced — a
+ * send fires three refreshes inside two seconds — and counting them retired
+ * messages seconds after they were sent, long before any agent could echo.
+ */
+internal const val ECHO_GRACE_MS = 90_000L
 
 /**
  * Merge question cards by stable id. Incremental polls only deliver new
@@ -174,30 +195,50 @@ internal fun dropConfirmedMessages(
     incoming: List<SessionEntry>,
     incomingQuestions: List<QuestionEntry> = emptyList(),
     previouslyAnsweredIds: Set<String> = emptySet(),
+    nowMs: Long = System.currentTimeMillis(),
 ): List<PendingUserMessage> {
     val freshUsers = incoming.filter { it.role == "user" }.toMutableList()
     return pending.filter { message ->
-        // entryText collapses whitespace runs, so the typed text must be
-        // normalized the same way or multi-space/newline messages never reconcile.
-        val normalizedText = message.text.replace(Regex("\\s+"), " ").trim()
-        val match = freshUsers.indexOfFirst { entry ->
-            entry.entryId !in message.baselineIds && entryText(entry.content) == normalizedText
+        if (!keepPendingMessage(message, freshUsers, incomingQuestions, previouslyAnsweredIds)) {
+            return@filter false
         }
-        if (match >= 0) freshUsers.removeAt(match)
-        if (match >= 0) return@filter false
-        // Answers typed in the composer never appear as user entries — pi
-        // records them only in the toolResult's details.answers. Confirm the
-        // pending bubble once a question in the fresh snapshot is answered
-        // with that text, so it lands in the transcript as the answer bubble
-        // instead of lingering forever.
-        // Only a question that flips to answered NOW may confirm the pending
-        // bubble. An old answer with the same text (e.g. "Proceed") must not
-        // eat an unrelated later message before its user entry arrives.
-        incomingQuestions.none { question ->
-            question.answered &&
-                question.id !in previouslyAnsweredIds &&
-                (question.answerText == normalizedText || question.selected.contains(normalizedText))
-        }
+        // Nothing matched it. Keep showing it until the grace period is up —
+        // then trust the send that already succeeded rather than leaving a row
+        // that waits forever.
+        val sentAt = message.sentAtMs.takeIf { message.state == MessageDeliveryState.SENT }
+        sentAt == null || nowMs - sentAt < ECHO_GRACE_MS
+    }
+}
+
+/** True while the transcript still owes this message an echo. */
+private fun keepPendingMessage(
+    message: PendingUserMessage,
+    freshUsers: MutableList<SessionEntry>,
+    incomingQuestions: List<QuestionEntry>,
+    previouslyAnsweredIds: Set<String>,
+): Boolean {
+    // entryText collapses whitespace runs, so the typed text must be
+    // normalized the same way or multi-space/newline messages never reconcile.
+    val normalizedText = message.text.replace(Regex("\\s+"), " ").trim()
+    val match = freshUsers.indexOfFirst { entry ->
+        entry.entryId !in message.baselineIds && entryText(entry.content) == normalizedText
+    }
+    if (match >= 0) {
+        freshUsers.removeAt(match)
+        return false
+    }
+    // Answers typed in the composer never appear as user entries — pi
+    // records them only in the toolResult's details.answers. Confirm the
+    // pending bubble once a question in the fresh snapshot is answered
+    // with that text, so it lands in the transcript as the answer bubble
+    // instead of lingering forever.
+    // Only a question that flips to answered NOW may confirm the pending
+    // bubble. An old answer with the same text (e.g. "Proceed") must not
+    // eat an unrelated later message before its user entry arrives.
+    return incomingQuestions.none { question ->
+        question.answered &&
+            question.id !in previouslyAnsweredIds &&
+            (question.answerText == normalizedText || question.selected.contains(normalizedText))
     }
 }
 
@@ -733,7 +774,23 @@ class ChatViewModel(
                     else bridge.answerQuestion(paneId, message.text)
                 } else bridge.steer(paneId, message.text)
 
-                _ui.update { state -> state.copy(sending = false) }
+                // The bridge accepted it, so it is no longer queued — only
+                // waiting for the transcript to echo it back.
+                _ui.update { state ->
+                    state.copy(
+                        sending = false,
+                        pendingMessages = state.pendingMessages.map {
+                            if (it.localId == localId && it.state != MessageDeliveryState.FAILED) {
+                                it.copy(
+                                    state = MessageDeliveryState.SENT,
+                                    sentAtMs = System.currentTimeMillis(),
+                                )
+                            } else {
+                                it
+                            }
+                        },
+                    )
+                }
                 repeat(3) {
                     refresh()
                     if (_ui.value.pendingMessages.none { it.localId == localId }) return@launch

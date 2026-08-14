@@ -54,6 +54,7 @@ import dev.scoutr.app.R
 import dev.scoutr.app.data.TerminalPreferencesStore
 import dev.scoutr.app.ui.components.PressTintSurface
 import dev.scoutr.app.ui.theme.ScoutrMono
+import dev.scoutr.app.ui.theme.ScoutrTerminalMono
 import dev.scoutr.app.ui.imeOrNavigationBarsPadding
 import dev.scoutr.app.state.TerminalConnectionState
 import dev.scoutr.app.state.TerminalViewModel
@@ -336,9 +337,12 @@ private fun TerminalBreadcrumb(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
+                // The breadcrumb sits over the grid, so it takes the grid's face:
+                // JetBrains Mono is the full-screen terminal's mono, and Martian
+                // beside it would read as a second typeface on one surface (§9a).
                 text = "$workspace › $tab › $paneName",
                 style = MaterialTheme.typography.labelMedium,
-                fontFamily = ScoutrMono,
+                fontFamily = ScoutrTerminalMono,
                 fontWeight = FontWeight.Medium,
                 color = MaterialTheme.colorScheme.onSurface,
                 maxLines = 1,

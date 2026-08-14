@@ -19,6 +19,10 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import dev.scoutr.app.ui.shortenHostPath
+import dev.scoutr.app.ui.theme.ScoutrType
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
@@ -211,7 +215,15 @@ private fun PickerMode(
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                             Spacer(Modifier.width(12.dp))
-                            Text(dir, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+                            // A directory name is a path fragment, not a label (§9d).
+                            Text(
+                                dir,
+                                style = ScoutrType.monoMeta,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f),
+                            )
                             Icon(
                                 Icons.Default.ChevronRight,
                                 contentDescription = null,
@@ -270,16 +282,37 @@ private fun ReviewMode(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
+                // `~/scoutr · main · 17 files` — one mono line of machine facts,
+                // the same shape the chat header and board tiles use (§9c).
                 Text(
-                    (overviewData.branch?.let { "branch $it" } ?: "detached HEAD") +
-                        " · ${overviewData.status.size} changed" +
-                        syncSuffix(overviewData),
-                    style = MaterialTheme.typography.labelMedium,
+                    listOfNotNull(
+                        shortenHostPath(overviewData.path),
+                        overviewData.branch ?: "detached HEAD",
+                        "${overviewData.status.size} files",
+                    ).joinToString(" · ") + syncSuffix(overviewData),
+                    style = ScoutrType.monoMeta,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
-            TextButton(onClick = viewModel::openPicker) { Text("Switch repo") }
-            TextButton(onClick = viewModel::refresh) { Text("Refresh") }
+            // Icons, not labels: two text buttons crowded the header until the
+            // `~/repo · branch · N files` line clipped mid-word (§9c puts a single
+            // 22dp glyph in this slot).
+            IconButton(onClick = viewModel::openPicker) {
+                Icon(
+                    Icons.Default.FolderOpen,
+                    contentDescription = "Switch repo",
+                    modifier = Modifier.size(22.dp),
+                )
+            }
+            IconButton(onClick = viewModel::refresh) {
+                Icon(
+                    Icons.Default.Refresh,
+                    contentDescription = "Refresh",
+                    modifier = Modifier.size(22.dp),
+                )
+            }
         }
         HorizontalDivider()
         LazyColumn(Modifier.weight(1f).fillMaxWidth()) {
@@ -413,33 +446,36 @@ private fun CommitSheet(
 @Composable
 private fun SectionLabel(title: String) {
     Text(
-        title,
-        style = MaterialTheme.typography.labelSmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier.padding(top = 16.dp, bottom = 4.dp),
+        title.uppercase(),
+        style = ScoutrType.monoSection,
+        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+        modifier = Modifier.padding(top = 14.dp, bottom = 6.dp),
     )
 }
 
 @Composable
 private fun StatusRow(code: String, path: String) {
     Row(
-        Modifier.fillMaxWidth().padding(vertical = 6.dp),
+        Modifier.fillMaxWidth().padding(vertical = 5.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
             code,
-            style = MaterialTheme.typography.labelMedium,
-            fontFamily = ScoutrMono,
+            style = ScoutrType.monoFact,
             color = statusCodeColor(code),
-            modifier = Modifier.width(28.dp),
+            modifier = Modifier.width(22.dp),
         )
+        // Ellipsize the head, not the tail. Every path in a repo shares its
+        // leading directories, so tail-truncation renders a screen of identical
+        // `android/app/src/main/java/dev/sc…` rows; the filename is the fact
+        // worth reading, and §9c shows exactly that shortened form.
         Text(
             path,
-            style = MaterialTheme.typography.bodyMedium,
-            fontFamily = ScoutrMono,
+            style = ScoutrType.monoMeta,
             color = MaterialTheme.colorScheme.onSurface,
             maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
+            overflow = TextOverflow.StartEllipsis,
+            softWrap = false,
             modifier = Modifier.weight(1f),
         )
     }

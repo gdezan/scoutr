@@ -15,7 +15,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 
-/** Centers scan-oriented screen content at 960dp on expanded windows and 16dp on phones. */
+/** Centers scan-oriented screen content at 960dp on expanded windows and 12dp on phones. */
 @Composable
 fun ReadableContentColumn(
     modifier: Modifier = Modifier,
@@ -27,7 +27,7 @@ fun ReadableContentColumn(
         modifier = modifier,
         contentAlignment = Alignment.TopCenter,
     ) {
-        val horizontalGutter = if (maxWidth >= 1008.dp) 24.dp else 16.dp
+        val horizontalGutter = if (maxWidth >= 1008.dp) 24.dp else 12.dp
         Box(
             modifier = Modifier
                 .fillMaxSize()

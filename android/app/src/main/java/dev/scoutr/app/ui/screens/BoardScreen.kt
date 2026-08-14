@@ -1,6 +1,8 @@
 package dev.scoutr.app.ui.screens
 
-import dev.scoutr.app.ui.theme.ScoutrMono
+import dev.scoutr.app.ui.agentDisplayTitle
+import dev.scoutr.app.ui.shortenHostPath
+import dev.scoutr.app.ui.theme.ScoutrType
 import android.widget.Toast
 
 import androidx.compose.foundation.background
@@ -75,6 +77,7 @@ import dev.scoutr.app.data.AgentCard
 import dev.scoutr.app.data.AgentStatus
 import dev.scoutr.app.state.BoardViewModel
 import dev.scoutr.app.state.viewModelFactory
+import dev.scoutr.app.ui.components.AgentMark
 import dev.scoutr.app.ui.components.ConfirmDialog
 import dev.scoutr.app.ui.components.ReadableContentColumn
 import dev.scoutr.app.ui.components.PullRefreshIndicator
@@ -162,13 +165,13 @@ fun BoardScreen(
         ) {
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
+                // 2dp inside a group; the section headers carry the 14dp that
+                // separates groups (reference §9a "gaps").
+                verticalArrangement = Arrangement.spacedBy(2.dp),
                 // Clear the board's FAB so it never covers the last card, even at
                 // large font scales.
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 96.dp),
             ) {
-                item { Spacer(Modifier.height(8.dp)) }
-                item { BoardLockup() }
                 if (!ui.connected) {
                     item { DisconnectedBanner(error = ui.error, onRetry = { viewModel.connect("", "") }) }
                 }
@@ -199,37 +202,6 @@ fun BoardScreen(
     }
 }
 
-@Composable
-private fun BoardLockup() {
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .padding(top = 4.dp, bottom = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Box(
-            Modifier
-                .size(22.dp)
-                .border(2.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(6.dp)),
-            contentAlignment = Alignment.Center,
-        ) {
-            Box(
-                Modifier
-                    .size(7.dp)
-                    .background(MaterialTheme.colorScheme.primary, RoundedCornerShape(4.dp)),
-            )
-        }
-        Spacer(Modifier.width(8.dp))
-        Text(
-            "SCOUTR",
-            style = MaterialTheme.typography.titleSmall,
-            fontWeight = FontWeight.Bold,
-            letterSpacing = 1.2.sp,
-            color = MaterialTheme.colorScheme.onSurface,
-        )
-    }
-}
-
 /** Adds a section header + its agent cards to the LazyList. */
 private fun LazyListScope.boardSection(
     title: String,
@@ -241,16 +213,29 @@ private fun LazyListScope.boardSection(
 ) {
     if (agents.isEmpty()) return
     item(key = "header_$title") {
+        // The header carries the status color; the count stays quiet beside it so
+        // the eye lands on the word, not the number (reference §8b).
         Row(
-            Modifier.padding(top = 20.dp, bottom = 6.dp),
+            Modifier
+                .padding(start = 4.dp, top = 14.dp, bottom = 6.dp)
+                // The word and the count are separate nodes because they carry
+                // separate colors, so the pair is addressed by tag.
+                .semantics(mergeDescendants = true) {
+                    contentDescription = "${title.uppercase()} ${agents.size}"
+                }
+                .testTag("board_section_${title.lowercase().replace(' ', '_')}"),
             verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Text(
-                text = "${title.uppercase()} ${agents.size}",
-                style = MaterialTheme.typography.labelSmall.copy(fontFamily = ScoutrMono),
-                fontWeight = FontWeight.Bold,
-                letterSpacing = 1.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                text = title.uppercase(),
+                style = ScoutrType.monoSection,
+                color = sectionColor(title),
+            )
+            Text(
+                text = "${agents.size}",
+                style = ScoutrType.monoMeta,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
             )
         }
     }
@@ -284,8 +269,8 @@ private fun LazyListScope.collapsedBoardSection(
         ) {
             Text(
                 text = "${title.uppercase()} $count · tap to expand",
-                style = MaterialTheme.typography.labelSmall.copy(fontFamily = ScoutrMono),
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = ScoutrType.monoMeta,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
                 modifier = Modifier.padding(horizontal = 4.dp, vertical = 12.dp),
             )
         }
@@ -330,7 +315,7 @@ private fun DisconnectedBanner(error: String?, onRetry: () -> Unit) {
 
 /** The name the card shows, so the close confirmation names the same thing. */
 private fun AgentCard.cardTitle(): String =
-    title?.takeIf { it.isNotBlank() } ?: agent
+    agentDisplayTitle(title).takeIf { it.isNotBlank() } ?: agent
 
 /** Swipe-to-reveal anchor values for a board card. */
 private enum class BoardReveal { Closed, Open }
@@ -392,7 +377,7 @@ private fun AgentCardRow(
         scope.launch { reveal.animateTo(BoardReveal.Closed) }
     }
 
-    Box(modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp))) {
+    Box(modifier.fillMaxWidth().clip(RoundedCornerShape(4.dp))) {
         // Action bar, right-aligned, revealed as the card slides left. It
         // sizes itself from the card (matchParentSize) because LazyColumn
         // items measure with unbounded height.
@@ -425,8 +410,8 @@ private fun AgentCardRow(
         // Foreground card slides left on a horizontal drag.
         PressTintSurface(
             onClick = { if (reveal.currentValue == BoardReveal.Open) closeReveal() else onClick() },
-            shape = RoundedCornerShape(8.dp),
-            color = MaterialTheme.colorScheme.surface,
+            shape = RoundedCornerShape(4.dp),
+            color = MaterialTheme.colorScheme.surfaceContainer,
             pressedColor = MaterialTheme.colorScheme.surfaceVariant,
             modifier = Modifier
                 .offset { IntOffset(reveal.requireOffset().roundToInt(), 0) }
@@ -436,72 +421,78 @@ private fun AgentCardRow(
         ) {
             Card(
                 colors = CardDefaults.cardColors(containerColor = Color.Transparent),
-                shape = RoundedCornerShape(8.dp),
+                shape = RoundedCornerShape(4.dp),
                 border = androidx.compose.foundation.BorderStroke(
                     width = if (isNeedsYou) 1.dp else 0.dp,
                     color = if (isNeedsYou) accent else Color.Transparent,
                 ),
             ) {
+                // Tile anatomy per reference §8b: ring, then a text column of
+                // title / latest activity / machine facts, then time in state.
                 Row(
-                    Modifier.padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically,
+                    Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.Top,
                 ) {
+                    StatusRing(
+                        color = accent,
+                        animation = ringAnimation(status),
+                        modifier = Modifier.padding(top = 5.dp),
+                    )
+                    Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            StatusRing(
-                                color = accent,
-                                animation = StatusRingAnimation.Static,
-                            )
-                            Spacer(Modifier.width(10.dp))
+                            AgentMark(agent.agentKind)
+                            if (agent.agentKind.lowercase() == "claude") {
+                                Spacer(Modifier.width(6.dp))
+                            }
                             Text(
                                 text = agent.cardTitle(),
                                 style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.SemiBold,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.weight(1f),
                             )
                         }
+                        // A needs-you agent's question is prose addressed to the
+                        // user; everything else is the machine's own last move.
                         agent.latestActivity?.takeIf { it.isNotBlank() }?.let { activity ->
-                            Spacer(Modifier.height(4.dp))
+                            Spacer(Modifier.height(2.dp))
                             Text(
-                                text = activity,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                text = if (isNeedsYou) activity else "▸ $activity",
+                                style = if (isNeedsYou) MaterialTheme.typography.bodySmall else ScoutrType.monoMeta,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    .copy(alpha = if (isNeedsYou) 1f else 0.65f),
                                 maxLines = 2,
                                 overflow = TextOverflow.Ellipsis,
                             )
                         }
-                        Spacer(Modifier.height(6.dp))
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                text = agent.cwd ?: agent.workspaceId,
-                                style = MaterialTheme.typography.labelSmall,
-                                fontFamily = ScoutrMono,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f),
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.weight(1f),
-                            )
-                            Spacer(Modifier.width(8.dp))
-                            Text(
-                                text = agent.model?.let { shortModel(it) } ?: "—",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f),
-                                fontFamily = ScoutrMono,
-                            )
-                        }
+                        Spacer(Modifier.height(2.dp))
+                        Text(
+                            text = listOfNotNull(
+                                shortenHostPath(agent.cwd) ?: agent.workspaceId,
+                                agent.model?.let { shortModel(it) },
+                            ).joinToString(" · "),
+                            style = ScoutrType.monoMeta,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
                     }
                     Spacer(Modifier.width(12.dp))
-                    StatusPill(status, agent.statusSinceMs)
+                    TimeInState(status, agent.statusSinceMs ?: agent.latestActivityAtMs)
                     Box {
                         androidx.compose.material3.IconButton(
                             onClick = { menuOpen = true },
                             modifier = Modifier
+                                .size(28.dp)
                                 .testTag("agent_actions_${agent.paneId}")
                                 .semantics { contentDescription = "Agent actions for ${agent.cardTitle()}" },
                         ) {
-                            Icon(Icons.Default.MoreVert, contentDescription = null, tint = scheme.onSurfaceVariant)
+                            Icon(
+                                Icons.Default.MoreVert,
+                                contentDescription = null,
+                                tint = scheme.onSurfaceVariant.copy(alpha = 0.5f),
+                                modifier = Modifier.size(16.dp),
+                            )
                         }
                         DropdownMenu(
                             expanded = menuOpen,
@@ -537,30 +528,40 @@ private fun statusColor(status: AgentStatus) = when (status) {
 }
 
 /**
- * The section header already names the status, so the bounded metadata label only
- * earns its place by carrying what the header cannot: time in state.
+ * The section header already names the status, so the tile's right rail only
+ * earns its place by carrying what the header cannot: time in state. Needs-you
+ * keeps the red so an unanswered agent still reads loud at a glance.
  */
 @Composable
-private fun StatusPill(status: AgentStatus, statusSinceMs: Double?) {
-    val isNeedsYou = status == AgentStatus.NeedsYou
-    val label = if (isNeedsYou) "needs you" else timeInState(statusSinceMs) ?: statusLabel(status)
-    val color = statusColor(status)
-    Box(
-        Modifier
-            .background(
-                if (isNeedsYou) color else MaterialTheme.colorScheme.surfaceVariant,
-                RoundedCornerShape(6.dp),
-            )
-            .padding(horizontal = 10.dp, vertical = 4.dp),
-    ) {
-        Text(
-            label,
-            style = MaterialTheme.typography.labelMedium,
-            color = if (isNeedsYou) MaterialTheme.colorScheme.onError else
-                MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-            fontWeight = FontWeight.SemiBold,
-        )
-    }
+private fun TimeInState(status: AgentStatus, sinceMs: Double?) {
+    // Not every agent kind stamps a status transition; the last activity is the
+    // same glanceable fact when it doesn't, and the status word is the last resort.
+    val label = timeInState(sinceMs) ?: statusLabel(status)
+    Text(
+        label,
+        style = ScoutrType.monoFact,
+        color = when (status) {
+            AgentStatus.NeedsYou -> MaterialTheme.colorScheme.error
+            AgentStatus.Working -> MaterialTheme.colorScheme.onSurfaceVariant
+            else -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+        },
+        modifier = Modifier.padding(top = 5.dp),
+    )
+}
+
+/** Section headers speak the status language: green live, red you, gray settled. */
+@Composable
+private fun sectionColor(title: String) = when (title.lowercase()) {
+    "needs you" -> MaterialTheme.colorScheme.error
+    "working" -> MaterialTheme.colorScheme.primary
+    else -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+}
+
+/** Only genuinely live states animate — the ripple is the icon's own gesture. */
+private fun ringAnimation(status: AgentStatus) = when (status) {
+    AgentStatus.Working -> StatusRingAnimation.Live
+    AgentStatus.NeedsYou -> StatusRingAnimation.NeedsYou
+    else -> StatusRingAnimation.Static
 }
 
 private fun statusLabel(status: AgentStatus) = when (status) {

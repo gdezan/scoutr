@@ -63,8 +63,8 @@ class ReviewScreenTest {
             compose.onAllNodes(androidx.compose.ui.test.hasTestTag("review_picker_content")).fetchSemanticsNodes().isNotEmpty()
         }
         val contentBounds = compose.onNodeWithTag("review_picker_content").getUnclippedBoundsInRoot()
-        org.junit.Assert.assertTrue("compact review picker should start at 16dp", kotlin.math.abs(contentBounds.left.value - 16f) <= 1f)
-        org.junit.Assert.assertTrue("compact review picker should be 288dp wide", kotlin.math.abs((contentBounds.right - contentBounds.left).value - 288f) <= 1f)
+        org.junit.Assert.assertTrue("compact review picker should start at 12dp", kotlin.math.abs(contentBounds.left.value - 12f) <= 1f)
+        org.junit.Assert.assertTrue("compact review picker should be 296dp wide", kotlin.math.abs((contentBounds.right - contentBounds.left).value - 296f) <= 1f)
     }
 
     @Test
@@ -260,7 +260,8 @@ class ReviewScreenTest {
         compose.waitUntil(5000) {
             compose.onAllNodes(androidx.compose.ui.test.hasText("Working tree")).fetchSemanticsNodes().isNotEmpty()
         }
-        compose.onNodeWithText("branch main · 2 changed").assertIsDisplayed()
+        // Header subtitle is now one mono `repo · branch · N files` line (§9c).
+        compose.onNodeWithText("main \u00b7 2 files", substring = true).assertIsDisplayed()
         compose.onNodeWithText("src/server.ts").assertIsDisplayed()
         compose.onNodeWithText("notes.txt").assertIsDisplayed()
         compose.onNodeWithText("feat: add review center").assertIsDisplayed()

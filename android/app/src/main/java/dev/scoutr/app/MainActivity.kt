@@ -283,10 +283,13 @@ private fun ScoutrAppNav(
                 )
                 var showNewSession by remember { mutableStateOf(false) }
                 TabScaffold(
+                    // Header composition is per-screen in the reference: the board
+                    // carries terminal + settings, and search belongs to Sessions
+                    // (§8b, §9c) — not a uniform action row on every tab.
                     title = "Board",
-                    onSearch = openPalette,
                     onSettings = openSettings,
                     onTerminal = openTerminal,
+                    showLockup = true,
                     floatingActionButton = {
                         FloatingActionButton(
                             onClick = { showNewSession = true },
@@ -337,8 +340,6 @@ private fun ScoutrAppNav(
                 TabScaffold(
                     title = "Sessions",
                     onSearch = openPalette,
-                    onSettings = openSettings,
-                    onTerminal = openTerminal,
                 ) { innerSessions ->
                     HistoryScreen(
                         onOpenSession = { resumed ->
@@ -390,9 +391,6 @@ private fun ScoutrAppNav(
                 )
                 TabScaffold(
                     title = "Usage",
-                    onSearch = openPalette,
-                    onSettings = openSettings,
-                    onTerminal = openTerminal,
                 ) { innerUsage ->
                     UsageScreen(
                         viewModel = usageViewModel,
@@ -404,9 +402,6 @@ private fun ScoutrAppNav(
                 // Shared with the Sessions swipe action; see the hoisted instance above.
                 TabScaffold(
                     title = "Review",
-                    onSearch = openPalette,
-                    onSettings = openSettings,
-                    onTerminal = openTerminal,
                 ) { innerReview ->
                     ReviewScreen(
                         viewModel = reviewViewModel,

@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.width
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.filterToOne
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
@@ -90,8 +91,8 @@ class BoardScreenTest {
             }
         }
         val contentBounds = compose.onNodeWithTag("board_capture_root").getUnclippedBoundsInRoot()
-        assertTrue("compact board should start at 16dp", abs(contentBounds.left.value - 16f) <= 1f)
-        assertTrue("compact board should be 288dp wide", abs((contentBounds.right - contentBounds.left).value - 288f) <= 1f)
+        assertTrue("compact board should start at 12dp", abs(contentBounds.left.value - 12f) <= 1f)
+        assertTrue("compact board should be 296dp wide", abs((contentBounds.right - contentBounds.left).value - 296f) <= 1f)
     }
 
     @Test
@@ -169,12 +170,16 @@ class BoardScreenTest {
             }
         }
 
-        compose.onNodeWithText("NEEDS YOU 1").assertIsDisplayed()
-        compose.onNodeWithText("WORKING 1").assertIsDisplayed()
+        // The header's word and count are separate nodes now (they carry
+        // different colors), so the pair is read from the merged description.
+        compose.onNodeWithContentDescription("NEEDS YOU 1").assertIsDisplayed()
+        compose.onNodeWithContentDescription("WORKING 1").assertIsDisplayed()
         compose.onNodeWithTag("agent_card_p1").assertIsDisplayed()
         compose.onNodeWithText("Found the rounding error in the tax module").assertIsDisplayed()
-        compose.onNodeWithText("gpt-5.4").assertIsDisplayed()
-        compose.onNodeWithText("needs you").assertIsDisplayed()
+        // Path and model are one mono line now: `~/repo · gpt-5.4` (§8b).
+        compose.onNodeWithText("gpt-5.4", substring = true).assertIsDisplayed()
+        // The status word gave way to time-in-state; the ring carries the phase.
+        compose.onNodeWithTag("board_section_needs_you").assertIsDisplayed()
         capture("board-card", overlay = true)
     }
 

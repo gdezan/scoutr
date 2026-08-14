@@ -1,5 +1,6 @@
 package dev.scoutr.app.ui
 
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
@@ -114,8 +115,8 @@ class ScoutrUiTest {
             }
         }
 
-        composeRule.onNodeWithText("NEEDS YOU 1").assertExists()
-        composeRule.onNodeWithText("WORKING 1").assertExists()
+        composeRule.onNodeWithContentDescription("NEEDS YOU 1").assertExists()
+        composeRule.onNodeWithContentDescription("WORKING 1").assertExists()
         composeRule.onNodeWithText("hestia").assertExists()
         composeRule.onNodeWithText("agents-mobile").assertExists()
     }

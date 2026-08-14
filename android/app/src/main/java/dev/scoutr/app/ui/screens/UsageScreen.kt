@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import dev.scoutr.app.ui.theme.ScoutrType
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Card
@@ -134,9 +135,10 @@ internal fun UsageContent(
 @Composable
 private fun ProviderCard(provider: UsageSnapshot, nowMillis: Long, onRefresh: () -> Unit) {
     Card(
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-        shape = RoundedCornerShape(8.dp),
+        // Tiles are filled, never outlined: the tonal step off the canvas is the
+        // whole hierarchy, and a stroke on top of it reads as a second edge (§9c).
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+        shape = RoundedCornerShape(4.dp),
         modifier = Modifier.fillMaxWidth().testTag("usage_${provider.provider}"),
     ) {
         Column(
@@ -159,7 +161,7 @@ private fun ProviderCard(provider: UsageSnapshot, nowMillis: Long, onRefresh: ()
                 updatedLabel(provider.updatedAt, nowMillis)?.let { updated ->
                     Text(
                         text = updated,
-                        style = MaterialTheme.typography.labelSmall,
+                        style = ScoutrType.monoMeta,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
                     )
@@ -260,9 +262,10 @@ private fun UsageBar(window: UsageWindow, provider: String, nowSeconds: Long) {
                 modifier = Modifier.weight(1f),
             )
             Text(
+                // A percentage and a countdown are machine facts, so they take
+                // the mono face while the window's name stays in the UI one (§9d).
                 text = "${percent.roundToInt()}% used",
-                style = MaterialTheme.typography.labelLarge,
-                fontWeight = FontWeight.SemiBold,
+                style = ScoutrType.monoFact,
                 color = color,
                 maxLines = 1,
             )
@@ -280,7 +283,7 @@ private fun UsageBar(window: UsageWindow, provider: String, nowSeconds: Long) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(
                     text = reset.orEmpty(),
-                    style = MaterialTheme.typography.labelSmall,
+                    style = ScoutrType.monoMeta,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -288,7 +291,7 @@ private fun UsageBar(window: UsageWindow, provider: String, nowSeconds: Long) {
                 )
                 Text(
                     text = amount.orEmpty(),
-                    style = MaterialTheme.typography.labelSmall,
+                    style = ScoutrType.monoMeta,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.End,
                     maxLines = 1,
