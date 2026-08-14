@@ -17,5 +17,4 @@ bridge/dist/
 .DS_Store
 
 # Local implementation plans
-.plans/*
-!.plans/full-screen-interactive-terminal.md
+.plans

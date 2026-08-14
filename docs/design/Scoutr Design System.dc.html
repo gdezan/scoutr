@@ -1,0 +1,690 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet data-dc-atomics>
+<meta name="design_doc_mode" content="canvas">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,400,0..1,0" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&family=Archivo:wght@400;500;600;700&family=Space+Mono:wght@400;700&family=Manrope:wght@400;500;600;700&family=Martian+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#08090a;font-family:Roboto,system-ui,sans-serif;color:#ECEDF0}
+a{color:#5B8CFF;text-decoration:none}
+a:hover{color:#8fb0ff}
+@keyframes scoutrRipple{0%{transform:scale(.28);opacity:.55}100%{transform:scale(1);opacity:0}}
+@keyframes scoutrPulse{0%,100%{opacity:.35}50%{opacity:1}}
+</style>
+</helmet>
+
+<section id="t9" style="padding:40px 44px 40px;border-bottom:1px solid rgba(236,237,240,.08)">
+<div style="display:flex;align-items:baseline;gap:10px;margin:0 0 8px">
+<a href="#t9" style="font:600 10px 'JetBrains Mono',monospace;padding:3px 7px;background:#8DF08D;color:#04241A;border-radius:4px">9</a>
+<span style="font:600 13px/1.2 'Space Grotesk',sans-serif">Scoutr design system — locked</span>
+</div>
+<p style="max-width:840px;margin:0 0 26px;font:400 12.5px/1.7 'Space Grotesk',sans-serif;color:#A8AEB9;text-wrap:pretty">Everything decided across turns 1–8, consolidated: foundations, the full component index, the four screens that hadn't been designed yet, and the Compose mapping. This section supersedes <a href="#1c">1c</a> and <a href="#1d">1d</a> — earlier turns stay as history.</p>
+
+<div style="display:flex;flex-wrap:wrap;gap:32px;align-items:flex-start">
+
+<!-- 9a foundations -->
+<div id="9a" style="display:flex;flex-direction:column;gap:9px;width:1152px">
+<div style="display:flex;align-items:baseline;gap:8px;font:400 11px/1.3 'Space Grotesk',sans-serif;color:rgba(236,237,240,.55)">
+<a href="#9a" style="font:600 10.5px 'JetBrains Mono',monospace;padding:3px 7px;background:rgba(236,237,240,.1);color:#ECEDF0;border-radius:5px">9a</a>Foundations
+</div>
+<div style="background:#121316;border-radius:6px;border:1px solid #26292E;padding:24px;display:grid;grid-template-columns:1.15fr 1fr 1fr;gap:26px">
+
+  <div style="display:flex;flex-direction:column;gap:12px">
+    <div style="font:600 10.5px 'Space Grotesk';color:#A8AEB9;letter-spacing:.06em">COLOR</div>
+    <div style="display:flex;flex-direction:column;gap:5px">
+      <div style="display:flex;align-items:center;gap:9px"><div style="width:22px;height:22px;border-radius:4px;background:#0B0C0E;border:1px solid #26292E;flex:none"></div><span style="font:600 10px 'JetBrains Mono';width:64px">#0B0C0E</span><span style="font:400 10px 'Space Grotesk';color:#A8AEB9">canvas — every working screen</span></div>
+      <div style="display:flex;align-items:center;gap:9px"><div style="width:22px;height:22px;border-radius:4px;background:#121316;flex:none"></div><span style="font:600 10px 'JetBrains Mono';width:64px">#121316</span><span style="font:400 10px 'Space Grotesk';color:#A8AEB9">surface — bars, sheets, tab bar</span></div>
+      <div style="display:flex;align-items:center;gap:9px"><div style="width:22px;height:22px;border-radius:4px;background:#16171B;flex:none"></div><span style="font:600 10px 'JetBrains Mono';width:64px">#16171B</span><span style="font:400 10px 'Space Grotesk';color:#A8AEB9">tile — the workhorse card</span></div>
+      <div style="display:flex;align-items:center;gap:9px"><div style="width:22px;height:22px;border-radius:4px;background:#1A1C20;flex:none"></div><span style="font:600 10px 'JetBrains Mono';width:64px">#1A1C20</span><span style="font:400 10px 'Space Grotesk';color:#A8AEB9">user bubble</span></div>
+      <div style="display:flex;align-items:center;gap:9px"><div style="width:22px;height:22px;border-radius:4px;background:#1B1D21;flex:none"></div><span style="font:600 10px 'JetBrains Mono';width:64px">#1B1D21</span><span style="font:400 10px 'Space Grotesk';color:#A8AEB9">control fill — secondary buttons</span></div>
+      <div style="display:flex;align-items:center;gap:9px"><div style="width:22px;height:22px;border-radius:4px;background:#141619;flex:none"></div><span style="font:600 10px 'JetBrains Mono';width:64px">#141619</span><span style="font:400 10px 'Space Grotesk';color:#A8AEB9">icon ink — brand surfaces only</span></div>
+      <div style="display:flex;align-items:center;gap:9px"><div style="width:22px;height:22px;border-radius:4px;background:#26292E;flex:none"></div><span style="font:600 10px 'JetBrains Mono';width:64px">#26292E</span><span style="font:400 10px 'Space Grotesk';color:#A8AEB9">outlineVariant — hairlines</span></div>
+      <div style="display:flex;align-items:center;gap:9px"><div style="width:22px;height:22px;border-radius:4px;background:#363B43;flex:none"></div><span style="font:600 10px 'JetBrains Mono';width:64px">#363B43</span><span style="font:400 10px 'Space Grotesk';color:#A8AEB9">outline — inputs, dividers</span></div>
+      <div style="height:6px"></div>
+      <div style="display:flex;align-items:center;gap:9px"><div style="width:22px;height:22px;border-radius:4px;background:#8DF08D;flex:none"></div><span style="font:600 10px 'JetBrains Mono';width:64px">#8DF08D</span><span style="font:400 10px 'Space Grotesk';color:#A8AEB9">primary — live &amp; AI-owned only</span></div>
+      <div style="display:flex;align-items:center;gap:9px"><div style="width:22px;height:22px;border-radius:4px;background:#04241A;border:1px solid #26292E;flex:none"></div><span style="font:600 10px 'JetBrains Mono';width:64px">#04241A</span><span style="font:400 10px 'Space Grotesk';color:#A8AEB9">onPrimary — never white</span></div>
+      <div style="display:flex;align-items:center;gap:9px"><div style="width:22px;height:22px;border-radius:4px;background:#12301A;flex:none"></div><span style="font:600 10px 'JetBrains Mono';width:64px">#12301A</span><span style="font:400 10px 'Space Grotesk';color:#A8AEB9">primaryContainer + #A6EFAD text</span></div>
+      <div style="display:flex;align-items:center;gap:9px"><div style="width:22px;height:22px;border-radius:4px;background:#E5484D;flex:none"></div><span style="font:600 10px 'JetBrains Mono';width:64px">#E5484D</span><span style="font:400 10px 'Space Grotesk';color:#A8AEB9">error — needs you, failures</span></div>
+      <div style="display:flex;align-items:center;gap:9px"><div style="width:22px;height:22px;border-radius:4px;background:#E8B84B;flex:none"></div><span style="font:600 10px 'JetBrains Mono';width:64px">#E8B84B</span><span style="font:400 10px 'Space Grotesk';color:#A8AEB9">warn — quota, limits</span></div>
+      <div style="display:flex;align-items:center;gap:9px"><div style="width:22px;height:22px;border-radius:4px;background:#2C6F72;flex:none"></div><span style="font:600 10px 'JetBrains Mono';width:64px">#2C6F72</span><span style="font:400 10px 'Space Grotesk';color:#A8AEB9">teal — charts, non-semantic data</span></div>
+      <div style="display:flex;align-items:center;gap:9px"><div style="width:22px;height:22px;border-radius:4px;background:#3FC9E8;flex:none"></div><span style="font:600 10px 'JetBrains Mono';width:64px">#3FC9E8</span><span style="font:400 10px 'Space Grotesk';color:#A8AEB9">diff added (was #00C8FF)</span></div>
+      <div style="display:flex;align-items:center;gap:9px"><div style="width:22px;height:22px;border-radius:4px;background:#ECEDF0;flex:none"></div><span style="font:600 10px 'JetBrains Mono';width:64px">#ECEDF0</span><span style="font:400 10px 'Space Grotesk';color:#A8AEB9">text primary · #A8AEB9 secondary</span></div>
+    </div>
+    <div style="font:400 10px/1.6 'Space Grotesk';color:rgba(168,174,185,.8);margin-top:2px">Green means <em>live</em> and nothing else — done is gray. Red is the only other loud color. Everything else is a shade of the canvas.</div>
+  </div>
+
+  <div style="display:flex;flex-direction:column;gap:16px">
+    <div style="display:flex;flex-direction:column;gap:9px">
+      <div style="font:600 10.5px 'Space Grotesk';color:#A8AEB9;letter-spacing:.06em">TYPE — SPACE GROTESK / MARTIAN MONO</div>
+      <div style="display:flex;align-items:baseline;gap:10px"><span style="font:700 21px/1.2 'Space Grotesk';letter-spacing:-.5px">Board</span><span style="font:400 9px 'JetBrains Mono';color:#A8AEB9">screen 21/700/-.5</span></div>
+      <div style="display:flex;align-items:baseline;gap:10px"><span style="font:600 17px/1.3 'Space Grotesk'">π - scoutr</span><span style="font:400 9px 'JetBrains Mono';color:#A8AEB9">header 17/600</span></div>
+      <div style="display:flex;align-items:baseline;gap:10px"><span style="font:600 15px/1.3 'Space Grotesk'">Agent title</span><span style="font:400 9px 'JetBrains Mono';color:#A8AEB9">title 15/600</span></div>
+      <div style="display:flex;align-items:baseline;gap:10px"><span style="font:400 15px/1.5 'Space Grotesk'">Transcript prose</span><span style="font:400 9px 'JetBrains Mono';color:#A8AEB9">body 15/400/23</span></div>
+      <div style="display:flex;align-items:baseline;gap:10px"><span style="font:400 12.5px/1.4 'Space Grotesk';color:#A8AEB9">Card subtitle · metadata</span><span style="font:400 9px 'JetBrains Mono';color:#A8AEB9">sub 12.5/400</span></div>
+      <div style="display:flex;align-items:baseline;gap:10px"><span style="font:600 11px 'Space Grotesk'">Button label</span><span style="font:400 9px 'JetBrains Mono';color:#A8AEB9">label 11–13/600</span></div>
+      <div style="display:flex;align-items:baseline;gap:10px"><span style="font:600 9.5px 'Martian Mono',monospace;color:#8DF08D">WORKING</span><span style="font:400 9px 'JetBrains Mono';color:#A8AEB9">section 9.5/600 mono caps</span></div>
+      <div style="display:flex;align-items:baseline;gap:10px"><span style="font:400 9.5px/16px 'Martian Mono',monospace;color:#A8AEB9">~/scoutr · w6M:p8</span><span style="font:400 9px 'JetBrains Mono';color:#A8AEB9">mono 9.5/400/16</span></div>
+      <div style="font:400 10px/1.6 'Space Grotesk';color:rgba(168,174,185,.8)">Martian Mono is ~25% wider than a normal mono: cap it at 10px, and shorten paths to <span style="font-family:'Martian Mono',monospace;font-size:9px">~/repo</span> or a basename. Full path lives in the header or a long-press.</div>
+    </div>
+
+    <div style="height:1px;background:#26292E"></div>
+
+    <div style="display:flex;flex-direction:column;gap:9px">
+      <div style="font:600 10.5px 'Space Grotesk';color:#A8AEB9;letter-spacing:.06em">SHAPE &amp; SPACE</div>
+      <div style="display:flex;gap:10px;align-items:flex-end">
+        <div style="display:flex;flex-direction:column;align-items:center;gap:5px"><div style="width:46px;height:34px;background:#16171B;border-radius:4px"></div><span style="font:400 9px 'JetBrains Mono';color:#A8AEB9">4 surface</span></div>
+        <div style="display:flex;flex-direction:column;align-items:center;gap:5px"><div style="width:46px;height:34px;background:#1B1D21;border-radius:6px"></div><span style="font:400 9px 'JetBrains Mono';color:#A8AEB9">6 control</span></div>
+        <div style="display:flex;flex-direction:column;align-items:center;gap:5px"><div style="width:46px;height:34px;background:#8DF08D;border-radius:8px"></div><span style="font:400 9px 'JetBrains Mono';color:#A8AEB9">8 FAB</span></div>
+        <div style="display:flex;flex-direction:column;align-items:center;gap:5px"><div style="width:34px;height:34px;display:flex;align-items:center;justify-content:center"><div style="width:12px;height:12px;border:2.5px solid #8DF08D;border-radius:50%;box-sizing:border-box"></div></div><span style="font:400 9px 'JetBrains Mono';color:#A8AEB9">ring only</span></div>
+      </div>
+      <div style="font:400 10px/1.6 'Space Grotesk';color:rgba(168,174,185,.8)">Gaps: <span style="font-family:'JetBrains Mono',monospace">2</span> inside a group · <span style="font-family:'JetBrains Mono',monospace">14</span> between groups · <span style="font-family:'JetBrains Mono',monospace">12</span> screen gutter · <span style="font-family:'JetBrains Mono',monospace">12/14</span> tile padding · <span style="font-family:'JetBrains Mono',monospace">44</span> minimum touch target. No shadows anywhere — depth is fill, never elevation.</div>
+    </div>
+  </div>
+
+  <div style="display:flex;flex-direction:column;gap:16px">
+    <div style="display:flex;flex-direction:column;gap:9px">
+      <div style="font:600 10.5px 'Space Grotesk';color:#A8AEB9;letter-spacing:.06em">THE RING — STATE GLYPH</div>
+      <div style="display:flex;gap:20px">
+        <div style="display:flex;flex-direction:column;align-items:center;gap:6px"><div style="width:30px;height:30px;position:relative;display:flex;align-items:center;justify-content:center"><div style="position:absolute;width:11px;height:11px;border:2.5px solid #8DF08D;border-radius:50%;box-sizing:border-box"></div><div style="position:absolute;width:26px;height:26px;border:1.5px solid #8DF08D;border-radius:50%;animation:scoutrRipple 1.8s linear infinite"></div></div><span style="font:400 9px 'JetBrains Mono';color:#A8AEB9">live</span></div>
+        <div style="display:flex;flex-direction:column;align-items:center;gap:6px"><div style="width:30px;height:30px;display:flex;align-items:center;justify-content:center"><div style="width:11px;height:11px;border:2.5px solid #E5484D;border-radius:50%;box-sizing:border-box;animation:scoutrPulse 1.6s ease-in-out infinite"></div></div><span style="font:400 9px 'JetBrains Mono';color:#A8AEB9">needs you</span></div>
+        <div style="display:flex;flex-direction:column;align-items:center;gap:6px"><div style="width:30px;height:30px;display:flex;align-items:center;justify-content:center"><div style="width:11px;height:11px;border:2.5px solid rgba(168,174,185,.55);border-radius:50%;box-sizing:border-box"></div></div><span style="font:400 9px 'JetBrains Mono';color:#A8AEB9">done</span></div>
+        <div style="display:flex;flex-direction:column;align-items:center;gap:6px"><div style="width:30px;height:30px;display:flex;align-items:center;justify-content:center"><div style="width:11px;height:11px;border:2.5px solid rgba(168,174,185,.22);border-radius:50%;box-sizing:border-box"></div></div><span style="font:400 9px 'JetBrains Mono';color:#A8AEB9">idle</span></div>
+      </div>
+    </div>
+
+    <div style="height:1px;background:#26292E"></div>
+
+    <div style="display:flex;flex-direction:column;gap:9px">
+      <div style="font:600 10.5px 'Space Grotesk';color:#A8AEB9;letter-spacing:.06em">MOTION</div>
+      <div style="font:400 10px/1.7 'Space Grotesk';color:#A8AEB9"><span style="font-family:'JetBrains Mono',monospace;color:#ECEDF0">ripple</span> 1600ms linear, 2 rings, 800ms offset — live work only<br><span style="font-family:'JetBrains Mono',monospace;color:#ECEDF0">pulse</span> 1600ms ease-in-out — blocked states only<br><span style="font-family:'JetBrains Mono',monospace;color:#ECEDF0">press</span> 90ms tile tint, no scale<br><span style="font-family:'JetBrains Mono',monospace;color:#ECEDF0">arrive</span> 140ms fade, no slide — new rows must not shift the list<br><span style="font-family:'JetBrains Mono',monospace;color:#ECEDF0">never</span> spinners, skeletons, or looping progress bars</div>
+    </div>
+
+    <div style="height:1px;background:#26292E"></div>
+
+    <div style="display:flex;flex-direction:column;gap:9px">
+      <div style="font:600 10.5px 'Space Grotesk';color:#A8AEB9;letter-spacing:.06em">VOICE</div>
+      <div style="font:400 10px/1.7 'Space Grotesk';color:#A8AEB9">Lowercase for machine states (<span style="font-family:'Martian Mono',monospace;font-size:9px">working</span>, <span style="font-family:'Martian Mono',monospace;font-size:9px">idle</span>), sentence case for anything addressed to the user. Never "AI" — it's <em>the agent</em>. Time is always relative (<span style="font-family:'Martian Mono',monospace;font-size:9px">8m</span>, <span style="font-family:'Martian Mono',monospace;font-size:9px">2h</span>), never a timestamp.</div>
+    </div>
+  </div>
+</div>
+</div>
+
+<!-- 9b components -->
+<div id="9b" style="display:flex;flex-direction:column;gap:9px;width:1152px">
+<div style="display:flex;align-items:baseline;gap:8px;font:400 11px/1.3 'Space Grotesk',sans-serif;color:rgba(236,237,240,.55)">
+<a href="#9b" style="font:600 10.5px 'JetBrains Mono',monospace;padding:3px 7px;background:rgba(236,237,240,.1);color:#ECEDF0;border-radius:5px">9b</a>Component index
+</div>
+<div style="background:#121316;border-radius:6px;border:1px solid #26292E;padding:24px;display:grid;grid-template-columns:repeat(3,1fr);gap:26px">
+
+  <div style="display:flex;flex-direction:column;gap:10px">
+    <div style="font:600 10.5px 'Space Grotesk';color:#A8AEB9;letter-spacing:.06em">AGENT TILE — 4 STATES</div>
+    <div style="background:#16171B;border-radius:4px;padding:12px 14px;display:flex;gap:12px;align-items:flex-start">
+      <div style="width:9px;height:9px;margin-top:5px;flex:none;position:relative;display:flex;align-items:center;justify-content:center"><div style="position:absolute;width:9px;height:9px;border-radius:50%;border:2.5px solid #8DF08D;box-sizing:border-box"></div><div style="position:absolute;width:17px;height:17px;border-radius:50%;border:1.5px solid #8DF08D;animation:scoutrRipple 1.8s linear infinite"></div></div>
+      <div style="flex:1;min-width:0"><div style="font:600 15px/20px 'Space Grotesk'">π - scoutr</div><div style="font:400 9px/15px 'Martian Mono',monospace;color:rgba(168,174,185,.65);margin-top:2px">▸ bash strip_ws.py</div><div style="font:400 9px/15px 'Martian Mono',monospace;color:rgba(168,174,185,.5);margin-top:2px">~/scoutr · gpt-5.2</div></div>
+      <div style="font:600 9.5px 'Martian Mono',monospace;color:#A8AEB9">8m</div>
+    </div>
+    <div style="background:#16171B;border-radius:4px;padding:12px 14px;display:flex;gap:12px;align-items:flex-start">
+      <div style="width:9px;height:9px;border-radius:50%;border:2.5px solid #E5484D;box-sizing:border-box;margin-top:5px;flex:none;animation:scoutrPulse 1.6s ease-in-out infinite"></div>
+      <div style="flex:1;min-width:0"><div style="font:600 15px/20px 'Space Grotesk'">claude - bridge</div><div style="font:400 12.5px/18px 'Space Grotesk';color:#A8AEB9;margin-top:2px">Which agent id should Antigravity register as?</div></div>
+      <div style="font:600 9.5px 'Martian Mono',monospace;color:#E5484D">1m</div>
+    </div>
+    <div style="background:#16171B;border-radius:4px;padding:10px 14px;display:flex;gap:12px;align-items:center">
+      <div style="width:9px;height:9px;border-radius:50%;border:2.5px solid rgba(168,174,185,.5);box-sizing:border-box;flex:none"></div>
+      <div style="flex:1;font:400 13.5px/19px 'Space Grotesk';color:#A8AEB9">π - perf-study</div>
+      <div style="font:600 9.5px 'Martian Mono',monospace;color:rgba(168,174,185,.6)">3h</div>
+    </div>
+    <div style="background:#16171B;border-radius:4px;padding:10px 14px;display:flex;gap:12px;align-items:center;opacity:.6">
+      <div style="width:9px;height:9px;border-radius:50%;border:2.5px solid rgba(168,174,185,.25);box-sizing:border-box;flex:none"></div>
+      <div style="flex:1;font:400 13.5px/19px 'Space Grotesk';color:#A8AEB9">agy - sandbox</div>
+      <div style="font:600 9.5px 'Martian Mono',monospace;color:rgba(168,174,185,.5)">2d</div>
+    </div>
+  </div>
+
+  <div style="display:flex;flex-direction:column;gap:10px">
+    <div style="font:600 10.5px 'Space Grotesk';color:#A8AEB9;letter-spacing:.06em">TIMELINE ROW — COLLAPSED / EXPANDED</div>
+    <div style="border-left:1px solid #26292E;padding-left:15px;margin-left:5px;display:flex;flex-direction:column;gap:11px">
+      <div style="position:relative;display:flex;align-items:center;gap:8px">
+        <div style="position:absolute;left:-19px;width:7px;height:7px;border-radius:50%;border:2px solid rgba(168,174,185,.45);box-sizing:border-box"></div>
+        <div style="flex:1;font:600 10px/15px 'Martian Mono',monospace;color:#A8AEB9">read <span style="font-weight:400;color:rgba(168,174,185,.55)">theme.kt</span></div>
+        <span style="font-family:'Material Symbols Outlined';font-size:14px;color:rgba(168,174,185,.4)">chevron_right</span>
+      </div>
+      <div style="position:relative">
+        <div style="position:absolute;left:-19px;top:4px;width:7px;height:7px;border-radius:50%;border:2px solid #E5484D;box-sizing:border-box"></div>
+        <div style="display:flex;align-items:center;gap:8px"><div style="flex:1;font:600 10px/15px 'Martian Mono',monospace;color:#E5484D">bash <span style="font-weight:400">exit 1</span></div><span style="font-family:'Material Symbols Outlined';font-size:14px;color:rgba(229,72,77,.7)">expand_more</span></div>
+        <div style="margin-top:7px;background:rgba(229,72,77,.08);border-radius:4px;padding:8px 10px;font:400 9.5px/16px 'Martian Mono',monospace;color:rgba(236,237,240,.85)">2 tests failed</div>
+      </div>
+      <div style="position:relative;display:flex;align-items:center;gap:8px">
+        <div style="position:absolute;left:-19px;width:7px;height:7px;border-radius:50%;border:2px solid #8DF08D;box-sizing:border-box;animation:scoutrPulse 1.4s ease-in-out infinite"></div>
+        <div style="flex:1;font:600 10px/15px 'Martian Mono',monospace;color:#8DF08D">edit <span style="font-weight:400">Theme.kt</span></div>
+      </div>
+    </div>
+    <div style="background:#16171B;border-radius:4px;padding:10px 12px;margin-top:2px">
+      <div style="font:500 10.5px 'Space Grotesk';color:#A8AEB9">thinking · 2 blocks</div>
+      <div style="font:400 13px/20px 'Space Grotesk';font-style:italic;color:#A8AEB9;margin-top:4px">Planning the token rename…</div>
+    </div>
+    <div style="display:flex;justify-content:flex-end"><div style="max-width:230px;background:#1A1C20;border-radius:4px;padding:10px 14px;font:400 14px/21px 'Space Grotesk'">use the new lime everywhere</div></div>
+  </div>
+
+  <div style="display:flex;flex-direction:column;gap:10px">
+    <div style="font:600 10.5px 'Space Grotesk';color:#A8AEB9;letter-spacing:.06em">CONTROLS</div>
+    <div style="display:flex;flex-wrap:wrap;gap:6px">
+      <div style="background:#8DF08D;border-radius:6px;padding:9px 15px;font:600 12px 'Space Grotesk';color:#04241A">Primary</div>
+      <div style="background:#1B1D21;border-radius:6px;padding:9px 15px;font:600 12px 'Space Grotesk';color:#ECEDF0">Secondary</div>
+      <div style="border:1px solid #363B43;border-radius:6px;padding:9px 15px;font:600 12px 'Space Grotesk';color:#A8AEB9">Tertiary</div>
+      <div style="border:1px solid rgba(229,72,77,.5);border-radius:6px;padding:9px 15px;font:600 12px 'Space Grotesk';color:#E5484D">Destructive</div>
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center">
+      <div style="background:#E5484D;border-radius:4px;padding:4px 9px;font:600 11px 'Space Grotesk';color:#3A0B0C">needs you</div>
+      <div style="background:#12301A;border-radius:4px;padding:4px 9px;font:600 11px 'Space Grotesk';color:#A6EFAD">live</div>
+      <div style="background:#16171B;border-radius:4px;padding:4px 9px;font:600 10px 'Martian Mono',monospace;color:rgba(168,174,185,.7)">12m</div>
+      <div style="background:#16171B;border-radius:4px;padding:6px 10px;font:500 10px 'Space Grotesk';color:#A8AEB9">Model <span style="color:#ECEDF0;font-weight:600">gpt-5.2</span></div>
+    </div>
+    <div style="display:flex;align-items:center;background:#16171B;border:1px solid rgba(141,240,141,.55);border-radius:6px;padding:0 4px 0 14px;min-height:48px">
+      <div style="flex:1;font:400 14px 'Space Grotesk';color:#ECEDF0">run it again</div>
+      <div style="width:38px;height:38px;display:flex;align-items:center;justify-content:center"><span style="font-family:'Material Symbols Outlined';font-size:19px;color:#A8AEB9">image</span></div>
+      <div style="width:32px;height:32px;margin-right:4px;border-radius:6px;background:#8DF08D;display:flex;align-items:center;justify-content:center"><span style="font-family:'Material Symbols Outlined';font-size:18px;color:#04241A">arrow_upward</span></div>
+    </div>
+    <div style="display:flex;align-items:center;gap:12px">
+      <div style="width:48px;height:48px;border-radius:8px;background:#8DF08D;display:flex;align-items:center;justify-content:center"><span style="font-family:'Material Symbols Outlined';font-size:22px;color:#04241A">add</span></div>
+      <div style="width:38px;height:38px;border-radius:6px;background:#1B1D21;display:flex;align-items:center;justify-content:center"><span style="font-family:'Material Symbols Outlined';font-size:20px;color:#8DF08D">keyboard_arrow_down</span></div>
+      <div style="background:#16171B;border-radius:4px;padding:8px 12px;display:flex;align-items:center;gap:8px"><div style="width:14px;height:14px;position:relative"><div style="position:absolute;inset:0;border:1.5px solid #8DF08D;border-radius:50%;animation:scoutrRipple 1.6s linear infinite"></div></div><span style="font:500 11px 'Space Grotesk';color:#8DF08D">Working</span><span style="font:400 9px 'Martian Mono',monospace;color:#A8AEB9">8m15s</span></div>
+    </div>
+    <div style="background:#16171B;border-radius:4px;padding:12px">
+      <div style="font:600 9.5px 'Martian Mono',monospace;color:#E5484D">NEEDS YOU · 1/2</div>
+      <div style="font:400 13.5px/20px 'Space Grotesk';margin-top:5px">Keep the 30s terminal grace window?</div>
+      <div style="display:flex;gap:6px;margin-top:10px"><div style="background:#8DF08D;border-radius:6px;padding:8px 13px;font:600 11.5px 'Space Grotesk';color:#04241A">Keep</div><div style="background:#1B1D21;border-radius:6px;padding:8px 13px;font:500 11.5px 'Space Grotesk';color:#A8AEB9">Drop to 10s</div><div style="border:1px solid #363B43;border-radius:6px;padding:8px 13px;font:500 11.5px 'Space Grotesk';color:#A8AEB9">Type…</div></div>
+    </div>
+  </div>
+</div>
+</div>
+
+<!-- 9c remaining screens -->
+<div id="9c" style="display:flex;flex-direction:column;gap:9px">
+<div style="display:flex;align-items:baseline;gap:8px;font:400 11px/1.3 'Space Grotesk',sans-serif;color:rgba(236,237,240,.55)">
+<a href="#9c" style="font:600 10.5px 'JetBrains Mono',monospace;padding:3px 7px;background:rgba(236,237,240,.1);color:#ECEDF0;border-radius:5px">9c</a>The remaining four screens
+</div>
+<div style="display:flex;flex-wrap:wrap;gap:24px">
+
+  <x-import component-from-global-scope="AndroidDevice" from="./android-frame.jsx" dark="{{ true }}" width="{{ 412 }}" height="{{ 892 }}" hint-size="428px,908px">
+  <div style="height:100%;display:flex;flex-direction:column;background:#0B0C0E;font-family:'Space Grotesk',sans-serif">
+    <div style="display:flex;align-items:center;padding:8px 16px 8px"><div style="flex:1;font:700 21px/26px 'Space Grotesk';letter-spacing:-.5px">Sessions</div><div style="width:40px;height:40px;display:flex;align-items:center;justify-content:center"><span style="font-family:'Material Symbols Outlined';font-size:22px;color:#ECEDF0">search</span></div></div>
+    <div style="display:flex;gap:6px;padding:0 12px 10px">
+      <div style="background:#12301A;border-radius:6px;padding:6px 11px;font:600 11px 'Space Grotesk';color:#A6EFAD">All</div>
+      <div style="background:#16171B;border-radius:6px;padding:6px 11px;font:500 11px 'Space Grotesk';color:#A8AEB9">scoutr</div>
+      <div style="background:#16171B;border-radius:6px;padding:6px 11px;font:500 11px 'Space Grotesk';color:#A8AEB9">material</div>
+      <div style="background:#16171B;border-radius:6px;padding:6px 11px;font:500 11px 'Space Grotesk';color:#A8AEB9">bridge</div>
+    </div>
+    <div style="flex:1;overflow:hidden;padding:0 12px;display:flex;flex-direction:column;gap:14px">
+      <div>
+        <div style="font:600 9.5px 'Martian Mono',monospace;color:rgba(168,174,185,.6);padding:0 4px 6px">TODAY</div>
+        <div style="display:flex;flex-direction:column;gap:2px">
+          <div style="background:#16171B;border-radius:4px;padding:11px 14px;display:flex;gap:12px;align-items:center"><div style="width:9px;height:9px;border-radius:50%;border:2.5px solid #8DF08D;box-sizing:border-box;flex:none"></div><div style="flex:1;min-width:0"><div style="font:600 14px/19px 'Space Grotesk'">π - scoutr</div><div style="font:400 9px/15px 'Martian Mono',monospace;color:rgba(168,174,185,.5)">142 msgs · 61k tok</div></div><div style="font:600 9.5px 'Martian Mono',monospace;color:#A8AEB9">8m</div></div>
+          <div style="background:#16171B;border-radius:4px;padding:11px 14px;display:flex;gap:12px;align-items:center"><div style="width:9px;height:9px;border-radius:50%;border:2.5px solid rgba(168,174,185,.5);box-sizing:border-box;flex:none"></div><div style="flex:1;min-width:0"><div style="font:600 14px/19px 'Space Grotesk'">π - perf-study</div><div style="font:400 9px/15px 'Martian Mono',monospace;color:rgba(168,174,185,.5)">88 msgs · 34k tok</div></div><div style="font:600 9.5px 'Martian Mono',monospace;color:rgba(168,174,185,.6)">3h</div></div>
+          <div style="background:#16171B;border-radius:4px;padding:11px 14px;display:flex;gap:12px;align-items:center"><div style="width:9px;height:9px;border-radius:50%;border:2.5px solid rgba(168,174,185,.5);box-sizing:border-box;flex:none"></div><div style="flex:1;min-width:0"><div style="font:600 14px/19px 'Space Grotesk'">agy - gdezan-material</div><div style="font:400 9px/15px 'Martian Mono',monospace;color:rgba(168,174,185,.5)">51 msgs · 19k tok</div></div><div style="font:600 9.5px 'Martian Mono',monospace;color:rgba(168,174,185,.6)">6h</div></div>
+        </div>
+      </div>
+      <div>
+        <div style="font:600 9.5px 'Martian Mono',monospace;color:rgba(168,174,185,.6);padding:0 4px 6px">YESTERDAY</div>
+        <div style="display:flex;flex-direction:column;gap:2px">
+          <div style="background:#16171B;border-radius:4px;padding:11px 14px;display:flex;gap:12px;align-items:center"><div style="width:9px;height:9px;border-radius:50%;border:2.5px solid rgba(168,174,185,.5);box-sizing:border-box;flex:none"></div><div style="flex:1;min-width:0"><div style="font:600 14px/19px 'Space Grotesk'">claude - install-scripts</div><div style="font:400 9px/15px 'Martian Mono',monospace;color:rgba(168,174,185,.5)">37 msgs · 12k tok</div></div><div style="font:600 9.5px 'Martian Mono',monospace;color:rgba(168,174,185,.6)">1d</div></div>
+          <div style="background:#16171B;border-radius:4px;padding:11px 14px;display:flex;gap:12px;align-items:center"><div style="width:9px;height:9px;border-radius:50%;border:2.5px solid rgba(168,174,185,.5);box-sizing:border-box;flex:none"></div><div style="flex:1;min-width:0"><div style="font:600 14px/19px 'Space Grotesk'">π - ntfy-tuning</div><div style="font:400 9px/15px 'Martian Mono',monospace;color:rgba(168,174,185,.5)">23 msgs · 8k tok</div></div><div style="font:600 9.5px 'Martian Mono',monospace;color:rgba(168,174,185,.6)">1d</div></div>
+        </div>
+      </div>
+    </div>
+    <div style="background:#121316;border-top:1px solid #26292E;display:flex;padding:6px 8px">
+      <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:2px"><span style="font-family:'Material Symbols Outlined';font-size:22px;color:#A8AEB9">grid_view</span><span style="font:500 10px 'Space Grotesk';color:#A8AEB9">Board</span></div>
+      <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:2px"><span style="font-family:'Material Symbols Outlined';font-size:22px;color:#8DF08D">history</span><span style="font:600 10px 'Space Grotesk';color:#8DF08D">Sessions</span></div>
+      <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:2px"><span style="font-family:'Material Symbols Outlined';font-size:22px;color:#A8AEB9">bar_chart</span><span style="font:500 10px 'Space Grotesk';color:#A8AEB9">Usage</span></div>
+      <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:2px"><span style="font-family:'Material Symbols Outlined';font-size:22px;color:#A8AEB9">code</span><span style="font:500 10px 'Space Grotesk';color:#A8AEB9">Review</span></div>
+    </div>
+  </div>
+  </x-import>
+
+  <x-import component-from-global-scope="AndroidDevice" from="./android-frame.jsx" dark="{{ true }}" width="{{ 412 }}" height="{{ 892 }}" hint-size="428px,908px">
+  <div style="height:100%;display:flex;flex-direction:column;background:#0B0C0E;font-family:'Space Grotesk',sans-serif">
+    <div style="display:flex;align-items:center;padding:8px 16px"><div style="flex:1;font:700 21px/26px 'Space Grotesk';letter-spacing:-.5px">Usage</div><div style="background:#16171B;border-radius:6px;padding:6px 11px;font:500 11px 'Space Grotesk';color:#A8AEB9">7d</div></div>
+    <div style="flex:1;overflow:hidden;padding:8px 12px 0;display:flex;flex-direction:column;gap:14px">
+      <div style="background:#16171B;border-radius:4px;padding:16px">
+        <div style="font:600 9.5px 'Martian Mono',monospace;color:rgba(168,174,185,.6)">TOKENS THIS WEEK</div>
+        <div style="display:flex;align-items:baseline;gap:8px;margin-top:6px"><div style="font:700 32px/1 'Space Grotesk';letter-spacing:-1px">1.84M</div><div style="font:500 12px 'Space Grotesk';color:#8DF08D">+12%</div></div>
+        <div style="display:flex;align-items:flex-end;gap:6px;height:88px;margin-top:16px">
+          <div style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;gap:2px;height:100%"><div style="height:38%;background:#2C6F72;border-radius:2px"></div></div>
+          <div style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;gap:2px;height:100%"><div style="height:56%;background:#2C6F72;border-radius:2px"></div></div>
+          <div style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;gap:2px;height:100%"><div style="height:44%;background:#2C6F72;border-radius:2px"></div></div>
+          <div style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;gap:2px;height:100%"><div style="height:72%;background:#2C6F72;border-radius:2px"></div></div>
+          <div style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;gap:2px;height:100%"><div style="height:61%;background:#2C6F72;border-radius:2px"></div></div>
+          <div style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;gap:2px;height:100%"><div style="height:88%;background:#2C6F72;border-radius:2px"></div></div>
+          <div style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;gap:2px;height:100%"><div style="height:96%;background:#8DF08D;border-radius:2px"></div></div>
+        </div>
+        <div style="display:flex;justify-content:space-between;margin-top:8px"><span style="font:400 9px 'Martian Mono',monospace;color:rgba(168,174,185,.5)">mon</span><span style="font:400 9px 'Martian Mono',monospace;color:#8DF08D">today</span></div>
+      </div>
+
+      <div style="background:#16171B;border-radius:4px;padding:14px">
+        <div style="display:flex;align-items:center;gap:8px"><span style="font:600 9.5px 'Martian Mono',monospace;color:#E8B84B">WEEKLY LIMIT</span><span style="flex:1"></span><span style="font:600 11px 'Space Grotesk';color:#E8B84B">74%</span></div>
+        <div style="height:4px;background:#0B0C0E;border-radius:2px;margin-top:10px;overflow:hidden"><div style="width:74%;height:100%;background:#E8B84B"></div></div>
+        <div style="font:400 9px/15px 'Martian Mono',monospace;color:rgba(168,174,185,.5);margin-top:8px">resets in 2d 6h</div>
+      </div>
+
+      <div>
+        <div style="font:600 9.5px 'Martian Mono',monospace;color:rgba(168,174,185,.6);padding:0 4px 6px">BY AGENT</div>
+        <div style="display:flex;flex-direction:column;gap:2px">
+          <div style="background:#16171B;border-radius:4px;padding:11px 14px;display:flex;align-items:center;gap:12px"><div style="flex:1"><div style="font:600 13.5px/19px 'Space Grotesk'">π</div><div style="height:3px;background:#0B0C0E;border-radius:2px;margin-top:6px"><div style="width:62%;height:100%;background:#2C6F72;border-radius:2px"></div></div></div><div style="font:600 9.5px 'Martian Mono',monospace;color:#A8AEB9">1.1M</div></div>
+          <div style="background:#16171B;border-radius:4px;padding:11px 14px;display:flex;align-items:center;gap:12px"><div style="flex:1"><div style="font:600 13.5px/19px 'Space Grotesk'">claude</div><div style="height:3px;background:#0B0C0E;border-radius:2px;margin-top:6px"><div style="width:28%;height:100%;background:#2C6F72;border-radius:2px"></div></div></div><div style="font:600 9.5px 'Martian Mono',monospace;color:#A8AEB9">520k</div></div>
+          <div style="background:#16171B;border-radius:4px;padding:11px 14px;display:flex;align-items:center;gap:12px"><div style="flex:1"><div style="font:600 13.5px/19px 'Space Grotesk'">agy</div><div style="height:3px;background:#0B0C0E;border-radius:2px;margin-top:6px"><div style="width:12%;height:100%;background:#2C6F72;border-radius:2px"></div></div></div><div style="font:600 9.5px 'Martian Mono',monospace;color:#A8AEB9">220k</div></div>
+        </div>
+      </div>
+    </div>
+    <div style="background:#121316;border-top:1px solid #26292E;display:flex;padding:6px 8px">
+      <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:2px"><span style="font-family:'Material Symbols Outlined';font-size:22px;color:#A8AEB9">grid_view</span><span style="font:500 10px 'Space Grotesk';color:#A8AEB9">Board</span></div>
+      <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:2px"><span style="font-family:'Material Symbols Outlined';font-size:22px;color:#A8AEB9">history</span><span style="font:500 10px 'Space Grotesk';color:#A8AEB9">Sessions</span></div>
+      <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:2px"><span style="font-family:'Material Symbols Outlined';font-size:22px;color:#8DF08D">bar_chart</span><span style="font:600 10px 'Space Grotesk';color:#8DF08D">Usage</span></div>
+      <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:2px"><span style="font-family:'Material Symbols Outlined';font-size:22px;color:#A8AEB9">code</span><span style="font:500 10px 'Space Grotesk';color:#A8AEB9">Review</span></div>
+    </div>
+  </div>
+  </x-import>
+
+  <x-import component-from-global-scope="AndroidDevice" from="./android-frame.jsx" dark="{{ true }}" width="{{ 412 }}" height="{{ 892 }}" hint-size="428px,908px">
+  <div style="height:100%;display:flex;flex-direction:column;background:#0B0C0E;font-family:'Space Grotesk',sans-serif">
+    <div style="display:flex;align-items:center;padding:8px 4px 8px 16px"><div style="flex:1;min-width:0"><div style="font:700 21px/26px 'Space Grotesk';letter-spacing:-.5px">Review</div><div style="font:400 9px/14px 'Martian Mono',monospace;color:#A8AEB9">~/scoutr · main · 3 files</div></div><div style="width:44px;height:44px;display:flex;align-items:center;justify-content:center"><span style="font-family:'Material Symbols Outlined';font-size:22px;color:#ECEDF0">history</span></div></div>
+    <div style="display:flex;gap:2px;padding:0 12px 10px">
+      <div style="flex:1;background:#16171B;border-radius:4px;padding:9px 11px"><div style="font:600 9px 'Martian Mono',monospace;color:#3FC9E8">+128</div><div style="font:400 9px/14px 'Martian Mono',monospace;color:rgba(168,174,185,.5);margin-top:2px">added</div></div>
+      <div style="flex:1;background:#16171B;border-radius:4px;padding:9px 11px"><div style="font:600 9px 'Martian Mono',monospace;color:#E5484D">−41</div><div style="font:400 9px/14px 'Martian Mono',monospace;color:rgba(168,174,185,.5);margin-top:2px">removed</div></div>
+      <div style="flex:1;background:#16171B;border-radius:4px;padding:9px 11px"><div style="font:600 9px 'Martian Mono',monospace;color:#A8AEB9">3</div><div style="font:400 9px/14px 'Martian Mono',monospace;color:rgba(168,174,185,.5);margin-top:2px">files</div></div>
+    </div>
+    <div style="flex:1;overflow:hidden;padding:0 12px;display:flex;flex-direction:column;gap:10px">
+      <div style="background:#16171B;border-radius:4px;overflow:hidden">
+        <div style="padding:10px 12px;display:flex;align-items:center;gap:8px"><span style="font-family:'Material Symbols Outlined';font-size:16px;color:#A8AEB9">expand_more</span><span style="flex:1;font:600 9.5px 'Martian Mono',monospace;color:#ECEDF0">ui/theme/Theme.kt</span><span style="font:600 9px 'Martian Mono',monospace;color:#3FC9E8">+42</span><span style="font:600 9px 'Martian Mono',monospace;color:#E5484D">−12</span></div>
+        <div style="background:#0B0C0E;padding:10px 12px;font:400 9.5px/17px 'Martian Mono',monospace">
+          <div style="color:rgba(168,174,185,.45)">@@ -18,7 +18,9 @@</div>
+          <div style="background:rgba(229,72,77,.1);color:#FF9A9D">- val Primary = Color(0xFF5B8CFF)</div>
+          <div style="background:rgba(63,201,232,.1);color:#8FE4F5">+ val Primary = Color(0xFF8DF08D)</div>
+          <div style="background:rgba(63,201,232,.1);color:#8FE4F5">+ val OnPrimary = Color(0xFF04241A)</div>
+          <div style="background:rgba(63,201,232,.1);color:#8FE4F5">+ val Teal = Color(0xFF2C6F72)</div>
+          <div style="color:rgba(168,174,185,.6)">  val Error = Color(0xFFE5484D)</div>
+        </div>
+      </div>
+      <div style="background:#16171B;border-radius:4px;padding:10px 12px;display:flex;align-items:center;gap:8px"><span style="font-family:'Material Symbols Outlined';font-size:16px;color:#A8AEB9">chevron_right</span><span style="flex:1;font:600 9.5px 'Martian Mono',monospace;color:#ECEDF0">ui/screens/BoardScreen.kt</span><span style="font:600 9px 'Martian Mono',monospace;color:#3FC9E8">+71</span><span style="font:600 9px 'Martian Mono',monospace;color:#E5484D">−24</span></div>
+      <div style="background:#16171B;border-radius:4px;padding:10px 12px;display:flex;align-items:center;gap:8px"><span style="font-family:'Material Symbols Outlined';font-size:16px;color:#A8AEB9">chevron_right</span><span style="flex:1;font:600 9.5px 'Martian Mono',monospace;color:#ECEDF0">res/drawable/ic_launcher.xml</span><span style="font:600 9px 'Martian Mono',monospace;color:#3FC9E8">+15</span><span style="font:600 9px 'Martian Mono',monospace;color:#E5484D">−5</span></div>
+    </div>
+    <div style="padding:10px 12px;display:flex;gap:6px">
+      <div style="flex:1;background:#8DF08D;border-radius:6px;padding:12px;text-align:center;font:600 13px 'Space Grotesk';color:#04241A">Commit</div>
+      <div style="background:#1B1D21;border-radius:6px;padding:12px 16px;font:600 13px 'Space Grotesk';color:#ECEDF0">Stage</div>
+      <div style="border:1px solid rgba(229,72,77,.5);border-radius:6px;padding:12px 16px;font:600 13px 'Space Grotesk';color:#E5484D">Revert</div>
+    </div>
+    <div style="background:#121316;border-top:1px solid #26292E;display:flex;padding:6px 8px">
+      <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:2px"><span style="font-family:'Material Symbols Outlined';font-size:22px;color:#A8AEB9">grid_view</span><span style="font:500 10px 'Space Grotesk';color:#A8AEB9">Board</span></div>
+      <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:2px"><span style="font-family:'Material Symbols Outlined';font-size:22px;color:#A8AEB9">history</span><span style="font:500 10px 'Space Grotesk';color:#A8AEB9">Sessions</span></div>
+      <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:2px"><span style="font-family:'Material Symbols Outlined';font-size:22px;color:#A8AEB9">bar_chart</span><span style="font:500 10px 'Space Grotesk';color:#A8AEB9">Usage</span></div>
+      <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:2px"><span style="font-family:'Material Symbols Outlined';font-size:22px;color:#8DF08D">code</span><span style="font:600 10px 'Space Grotesk';color:#8DF08D">Review</span></div>
+    </div>
+  </div>
+  </x-import>
+
+  <x-import component-from-global-scope="AndroidDevice" from="./android-frame.jsx" dark="{{ true }}" width="{{ 412 }}" height="{{ 892 }}" hint-size="428px,908px">
+  <div style="height:100%;display:flex;flex-direction:column;background:#0B0C0E;font-family:'Space Grotesk',sans-serif">
+    <div style="display:flex;align-items:center;padding:2px 4px">
+      <div style="width:44px;height:44px;display:flex;align-items:center;justify-content:center"><span style="font-family:'Material Symbols Outlined';font-size:22px;color:#ECEDF0">arrow_back</span></div>
+      <div style="flex:1;min-width:0"><div style="font:600 15px/20px 'Space Grotesk'">Terminal</div><div style="font:400 9px/14px 'Martian Mono',monospace;color:#A8AEB9">w6M:p8 · 120×34</div></div>
+      <div style="background:#12301A;border-radius:4px;padding:5px 9px;font:600 10px 'Space Grotesk';color:#A6EFAD;margin-right:6px">attached</div>
+      <div style="width:44px;height:44px;display:flex;align-items:center;justify-content:center"><span style="font-family:'Material Symbols Outlined';font-size:22px;color:#ECEDF0">more_vert</span></div>
+    </div>
+    <div style="margin:0 12px 8px;background:#16171B;border-radius:4px;padding:8px 11px;display:flex;align-items:center;gap:8px">
+      <span style="font:600 9.5px 'Martian Mono',monospace;color:#8DF08D">π</span>
+      <span style="font:400 9.5px 'Martian Mono',monospace;color:rgba(168,174,185,.55)">/</span>
+      <span style="font:600 9.5px 'Martian Mono',monospace;color:#ECEDF0">scoutr</span>
+      <span style="font:400 9.5px 'Martian Mono',monospace;color:rgba(168,174,185,.55)">/</span>
+      <span style="font:600 9.5px 'Martian Mono',monospace;color:#ECEDF0">p8</span>
+      <span style="flex:1"></span>
+      <span style="font-family:'Material Symbols Outlined';font-size:16px;color:#A8AEB9">expand_more</span>
+    </div>
+    <div style="flex:1;background:#0B0C0E;margin:0 12px;border-radius:4px;border:1px solid #1E2126;padding:10px;overflow:hidden;font:400 9.5px/16px 'Martian Mono',monospace">
+      <div style="color:rgba(168,174,185,.75)">$ git status --short</div>
+      <div style="color:#8FE4F5">?? docs/performance-study.md</div>
+      <div style="color:rgba(168,174,185,.75)">$ python3 strip_ws.py docs/</div>
+      <div style="color:rgba(168,174,185,.6)">stripped 3 lines in 1 file</div>
+      <div style="color:rgba(168,174,185,.75)">$ npm test -- --run bridge</div>
+      <div style="color:rgba(168,174,185,.6)">PASS src/agents/agy/index.test.ts (18)</div>
+      <div style="color:rgba(168,174,185,.6)">PASS src/routes/usage.test.ts (9)</div>
+      <div style="color:#FF9A9D">FAIL src/bridge/pty.test.ts (2)</div>
+      <div style="color:rgba(168,174,185,.6)">  ✕ grace window closes at 30s</div>
+      <div style="color:rgba(168,174,185,.75)">$ <span style="display:inline-block;width:6px;height:13px;background:#8DF08D;vertical-align:-2px"></span></div>
+    </div>
+    <div style="display:flex;gap:2px;padding:10px 12px 6px;overflow:hidden">
+      <div style="background:#16171B;border-radius:4px;padding:8px 11px;font:600 10px 'Martian Mono',monospace;color:#A8AEB9">esc</div>
+      <div style="background:#16171B;border-radius:4px;padding:8px 11px;font:600 10px 'Martian Mono',monospace;color:#A8AEB9">tab</div>
+      <div style="background:#16171B;border-radius:4px;padding:8px 11px;font:600 10px 'Martian Mono',monospace;color:#A8AEB9">^C</div>
+      <div style="background:#16171B;border-radius:4px;padding:8px 11px;font:600 10px 'Martian Mono',monospace;color:#A8AEB9">^D</div>
+      <div style="background:#16171B;border-radius:4px;padding:8px 11px;font:600 10px 'Martian Mono',monospace;color:#A8AEB9">↑</div>
+      <div style="background:#16171B;border-radius:4px;padding:8px 11px;font:600 10px 'Martian Mono',monospace;color:#A8AEB9">↓</div>
+      <div style="background:#16171B;border-radius:4px;padding:8px 11px;font:600 10px 'Martian Mono',monospace;color:#A8AEB9">|</div>
+    </div>
+    <div style="padding:0 12px 10px">
+      <div style="display:flex;align-items:center;background:#16171B;border:1px solid #363B43;border-radius:6px;padding:0 4px 0 12px;min-height:48px">
+        <div style="flex:1;font:400 13px 'Martian Mono',monospace;color:rgba(168,174,185,.55)">type a command…</div>
+        <div style="width:32px;height:32px;margin-right:4px;border-radius:6px;background:#1B1D21;display:flex;align-items:center;justify-content:center"><span style="font-family:'Material Symbols Outlined';font-size:18px;color:rgba(168,174,185,.55)">keyboard_return</span></div>
+      </div>
+    </div>
+  </div>
+  </x-import>
+</div>
+<p style="max-width:900px;margin:2px 0 0;font:400 11px/1.6 'Space Grotesk',sans-serif;color:rgba(168,174,185,.75)">Sessions reuses the agent tile verbatim with a date group header. Usage is the only place teal appears — data that carries no state must not be green. Review keeps the new cyan for added lines. Terminal is the one screen that goes edge-to-edge mono, with a breadcrumb tile above and a modifier-key row that never covers output.</p>
+</div>
+
+<!-- 9d handoff -->
+<div id="9d" style="display:flex;flex-direction:column;gap:9px;width:700px">
+<div style="display:flex;align-items:baseline;gap:8px;font:400 11px/1.3 'Space Grotesk',sans-serif;color:rgba(236,237,240,.55)">
+<a href="#9d" style="font:600 10.5px 'JetBrains Mono',monospace;padding:3px 7px;background:rgba(236,237,240,.1);color:#ECEDF0;border-radius:5px">9d</a>Compose mapping &amp; rules
+</div>
+<div style="background:#121316;border-radius:6px;border:1px solid #26292E;padding:22px;display:flex;flex-direction:column;gap:18px">
+  <div style="background:#0B0C0E;border-radius:4px;padding:14px;font:400 10px/18px 'JetBrains Mono',monospace;color:rgba(236,237,240,.85);overflow:hidden">
+    <div style="color:rgba(168,174,185,.5)">// ui/theme/Theme.kt — darkColorScheme()</div>
+    <div><span style="color:#8DF08D">primary</span> = <span style="color:#A8AEB9">Color(0xFF8DF08D)</span>   <span style="color:rgba(168,174,185,.45)">// live / AI-owned only</span></div>
+    <div><span style="color:#8DF08D">onPrimary</span> = <span style="color:#A8AEB9">Color(0xFF04241A)</span></div>
+    <div><span style="color:#8DF08D">primaryContainer</span> = <span style="color:#A8AEB9">Color(0xFF12301A)</span></div>
+    <div><span style="color:#8DF08D">secondary</span> = <span style="color:#A8AEB9">Color(0xFF2C6F72)</span>  <span style="color:rgba(168,174,185,.45)">// charts only</span></div>
+    <div><span style="color:#8DF08D">error</span> = <span style="color:#A8AEB9">Color(0xFFE5484D)</span></div>
+    <div><span style="color:#8DF08D">background</span> = <span style="color:#A8AEB9">Color(0xFF0B0C0E)</span></div>
+    <div><span style="color:#8DF08D">surface</span> = <span style="color:#A8AEB9">Color(0xFF121316)</span></div>
+    <div><span style="color:#8DF08D">surfaceContainer</span> = <span style="color:#A8AEB9">Color(0xFF16171B)</span>  <span style="color:rgba(168,174,185,.45)">// was undeclared — the tile</span></div>
+    <div><span style="color:#8DF08D">surfaceContainerHighest</span> = <span style="color:#A8AEB9">Color(0xFF1A1C20)</span></div>
+    <div><span style="color:#8DF08D">surfaceVariant</span> = <span style="color:#A8AEB9">Color(0xFF1B1D21)</span></div>
+    <div><span style="color:#8DF08D">outline</span> = <span style="color:#A8AEB9">Color(0xFF363B43)</span> · <span style="color:#8DF08D">outlineVariant</span> = <span style="color:#A8AEB9">Color(0xFF26292E)</span></div>
+    <div style="margin-top:6px;color:rgba(168,174,185,.5)">// Shapes.kt</div>
+    <div><span style="color:#8DF08D">extraSmall</span> = <span style="color:#A8AEB9">RoundedCornerShape(4.dp)</span> · <span style="color:#8DF08D">small</span> = <span style="color:#A8AEB9">6.dp</span> · <span style="color:#8DF08D">medium</span> = <span style="color:#A8AEB9">8.dp</span></div>
+  </div>
+
+  <div style="display:flex;flex-direction:column;gap:8px">
+    <div style="font:600 10.5px 'Space Grotesk';color:#A8AEB9;letter-spacing:.06em">MIGRATION — WHAT CHANGES IN THE APP</div>
+    <div style="font:400 11px/1.8 'Space Grotesk';color:#A8AEB9">
+      <span style="color:#ECEDF0">1.</span> <span style="font-family:'JetBrains Mono',monospace;font-size:10px">Primary</span> #5B8CFF → #8DF08D, and every <span style="font-family:'JetBrains Mono',monospace;font-size:10px">onPrimary</span> becomes #04241A, never white.<br>
+      <span style="color:#ECEDF0">2.</span> Done stops being green: <span style="font-family:'JetBrains Mono',monospace;font-size:10px">statusColor(Done)</span> → <span style="font-family:'JetBrains Mono',monospace;font-size:10px">onSurfaceVariant</span>.<br>
+      <span style="color:#ECEDF0">3.</span> <span style="font-family:'JetBrains Mono',monospace;font-size:10px">DiffPalette.Added</span> #00C8FF → #3FC9E8 so Review never competes with the accent.<br>
+      <span style="color:#ECEDF0">4.</span> Status dots become rings: 9dp circle, 2.5dp stroke, no fill.<br>
+      <span style="color:#ECEDF0">5.</span> Every pill dies — <span style="font-family:'JetBrains Mono',monospace;font-size:10px">CircleShape</span> chips and the 22dp composer go to 4/6dp.<br>
+      <span style="color:#ECEDF0">6.</span> Bundle Space Grotesk + Martian Mono as font resources; JetBrains Mono stays only if you want a narrower mono in Terminal.<br>
+      <span style="color:#ECEDF0">7.</span> Declare <span style="font-family:'JetBrains Mono',monospace;font-size:10px">surfaceContainer</span> — it was falling through to the M3 default.
+    </div>
+  </div>
+
+  <div style="display:flex;flex-direction:column;gap:8px">
+    <div style="font:600 10.5px 'Space Grotesk';color:#A8AEB9;letter-spacing:.06em">HARD RULES</div>
+    <div style="font:400 11px/1.8 'Space Grotesk';color:#A8AEB9">
+      Dark mode only, always. · Green is live, gray is done, red is you. · Mono for machine facts, never for labels. · No shadows, no gradients, no glows, no purple. · Nothing animates unless it is actually happening. · A screen that holds a transcript stays on true black.
+    </div>
+  </div>
+</div>
+</div>
+
+</div>
+<p style="margin:24px 0 0;font:400 12px/1.6 'Space Grotesk',sans-serif;color:rgba(168,174,185,.6)">The system is complete: <a href="#9a">9a</a> foundations · <a href="#9b">9b</a> components · <a href="#8b">8b</a> board · <a href="#7a">7a</a> chat · <a href="#9c">9c</a> Sessions, Usage, Review, Terminal · <a href="#8c">8c</a> splash, empty, widget · <a href="#9d">9d</a> handoff.</p>
+</section>
+
+<section id="t8-kept" style="padding:40px 44px 40px;border-bottom:1px solid rgba(236,237,240,.08)">
+<div style="display:flex;align-items:baseline;gap:10px;margin:0 0 8px">
+<span style="font:600 10px 'JetBrains Mono',monospace;padding:3px 7px;background:rgba(236,237,240,.1);color:#ECEDF0;border-radius:4px">8</span>
+<span style="font:600 13px/1.2 'Space Grotesk',sans-serif;color:#A8AEB9">Kept from turn 8 — referenced by section 9</span>
+</div>
+<div style="display:flex;flex-wrap:wrap;gap:32px;align-items:flex-start">
+<div id="8b" style="display:flex;flex-direction:column;gap:9px">
+<div style="display:flex;align-items:baseline;gap:8px;font:400 11px/1.3 'Space Grotesk',sans-serif;color:rgba(236,237,240,.55)">
+<a href="#8b" style="font:600 10.5px 'JetBrains Mono',monospace;padding:3px 7px;background:rgba(236,237,240,.1);color:#ECEDF0;border-radius:5px">8b</a>Tile board <a href="#6a">6a</a> with rings and icon color
+</div>
+<x-import component-from-global-scope="AndroidDevice" from="./android-frame.jsx" dark="{{ true }}" width="{{ 412 }}" height="{{ 892 }}" hint-size="428px,908px">
+<div style="height:100%;display:flex;flex-direction:column;background:#0B0C0E;font-family:'Space Grotesk',sans-serif">
+  <div style="display:flex;align-items:center;padding:6px 4px 6px 16px">
+    <div style="flex:1;display:flex;align-items:center;gap:11px">
+      <div style="position:relative;width:28px;height:30px;flex:none">
+        <div style="position:absolute;left:2px;bottom:3px;width:6px;height:22px;background:#2C6F72;border-radius:3px 0 0 0"></div>
+        <div style="position:absolute;left:2px;top:6px;width:10px;height:6px;background:#2C6F72;border-radius:3px 0 0 0"></div>
+        <div style="position:absolute;left:9px;top:2px;width:12px;height:12px;border:2.5px solid #8DF08D;border-radius:50%;box-sizing:border-box"></div>
+        <div style="position:absolute;left:12px;bottom:3px;width:5px;height:13px;background:#2C6F72;border-radius:2px 0 0 0"></div>
+        <div style="position:absolute;left:12px;top:16px;width:8px;height:5px;background:#2C6F72;border-radius:2px 0 0 0"></div>
+        <div style="position:absolute;left:18px;top:13px;width:9px;height:9px;border:2px solid #8DF08D;border-radius:50%;box-sizing:border-box"></div>
+        <div style="position:absolute;left:0;bottom:0;width:25px;height:4px;border-radius:2px;background:#8DF08D"></div>
+      </div>
+      <div style="font:700 21px/26px 'Space Grotesk',sans-serif;letter-spacing:-.5px">Board</div>
+    </div>
+    <div style="width:44px;height:44px;display:flex;align-items:center;justify-content:center"><span style="font-family:'Material Symbols Outlined';font-size:22px;color:#ECEDF0">terminal</span></div>
+    <div style="width:44px;height:44px;display:flex;align-items:center;justify-content:center"><span style="font-family:'Material Symbols Outlined';font-size:22px;color:#ECEDF0">settings</span></div>
+  </div>
+  <div style="flex:1;overflow:hidden;padding:0 12px">
+    <div style="display:flex;align-items:center;gap:8px;padding:10px 4px 6px"><span style="font:600 9.5px 'Martian Mono',monospace;color:#E5484D">NEEDS YOU</span><span style="font:400 9.5px 'Martian Mono',monospace;color:rgba(168,174,185,.5)">1</span></div>
+    <div style="background:#16171B;border-radius:4px;padding:12px 14px;display:flex;gap:12px;align-items:flex-start">
+      <div style="width:9px;height:9px;border-radius:50%;border:2.5px solid #E5484D;box-sizing:border-box;margin-top:5px;flex:none;animation:scoutrPulse 1.6s ease-in-out infinite"></div>
+      <div style="flex:1;min-width:0">
+        <div style="font:600 15px/20px 'Space Grotesk'">claude - bridge</div>
+        <div style="font:400 12.5px/18px 'Space Grotesk';color:#A8AEB9;margin-top:2px">Which agent id should Antigravity register as?</div>
+        <div style="font:400 9px/15px 'Martian Mono',monospace;color:rgba(168,174,185,.5);margin-top:4px">~/scoutr/bridge · sonnet-4.6</div>
+      </div>
+      <div style="font:600 9.5px 'Martian Mono',monospace;color:#E5484D">1m</div>
+    </div>
+
+    <div style="display:flex;align-items:center;gap:8px;padding:14px 4px 6px"><span style="font:600 9.5px 'Martian Mono',monospace;color:#8DF08D">WORKING</span><span style="font:400 9.5px 'Martian Mono',monospace;color:rgba(168,174,185,.5)">3</span></div>
+    <div style="display:flex;flex-direction:column;gap:2px">
+      <div style="background:#16171B;border-radius:4px;padding:12px 14px;display:flex;gap:12px;align-items:flex-start">
+        <div style="width:9px;height:9px;margin-top:5px;flex:none;position:relative;display:flex;align-items:center;justify-content:center">
+          <div style="position:absolute;width:9px;height:9px;border-radius:50%;border:2.5px solid #8DF08D;box-sizing:border-box"></div>
+          <div style="position:absolute;width:17px;height:17px;border-radius:50%;border:1.5px solid #8DF08D;animation:scoutrRipple 1.8s linear infinite"></div>
+        </div>
+        <div style="flex:1;min-width:0">
+          <div style="font:600 15px/20px 'Space Grotesk'">π - scoutr</div>
+          <div style="font:400 9px/15px 'Martian Mono',monospace;color:rgba(168,174,185,.65);margin-top:2px">▸ bash strip_ws.py</div>
+          <div style="font:400 9px/15px 'Martian Mono',monospace;color:rgba(168,174,185,.5);margin-top:2px">~/scoutr · gpt-5.2</div>
+        </div>
+        <div style="font:600 9.5px 'Martian Mono',monospace;color:#A8AEB9">8m</div>
+      </div>
+      <div style="background:#16171B;border-radius:4px;padding:12px 14px;display:flex;gap:12px;align-items:flex-start">
+        <div style="width:9px;height:9px;border-radius:50%;border:2.5px solid #8DF08D;box-sizing:border-box;margin-top:5px;flex:none"></div>
+        <div style="flex:1;min-width:0">
+          <div style="font:600 15px/20px 'Space Grotesk'">agy - gdezan-material</div>
+          <div style="font:400 9px/15px 'Martian Mono',monospace;color:rgba(168,174,185,.65);margin-top:2px">▸ read palette.json</div>
+          <div style="font:400 9px/15px 'Martian Mono',monospace;color:rgba(168,174,185,.5);margin-top:2px">~/gdezan-material · gemini-3-pro</div>
+        </div>
+        <div style="font:600 9.5px 'Martian Mono',monospace;color:#A8AEB9">21m</div>
+      </div>
+      <div style="background:#16171B;border-radius:4px;padding:12px 14px;display:flex;gap:12px;align-items:flex-start">
+        <div style="width:9px;height:9px;border-radius:50%;border:2.5px solid #8DF08D;box-sizing:border-box;margin-top:5px;flex:none"></div>
+        <div style="flex:1;min-width:0">
+          <div style="font:600 15px/20px 'Space Grotesk'">π - ntfy-tuning</div>
+          <div style="font:400 9px/15px 'Martian Mono',monospace;color:rgba(168,174,185,.65);margin-top:2px">▸ bash systemctl restart</div>
+          <div style="font:400 9px/15px 'Martian Mono',monospace;color:rgba(168,174,185,.5);margin-top:2px">~/scoutr · gpt-5.2</div>
+        </div>
+        <div style="font:600 9.5px 'Martian Mono',monospace;color:#A8AEB9">2h</div>
+      </div>
+    </div>
+
+    <div style="display:flex;align-items:center;gap:8px;padding:14px 4px 6px"><span style="font:600 9.5px 'Martian Mono',monospace;color:rgba(168,174,185,.6)">DONE</span><span style="font:400 9.5px 'Martian Mono',monospace;color:rgba(168,174,185,.5)">2</span></div>
+    <div style="display:flex;flex-direction:column;gap:2px">
+      <div style="background:#16171B;border-radius:4px;padding:10px 14px;display:flex;gap:12px;align-items:center">
+        <div style="width:9px;height:9px;border-radius:50%;border:2.5px solid rgba(168,174,185,.5);box-sizing:border-box;flex:none"></div>
+        <div style="flex:1;font:400 13.5px/19px 'Space Grotesk';color:#A8AEB9">π - perf-study</div>
+        <div style="font:600 9.5px 'Martian Mono',monospace;color:rgba(168,174,185,.6)">3h</div>
+      </div>
+      <div style="background:#16171B;border-radius:4px;padding:10px 14px;display:flex;gap:12px;align-items:center">
+        <div style="width:9px;height:9px;border-radius:50%;border:2.5px solid rgba(168,174,185,.5);box-sizing:border-box;flex:none"></div>
+        <div style="flex:1;font:400 13.5px/19px 'Space Grotesk';color:#A8AEB9">claude - install-scripts</div>
+        <div style="font:600 9.5px 'Martian Mono',monospace;color:rgba(168,174,185,.6)">1d</div>
+      </div>
+    </div>
+    <div style="padding:12px 4px;font:400 9.5px 'Martian Mono',monospace;color:rgba(168,174,185,.5)">IDLE 4 · tap to expand</div>
+  </div>
+  <div style="position:relative;height:0">
+    <div style="position:absolute;right:16px;bottom:22px;width:56px;height:56px;border-radius:8px;background:#8DF08D;display:flex;align-items:center;justify-content:center"><span style="font-family:'Material Symbols Outlined';font-size:26px;color:#04241A">add</span></div>
+  </div>
+  <div style="background:#121316;border-top:1px solid #26292E;display:flex;padding:6px 8px">
+    <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;position:relative"><span style="font-family:'Material Symbols Outlined';font-size:22px;color:#8DF08D">grid_view</span><span style="font:600 10px 'Space Grotesk';color:#8DF08D">Board</span><div style="position:absolute;top:-4px;right:26px;width:15px;height:15px;border-radius:4px;background:#E5484D;display:flex;align-items:center;justify-content:center;font:700 9px 'Space Grotesk';color:#3A0B0C">1</div></div>
+    <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:2px"><span style="font-family:'Material Symbols Outlined';font-size:22px;color:#A8AEB9">history</span><span style="font:500 10px 'Space Grotesk';color:#A8AEB9">Sessions</span></div>
+    <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:2px"><span style="font-family:'Material Symbols Outlined';font-size:22px;color:#A8AEB9">bar_chart</span><span style="font:500 10px 'Space Grotesk';color:#A8AEB9">Usage</span></div>
+    <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:2px"><span style="font-family:'Material Symbols Outlined';font-size:22px;color:#A8AEB9">code</span><span style="font:500 10px 'Space Grotesk';color:#A8AEB9">Review</span></div>
+  </div>
+</div>
+</x-import>
+<p style="max-width:428px;margin:2px 0 0;font:400 11px/1.6 'Space Grotesk',sans-serif;color:rgba(168,174,185,.75)">Only two things changed from <a href="#6a">6a</a>: dots became rings, and the lockup replaced the peek face in the header. The live agent's ring emits the ripple — the icon's own gesture, at 9px.</p>
+</div>
+
+<div id="8c" style="display:flex;flex-direction:column;gap:9px">
+<div style="display:flex;align-items:baseline;gap:8px;font:400 11px/1.3 'Space Grotesk',sans-serif;color:rgba(236,237,240,.55)">
+<a href="#8c" style="font:600 10.5px 'JetBrains Mono',monospace;padding:3px 7px;background:rgba(236,237,240,.1);color:#ECEDF0;border-radius:5px">8c</a>Where the icon ground earns its place — splash, empty board, widget
+</div>
+<div style="display:flex;gap:18px;align-items:flex-start">
+  <x-import component-from-global-scope="AndroidDevice" from="./android-frame.jsx" dark="{{ true }}" width="{{ 412 }}" height="{{ 892 }}" hint-size="428px,908px">
+  <div style="height:100%;position:relative;display:flex;flex-direction:column;background:#141619;font-family:'Space Grotesk',sans-serif;align-items:center;justify-content:center;gap:26px">
+    <img src="assets/scoutr-icon.png" alt="Scoutr" style="width:112px;height:112px;border-radius:26px;display:block">
+    <div style="display:flex;flex-direction:column;align-items:center;gap:8px">
+      <div style="font:700 30px/1 'Space Grotesk',sans-serif;letter-spacing:-1.2px;color:#ECEDF0">scoutr</div>
+      <div style="font:400 10px/1 'Martian Mono',monospace;color:#6FA89E">artemis · protocol 19</div>
+    </div>
+    <div style="position:absolute;bottom:76px;left:0;right:0;display:flex;flex-direction:column;align-items:center;gap:12px">
+      <div style="width:26px;height:26px;position:relative;display:flex;align-items:center;justify-content:center">
+        <div style="position:absolute;width:12px;height:12px;border:2px solid #8DF08D;border-radius:50%"></div>
+        <div style="position:absolute;width:26px;height:26px;border:1.5px solid #8DF08D;border-radius:50%;animation:scoutrRipple 1.8s linear infinite"></div>
+      </div>
+      <div style="font:400 10px 'Martian Mono',monospace;color:rgba(143,240,141,.7)">connecting…</div>
+    </div>
+  </div>
+  </x-import>
+
+  <div style="display:flex;flex-direction:column;gap:18px;width:340px">
+    <div style="background:#141619;border-radius:8px;padding:22px;display:flex;flex-direction:column;align-items:center;gap:14px;text-align:center">
+      <div style="position:relative;width:78px;height:84px;flex:none">
+        <div style="position:absolute;left:6px;bottom:8px;width:17px;height:60px;background:#2C6F72;border-radius:9px 0 0 0"></div>
+        <div style="position:absolute;left:6px;top:16px;width:28px;height:17px;background:#2C6F72;border-radius:9px 0 0 0"></div>
+        <div style="position:absolute;left:26px;top:4px;width:34px;height:34px;border:7px solid #8DF08D;border-radius:50%;box-sizing:border-box"></div>
+        <div style="position:absolute;left:36px;bottom:8px;width:14px;height:34px;background:#1E4E54;border-radius:7px 0 0 0"></div>
+        <div style="position:absolute;left:36px;top:44px;width:22px;height:14px;background:#1E4E54;border-radius:7px 0 0 0"></div>
+        <div style="position:absolute;left:51px;top:36px;width:26px;height:26px;border:6px solid rgba(141,240,141,.5);border-radius:50%;box-sizing:border-box"></div>
+        <div style="position:absolute;left:0;bottom:0;width:70px;height:11px;border-radius:6px;background:#8DF08D"></div>
+      </div>
+      <div style="font:600 16px/22px 'Space Grotesk';color:#ECEDF0">Nothing is running</div>
+      <div style="font:400 12.5px/19px 'Space Grotesk';color:#8C979B;max-width:230px">Start a session on the host and it will surface here within a second.</div>
+      <div style="background:#8DF08D;border-radius:6px;padding:10px 16px;font:600 13px 'Space Grotesk';color:#04241A">New session</div>
+      <div style="font:400 9.5px 'Martian Mono',monospace;color:#6C7478;margin-top:2px">empty board · ink surface</div>
+    </div>
+
+    <div style="background:#141619;border-radius:8px;padding:14px;display:flex;flex-direction:column;gap:10px">
+      <div style="display:flex;align-items:center;gap:8px">
+        <div style="width:12px;height:12px;border:2px solid #8DF08D;border-radius:50%"></div>
+        <div style="flex:1;font:600 12px 'Space Grotesk';color:#ECEDF0">scoutr</div>
+        <div style="font:400 9px 'Martian Mono',monospace;color:#6FA89E">6 live</div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:2px">
+        <div style="background:rgba(255,255,255,.05);border-radius:4px;padding:8px 10px;display:flex;align-items:center;gap:8px"><div style="width:8px;height:8px;border:2px solid #E5484D;border-radius:50%;box-sizing:border-box"></div><span style="flex:1;font:500 11.5px 'Space Grotesk';color:#ECEDF0">claude - bridge</span><span style="font:600 9px 'Martian Mono',monospace;color:#E5484D">1m</span></div>
+        <div style="background:rgba(255,255,255,.05);border-radius:4px;padding:8px 10px;display:flex;align-items:center;gap:8px"><div style="width:8px;height:8px;border:2px solid #8DF08D;border-radius:50%;box-sizing:border-box"></div><span style="flex:1;font:500 11.5px 'Space Grotesk';color:#ECEDF0">π - scoutr</span><span style="font:600 9px 'Martian Mono',monospace;color:#8C979B">8m</span></div>
+        <div style="background:rgba(255,255,255,.05);border-radius:4px;padding:8px 10px;display:flex;align-items:center;gap:8px"><div style="width:8px;height:8px;border:2px solid #8DF08D;border-radius:50%;box-sizing:border-box"></div><span style="flex:1;font:500 11.5px 'Space Grotesk';color:#ECEDF0">agy - material</span><span style="font:600 9px 'Martian Mono',monospace;color:#8C979B">21m</span></div>
+      </div>
+      <div style="font:400 9.5px 'Martian Mono',monospace;color:#6C7478">home screen widget · 4×2</div>
+    </div>
+
+    <div style="background:#121316;border:1px solid #26292E;border-radius:6px;padding:14px;font:400 10.5px/1.7 'Space Grotesk';color:#A8AEB9">
+      <span style="color:#ECEDF0;font-weight:600">Rule:</span> icon ink <span style="font-family:'JetBrains Mono',monospace">#141619</span> is for surfaces where the brand is the content — splash, empty states, widget, notification. It sits one step <em>above</em> the app canvas <span style="font-family:'JetBrains Mono',monospace">#0B0C0E</span>, so those read as slightly raised rather than as a different product. Boards and transcripts stay true black for OLED.
+    </div>
+  </div>
+</div>
+</div>
+</div>
+</section>
+
+<section id="t7-kept" style="padding:40px 44px 40px;border-bottom:1px solid rgba(236,237,240,.08)">
+<div style="display:flex;align-items:baseline;gap:10px;margin:0 0 8px">
+<span style="font:600 10px 'JetBrains Mono',monospace;padding:3px 7px;background:rgba(236,237,240,.1);color:#ECEDF0;border-radius:4px">7</span>
+<span style="font:600 13px/1.2 'Space Grotesk',sans-serif;color:#A8AEB9">Kept from turn 7 — referenced by section 9</span>
+</div>
+<div style="display:flex;flex-wrap:wrap;gap:32px;align-items:flex-start">
+<div id="7a" style="display:flex;flex-direction:column;gap:9px">
+<div style="display:flex;align-items:baseline;gap:8px;font:400 11px/1.3 'Space Grotesk',sans-serif;color:rgba(236,237,240,.55)">
+<a href="#7a" style="font:600 10.5px 'JetBrains Mono',monospace;padding:3px 7px;background:rgba(236,237,240,.1);color:#ECEDF0;border-radius:5px">7a</a>Chat <a href="#5b">5b</a>, retuned to tiles
+</div>
+<x-import component-from-global-scope="AndroidDevice" from="./android-frame.jsx" dark="{{ true }}" width="{{ 412 }}" height="{{ 892 }}" hint-size="428px,908px">
+<div style="height:100%;display:flex;flex-direction:column;background:#0B0C0E;font-family:'Space Grotesk',sans-serif">
+  <div style="display:flex;align-items:center;padding:2px 4px">
+    <div style="width:48px;height:48px;display:flex;align-items:center;justify-content:center"><span style="font-family:'Material Symbols Outlined';font-size:24px;color:#ECEDF0">arrow_back</span></div>
+    <div style="flex:1;min-width:0">
+      <div style="font:600 17px/22px 'Space Grotesk',sans-serif;letter-spacing:-.2px">π - scoutr</div>
+      <div style="font:400 9.5px/15px 'Martian Mono',monospace;color:#A8AEB9">w6M:p8 · gpt-5.2</div>
+    </div>
+    <div style="width:44px;height:44px;display:flex;align-items:center;justify-content:center"><span style="font-family:'Material Symbols Outlined';font-size:20px;color:#7EE787">visibility</span></div>
+    <div style="width:44px;height:44px;display:flex;align-items:center;justify-content:center"><span style="font-family:'Material Symbols Outlined';font-size:22px;color:#ECEDF0">more_vert</span></div>
+  </div>
+  <div style="display:flex;gap:2px;padding:0 12px 10px">
+    <div style="background:#16171B;border-radius:4px;padding:6px 10px;font:500 10px/14px 'Space Grotesk';color:#A8AEB9">Thinking <span style="color:#ECEDF0;font-weight:600">xhigh</span></div>
+    <div style="background:#16171B;border-radius:4px;padding:6px 10px;font:500 10px/14px 'Space Grotesk';color:#A8AEB9">Agent <span style="color:#ECEDF0;font-weight:600">Pi</span></div>
+    <div style="background:#16171B;border-radius:4px;padding:6px 10px;font:500 10px/14px 'Space Grotesk';color:#A8AEB9">Model <span style="color:#ECEDF0;font-weight:600">gpt-5.2</span></div>
+  </div>
+  <div style="height:1px;background:rgba(54,59,67,.5)"></div>
+  <div style="flex:1;overflow:hidden;padding:14px 12px 0">
+    <div style="display:flex;justify-content:flex-end"><div style="max-width:288px;background:#1A1C20;border-radius:4px;padding:10px 14px;font:400 14px/21px 'Space Grotesk',sans-serif">clean the trailing whitespace in the perf doc and re-run the link check</div></div>
+    <div style="font:400 15px/23px 'Space Grotesk',sans-serif;margin-top:16px;padding:0 2px;text-wrap:pretty">Found 3 lines with trailing whitespace and one broken relative link. Fixing both now.</div>
+
+    <div style="margin-top:16px;margin-left:5px;border-left:1px solid #26292E;padding-left:15px;display:flex;flex-direction:column;gap:11px">
+      <div style="position:relative;display:flex;align-items:center;gap:8px">
+        <div style="position:absolute;left:-19px;width:7px;height:7px;border-radius:50%;background:#1B1D21;border:1px solid #363B43"></div>
+        <div style="flex:1;min-width:0;font:600 10px/15px 'Martian Mono',monospace;color:#A8AEB9">read <span style="font-weight:400;color:rgba(168,174,185,.55)">performance-study.md</span></div>
+        <span style="font-family:'Material Symbols Outlined';font-size:14px;color:rgba(168,174,185,.4)">chevron_right</span>
+      </div>
+      <div style="position:relative;display:flex;align-items:center;gap:8px">
+        <div style="position:absolute;left:-19px;width:7px;height:7px;border-radius:50%;background:#1B1D21;border:1px solid #363B43"></div>
+        <div style="flex:1;min-width:0;font:600 10px/15px 'Martian Mono',monospace;color:#A8AEB9">bash <span style="font-weight:400;color:rgba(168,174,185,.55)">git status</span></div>
+        <span style="font-family:'Material Symbols Outlined';font-size:14px;color:rgba(168,174,185,.4)">chevron_right</span>
+      </div>
+      <div style="position:relative">
+        <div style="position:absolute;left:-19px;top:4px;width:7px;height:7px;border-radius:50%;background:#E5484D"></div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <div style="flex:1;font:600 10px/15px 'Martian Mono',monospace;color:#E5484D">bash <span style="font-weight:400">exit 1</span></div>
+          <span style="font-family:'Material Symbols Outlined';font-size:14px;color:rgba(229,72,77,.7)">expand_more</span>
+        </div>
+        <div style="margin-top:7px;background:rgba(229,72,77,.08);border-radius:4px;padding:8px 10px;font:400 9.5px/16px 'Martian Mono',monospace;color:rgba(236,237,240,.85)">performance-study.md:3: trailing whitespace<br>performance-study.md:41: trailing whitespace</div>
+      </div>
+      <div style="position:relative">
+        <div style="position:absolute;left:-19px;top:4px;width:7px;height:7px;border-radius:50%;background:#1B1D21;border:1px solid #363B43"></div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <div style="flex:1;font:600 10px/15px 'Martian Mono',monospace;color:#A8AEB9">bash <span style="font-weight:400;color:rgba(168,174,185,.55)">python3 linkcheck.py</span></div>
+          <span style="font-family:'Material Symbols Outlined';font-size:14px;color:rgba(168,174,185,.4)">expand_more</span>
+        </div>
+        <div style="margin-top:7px;background:#16171B;border-radius:4px;padding:8px 10px;font:400 9.5px/16px 'Martian Mono',monospace;color:rgba(168,174,185,.75)">links=33 unique=23</div>
+      </div>
+      <div style="position:relative;display:flex;align-items:center;gap:8px">
+        <div style="position:absolute;left:-19px;width:7px;height:7px;border-radius:50%;background:#7EE787;animation:scoutrPulse 1.4s ease-in-out infinite"></div>
+        <div style="flex:1;font:600 10px/15px 'Martian Mono',monospace;color:#7EE787">edit <span style="font-weight:400">performance-study.md</span></div>
+      </div>
+    </div>
+
+    <div style="margin-top:14px;background:#16171B;border-radius:4px;padding:10px 12px">
+      <div style="font:500 10.5px 'Space Grotesk',sans-serif;color:#A8AEB9">thinking · 2 blocks</div>
+      <div style="font:400 13px/20px 'Space Grotesk',sans-serif;font-style:italic;color:#A8AEB9;margin-top:4px">Planning trailing whitespace cleanup…</div>
+    </div>
+  </div>
+
+  <div style="margin:0 12px;background:#16171B;border-radius:4px;padding:10px 12px;display:flex;align-items:center;gap:10px">
+    <div style="width:18px;height:18px;position:relative;flex:none"><div style="position:absolute;inset:0;border:1.5px solid #7EE787;border-radius:50%;animation:scoutrRipple 1.6s linear infinite"></div><div style="position:absolute;inset:0;border:1.5px solid #7EE787;border-radius:50%;animation:scoutrRipple 1.6s linear infinite;animation-delay:.8s"></div></div>
+    <div style="flex:1;min-width:0"><div style="font:500 12.5px/17px 'Space Grotesk',sans-serif;color:#7EE787">Editing performance-study.md</div><div style="font:400 9.5px/15px 'Martian Mono',monospace;color:#A8AEB9">8m15s · 14 tools · 2 err</div></div>
+    <div style="background:#1B1D21;border-radius:6px;padding:7px 12px;font:600 11px 'Space Grotesk',sans-serif;color:#A8AEB9">Abort</div>
+  </div>
+
+  <div style="padding:8px 12px">
+    <div style="display:flex;align-items:center;background:#16171B;border:1px solid rgba(126,231,135,.55);border-radius:6px;padding:0 4px 0 14px;min-height:52px">
+      <div style="flex:1;font:400 15px 'Space Grotesk',sans-serif;color:#ECEDF0">rename the Cockpit refs too</div>
+      <div style="width:44px;height:44px;display:flex;align-items:center;justify-content:center"><span style="font-family:'Material Symbols Outlined';font-size:22px;color:#A8AEB9">image</span></div>
+      <div style="width:36px;height:36px;margin-right:4px;border-radius:6px;background:#7EE787;display:flex;align-items:center;justify-content:center"><span style="font-family:'Material Symbols Outlined';font-size:20px;color:#052B0A">arrow_upward</span></div>
+    </div>
+  </div>
+</div>
+</x-import>
+<p style="max-width:428px;margin:2px 0 0;font:400 11px/1.6 'Space Grotesk',sans-serif;color:rgba(168,174,185,.75)">Tool calls stay a timeline: one mono line per call on the 1px spine, no tile of their own, with a chevron on the right. Tapping expands the output into a 4px tile inline (two shown expanded here) — the tile surface is reserved for content, the spine for structure. The send button is a filled 6px square, the only accent surface in the composer.</p>
+</div>
+</div>
+</section>
+
+
+</x-dc>
+</body>
+</html>
