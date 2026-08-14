@@ -28,7 +28,7 @@ import org.junit.Rule
 import org.junit.Test
 
 /**
- * Settings: the five sections, the durable stores behind them, and the
+ * Settings: the six sections, the durable stores behind them, and the
  * Forget gate. The instrumented app keeps one preferences file across tests,
  * so every test clears what it asserts on. The page is one long scroll —
  * scroll to a row before touching it.
@@ -155,6 +155,22 @@ class SettingsScreenTest {
         setSettings()
         compose.onNodeWithTag("settings_haptics").performScrollTo().assertIsOn().performClick()
         assertFalse(AppearancePreferencesStore(context).hapticsEnabled)
+    }
+
+    @Test
+    fun typographySteppersPersistIndependentCodeSizes() {
+        setSettings()
+        val appearance = AppearancePreferencesStore(context)
+
+        compose.onNodeWithTag("settings_markdown_code_value").performScrollTo().assertTextEquals("11")
+        compose.onNodeWithTag("settings_markdown_code_minus").performClick()
+        compose.onNodeWithTag("settings_markdown_code_value").assertTextEquals("10")
+        assertEquals(10f, appearance.markdownCodeFontSizeSp, 0.01f)
+
+        compose.onNodeWithTag("settings_tool_output_value").performScrollTo().assertTextEquals("9.5")
+        compose.onNodeWithTag("settings_tool_output_plus").performClick()
+        compose.onNodeWithTag("settings_tool_output_value").assertTextEquals("10")
+        assertEquals(10f, appearance.toolOutputFontSizeSp, 0.01f)
     }
 
     @Test

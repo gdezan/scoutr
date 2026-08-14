@@ -1,6 +1,7 @@
 package dev.scoutr.app.data
 
 import android.content.Context
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -31,6 +32,8 @@ class AppearancePreferencesStoreTest {
         assertTrue(prefs.showThinkingDefault)
         assertFalse(prefs.expandToolsDefault)
         assertTrue(prefs.hapticsEnabled)
+        assertEquals(11f, prefs.markdownCodeFontSizeSp)
+        assertEquals(9.5f, prefs.toolOutputFontSizeSp, 0.01f)
     }
 
     @Test
@@ -38,11 +41,25 @@ class AppearancePreferencesStoreTest {
         store().showThinkingDefault = false
         store().expandToolsDefault = true
         store().hapticsEnabled = false
+        store().markdownCodeFontSizeSp = 13f
+        store().toolOutputFontSizeSp = 12.5f
 
         val reread = store()
         assertFalse(reread.showThinkingDefault)
         assertTrue(reread.expandToolsDefault)
         assertFalse(reread.hapticsEnabled)
+        assertEquals(13f, reread.markdownCodeFontSizeSp)
+        assertEquals(12.5f, reread.toolOutputFontSizeSp, 0.01f)
+    }
+
+    @Test
+    fun code_sizes_are_clamped_to_the_readable_range() {
+        val prefs = store()
+        prefs.markdownCodeFontSizeSp = 2f
+        prefs.toolOutputFontSizeSp = 30f
+
+        assertEquals(8f, prefs.markdownCodeFontSizeSp)
+        assertEquals(18f, prefs.toolOutputFontSizeSp)
     }
 
     @Test

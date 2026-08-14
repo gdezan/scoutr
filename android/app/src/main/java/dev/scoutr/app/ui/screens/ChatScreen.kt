@@ -186,6 +186,8 @@ fun ChatScreen(
     // so rotation keeps the override and a later Settings change never rewrites
     // a chat that is already open.
     val appearance = remember(context) { AppearancePreferencesStore(context) }
+    val markdownCodeFontSizeSp = appearance.markdownCodeFontSizeSp
+    val toolOutputFontSizeSp = appearance.toolOutputFontSizeSp
     var showThinking by rememberSaveable { mutableStateOf(appearance.showThinkingDefault) }
     var expandTools by rememberSaveable { mutableStateOf(appearance.expandToolsDefault) }
     var renameOpen by remember { mutableStateOf(false) }
@@ -259,6 +261,8 @@ fun ChatScreen(
                         pendingMessages = ui.pendingMessages,
                         showThinking = showThinking,
                         expandTools = expandTools,
+                        markdownCodeFontSizeSp = markdownCodeFontSizeSp,
+                        toolOutputFontSizeSp = toolOutputFontSizeSp,
                         starting = starting,
                         agentStatus = ui.agentStatus,
                         statusSinceMs = ui.statusSinceMs,
@@ -598,6 +602,8 @@ fun ChatList(
     entries: List<SessionEntry>,
     showThinking: Boolean = true,
     expandTools: Boolean = false,
+    markdownCodeFontSizeSp: Float = AppearancePreferencesStore.DEFAULT_MARKDOWN_CODE_FONT_SIZE_SP,
+    toolOutputFontSizeSp: Float = AppearancePreferencesStore.DEFAULT_TOOL_OUTPUT_FONT_SIZE_SP,
     pendingMessages: List<PendingUserMessage> = emptyList(),
     questions: List<QuestionEntry> = emptyList(),
     answeringQuestionId: String? = null,
@@ -722,6 +728,8 @@ fun ChatList(
                     is ChatRow.Entry -> MessageRow(
                         entry = row.entry,
                         showThinking = showThinking,
+                        markdownCodeFontSizeSp = markdownCodeFontSizeSp,
+                        toolOutputFontSizeSp = toolOutputFontSizeSp,
                         toolExpanded = { toolId -> isToolExpanded(toolId) },
                         resultToolKey = { entry -> toolResultKey(entry, entries) },
                         resultHasCall = { entry -> inferredToolCallKey(entry, entries) != null },
@@ -846,6 +854,8 @@ private suspend fun scrollChatToEnd(listState: LazyListState, lastIndex: Int) {
 private fun MessageRow(
     entry: SessionEntry,
     showThinking: Boolean,
+    markdownCodeFontSizeSp: Float,
+    toolOutputFontSizeSp: Float,
     toolExpanded: (String) -> Boolean,
     onToggleTool: (String) -> Unit,
     resultToolKey: (SessionEntry) -> String,
@@ -858,6 +868,7 @@ private fun MessageRow(
         "assistant" -> AssistantBubble(
             entry = entry,
             showThinking = showThinking,
+            markdownCodeFontSizeSp = markdownCodeFontSizeSp,
             toolExpanded = toolExpanded,
             fileEditFor = fileEditFor,
             onToggleTool = onToggleTool,
@@ -865,6 +876,7 @@ private fun MessageRow(
         )
         "toolResult" -> ToolResultChip(
             entry = entry,
+            toolOutputFontSizeSp = toolOutputFontSizeSp,
             toolExpanded = toolExpanded,
             resultToolKey = resultToolKey,
             hasCall = resultHasCall(entry),
@@ -954,6 +966,7 @@ private fun PendingUserBubble(
 private fun AssistantBubble(
     entry: SessionEntry,
     showThinking: Boolean,
+    markdownCodeFontSizeSp: Float,
     toolExpanded: (String) -> Boolean,
     fileEditFor: (String) -> ContentBlock?,
     onToggleTool: (String) -> Unit,
@@ -973,7 +986,7 @@ private fun AssistantBubble(
                         // Only the prose is selectable — tool chips keep their
                         // tap-to-expand gesture without selection fighting it.
                         SelectionContainer(modifier = Modifier.padding(horizontal = 2.dp, vertical = 4.dp)) {
-                            AssistantMarkdown(content = text)
+                            AssistantMarkdown(content = text, codeFontSizeSp = markdownCodeFontSizeSp)
                         }
                     }
                     index++
@@ -1289,6 +1302,7 @@ private val SPINE_RUN_GAP = 16.dp
 @Composable
 private fun ToolResultChip(
     entry: SessionEntry,
+    toolOutputFontSizeSp: Float,
     toolExpanded: (String) -> Boolean,
     resultToolKey: (SessionEntry) -> String,
     hasCall: Boolean,
@@ -1325,11 +1339,11 @@ private fun ToolResultChip(
                 )
             }
             if (edit != null) {
-                FileEditDiff(edit)
+                FileEditDiff(edit, toolOutputFontSizeSp)
             } else if (output.isNotBlank()) {
                 Text(
                     output,
-                    style = ScoutrType.monoMeta,
+                    style = ScoutrType.monoCode(toolOutputFontSizeSp),
                     color = if (isError) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f)
                     else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
                     maxLines = if (expanded) Int.MAX_VALUE else 2,
@@ -1364,13 +1378,17 @@ private fun DiffStatBadge(edit: ContentBlock, modifier: Modifier = Modifier) {
  * indentation survives, matching the review diff's no-wrap default.
  */
 @Composable
-private fun FileEditDiff(edit: ContentBlock, modifier: Modifier = Modifier) {
+private fun FileEditDiff(
+    edit: ContentBlock,
+    fontSizeSp: Float,
+    modifier: Modifier = Modifier,
+) {
     val path = edit.path.orEmpty()
     val language = remember(path) { languageForPath(path) }
     Column(modifier.fillMaxWidth().testTag("file_edit_diff")) {
         Text(
             fileEditDisplayPath(edit),
-            style = ScoutrType.monoMeta,
+            style = ScoutrType.monoCode(fontSizeSp),
             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
             maxLines = 1,
             overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
@@ -1383,12 +1401,12 @@ private fun FileEditDiff(edit: ContentBlock, modifier: Modifier = Modifier) {
                 addAll(hunk.lines)
             }
         }
-        DiffLines(lines, language, wrapLines = false, horizontalPadding = 0.dp, style = ScoutrType.monoMeta)
+        DiffLines(lines, language, wrapLines = false, horizontalPadding = 0.dp, style = ScoutrType.monoCode(fontSizeSp))
         if (edit.truncated) {
             Spacer(Modifier.height(4.dp))
             Text(
                 "⋯ diff truncated",
-                style = ScoutrType.monoMeta,
+                style = ScoutrType.monoCode(fontSizeSp),
                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
             )
         }

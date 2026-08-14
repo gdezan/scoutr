@@ -54,8 +54,8 @@ import kotlin.math.roundToInt
  * Settings: the home for durable device preferences and the only place the
  * saved pairing can be managed.
  *
- * Five sections on one scroll — Connection, Notifications, Chat, Terminal,
- * Haptics. Deliberately not a session-admin page: launch defaults, the Chat
+ * Six sections on one scroll — Connection, Notifications, Chat, Typography,
+ * Terminal, Haptics. Deliberately not a session-admin page: launch defaults, the Chat
  * header toggles, and pin/archive stay in the flow that owns them. Chat here
  * only supplies the seed a *new* visit starts from; Terminal writes the same
  * per-connection store that pinch and the extra-keys strip write.
@@ -107,6 +107,7 @@ fun SettingsScreen(
 
         ChatSection(appearance = appearance)
 
+        TypographySection(appearance = appearance)
         if (saved != null) {
             TerminalSection(
                 preferences = remember(terminalPreferences, saved) {
@@ -287,6 +288,111 @@ private fun ChatSection(appearance: AppearancePreferencesStore) {
     }
 }
 
+/** Global code density controls; review code deliberately follows Terminal below. */
+@Composable
+private fun TypographySection(appearance: AppearancePreferencesStore) {
+    var markdownCodeFontSizeSp by remember(appearance) { mutableFloatStateOf(appearance.markdownCodeFontSizeSp) }
+    var toolOutputFontSizeSp by remember(appearance) { mutableFloatStateOf(appearance.toolOutputFontSizeSp) }
+
+    fun setMarkdownCodeFontSize(value: Float) {
+        appearance.markdownCodeFontSizeSp = value
+        markdownCodeFontSizeSp = appearance.markdownCodeFontSizeSp
+    }
+
+    fun setToolOutputFontSize(value: Float) {
+        appearance.toolOutputFontSizeSp = value
+        toolOutputFontSizeSp = appearance.toolOutputFontSizeSp
+    }
+
+    SettingsSection(
+        "Typography",
+        footnote = "Review diff and file content use the active connection's Terminal font size.",
+    ) {
+        FontSizeStepperRow(
+            title = "Markdown code",
+            subtitle = "Inline and fenced code in assistant messages.",
+            fontSizeSp = markdownCodeFontSizeSp,
+            minFontSizeSp = AppearancePreferencesStore.MIN_CODE_FONT_SIZE_SP,
+            maxFontSizeSp = AppearancePreferencesStore.MAX_CODE_FONT_SIZE_SP,
+            onFontSizeChange = ::setMarkdownCodeFontSize,
+            minusTag = "settings_markdown_code_minus",
+            valueTag = "settings_markdown_code_value",
+            plusTag = "settings_markdown_code_plus",
+            smallerContentDescription = "Smaller Markdown code",
+            largerContentDescription = "Larger Markdown code",
+        )
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        FontSizeStepperRow(
+            title = "Tool output",
+            subtitle = "Expanded command results and inline file-edit diffs.",
+            fontSizeSp = toolOutputFontSizeSp,
+            minFontSizeSp = AppearancePreferencesStore.MIN_CODE_FONT_SIZE_SP,
+            maxFontSizeSp = AppearancePreferencesStore.MAX_CODE_FONT_SIZE_SP,
+            stepSp = 0.5f,
+            onFontSizeChange = ::setToolOutputFontSize,
+            minusTag = "settings_tool_output_minus",
+            valueTag = "settings_tool_output_value",
+            plusTag = "settings_tool_output_plus",
+            smallerContentDescription = "Smaller tool output",
+            largerContentDescription = "Larger tool output",
+        )
+    }
+}
+
+@Composable
+private fun FontSizeStepperRow(
+    title: String,
+    subtitle: String,
+    fontSizeSp: Float,
+    minFontSizeSp: Float,
+    maxFontSizeSp: Float,
+    onFontSizeChange: (Float) -> Unit,
+    minusTag: String,
+    valueTag: String,
+    plusTag: String,
+    smallerContentDescription: String,
+    largerContentDescription: String,
+    stepSp: Float = FONT_STEP_SP,
+) {
+    Row(
+        Modifier.fillMaxWidth().padding(start = 14.dp, end = 6.dp, top = 10.dp, bottom = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.bodyLarge)
+            Text(
+                subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        IconButton(
+            onClick = { onFontSizeChange((fontSizeSp - stepSp).coerceAtLeast(minFontSizeSp)) },
+            enabled = fontSizeSp > minFontSizeSp,
+            modifier = Modifier.testTag(minusTag),
+        ) {
+            Icon(Icons.Default.Remove, contentDescription = smallerContentDescription)
+        }
+        Text(
+            fontSizeLabel(fontSizeSp),
+            style = MaterialTheme.typography.bodyMedium,
+            fontFamily = ScoutrMono,
+            modifier = Modifier.width(36.dp).testTag(valueTag),
+        )
+        IconButton(
+            onClick = { onFontSizeChange((fontSizeSp + stepSp).coerceAtMost(maxFontSizeSp)) },
+            enabled = fontSizeSp < maxFontSizeSp,
+            modifier = Modifier.testTag(plusTag),
+        ) {
+            Icon(Icons.Default.Add, contentDescription = largerContentDescription)
+        }
+    }
+}
+
+private fun fontSizeLabel(value: Float): String =
+    if (value == value.roundToInt().toFloat()) value.roundToInt().toString() else value.toString()
+
+
 /**
  * Terminal look, for this connection. These are the same values pinch and the
  * extra-keys strip write, so an open terminal follows along and the shortcuts
@@ -305,39 +411,19 @@ private fun TerminalSection(preferences: TerminalPreferencesStore.ConnectionPref
     }
 
     SettingsSection("Terminal") {
-        Row(
-            Modifier.fillMaxWidth().padding(start = 14.dp, end = 6.dp, top = 10.dp, bottom = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(Modifier.weight(1f)) {
-                Text("Font size", style = MaterialTheme.typography.bodyLarge)
-                Text(
-                    "Pinch in the terminal does the same thing.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            IconButton(
-                onClick = { setFont(fontSizeSp - FONT_STEP_SP) },
-                enabled = fontSizeSp > TerminalPreferencesStore.ConnectionPreferences.MIN_FONT_SIZE_SP,
-                modifier = Modifier.testTag("settings_font_minus"),
-            ) {
-                Icon(Icons.Default.Remove, contentDescription = "Smaller terminal font")
-            }
-            Text(
-                "${fontSizeSp.roundToInt()}",
-                style = MaterialTheme.typography.bodyMedium,
-                fontFamily = ScoutrMono,
-                modifier = Modifier.width(28.dp).testTag("settings_font_value"),
-            )
-            IconButton(
-                onClick = { setFont(fontSizeSp + FONT_STEP_SP) },
-                enabled = fontSizeSp < TerminalPreferencesStore.ConnectionPreferences.MAX_FONT_SIZE_SP,
-                modifier = Modifier.testTag("settings_font_plus"),
-            ) {
-                Icon(Icons.Default.Add, contentDescription = "Larger terminal font")
-            }
-        }
+        FontSizeStepperRow(
+            title = "Font size",
+            subtitle = "Pinch in the terminal does the same thing.",
+            fontSizeSp = fontSizeSp,
+            minFontSizeSp = TerminalPreferencesStore.ConnectionPreferences.MIN_FONT_SIZE_SP,
+            maxFontSizeSp = TerminalPreferencesStore.ConnectionPreferences.MAX_FONT_SIZE_SP,
+            onFontSizeChange = setFont,
+            minusTag = "settings_font_minus",
+            valueTag = "settings_font_value",
+            plusTag = "settings_font_plus",
+            smallerContentDescription = "Smaller terminal font",
+            largerContentDescription = "Larger terminal font",
+        )
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         SettingsSwitchRow(
             title = "Extra keys",

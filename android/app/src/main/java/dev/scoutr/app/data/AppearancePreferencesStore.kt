@@ -34,13 +34,28 @@ class AppearancePreferencesStore(context: Context) {
         get() = prefs.getBoolean(KEY_EXPAND_TOOLS, DEFAULT_EXPAND_TOOLS)
         set(value) = prefs.edit().putBoolean(KEY_EXPAND_TOOLS, value).apply()
 
+    /** Font size for inline and fenced code in assistant Markdown. */
+    var markdownCodeFontSizeSp: Float
+        get() = prefs.getFloat(KEY_MARKDOWN_CODE_FONT_SIZE, DEFAULT_MARKDOWN_CODE_FONT_SIZE_SP)
+        set(value) = prefs.edit().putFloat(KEY_MARKDOWN_CODE_FONT_SIZE, value.coerceIn(MIN_CODE_FONT_SIZE_SP, MAX_CODE_FONT_SIZE_SP)).apply()
+
+    /** Font size for expanded tool results and inline file-edit diffs. */
+    var toolOutputFontSizeSp: Float
+        get() = prefs.getFloat(KEY_TOOL_OUTPUT_FONT_SIZE, DEFAULT_TOOL_OUTPUT_FONT_SIZE_SP)
+        set(value) = prefs.edit().putFloat(KEY_TOOL_OUTPUT_FONT_SIZE, value.coerceIn(MIN_CODE_FONT_SIZE_SP, MAX_CODE_FONT_SIZE_SP)).apply()
+
     /** Off silences every [dev.scoutr.app.ui.motion.HapticEvent], BEL and NeedsYou included. */
     var hapticsEnabled: Boolean
         get() = prefs.getBoolean(KEY_HAPTICS, DEFAULT_HAPTICS)
         set(value) = prefs.edit().putBoolean(KEY_HAPTICS, value).apply()
-
     companion object {
         const val FILE = "scoutr_appearance"
+
+        /** Defaults for the compact machine-text controls in Chat. */
+        const val DEFAULT_MARKDOWN_CODE_FONT_SIZE_SP = 11f
+        const val DEFAULT_TOOL_OUTPUT_FONT_SIZE_SP = 9.5f
+        const val MIN_CODE_FONT_SIZE_SP = 8f
+        const val MAX_CODE_FONT_SIZE_SP = 18f
 
         /** Today's hard-coded Chat values, now durable. */
         const val DEFAULT_SHOW_THINKING = true
@@ -49,6 +64,8 @@ class AppearancePreferencesStore(context: Context) {
 
         private const val KEY_SHOW_THINKING = "showThinkingDefault"
         private const val KEY_EXPAND_TOOLS = "expandToolsDefault"
+        private const val KEY_MARKDOWN_CODE_FONT_SIZE = "markdownCodeFontSizeSp"
+        private const val KEY_TOOL_OUTPUT_FONT_SIZE = "toolOutputFontSizeSp"
         private const val KEY_HAPTICS = "hapticsEnabled"
     }
 }

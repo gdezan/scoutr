@@ -405,6 +405,8 @@ private fun ScoutrAppNav(
                 ) { innerReview ->
                     ReviewScreen(
                         viewModel = reviewViewModel,
+                        terminalPreferences = container.terminalPreferences,
+                        saved = remember { container.connectionStore.saved },
                         modifier = Modifier.padding(innerReview),
                     )
                 }

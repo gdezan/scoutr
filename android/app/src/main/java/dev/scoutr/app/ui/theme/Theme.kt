@@ -117,6 +117,12 @@ object ScoutrType {
         lineHeight = 16.sp,
     )
 
+    /** Adjustable machine text: review lines, Markdown code, and tool output. */
+    fun monoCode(fontSizeSp: Float) = monoMeta.copy(
+        fontSize = fontSizeSp.sp,
+        lineHeight = (fontSizeSp + 4f).sp,
+    )
+
     /** An emphasised machine fact: relative time, diff counts, tool names. */
     val monoFact = TextStyle(
         fontFamily = ScoutrMono,
