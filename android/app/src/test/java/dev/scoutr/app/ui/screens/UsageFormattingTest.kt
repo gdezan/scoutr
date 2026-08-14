@@ -27,9 +27,9 @@ class UsageFormattingTest {
         val now = 1_000_000L
 
         assertNull(resetLabel(null, now))
-        assertEquals("Resets now", resetLabel(now + 40, now))
-        assertEquals("Resets in 12m", resetLabel(now + 12 * 60, now))
-        assertEquals("Resets in 2h 15m", resetLabel(now + (2 * 60 + 15) * 60, now))
-        assertEquals("Resets in 3d 2h", resetLabel(now + (3 * 24 + 2) * 60 * 60, now))
+        assertEquals("resets now", resetLabel(now + 40, now))
+        assertEquals("resets in 12m", resetLabel(now + 12 * 60, now))
+        assertEquals("resets in 2h 15m", resetLabel(now + (2 * 60 + 15) * 60, now))
+        assertEquals("resets in 3d 2h", resetLabel(now + (3 * 24 + 2) * 60 * 60, now))
     }
 }

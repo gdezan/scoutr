@@ -12,14 +12,12 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import dev.scoutr.app.ui.theme.ScoutrType
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -37,7 +35,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -110,8 +107,9 @@ internal fun UsageContent(
             Modifier
                 .fillMaxSize()
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
+                .padding(horizontal = 12.dp)
+                .padding(top = 8.dp, bottom = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             when (val load = ui.providers) {
                 is Loadable.Loading -> UsageLoading()
@@ -142,8 +140,8 @@ private fun ProviderCard(provider: UsageSnapshot, nowMillis: Long, onRefresh: ()
         modifier = Modifier.fillMaxWidth().testTag("usage_${provider.provider}"),
     ) {
         Column(
-            Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
+            Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             Row(
                 Modifier.fillMaxWidth(),
@@ -152,8 +150,9 @@ private fun ProviderCard(provider: UsageSnapshot, nowMillis: Long, onRefresh: ()
             ) {
                 Text(
                     text = provider.label,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
+                    // Tile titles are the 13.5sp semibold slot, matching the
+                    // board/session tiles the Usage tile borrows from (§9c).
+                    style = MaterialTheme.typography.titleSmall,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
@@ -232,6 +231,9 @@ private fun UsageBar(window: UsageWindow, provider: String, nowSeconds: Long) {
         percent >= 75 -> MaterialTheme.colorScheme.tertiary
         else -> MaterialTheme.colorScheme.secondary
     }
+    // Teal is data, so it stays on the meter alone; only a crossed threshold is
+    // allowed to color the label and the number (DESIGN.md, "Usage").
+    val elevated = percent >= 75
     val reset = resetLabel(window.resetAt, nowSeconds)
     val amount = amountLabel(window)
     val description = buildString {
@@ -246,7 +248,6 @@ private fun UsageBar(window: UsageWindow, provider: String, nowSeconds: Long) {
             .fillMaxWidth()
             .semantics(mergeDescendants = true) { contentDescription = description }
             .testTag("usage_bar_${provider}_${window.label}"),
-        verticalArrangement = Arrangement.spacedBy(7.dp),
     ) {
         Row(
             Modifier.fillMaxWidth(),
@@ -254,33 +255,46 @@ private fun UsageBar(window: UsageWindow, provider: String, nowSeconds: Long) {
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                text = windowTitle(window.label),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurface,
+                // The window name is a mono-caps section header, not prose: it
+                // titles the meter the way `WEEKLY LIMIT` does in §9c, and it
+                // takes the threshold color only once the threshold is crossed.
+                text = windowTitle(window.label).uppercase(Locale.US),
+                style = ScoutrType.monoSection,
+                color = if (elevated) color else MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
             )
             Text(
-                // A percentage and a countdown are machine facts, so they take
-                // the mono face while the window's name stays in the UI one (§9d).
-                text = "${percent.roundToInt()}% used",
-                style = ScoutrType.monoFact,
-                color = color,
+                text = "${percent.roundToInt()}%",
+                style = MaterialTheme.typography.labelMedium,
+                color = if (elevated) color else MaterialTheme.colorScheme.onSurface,
                 maxLines = 1,
             )
         }
-        LinearProgressIndicator(
-            progress = { progress },
-            modifier = Modifier.fillMaxWidth().height(8.dp),
-            color = color,
-            trackColor = color.copy(alpha = 0.16f),
-            strokeCap = StrokeCap.Round,
-            gapSize = 0.dp,
-            drawStopIndicator = {},
-        )
+        // A 4dp meter on the canvas color, not a tinted Material track: the
+        // hairline is what keeps Usage from reading as an agent status screen.
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .padding(top = 10.dp)
+                .height(4.dp)
+                .clip(RoundedCornerShape(2.dp))
+                .background(MaterialTheme.colorScheme.background),
+        ) {
+            Box(
+                Modifier
+                    .fillMaxWidth(progress)
+                    .height(4.dp)
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(color),
+            )
+        }
         if (reset != null || amount != null) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(
+                Modifier.fillMaxWidth().padding(top = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
                 Text(
                     text = reset.orEmpty(),
                     style = ScoutrType.monoMeta,
@@ -327,12 +341,15 @@ private fun BalanceRow(window: UsageWindow) {
         ) {
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(
-                    if (negative) "Balance below zero" else "Available balance",
-                    style = MaterialTheme.typography.bodyMedium,
+                    // A balance titles itself the same way a meter does, so it
+                    // takes the same mono-caps header slot.
+                    text = (if (negative) "Balance below zero" else "Available balance").uppercase(Locale.US),
+                    style = ScoutrType.monoSection,
+                    color = if (negative) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Text(
                     currency,
-                    style = MaterialTheme.typography.labelSmall,
+                    style = ScoutrType.monoMeta,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -419,27 +436,31 @@ internal fun windowTitle(label: String): String = when (label.lowercase()) {
     else -> label
 }
 
+/**
+ * The countdown is mono metadata under the meter, and mono metadata is lowercase
+ * across the system (`resets in 2d 6h`, §9c) — sentence case belongs to UI prose.
+ */
 internal fun resetLabel(resetAt: Long?, nowSeconds: Long): String? {
     if (resetAt == null) return null
     val remaining = (resetAt - nowSeconds).coerceAtLeast(0)
-    if (remaining < 60) return "Resets now"
+    if (remaining < 60) return "resets now"
     val minutes = remaining / 60
-    if (minutes < 60) return "Resets in ${minutes}m"
+    if (minutes < 60) return "resets in ${minutes}m"
     val hours = minutes / 60
     val trailingMinutes = minutes % 60
-    if (hours < 24) return "Resets in ${hours}h" + if (trailingMinutes > 0) " ${trailingMinutes}m" else ""
+    if (hours < 24) return "resets in ${hours}h" + if (trailingMinutes > 0) " ${trailingMinutes}m" else ""
     val days = hours / 24
     val trailingHours = hours % 24
-    return "Resets in ${days}d" + if (trailingHours > 0) " ${trailingHours}h" else ""
+    return "resets in ${days}d" + if (trailingHours > 0) " ${trailingHours}h" else ""
 }
 
 private fun updatedLabel(updatedAt: Long, nowMillis: Long): String? {
     if (updatedAt <= 0) return null
     val minutes = ((nowMillis - updatedAt).coerceAtLeast(0) / 60_000)
     return when {
-        minutes == 0L -> "Updated now"
-        minutes < 60 -> "Updated ${minutes}m ago"
-        else -> "Updated ${minutes / 60}h ago"
+        minutes == 0L -> "updated now"
+        minutes < 60 -> "updated ${minutes}m ago"
+        else -> "updated ${minutes / 60}h ago"
     }
 }
 

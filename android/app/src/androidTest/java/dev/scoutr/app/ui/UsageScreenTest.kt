@@ -85,13 +85,13 @@ class UsageScreenTest {
         }
 
         compose.onNodeWithTag("usage_bar_openai-codex_5h").assertIsDisplayed()
-        compose.onNodeWithText("5-hour limit").assertIsDisplayed()
-        compose.onNodeWithText("82% used").assertIsDisplayed()
+        compose.onNodeWithText("5-HOUR LIMIT").assertIsDisplayed()
+        compose.onNodeWithText("82%").assertIsDisplayed()
         compose.onNodeWithContentDescription("5-hour limit, 82% used, $42.00 of $100.00").assertIsDisplayed()
         compose.onNodeWithContentDescription("7-day limit, 34% used, Limit $200.00").assertIsDisplayed()
         compose.onNodeWithText("Showing last known usage. Balance delayed").assertIsDisplayed()
         compose.onNodeWithTag("usage_deepseek").assertIsDisplayed()
-        compose.onNodeWithText("Balance below zero").assertIsDisplayed()
+        compose.onNodeWithText("BALANCE BELOW ZERO").assertIsDisplayed()
         compose.onNodeWithText("Add credit before starting more work.").assertIsDisplayed()
         compose.onNodeWithContentDescription("Balance below zero, USD, negative $0.01").assertIsDisplayed()
         compose.onNodeWithTag("usage_anthropic").assertIsDisplayed()
@@ -151,9 +151,9 @@ class UsageScreenTest {
             }
         }
 
-        compose.onNodeWithText("Resets in 2m").assertIsDisplayed()
+        compose.onNodeWithText("resets in 2m").assertIsDisplayed()
         compose.runOnIdle { nowMillis += 90_000 }
-        compose.onNodeWithText("Resets now").assertIsDisplayed()
+        compose.onNodeWithText("resets now").assertIsDisplayed()
         compose.runOnIdle { ui = ui.copy(error = "Showing cached usage") }
         compose.onNodeWithTag("usage_codex").assertIsDisplayed()
         compose.onNodeWithText("Showing cached usage").assertIsDisplayed()
