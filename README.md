@@ -126,10 +126,18 @@ the ask is answered, so without a hook the app can show the question only once
 it is too late to answer it. Install the hook that reports open asks:
 
 ```bash
-scoutr-bridge install-claude-hook   # adds PreToolUse/PostToolUse to ~/.claude/settings.json
+cd bridge && npm run build && node dist/cli.js install-claude-hook
 ```
 
-Restart any running `claude` session afterwards. Open asks then show up as
+It appends a `PreToolUse`/`PostToolUse` entry to `~/.claude/settings.json`,
+keeping every other hook and setting as it is. The command it installs is
+absolute (this node, this checkout's `dist/cli.js`) because a hook inherits
+the agent's environment, not yours — there is no `scoutr-bridge` on `PATH`.
+Re-run it after moving the checkout.
+
+Restart any running `claude` session afterwards: hooks are read at session
+start, so a session that was already open when you installed it keeps asking
+invisibly. Open asks then show up as
 answerable cards in chat; answering one from the app drives Claude's own
 questionnaire in the pane. pi needs no hook — it records the call immediately.
 

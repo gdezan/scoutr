@@ -66,7 +66,7 @@ Primary references:
 - readSeek anchors are invalid after editing the same file; re-grep/re-digest, or use plain `edit` for small changes.
 - `XDG_CONFIG_HOME` selects the bridge config dir; `SCOUTR_REPO_ROOTS` allow-lists review repos; config tokens must be at least 16 characters.
 - ntfy drops custom JSON publish fields; deep links belong in ntfy's documented `click` field.
-- Claude does not write an `AskUserQuestion` call to its JSONL until the ask is answered, so a live card exists only because the `scoutr-bridge hook claude` sidecar reports it (`agents/claude/pending-asks.ts`). pi records the call immediately and needs no hook.
+- Claude does not write an `AskUserQuestion` call to its JSONL until the ask is answered, so a live card exists only because the `node bridge/dist/cli.js hook claude` sidecar reports it (installed with `install-claude-hook`; the command must be absolute — a hook inherits the agent's environment) (`agents/claude/pending-asks.ts`). pi records the call immediately and needs no hook.
 - Question answers travel as intent (`questionId` + `selectedLabels` + `text`); the TUI key grammar lives in each adapter's `questionnaire.ts`, never in the app. A partly answered ask exists only in the bridge's in-memory progress and the app's `localAnswers` — the transcript records the whole ask at once, on submit.
 - Composer contract: Enter inserts a newline and must never send; keep multiline + `ImeAction.None` + no-op `KeyboardActions`.
 - `pkill -f` / `pgrep -f` can match their own shell command. Use bracketed patterns or a pid mechanism.

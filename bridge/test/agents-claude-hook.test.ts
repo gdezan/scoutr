@@ -4,7 +4,7 @@ import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeEach, afterEach, describe, it } from "node:test";
-import { handleClaudeHook, installClaudeHook, CLAUDE_HOOK_COMMAND } from "../src/agents/claude/hook.js";
+import { defaultHookCommand, handleClaudeHook, installClaudeHook } from "../src/agents/claude/hook.js";
 import { pendingAsksDir, pruneStalePendingAsks, readPendingAsk, writePendingAsk } from "../src/agents/claude/pending-asks.js";
 import { claudeQuestions } from "../src/agents/claude/questions.js";
 import type { Transcript } from "../src/transcript.js";
@@ -140,7 +140,16 @@ describe("claude pending asks", () => {
   });
 });
 
+const HOOK_COMMAND = defaultHookCommand();
+
 describe("claude hook installation", () => {
+  it("names an absolute interpreter and CLI, since a hook inherits no PATH", () => {
+    const [node] = HOOK_COMMAND.split(" ");
+    assert.equal(node?.replace(/'/g, "").startsWith("/"), true);
+    assert.match(HOOK_COMMAND, /cli\.js'? hook claude$/);
+    assert.equal(HOOK_COMMAND.includes("src/cli.ts"), false);
+  });
+
   let dir = "";
   beforeEach(async () => {
     dir = await mkdtemp(join(tmpdir(), "scoutr-claude-settings-"));
@@ -159,24 +168,24 @@ describe("claude hook installation", () => {
         hooks: { PreToolUse: [{ matcher: "Bash", hooks: [{ type: "command", command: "audit" }] }] },
       }),
     );
-    const first = await installClaudeHook(CLAUDE_HOOK_COMMAND, path);
+    const first = await installClaudeHook(HOOK_COMMAND, path);
     assert.equal(first.changed, true);
     const settings = JSON.parse(await readFile(path, "utf8")) as Record<string, any>;
     assert.equal(settings.model, "opus");
     assert.equal(settings.hooks.PreToolUse.length, 2);
     assert.equal(settings.hooks.PreToolUse[0].matcher, "Bash");
-    assert.equal(settings.hooks.PreToolUse[1].hooks[0].command, CLAUDE_HOOK_COMMAND);
+    assert.equal(settings.hooks.PreToolUse[1].hooks[0].command, HOOK_COMMAND);
     assert.equal(settings.hooks.PostToolUse[0].matcher, "AskUserQuestion");
 
-    const second = await installClaudeHook(CLAUDE_HOOK_COMMAND, path);
+    const second = await installClaudeHook(HOOK_COMMAND, path);
     assert.equal(second.changed, false);
   });
 
   it("writes a fresh settings file when there is none", async () => {
     const path = join(dir, "nested", "settings.json");
-    const result = await installClaudeHook(CLAUDE_HOOK_COMMAND, path);
+    const result = await installClaudeHook(HOOK_COMMAND, path);
     assert.equal(result.changed, true);
     const settings = JSON.parse(await readFile(path, "utf8")) as Record<string, any>;
-    assert.equal(settings.hooks.PreToolUse[0].hooks[0].command, CLAUDE_HOOK_COMMAND);
+    assert.equal(settings.hooks.PreToolUse[0].hooks[0].command, HOOK_COMMAND);
   });
 });

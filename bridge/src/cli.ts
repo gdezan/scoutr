@@ -82,11 +82,11 @@ async function main(): Promise<void> {
         break;
       }
       case "install-claude-hook": {
-        const { installClaudeHook, CLAUDE_HOOK_COMMAND } = await import("./agents/claude/hook.js");
-        const { path, changed } = await installClaudeHook();
+        const { installClaudeHook } = await import("./agents/claude/hook.js");
+        const { path, command, changed } = await installClaudeHook();
         console.log(
           changed
-            ? `added '${CLAUDE_HOOK_COMMAND}' to PreToolUse/PostToolUse in ${path}`
+            ? `added ${command} to PreToolUse/PostToolUse in ${path}`
             : `already installed in ${path}`,
         );
         console.log("restart any running claude session for the hook to take effect.");

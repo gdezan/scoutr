@@ -1,5 +1,8 @@
+import { existsSync } from "node:fs";
 import { readFile, writeFile, mkdir } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { shellQuote } from "../../shell.js";
 import { claudeConfigDir } from "./index.js";
 import { clearPendingAsk, writePendingAsk } from "./pending-asks.js";
 
@@ -11,8 +14,27 @@ import { clearPendingAsk, writePendingAsk } from "./pending-asks.js";
  * fires once the ask is answered. Everything the bridge needs is on stdin, so
  * the hook talks to no socket and can never make the agent wait on Scoutr.
  */
-export const CLAUDE_HOOK_COMMAND = "scoutr-bridge hook claude";
 export const CLAUDE_ASK_TOOL_MATCHER = "AskUserQuestion";
+
+/**
+ * The command Claude runs for the hook.
+ *
+ * It has to be absolute. There is no `scoutr-bridge` on PATH — the daemon
+ * runs as `node dist/cli.js` from a systemd unit — and a hook inherits
+ * whatever environment the agent happened to have, which for a mise-managed
+ * node is not the one that installed it. So the command names this
+ * interpreter and this checkout's built CLI explicitly.
+ */
+export function defaultHookCommand(): string {
+  const here = dirname(fileURLToPath(import.meta.url));
+  // Built layout: dist/agents/claude/hook.js -> dist/cli.js.
+  let cli = resolve(here, "..", "..", "cli.js");
+  if (!existsSync(cli)) {
+    // Running from source under tsx: install the built entry, not the .ts one.
+    cli = resolve(here, "..", "..", "..", "dist", "cli.js");
+  }
+  return `${shellQuote(process.execPath)} ${shellQuote(cli)} hook claude`;
+}
 
 interface HookInput {
   hook_event_name?: string;
@@ -68,9 +90,9 @@ interface HookEntry {
  * alone. Returns the settings path and whether it changed.
  */
 export async function installClaudeHook(
-  command = CLAUDE_HOOK_COMMAND,
+  command = defaultHookCommand(),
   settingsPath = join(claudeConfigDir(), "settings.json"),
-): Promise<{ path: string; changed: boolean }> {
+): Promise<{ path: string; command: string; changed: boolean }> {
   let settings: Record<string, unknown> = {};
   try {
     settings = JSON.parse(await readFile(settingsPath, "utf8")) as Record<string, unknown>;
@@ -94,10 +116,10 @@ export async function installClaudeHook(
     ];
     changed = true;
   }
-  if (!changed) return { path: settingsPath, changed: false };
+  if (!changed) return { path: settingsPath, command, changed: false };
 
   settings.hooks = hooks;
   await mkdir(join(settingsPath, ".."), { recursive: true });
   await writeFile(settingsPath, `${JSON.stringify(settings, null, 2)}\n`, "utf8");
-  return { path: settingsPath, changed: true };
+  return { path: settingsPath, command, changed: true };
 }
