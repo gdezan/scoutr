@@ -6,14 +6,28 @@ import assert from "node:assert/strict";
 import { createSession, controlSession, launchStoredSession, SessionsError, THINKING_LEVELS } from "../src/sessions.js";
 import { piLaunchCommand, thinkingLevelKeys } from "../src/agents/pi/index.js";
 import { shellQuote } from "../src/shell.js";
+import { pane, snapshot, tab, workspace } from "./support/snapshot.js";
 
 function fakeHerdr(overrides: Record<string, unknown> = {}) {
   const calls: { method: string; params: any }[] = [];
+  let snapshotReads = 0;
   const herdr = {
     calls,
     async workspaceCreate(params: unknown) {
       calls.push({ method: "workspace.create", params });
       return overrides.workspaceCreate ?? { workspace: { workspace_id: "ws1" }, root_pane: { pane_id: "p1" } };
+    },
+    async tabCreate(params: unknown) {
+      calls.push({ method: "tab.create", params });
+      return overrides.tabCreate ?? { tab: { tab_id: "t1" }, root_pane: { pane_id: "p1" } };
+    },
+    async tabRename(tab_id: string, label: string) {
+      calls.push({ method: "tab.rename", params: { tab_id, label } });
+      return {};
+    },
+    async tabClose(tab_id: string) {
+      calls.push({ method: "tab.close", params: { tab_id } });
+      return {};
     },
     async workspaceClose(workspace_id: string) {
       calls.push({ method: "workspace.close", params: { workspace_id } });
@@ -44,8 +58,11 @@ function fakeHerdr(overrides: Record<string, unknown> = {}) {
     },
     async snapshot() {
       calls.push({ method: "session.snapshot", params: {} });
+      // Only the first read fails: the launch must survive a snapshot outage
+      // at workspace-lookup time and still detect the agent afterwards.
+      if (overrides.snapshotError && snapshotReads++ === 0) throw overrides.snapshotError;
       return overrides.snapshot ?? {
-        panes: [{ pane_id: "p1", workspace_id: "ws1", agent: "pi" }],
+        panes: [{ pane_id: "p1", workspace_id: "ws1", tab_id: "t1", agent: "pi" }],
         workspaces: [],
         tabs: [],
         agents: [],
@@ -58,15 +75,22 @@ function fakeHerdr(overrides: Record<string, unknown> = {}) {
 const cwd = homedir();
 
 describe("createSession", () => {
-  it("creates a workspace, starts pi in one input call, and waits for agent detection", async () => {
+  it("creates a workspace for an unclaimed folder, starts pi in one input call, and waits for agent detection", async () => {
     const herdr = fakeHerdr();
 
     const created = await createSession(herdr, { cwd, model: "openai-codex/gpt-5.4", name: "demo" });
 
     assert.deepEqual(created, { workspaceId: "ws1", paneId: "p1" });
-    assert.deepEqual(herdr.calls.map((call) => call.method), ["workspace.create", "pane.send_input", "session.snapshot"]);
-    assert.deepEqual(herdr.calls[0].params, { cwd, label: "demo", focus: false });
-    assert.deepEqual(herdr.calls[1].params, {
+    assert.deepEqual(herdr.calls.map((call) => call.method), [
+      "session.snapshot",
+      "workspace.create",
+      "pane.send_input",
+      "session.snapshot",
+      "tab.rename",
+    ]);
+    // The workspace is the folder's, not the session's: no session label on it.
+    assert.deepEqual(herdr.calls[1].params, { cwd, focus: false });
+    assert.deepEqual(herdr.calls[2].params, {
       pane_id: "p1",
       text: "pi --model 'openai-codex/gpt-5.4' --name 'demo'",
       keys: ["Enter"],
@@ -86,20 +110,22 @@ describe("createSession", () => {
     });
 
     assert.deepEqual(herdr.calls.map((call) => call.method), [
+      "session.snapshot",
       "workspace.create",
       "pane.send_input",
       "session.snapshot",
+      "tab.rename",
       "agent.prompt",
     ]);
-    assert.equal(herdr.calls[1].params.text, "pi --model 'openai-codex/gpt-5.4' --thinking 'high' --name 'demo'");
-    assert.deepEqual(herdr.calls[3].params, { target: "p1", text: initialPrompt });
+    assert.equal(herdr.calls[2].params.text, "pi --model 'openai-codex/gpt-5.4' --thinking 'high' --name 'demo'");
+    assert.deepEqual(herdr.calls[5].params, { target: "p1", text: initialPrompt });
   });
 
   it("preserves prompt-less creation", async () => {
     for (const initialPrompt of [undefined, ""]) {
       const herdr = fakeHerdr();
       await createSession(herdr, { cwd, model: "m1", initialPrompt });
-      assert.equal(herdr.calls[1].params.text, "pi --model 'm1'");
+      assert.equal(herdr.calls[2].params.text, "pi --model 'm1'");
       assert.equal(herdr.calls.some((call) => call.method === "agent.prompt"), false);
     }
   });
@@ -117,10 +143,10 @@ describe("createSession", () => {
     });
 
     assert.equal(
-      herdr.calls[1].params.text,
+      herdr.calls[2].params.text,
       "pi --model 'o'\\''brien; rm -rf /' --thinking 'off' --name '$(id) `ls` \"quoted\"'",
     );
-    assert.equal(herdr.calls[3].params.text, initialPrompt);
+    assert.equal(herdr.calls[5].params.text, initialPrompt);
   });
 
   it("piLaunchCommand quotes supported options", () => {
@@ -147,7 +173,7 @@ describe("createSession", () => {
     for (const level of THINKING_LEVELS) {
       const herdr = fakeHerdr();
       await createSession(herdr, { cwd, model: "m", thinkingLevel: level });
-      assert.equal(herdr.calls[1].params.text, `pi --model 'm' --thinking '${level}'`);
+      assert.equal(herdr.calls[2].params.text, `pi --model 'm' --thinking '${level}'`);
     }
   });
 
@@ -165,7 +191,12 @@ describe("createSession", () => {
 
     await assert.rejects(createSession(herdr, { cwd, model: "m" }), /session launch failed: send failed/);
 
-    assert.deepEqual(herdr.calls.map((call) => call.method), ["workspace.create", "pane.send_input", "workspace.close"]);
+    assert.deepEqual(herdr.calls.map((call) => call.method), [
+      "session.snapshot",
+      "workspace.create",
+      "pane.send_input",
+      "workspace.close",
+    ]);
   });
 
   it("closes the workspace when first-prompt delivery fails", async () => {
@@ -182,6 +213,95 @@ describe("createSession", () => {
     await assert.rejects(createSession(herdr, { cwd, model: "m" }), /did not return a pane id/);
 
     assert.equal(herdr.calls.at(-1)?.method, "workspace.close");
+  });
+});
+
+/**
+ * Workspaces are per folder. A session started on a folder that already has a
+ * workspace becomes a tab in it; only an unclaimed folder gets a workspace.
+ */
+describe("createSession workspace reuse", () => {
+  /** A workspace rooted at `cwd`, plus the live pane tab.create will return. */
+  function folderWorkspace(options: { rootCwd: string; workspaceId?: string; number?: number }) {
+    const workspaceId = options.workspaceId ?? "ws1";
+    return {
+      workspace: workspace({ workspace_id: workspaceId, number: options.number ?? 1 }),
+      root: pane({ pane_id: `${workspaceId}-root`, workspace_id: workspaceId, tab_id: `${workspaceId}-t0`, cwd: options.rootCwd }),
+    };
+  }
+
+  /** The pane tab.create/workspace.create hands back, already running an agent. */
+  const launched = (workspaceId: string) =>
+    pane({ pane_id: "p1", workspace_id: workspaceId, tab_id: "t1", agent: "pi", cwd });
+
+  it("adds a tab labeled with the session name to the workspace already on the folder", async () => {
+    const existing = folderWorkspace({ rootCwd: cwd });
+    const herdr = fakeHerdr({ snapshot: snapshot([existing.root, launched("ws1")], [], [existing.workspace]) });
+
+    const created = await createSession(herdr, { cwd, model: "m", name: "demo" });
+
+    assert.deepEqual(created, { workspaceId: "ws1", paneId: "p1" });
+    assert.deepEqual(herdr.calls.map((call) => call.method), ["session.snapshot", "tab.create", "pane.send_input", "session.snapshot"]);
+    assert.deepEqual(herdr.calls[1].params, { workspace_id: "ws1", cwd, label: "demo", focus: false });
+    // The workspace is the folder's: its label is never rewritten by a session.
+    assert.equal(herdr.calls.some((call) => call.method === "workspace.rename"), false);
+  });
+
+  it("names the root tab of a workspace it had to create", async () => {
+    const herdr = fakeHerdr({ snapshot: snapshot([launched("ws1")], [], []) });
+
+    await createSession(herdr, { cwd, model: "m", name: "demo" });
+
+    assert.deepEqual(herdr.calls.at(-1), { method: "tab.rename", params: { tab_id: "t1", label: "demo" } });
+  });
+
+  it("matches on the workspace root pane only, never a pane that cd-ed into the folder", async () => {
+    const elsewhere = folderWorkspace({ rootCwd: join(homedir(), "somewhere-else") });
+    const wanderer = pane({ pane_id: "p9", workspace_id: "ws1", tab_id: "ws1-t1", cwd });
+    const herdr = fakeHerdr({ snapshot: snapshot([elsewhere.root, wanderer, launched("ws2")], [], [elsewhere.workspace]) });
+
+    await createSession(herdr, { cwd, model: "m" });
+
+    assert.equal(herdr.calls[1].method, "workspace.create");
+  });
+
+  it("reuses the lowest-numbered workspace when several sit on the folder", async () => {
+    const second = folderWorkspace({ rootCwd: cwd, workspaceId: "ws2", number: 2 });
+    const first = folderWorkspace({ rootCwd: cwd, workspaceId: "ws1", number: 7 });
+    const older = folderWorkspace({ rootCwd: cwd, workspaceId: "ws0", number: 1 });
+    const herdr = fakeHerdr({
+      snapshot: snapshot(
+        [second.root, first.root, older.root, launched("ws0")],
+        [],
+        [second.workspace, first.workspace, older.workspace],
+      ),
+    });
+
+    const created = await createSession(herdr, { cwd, model: "m" });
+
+    assert.equal(created.workspaceId, "ws0");
+    assert.deepEqual((herdr.calls[1].params as { workspace_id: string }).workspace_id, "ws0");
+  });
+
+  it("closes only its own tab when a launch into a reused workspace fails", async () => {
+    const existing = folderWorkspace({ rootCwd: cwd });
+    const herdr = fakeHerdr({
+      snapshot: snapshot([existing.root, launched("ws1")], [], [existing.workspace]),
+      paneSendInputError: new Error("send failed"),
+    });
+
+    await assert.rejects(createSession(herdr, { cwd, model: "m" }), /session launch failed: send failed/);
+
+    assert.deepEqual(herdr.calls.map((call) => call.method), ["session.snapshot", "tab.create", "pane.send_input", "tab.close"]);
+    assert.deepEqual(herdr.calls.at(-1)?.params, { tab_id: "t1" });
+  });
+
+  it("falls back to a new workspace when the snapshot is unavailable", async () => {
+    const herdr = fakeHerdr({ snapshotError: new Error("herdr is down") });
+
+    await createSession(herdr, { cwd, model: "m" });
+
+    assert.equal(herdr.calls[1].method, "workspace.create");
   });
 });
 
@@ -202,8 +322,8 @@ describe("launchStoredSession", () => {
         const herdr = fakeHerdr();
         const created = await launchStoredSession(herdr, { path, mode });
         assert.deepEqual(created, { workspaceId: "ws1", paneId: "p1" });
-        assert.equal(herdr.calls[0].method, "workspace.create");
-        assert.deepEqual(herdr.calls[1].params, {
+        assert.equal(herdr.calls[1].method, "workspace.create");
+        assert.deepEqual(herdr.calls[2].params, {
           pane_id: "p1",
           text: `pi --${mode === "resume" ? "session" : "fork"} ${shellQuote(path)}`,
           keys: ["Enter"],
@@ -247,7 +367,7 @@ describe("launchStoredSession", () => {
       const herdr = fakeHerdr();
       const created = await launchStoredSession(herdr, { path, mode: "resume" });
       assert.deepEqual(created, { workspaceId: "ws1", paneId: "p1" });
-      assert.equal((herdr.calls[0].params as { cwd: string }).cwd, outsideCwd);
+      assert.equal((herdr.calls[1].params as { cwd: string }).cwd, outsideCwd);
     } finally {
       await rm(root, { recursive: true, force: true });
       await rm(outsideCwd, { recursive: true, force: true });
@@ -272,7 +392,7 @@ describe("launchStoredSession", () => {
     try {
       const herdr = fakeHerdr();
       await launchStoredSession(herdr, { path, mode: "resume" });
-      assert.equal((herdr.calls[0].params as { cwd: string }).cwd, root);
+      assert.equal((herdr.calls[1].params as { cwd: string }).cwd, root);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -334,19 +454,35 @@ describe("controlSession", () => {
     );
   });
 
-  it("rename persists the pi name and updates the workspace label", async () => {
+  it("rename persists the pi name and labels the session tab, not the folder's workspace", async () => {
     const herdr = fakeHerdr();
     await controlSession(herdr, { paneId: "p1", action: "rename", text: "new name" });
-    assert.deepEqual(herdr.calls.map((call) => call.method), ["session.snapshot", "session.snapshot", "pane.send_input", "workspace.rename"]);
-    assert.deepEqual(herdr.calls[2].params, { pane_id: "p1", text: "/name new name", keys: ["Enter"] });
-    assert.deepEqual(herdr.calls[3].params, { workspace_id: "ws1", label: "new name" });
+    assert.deepEqual(herdr.calls.map((call) => call.method), ["session.snapshot", "pane.send_input", "session.snapshot", "tab.rename"]);
+    assert.deepEqual(herdr.calls[1].params, { pane_id: "p1", text: "/name new name", keys: ["Enter"] });
+    assert.deepEqual(herdr.calls[3].params, { tab_id: "t1", label: "new name" });
   });
 
-  it("close resolves the pane workspace and closes it", async () => {
+  it("close takes the workspace with it when the session is the folder's last tab", async () => {
     const herdr = fakeHerdr();
     await controlSession(herdr, { paneId: "p1", action: "close" });
     assert.deepEqual(herdr.calls.map((call) => call.method), ["session.snapshot", "session.snapshot", "workspace.close"]);
     assert.deepEqual(herdr.calls[2].params, { workspace_id: "ws1" });
+  });
+
+  it("close spares the folder's other sessions, closing only its own tab", async () => {
+    const sibling = pane({ pane_id: "p2", workspace_id: "ws1", tab_id: "t2", agent: "pi" });
+    const herdr = fakeHerdr({
+      snapshot: snapshot(
+        [pane({ pane_id: "p1", workspace_id: "ws1", tab_id: "t1", agent: "pi" }), sibling],
+        [tab({ tab_id: "t1" }), tab({ tab_id: "t2", number: 2 })],
+        [workspace({ workspace_id: "ws1" })],
+      ),
+    });
+
+    await controlSession(herdr, { paneId: "p1", action: "close" });
+
+    assert.deepEqual(herdr.calls.at(-1), { method: "tab.close", params: { tab_id: "t1" } });
+    assert.equal(herdr.calls.some((call) => call.method === "workspace.close"), false);
   });
 
   it("rename of an unknown pane fails with 404", async () => {

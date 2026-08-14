@@ -236,12 +236,12 @@ describe("POST /api/sessions and /api/sessions/:paneId/control", () => {
     assert.deepEqual(last?.params.keys, ["escape"]);
   });
 
-  it("control: rename resolves workspace and renames", async () => {
+  it("control: rename labels the session's own tab", async () => {
     const { status } = await post("/api/sessions/p1/control", { action: "rename", text: "newname" });
     assert.equal(status, 200);
     const last = sent.at(-1);
-    assert.equal(last?.method, "workspaceRename");
-    assert.deepEqual(last?.params, { workspace_id: "ws1", label: "newname" });
+    assert.equal(last?.method, "tabRename");
+    assert.deepEqual(last?.params, { tab_id: "t1", label: "newname" });
   });
 
   it("control: close resolves and closes the workspace", async () => {

@@ -1,6 +1,7 @@
 import type { HerdrPort } from "./herdr/port.js";
+import type { SessionSnapshot } from "./herdr/types.js";
 import { BridgeError } from "./errors.js";
-import { resolveAllowedDir } from "./dirs.js";
+import { canonicalPath, resolveAllowedDir } from "./dirs.js";
 import type { Transcript } from "./transcript.js";
 import { resolveCatalogSessionPath } from "./session-catalog.js";
 import { backendFor, resolveBackendForPane } from "./agents/registry.js";
@@ -102,9 +103,10 @@ export function validateCreateSessionParams(params: CreateSessionParams): void {
 }
 
 /**
- * Create a workspace, start the agent, wait for Herdr to detect it, and
- * deliver the first prompt through agent.prompt. Any launch failure closes
- * the workspace. The launch command is the selected backend's own grammar.
+ * Open a pane for the folder (a tab in its workspace, or a new workspace when
+ * the folder has none), start the agent, wait for Herdr to detect it, and
+ * deliver the first prompt through agent.prompt. Any launch failure undoes
+ * what it created. The launch command is the selected backend's own grammar.
  */
 export async function createSession(
   herdr: HerdrPort,
@@ -138,7 +140,10 @@ export async function createSession(
   });
 }
 
-/** Open a stored session in a new Herdr workspace, via the owning backend. */
+/**
+ * Open a stored session through the owning backend, in the Herdr workspace
+ * rooted at its recorded cwd (a new workspace when that folder has none).
+ */
 export async function launchStoredSession(
   herdr: HerdrPort,
   params: LaunchStoredSessionParams,
@@ -187,14 +192,67 @@ function resolveSessionWorkspace(recorded: string, sessionPath: string, sessionR
   return dirname(sessionPath);
 }
 
-async function launchWorkspace(
-  herdr: HerdrPort,
-  cwd: string,
-  label: string,
-  command: string,
-  afterStart?: (paneId: string) => Promise<void>,
-): Promise<CreatedSession> {
-  const ws = await herdr.workspaceCreate({ cwd, label, focus: false });
+/**
+ * The workspace already rooted at `cwd`, or null when none is. A workspace's
+ * folder is the cwd of its **root pane** — the first pane of the workspace in
+ * snapshot order, the one herdr created with the workspace itself (the same
+ * "first pane of the workspace" convention the terminal hierarchy uses for
+ * post-close selection). Only that pane defines the folder: a pane the user
+ * later opened and `cd`-ed somewhere else must not claim a folder for the
+ * whole workspace. herdr's snapshot carries no workspace cwd, so this is the
+ * only grounding available. Two workspaces on one folder resolve to the
+ * lowest-numbered one, so repeat launches keep landing in the same place.
+ */
+export function findWorkspaceForCwd(snapshot: SessionSnapshot, cwd: string): string | null {
+  const wanted = canonicalPath(cwd);
+  const ordered = [...snapshot.workspaces].sort((a, b) => a.number - b.number);
+  for (const workspace of ordered) {
+    const root = snapshot.panes.find((pane) => pane.workspace_id === workspace.workspace_id);
+    const rootCwd = root?.cwd ?? root?.foreground_cwd;
+    if (rootCwd && canonicalPath(rootCwd) === wanted) return workspace.workspace_id;
+  }
+  return null;
+}
+
+/**
+ * Where a session landed, plus how to undo it. A reused workspace is undone by
+ * closing only the tab this launch added; a workspace created here is undone
+ * whole.
+ */
+interface LaunchTarget {
+  workspaceId: string;
+  paneId: string;
+  /** Set only when this launch created the tab (i.e. the workspace was reused). */
+  tabId: string | null;
+}
+
+/**
+ * Open the pane a session will run in. Workspaces are per folder: when one is
+ * already rooted at `cwd` the session becomes a new tab in it, and only an
+ * unclaimed folder gets a fresh workspace. The session name labels the tab —
+ * existing workspace labels are never touched.
+ */
+async function openLaunchTarget(herdr: HerdrPort, cwd: string, label: string): Promise<LaunchTarget> {
+  let existing: string | null = null;
+  try {
+    existing = findWorkspaceForCwd(await herdr.snapshot(), cwd);
+  } catch {
+    // Snapshot unavailable: a fresh workspace is the safe fallback — the
+    // launch still succeeds, at worst as a second workspace on the folder.
+  }
+
+  if (existing) {
+    const created = await herdr.tabCreate({ workspace_id: existing, cwd, label, focus: false });
+    const tabId = created.tab?.tab_id ?? "";
+    const paneId = created.root_pane?.pane_id ?? "";
+    if (!paneId) {
+      if (tabId) await closeTabQuietly(herdr, tabId);
+      throw new SessionsError("herdr did not return a pane id", 502);
+    }
+    return { workspaceId: existing, paneId, tabId: tabId || null };
+  }
+
+  const ws = await herdr.workspaceCreate({ cwd, focus: false });
   const workspaceId = ws.workspace?.workspace_id ?? "";
   const paneId = ws.root_pane?.pane_id ?? "";
   if (!workspaceId) throw new SessionsError("herdr did not return a workspace id", 502);
@@ -202,26 +260,41 @@ async function launchWorkspace(
     await closeWorkspaceQuietly(herdr, workspaceId);
     throw new SessionsError("herdr did not return a pane id", 502);
   }
+  return { workspaceId, paneId, tabId: null };
+}
+
+async function launchWorkspace(
+  herdr: HerdrPort,
+  cwd: string,
+  label: string,
+  command: string,
+  afterStart?: (paneId: string) => Promise<void>,
+): Promise<CreatedSession> {
+  const target = await openLaunchTarget(herdr, cwd, label);
+  const { workspaceId, paneId } = target;
 
   try {
     await herdr.paneSendInput(paneId, command, ["Enter"]);
-    await waitForAgent(herdr, paneId);
+    const snapshot = await waitForAgent(herdr, paneId);
+    // A workspace herdr created for us carries its own root tab, which
+    // tab.create could not label — name it after the session now.
+    if (!target.tabId) await labelRootTabQuietly(herdr, snapshot, paneId, label);
     await afterStart?.(paneId);
     return { workspaceId, paneId };
   } catch (error) {
-    await closeWorkspaceQuietly(herdr, workspaceId);
+    await undoLaunchTarget(herdr, target);
     if (error instanceof SessionsError) throw error;
     throw new SessionsError(`session launch failed: ${error instanceof Error ? error.message : String(error)}`, 502);
   }
 }
 
-async function waitForAgent(herdr: HerdrPort, paneId: string): Promise<void> {
+async function waitForAgent(herdr: HerdrPort, paneId: string): Promise<SessionSnapshot> {
   const deadline = Date.now() + AGENT_START_TIMEOUT_MS;
   while (Date.now() < deadline) {
     try {
       const snapshot = await herdr.snapshot();
       const pane = snapshot.panes.find((candidate) => candidate.pane_id === paneId);
-      if (pane?.agent || snapshot.agents.some((agent) => agent.pane_id === paneId)) return;
+      if (pane?.agent || snapshot.agents.some((agent) => agent.pane_id === paneId)) return snapshot;
     } catch {
       // The next poll may succeed while Herdr and the agent finish startup.
     }
@@ -230,11 +303,40 @@ async function waitForAgent(herdr: HerdrPort, paneId: string): Promise<void> {
   throw new SessionsError("agent did not start before the launch timeout", 502);
 }
 
+/** Undo exactly what this launch created: its tab, or the whole workspace. */
+async function undoLaunchTarget(herdr: HerdrPort, target: LaunchTarget): Promise<void> {
+  if (target.tabId) await closeTabQuietly(herdr, target.tabId);
+  else await closeWorkspaceQuietly(herdr, target.workspaceId);
+}
+
+async function labelRootTabQuietly(
+  herdr: HerdrPort,
+  snapshot: SessionSnapshot,
+  paneId: string,
+  label: string,
+): Promise<void> {
+  const tabId = snapshot.panes.find((pane) => pane.pane_id === paneId)?.tab_id;
+  if (!tabId) return;
+  try {
+    await herdr.tabRename(tabId, label);
+  } catch {
+    // A tab label is cosmetic; a running session must not fail over it.
+  }
+}
+
 async function closeWorkspaceQuietly(herdr: HerdrPort, workspaceId: string): Promise<void> {
   try {
     await herdr.workspaceClose(workspaceId);
   } catch {
     // Keep the launch error; cleanup failure is visible in Herdr's workspace list.
+  }
+}
+
+async function closeTabQuietly(herdr: HerdrPort, tabId: string): Promise<void> {
+  try {
+    await herdr.tabClose(tabId);
+  } catch {
+    // Keep the launch error; a stray tab is visible in Herdr's own hierarchy.
   }
 }
 

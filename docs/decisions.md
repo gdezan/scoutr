@@ -119,16 +119,28 @@ pi agents, as an alternative to Moshi's paid herdr integration.
 
 ## Sessions v2 (layer 3) — pane-native create flow
 
-- **App-owned sessions are real herdr panes** in a new workspace (workspace.create
-  pre-creates a root pane; `pi --model <model>` is typed into it). The bridge
-  `pi --mode rpc` layer was removed with no shims.
+- **App-owned sessions are real herdr panes** (`pi --model <model>` is typed into
+  a pre-created root pane). The bridge `pi --mode rpc` layer was removed with no
+  shims.
+- **Workspaces are per folder, sessions are tabs in them** (2026-08-14). A new
+  session lands in the workspace whose *root pane* sits in the folder, as a new
+  tab labeled with the session name; only an unclaimed folder gets a fresh
+  workspace, and its label is left to herdr. herdr's snapshot has no workspace
+  cwd, so the root pane (first pane of the workspace) is the folder of record —
+  a pane the user `cd`-ed elsewhere never claims one. Several workspaces on one
+  folder resolve to the lowest-numbered. Resume/fork of a stored session follows
+  the same rule via its recorded cwd; the Terminal's explicit "New workspace"
+  action still always creates one.
 - **Home is discovered from the bridge, never derived on-device.** The first
   `/api/dirs` call (no path) returns the host home; `System.getProperty("user.name")`
   on Android is unreliable (emulator reports "root"), so `~/...` paths must come
   from the listing response.
 - **Controls map to pi's documented TUI**: abort = `escape`, retry =
   `agent.prompt` with the last user message, compact/fork = typed slash
-  commands, rename = workspace label, cycle thinking = `shift+tab`.
+  commands, rename = tab label, cycle thinking = `shift+tab`.
+- **Close and rename are tab-scoped** (2026-08-14), because a workspace now holds
+  the folder's other sessions: closing a session closes its own tab, and only the
+  last tab takes the workspace with it.
 - **The create sheet must scroll** — folder list + model catalog + name +
   create exceed one screen; the content column uses `verticalScroll`.
 - **MockWebServer dispatchers must be path-aware** — the sheet fires dirs and

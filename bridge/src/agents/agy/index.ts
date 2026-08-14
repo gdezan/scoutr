@@ -1,6 +1,5 @@
 import { realpathSync } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
-import { BridgeError } from "../../errors.js";
 import type { HerdrPort } from "../../herdr/port.js";
 import type { AgentSessionInfo } from "../../herdr/types.js";
 import {
@@ -8,7 +7,7 @@ import {
   type Transcript,
   type TranscriptReadOpts,
 } from "../../transcript.js";
-import { findPaneWorkspace } from "../../herdr/panes.js";
+import { closeSessionPane } from "../../herdr/panes.js";
 import { shellQuote } from "../../shell.js";
 import type {
   AgentBackend,
@@ -111,9 +110,7 @@ export async function agyControl(herdr: HerdrPort, params: ControlParams): Promi
       await herdr.paneSendInput(paneId, "/compact", ["Enter"]);
       return;
     case "close": {
-      const workspaceId = await findPaneWorkspace(herdr, paneId);
-      if (!workspaceId) throw new BridgeError("pane not found in the snapshot", 404);
-      await herdr.workspaceClose(workspaceId);
+      await closeSessionPane(herdr, paneId);
       return;
     }
     case "set_model": {

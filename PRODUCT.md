@@ -41,7 +41,8 @@ surprise; calm cards so a running agent's state is the visual anchor.
   disambiguator between agents.
 - Board cards: 9dp unfilled status rings, mono-caps section counts, quiet time-in-state metadata, and red treatment only for needs-you; workspace paths use Martian Mono.
 - Board polls `/api/agents` every 3s; abrupt OkHttp closure made a long-lived Board feed unsafe. The planned terminal is the narrow exception: dedicated terminal/topology sockets run only while its full-screen route is visible and contain cancellation/errors.
-- Chat: pane-native sessions (new herdr workspace + pane + pi --model),
+- Chat: pane-native sessions (a tab in the folder's herdr workspace + pi --model,
+  a new workspace only when the folder has none),
   JSONL transcript polling with a since cursor, dedupe by entryId,
   answer/steer unified composer.
 - Push: self-hosted ntfy, app-side polling, blocked + done notifications.

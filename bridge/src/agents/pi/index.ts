@@ -11,7 +11,7 @@ import {
   type Transcript,
   type TranscriptReadOpts,
 } from "../../transcript.js";
-import { findPaneSessionPath, findPaneWorkspace } from "../../herdr/panes.js";
+import { closeSessionPane, findPaneSessionPath, renameSessionPane } from "../../herdr/panes.js";
 import { shellQuote } from "../../shell.js";
 import type {
   AgentBackend,
@@ -154,16 +154,12 @@ export async function piControl(herdr: HerdrPort, params: ControlParams): Promis
         throw new Error(`name is too long (max ${MAX_SESSION_TITLE_LENGTH} characters)`);
       }
       if (CONTROL_CHAR.test(name)) throw new Error("name must not contain control characters");
-      const workspaceId = await findPaneWorkspace(herdr, paneId);
-      if (!workspaceId) throw new BridgeError("pane not found in the snapshot", 404);
       await herdr.paneSendInput(paneId, `/name ${name}`, ["Enter"]);
-      await herdr.workspaceRename(workspaceId, name);
+      await renameSessionPane(herdr, paneId, name);
       return;
     }
     case "close": {
-      const workspaceId = await findPaneWorkspace(herdr, paneId);
-      if (!workspaceId) throw new BridgeError("pane not found in the snapshot", 404);
-      await herdr.workspaceClose(workspaceId);
+      await closeSessionPane(herdr, paneId);
       return;
     }
     case "set_model": {

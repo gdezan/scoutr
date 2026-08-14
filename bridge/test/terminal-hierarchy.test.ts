@@ -4,11 +4,12 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { HerdrPort } from "../src/herdr/port.js";
-import type { PaneInfo, SessionSnapshot, TabInfo, WorkspaceInfo } from "../src/herdr/types.js";
+import type { SessionSnapshot } from "../src/herdr/types.js";
 import { RouteTable, dispatchRoute } from "../src/routes/dispatcher.js";
 import { buildRoutes } from "../src/routes/index.js";
 import type { DispatchRequest, RouteContext, RouteResult } from "../src/routes/types.js";
 import { fakeHerdr, type FakeHerdrExtras } from "./support/fake-herdr.js";
+import { pane, snapshot, tab, workspace } from "./support/snapshot.js";
 
 const TOKEN = "terminal_hierarchy_test_token_0001";
 const table = new RouteTable(buildRoutes());
@@ -62,64 +63,6 @@ function recorded(fake: FakeHerdr, method: keyof HerdrPort): Record<string, unkn
 function okBody(result: RouteResult): { ok: boolean; selectedPaneId: string | null; snapshot: SessionSnapshot } {
   assert.equal(result.status, 200);
   return result.body as { ok: boolean; selectedPaneId: string | null; snapshot: SessionSnapshot };
-}
-
-function pane(overrides: Partial<PaneInfo> = {}): PaneInfo {
-  return {
-    pane_id: "p1",
-    workspace_id: "ws1",
-    tab_id: "t1",
-    terminal_id: "term1",
-    focused: false,
-    agent_status: "idle",
-    revision: 0,
-    agent: null,
-    display_agent: null,
-    agent_session: null,
-    cwd: null,
-    foreground_cwd: null,
-    label: null,
-    title: null,
-    terminal_title: null,
-    terminal_title_stripped: null,
-    state_labels: {},
-    scroll: null,
-    ...overrides,
-  };
-}
-
-function tab(overrides: Partial<TabInfo> = {}): TabInfo {
-  return { tab_id: "t1", workspace_id: "ws1", number: 1, label: "Tab 1", focused: false, pane_count: 0, agent_status: "idle", ...overrides };
-}
-
-function workspace(overrides: Partial<WorkspaceInfo> = {}): WorkspaceInfo {
-  return {
-    workspace_id: "ws1",
-    number: 1,
-    label: "Workspace 1",
-    focused: false,
-    pane_count: 0,
-    tab_count: 0,
-    active_tab_id: "t1",
-    agent_status: "idle",
-    worktree: null,
-    ...overrides,
-  };
-}
-
-function snapshot(panes: PaneInfo[], tabs: TabInfo[] = [], workspaces: WorkspaceInfo[] = []): SessionSnapshot {
-  return {
-    version: "0.8.0",
-    protocol: 19,
-    focused_workspace_id: null,
-    focused_tab_id: null,
-    focused_pane_id: null,
-    workspaces,
-    tabs,
-    panes,
-    agents: [],
-    layouts: [],
-  };
 }
 
 describe("terminal hierarchy route", () => {
