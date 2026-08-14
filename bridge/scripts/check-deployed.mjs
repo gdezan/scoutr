@@ -27,11 +27,16 @@ import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 
+/**
+ * Newest mtime under a tree. This walks subdirectories: while it only read the
+ * top level, every change confined to `agents/`, `routes/`, `herdr/`, or
+ * `terminal/` — which is most of them — was invisible to the freshness gate.
+ */
 function newestMtime(dir, ext) {
   let newest = 0;
-  for (const f of readdirSync(dir)) {
-    if (!f.endsWith(ext)) continue;
-    const m = statSync(join(dir, f)).mtimeMs;
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const path = join(dir, entry.name);
+    const m = entry.isDirectory() ? newestMtime(path, ext) : entry.name.endsWith(ext) ? statSync(path).mtimeMs : 0;
     if (m > newest) newest = m;
   }
   return newest;
