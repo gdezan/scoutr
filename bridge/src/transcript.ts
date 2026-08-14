@@ -21,7 +21,36 @@ export interface ToolCallBlock {
   arguments: unknown;
 }
 
-export type ContentBlock = TextBlock | ThinkingBlock | ToolCallBlock | { type: string; [key: string]: unknown };
+/** One run of diff lines, each prefixed with a unified marker (` `, `+`, `-`). */
+export interface FileEditHunk {
+  /** `@@ -a,b +c,d @@`, or null when the agent reports no line numbers. */
+  header: string | null;
+  lines: string[];
+}
+
+/**
+ * A file change the agent made, normalized from whatever patch its CLI wrote.
+ * Emitted on the tool-result entry, because that is where every agent records
+ * what the edit actually did. See `agents/file-edit.ts`.
+ */
+export interface FileEditBlock {
+  type: "fileEdit";
+  path: string;
+  changeKind: "create" | "edit" | "delete";
+  /** Counted over the whole diff, so they stay truthful when `truncated`. */
+  added: number;
+  removed: number;
+  hunks: FileEditHunk[];
+  /** The diff exceeded the inline caps; `hunks` holds its head. */
+  truncated: boolean;
+}
+
+export type ContentBlock =
+  | TextBlock
+  | ThinkingBlock
+  | ToolCallBlock
+  | FileEditBlock
+  | { type: string; [key: string]: unknown };
 
 export interface TokenUsage {
   input?: number;

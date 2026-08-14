@@ -17,6 +17,7 @@ espressoCore = "3.6.1"
 coroutines = "1.10.2"
 zxingEmbedded = "4.3.0"
 markdownRenderer = "0.41.0"
+textmate = "0.2.0"
 benchmark = "1.4.1"
 uiautomator = "2.4.0-beta02"
 
@@ -35,7 +36,7 @@ androidx-compose-ui-test-junit4 = { group = "androidx.compose.ui", name = "ui-te
 androidx-compose-ui-test-manifest = { group = "androidx.compose.ui", name = "ui-test-manifest" }
 androidx-compose-material3 = { group = "androidx.compose.material3", name = "material3" }
 androidx-compose-material-icons-extended = { group = "androidx.compose.material", name = "material-icons-extended" }
-highlights = { group = "dev.snipme", name = "highlights", version = "1.0.0" }
+textmate-core = { group = "io.github.ivan-magda", name = "kotlin-textmate-core", version.ref = "textmate" }
 okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version.ref = "okhttp" }
 mockwebserver = { group = "com.squareup.okhttp3", name = "mockwebserver", version.ref = "okhttp" }
 robolectric = { group = "org.robolectric", name = "robolectric", version.ref = "robolectric" }

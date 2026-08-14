@@ -1,6 +1,7 @@
 package dev.scoutr.app.ui.screens
 
 import dev.scoutr.app.data.ContentBlock
+import dev.scoutr.app.data.SessionEntry
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import org.junit.Assert.assertEquals
@@ -57,5 +58,62 @@ class ChatFormatTest {
         val out = toolCallCommand(block)
         assertEquals(true, out.startsWith("{"))
         assertEquals(true, out.length <= 64 + 3)
+    }
+
+    @Test
+    fun `a tool result carrying a fileEdit block is recognised as an edit`() {
+        val entry = SessionEntry(
+            entryId = "e1",
+            role = "toolResult",
+            toolName = "Edit",
+            content = listOf(
+                ContentBlock(type = "text", text = "The file has been updated successfully."),
+                ContentBlock(type = "fileEdit", path = "/repo/scripts/install-app.sh", added = 156, removed = 41),
+            ),
+        )
+        val edit = fileEditOf(entry)
+        assertEquals("/repo/scripts/install-app.sh", edit?.path)
+        assertEquals(156, edit?.added)
+    }
+
+    @Test
+    fun `an ordinary tool result has no edit`() {
+        val entry = SessionEntry(
+            entryId = "e1",
+            role = "toolResult",
+            toolName = "bash",
+            content = listOf(ContentBlock(type = "text", text = "a.txt")),
+        )
+        assertEquals(null, fileEditOf(entry))
+    }
+
+    @Test
+    fun `a fileEdit without a path is not rendered as one`() {
+        val entry = SessionEntry(
+            entryId = "e1",
+            role = "toolResult",
+            content = listOf(ContentBlock(type = "fileEdit", path = "", added = 1)),
+        )
+        assertEquals(null, fileEditOf(entry))
+    }
+
+    @Test
+    fun `the chip labels an edit with its file name`() {
+        val block = ContentBlock(type = "fileEdit", path = "/home/x/Dev/scoutr/scripts/install-app.sh")
+        assertEquals("install-app.sh", fileEditFileName(block))
+    }
+
+    @Test
+    fun `the expanded diff keeps the last two path segments`() {
+        assertEquals(
+            "…/scripts/install-app.sh",
+            fileEditDisplayPath(ContentBlock(type = "fileEdit", path = "/home/x/Dev/scoutr/scripts/install-app.sh")),
+        )
+    }
+
+    @Test
+    fun `a short path is shown whole`() {
+        assertEquals("src/main.kt", fileEditDisplayPath(ContentBlock(type = "fileEdit", path = "src/main.kt")))
+        assertEquals("Makefile", fileEditDisplayPath(ContentBlock(type = "fileEdit", path = "Makefile")))
     }
 }

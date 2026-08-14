@@ -101,6 +101,7 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.withStyle
 import dev.scoutr.app.ui.components.AgentMark
 import dev.scoutr.app.ui.agentDisplayTitle
+import dev.scoutr.app.ui.theme.DiffPalette
 import dev.scoutr.app.ui.theme.ScoutrType
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
@@ -636,6 +637,16 @@ fun ChatList(
         }
     }
 
+    // An edit's diff arrives on the tool-result entry, but the call chip above
+    // is what shows its `+n −n`. Both resolve to the same tool key, so one map
+    // built here serves the summary on the call and the diff on the result.
+    val fileEdits: Map<String, ContentBlock> = remember(entries) {
+        entries
+            .filter { it.role == "toolResult" }
+            .mapNotNull { entry -> fileEditOf(entry)?.let { toolResultKey(entry, entries) to it } }
+            .toMap()
+    }
+
     var followNew by remember { mutableStateOf(true) }
 
     // A new entry only lands while the user is at the bottom; the moment they
@@ -714,6 +725,7 @@ fun ChatList(
                         toolExpanded = { toolId -> isToolExpanded(toolId) },
                         resultToolKey = { entry -> toolResultKey(entry, entries) },
                         resultHasCall = { entry -> inferredToolCallKey(entry, entries) != null },
+                        fileEditFor = { toolId -> fileEdits[toolId] },
                         onToggleTool = { toolId -> toggleTool(toolId) },
                         modifier = Modifier.padding(top = entrySpacing(row.entry)).animateItem(
                             fadeInSpec = ScoutrMotion.itemSpec(reduceMotion),
@@ -838,6 +850,7 @@ private fun MessageRow(
     onToggleTool: (String) -> Unit,
     resultToolKey: (SessionEntry) -> String,
     resultHasCall: (SessionEntry) -> Boolean,
+    fileEditFor: (String) -> ContentBlock?,
     modifier: Modifier = Modifier,
 ) {
     when (entry.role) {
@@ -846,6 +859,7 @@ private fun MessageRow(
             entry = entry,
             showThinking = showThinking,
             toolExpanded = toolExpanded,
+            fileEditFor = fileEditFor,
             onToggleTool = onToggleTool,
             modifier = modifier,
         )
@@ -941,6 +955,7 @@ private fun AssistantBubble(
     entry: SessionEntry,
     showThinking: Boolean,
     toolExpanded: (String) -> Boolean,
+    fileEditFor: (String) -> ContentBlock?,
     onToggleTool: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -984,6 +999,7 @@ private fun AssistantBubble(
                             val key = toolCallKey(entry.entryId, call, i)
                             ToolCallChip(
                                 block = call,
+                                fileEdit = fileEditFor(key),
                                 isExpanded = toolExpanded(key),
                                 onToggle = { onToggleTool(key) },
                                 modifier = if (i == start) Modifier else Modifier.padding(top = SPINE_ROW_GAP),
@@ -1084,6 +1100,31 @@ fun toolCallCommand(block: ContentBlock): String {
     val compact = args.toString()
     return if (compact.length > 64) compact.take(61) + "…" else compact
 }
+/**
+ * The file change an agent reported for this tool result, or null when the
+ * tool did not edit a file. The bridge decides that from the patch the agent
+ * wrote, so nothing here depends on the tool's name.
+ */
+internal fun fileEditOf(entry: SessionEntry): ContentBlock? =
+    entry.content.firstOrNull { it.type == "fileEdit" && !it.path.isNullOrBlank() }
+
+/** The chip's label: the file name alone, which is what identifies the edit. */
+internal fun fileEditFileName(block: ContentBlock): String =
+    block.path.orEmpty().substringAfterLast('/').ifEmpty { block.path.orEmpty() }
+
+/**
+ * The expanded diff's header. Absolute agent paths are far too long for a phone
+ * column, and the leading directories are the least informative part, so this
+ * keeps the last two segments — enough to tell `bridge/src/index.ts` from
+ * `android/src/index.ts`.
+ */
+internal fun fileEditDisplayPath(block: ContentBlock): String {
+    val path = block.path.orEmpty()
+    val segments = path.split('/').filter { it.isNotEmpty() }
+    if (segments.size <= 2) return path
+    return "…/${segments.takeLast(2).joinToString("/")}"
+}
+
 /** Stable key shared by a tool-call row and its linked result state. */
 private fun toolCallKey(entryId: String, block: ContentBlock, blockIndex: Int): String =
     block.id?.takeUnless { it.isBlank() } ?: "$entryId:tool:$blockIndex"
@@ -1144,12 +1185,16 @@ private fun entrySpacing(entry: SessionEntry): Dp = when {
 @Composable
 private fun ToolCallChip(
     block: ContentBlock,
+    fileEdit: ContentBlock?,
     isExpanded: Boolean,
     onToggle: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val expanded = isExpanded
-    val command = toolCallCommand(block)
+    // An edit names its file, not its arguments: the full path ellipsizes away
+    // the only part that identifies it, so the chip carries the file name and
+    // the expanded diff below carries the path.
+    val command = if (fileEdit != null) fileEditFileName(fileEdit) else toolCallCommand(block)
     val name = block.name ?: "tool"
     // Tool calls remain one-line machine facts; the linked result owns the
     // expandable filled tile surface below. The row spans the rail so its node
@@ -1187,6 +1232,10 @@ private fun ToolCallChip(
                 overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
             )
+            if (fileEdit != null) {
+                Spacer(Modifier.width(8.dp))
+                DiffStatBadge(fileEdit)
+            }
             Spacer(Modifier.width(8.dp))
             Icon(
                 imageVector = if (expanded) Icons.Filled.KeyboardArrowDown else Icons.AutoMirrored.Filled.KeyboardArrowRight,
@@ -1250,13 +1299,16 @@ private fun ToolResultChip(
     val output = entryText(entry.content)
     val isError = entry.isError == true
     val tool = entry.toolName ?: "tool"
+    // An edit's diff replaces its result text: "the file has been updated
+    // successfully" says nothing the diff below does not say better.
+    val edit = fileEditOf(entry)
     // A collapsed call is one line on the spine with "no tile of their own" (§7a):
     // the chevron is the affordance, and a preview under every call turns the rail
     // into a ladder of boxes. Two results still show unasked — a failure, which is
     // the one thing worth interrupting the scan for, and an orphan whose call is
     // missing from the transcript, since nothing else could ever expand it.
     if (!isError && !expanded && hasCall) return
-    if (output.isBlank() && !isError) return
+    if (output.isBlank() && !isError && edit == null) return
     // Result = evidence: it stays on the rail under the call it belongs to, so
     // the indent and the continuing spine already say "this came from above."
     TimelineRail(topGap = 7.dp, modifier = modifier) {
@@ -1272,7 +1324,9 @@ private fun ToolResultChip(
                     color = MaterialTheme.colorScheme.error,
                 )
             }
-            if (output.isNotBlank()) {
+            if (edit != null) {
+                FileEditDiff(edit)
+            } else if (output.isNotBlank()) {
                 Text(
                     output,
                     style = ScoutrType.monoMeta,
@@ -1282,6 +1336,61 @@ private fun ToolResultChip(
                     overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                 )
             }
+        }
+    }
+}
+
+/**
+ * `+12 −3` on the call chip. Counts describe the whole edit even when the diff
+ * below is capped, so the badge never understates what the agent changed.
+ */
+@Composable
+private fun DiffStatBadge(edit: ContentBlock, modifier: Modifier = Modifier) {
+    Text(
+        buildAnnotatedString {
+            withStyle(SpanStyle(color = DiffPalette.Added)) { append("+${edit.added}") }
+            append(" ")
+            withStyle(SpanStyle(color = DiffPalette.Deleted)) { append("−${edit.removed}") }
+        },
+        style = ScoutrType.monoTool,
+        maxLines = 1,
+        modifier = modifier.testTag("diff_stat_badge"),
+    )
+}
+
+/**
+ * The expanded edit: its file, then the agent's own hunks in the same diff
+ * colors the review screen uses. Lines scroll horizontally rather than wrap so
+ * indentation survives, matching the review diff's no-wrap default.
+ */
+@Composable
+private fun FileEditDiff(edit: ContentBlock, modifier: Modifier = Modifier) {
+    val path = edit.path.orEmpty()
+    val language = remember(path) { languageForPath(path) }
+    Column(modifier.fillMaxWidth().testTag("file_edit_diff")) {
+        Text(
+            fileEditDisplayPath(edit),
+            style = ScoutrType.monoMeta,
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
+            maxLines = 1,
+            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+        )
+        Spacer(Modifier.height(6.dp))
+        val lines = buildList {
+            edit.hunks.forEachIndexed { index, hunk ->
+                if (index > 0) add("⋯")
+                hunk.header?.let(::add)
+                addAll(hunk.lines)
+            }
+        }
+        DiffLines(lines, language, wrapLines = false, horizontalPadding = 0.dp, style = ScoutrType.monoMeta)
+        if (edit.truncated) {
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "⋯ diff truncated",
+                style = ScoutrType.monoMeta,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+            )
         }
     }
 }

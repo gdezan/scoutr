@@ -3,6 +3,7 @@ package dev.scoutr.app.ui
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -24,6 +25,7 @@ import androidx.compose.ui.test.swipeDown
 import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.CompositionLocalProvider
 import dev.scoutr.app.data.ContentBlock
+import dev.scoutr.app.data.FileEditHunk
 import dev.scoutr.app.data.QuestionEntry
 import dev.scoutr.app.data.QuestionOption
 import dev.scoutr.app.data.SessionEntry
@@ -458,6 +460,68 @@ class ChatListTest {
         composeRule.onNodeWithContentDescription("Expand bash").performClick()
         composeRule.waitForIdle()
         composeRule.onNodeWithContentDescription("Collapse bash").assertIsDisplayed()
+    }
+
+    /** An Edit whose result carries the diff the bridge normalized from the agent. */
+    private fun editEntries(): List<SessionEntry> = listOf(
+        SessionEntry(
+            entryId = "ed-1",
+            role = "assistant",
+            content = listOf(
+                ContentBlock(
+                    type = "toolCall",
+                    id = "call-edit",
+                    name = "Edit",
+                    arguments = buildJsonObject { put("file_path", JsonPrimitive("/repo/scripts/install-app.sh")) },
+                ),
+            ),
+        ),
+        SessionEntry(
+            entryId = "ed-2",
+            parentId = "ed-1",
+            role = "toolResult",
+            toolCallId = "call-edit",
+            toolName = "Edit",
+            content = listOf(
+                ContentBlock(type = "text", text = "The file has been updated successfully."),
+                ContentBlock(
+                    type = "fileEdit",
+                    path = "/repo/scripts/install-app.sh",
+                    changeKind = "edit",
+                    added = 2,
+                    removed = 1,
+                    hunks = listOf(
+                        FileEditHunk(
+                            header = "@@ -10,3 +10,4 @@",
+                            lines = listOf(" set -euo pipefail", "-DEVICES=old", "+DEVICES=new", "+pick_device() {"),
+                        ),
+                    ),
+                ),
+            ),
+        ),
+    )
+
+    @Test
+    fun fileEditShowsDiffStatOnTheCallAndHunksWhenExpanded() {
+        composeRule.setContent {
+            ScoutrTheme { ChatList(entries = editEntries()) }
+        }
+        // The chip names the file (not the ellipsized absolute path) and carries
+        // the edit's size; the diff itself stays behind the chevron.
+        composeRule.onNodeWithText("install-app.sh", substring = true).assertIsDisplayed()
+        // The chip row is clickable, so it merges its children's semantics:
+        // these tags only exist in the unmerged tree.
+        composeRule.onNodeWithTag("diff_stat_badge", useUnmergedTree = true).assertIsDisplayed()
+        composeRule.onAllNodesWithTag("file_edit_diff", useUnmergedTree = true).assertCountEquals(0)
+
+        composeRule.onNodeWithContentDescription("Expand Edit").performClick()
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithTag("file_edit_diff", useUnmergedTree = true).assertIsDisplayed()
+        composeRule.onNodeWithText("+DEVICES=new").assertIsDisplayed()
+        composeRule.onNodeWithText("@@ -10,3 +10,4 @@").assertIsDisplayed()
+        // The diff replaces the result's prose, which says less than it does.
+        composeRule.onAllNodesWithText("The file has been updated successfully.").assertCountEquals(0)
     }
 
     @Test

@@ -215,6 +215,25 @@ data class ContentBlock(
     val name: String? = null,
     /** Tool-call arguments as sent by the agent (e.g. {command: "..."} for bash). */
     val arguments: JsonObject? = null,
+    /**
+     * `fileEdit` blocks only: the file change the bridge normalized out of
+     * whichever patch the agent's CLI wrote. Sits on the tool-result entry.
+     */
+    val path: String? = null,
+    val changeKind: String? = null,
+    val added: Int = 0,
+    val removed: Int = 0,
+    val hunks: List<FileEditHunk> = emptyList(),
+    /** The diff exceeded the bridge's inline caps; [hunks] holds its head. */
+    val truncated: Boolean = false,
+)
+
+/** One run of unified-diff lines, each prefixed with ` `, `+`, or `-`. */
+@Serializable
+data class FileEditHunk(
+    /** `@@ -a,b +c,d @@`, or null when the agent reports no line numbers. */
+    val header: String? = null,
+    val lines: List<String> = emptyList(),
 )
 
 @Serializable

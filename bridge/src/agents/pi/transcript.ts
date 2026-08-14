@@ -1,9 +1,15 @@
 import { appendFile } from "node:fs/promises";
 import { randomBytes } from "node:crypto";
 import {
+  fileEditFromAnchoredDiff,
+  fileEditFromUnifiedPatch,
+  pathFromSnapshotId,
+} from "../file-edit.js";
+import {
   collapseTranscriptText,
   joinContentBlocks,
   MAX_SESSION_TITLE_LENGTH,
+  type FileEditBlock,
   type TextBlock,
   type ThinkingBlock,
   type Transcript,
@@ -114,7 +120,11 @@ function parseMessageRecord(record: Record<string, unknown>): TranscriptEntry | 
   if (typeof msg.toolCallId === "string") entry.toolCallId = msg.toolCallId;
   if (typeof msg.toolName === "string") entry.toolName = msg.toolName;
   if (typeof msg.isError === "boolean") entry.isError = msg.isError;
-  if (msg.details && typeof msg.details === "object") entry.details = msg.details;
+  if (msg.details && typeof msg.details === "object") {
+    entry.details = msg.details;
+    const edit = fileEditFromDetails(msg.details as Record<string, unknown>);
+    if (edit) entry.content.push(edit);
+  }
   if (typeof msg.stopReason === "string") entry.stopReason = msg.stopReason;
   if (typeof msg.model === "string") entry.model = msg.model;
   if (msg.usage && typeof msg.usage === "object") {
@@ -129,6 +139,23 @@ function parseMessageRecord(record: Record<string, unknown>): TranscriptEntry | 
     }
   }
   return entry;
+}
+
+/**
+ * Read an edit out of a pi tool result. `details.patch` is a unified patch and
+ * names its own file; `details.diff` (what `replace` writes) is anchor-prefixed
+ * and takes its path from `details.snapshotId`. Any tool that writes either
+ * field qualifies, extensions included — there is no tool-name list.
+ */
+function fileEditFromDetails(details: Record<string, unknown>): FileEditBlock | null {
+  if (typeof details.patch === "string" && details.patch.trim()) {
+    const edit = fileEditFromUnifiedPatch(details.patch);
+    if (edit) return edit;
+  }
+  if (typeof details.diff === "string" && details.diff.trim()) {
+    return fileEditFromAnchoredDiff(details.diff, pathFromSnapshotId(details.snapshotId));
+  }
+  return null;
 }
 
 function normalizeContent(content: unknown): TranscriptEntry["content"] {

@@ -56,8 +56,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.text.SpanStyle
-import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -70,7 +68,6 @@ import dev.scoutr.app.state.ReviewViewModel
 import dev.scoutr.app.ui.components.ScoutrTextField
 import dev.scoutr.app.ui.components.ReadableContentColumn
 import dev.scoutr.app.ui.theme.DiffPalette
-import dev.snipme.highlights.model.SyntaxLanguage
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -756,8 +753,8 @@ private fun ColumnScope.FileDiffContent(
         is Loadable.Ready -> {
             val language = languageForPath(selectedFile)
             key(selectedFile) {
-                LineBody(load.value.diff.split("\n"), wrapLines) { line ->
-                    DiffLine(line, language, wrapLines)
+                LineBody(load.value.diff.split("\n"), wrapLines, scrollHorizontally = false) { lines ->
+                    DiffLines(lines, language, wrapLines)
                 }
             }
             if (load.value.truncated) TruncatedNote("file diff truncated to 64 KiB")
@@ -789,8 +786,8 @@ private fun ColumnScope.FileContent(
                 else -> {
                     val language = languageForPath(selectedFile)
                     key(selectedFile) {
-                        LineBody(body.content.split("\n"), wrapLines) { line ->
-                            CodeLine(line, language, MaterialTheme.colorScheme.onSurface, Color.Transparent, 0, wrapLines)
+                        LineBody(body.content.split("\n"), wrapLines) { lines ->
+                            CodeLines(lines, language, wrapLines)
                         }
                     }
                     if (body.truncated) TruncatedNote("file truncated to 256 KiB")
@@ -806,7 +803,8 @@ private fun ColumnScope.FileContent(
 private fun ColumnScope.LineBody(
     lines: List<String>,
     wrapLines: Boolean,
-    content: @Composable (line: String) -> Unit,
+    scrollHorizontally: Boolean = true,
+    content: @Composable (lines: List<String>) -> Unit,
 ) {
     val verticalScroll = rememberScrollState()
     val horizontalScroll = rememberScrollState()
@@ -815,68 +813,9 @@ private fun ColumnScope.LineBody(
             .weight(1f)
             .fillMaxWidth()
             .verticalScroll(verticalScroll)
-            .then(if (wrapLines) Modifier else Modifier.horizontalScroll(horizontalScroll)),
+            .then(if (!wrapLines && scrollHorizontally) Modifier.horizontalScroll(horizontalScroll) else Modifier),
     ) {
-        lines.forEach { content(it) }
-    }
-}
-
-@Composable
-private fun DiffLine(line: String, language: SyntaxLanguage?, wrapLines: Boolean) {
-    // gdezan-material version_control mapping: inserted cyan, deleted red,
-    // hunk headers quiet muted; line backgrounds are the editor's faint tints.
-    val (baseColor, background, codeOffset) = when {
-        line.startsWith("+++") -> Triple(DiffPalette.Added, DiffPalette.AddedBackground, -1)
-        line.startsWith("---") -> Triple(DiffPalette.Deleted, DiffPalette.DeletedBackground, -1)
-        line.startsWith('+') -> Triple(DiffPalette.Added, DiffPalette.AddedBackground, 1)
-        line.startsWith('-') -> Triple(DiffPalette.Deleted, DiffPalette.DeletedBackground, 1)
-        line.startsWith("@@") -> Triple(DiffPalette.Ignored, Color.Transparent, -1)
-        else -> Triple(MaterialTheme.colorScheme.onSurface, Color.Transparent, 0)
-    }
-    CodeLine(line, language, baseColor, background, codeOffset, wrapLines)
-}
-
-/**
- * One code line as an [AnnotatedString]: the line color stays the diff
- * identity and syntax token colors compose on top. [codeOffset] is the index
- * where code starts (1 for +/- markers); -1 disables syntax spans.
- */
-@Composable
-private fun CodeLine(
-    line: String,
-    language: SyntaxLanguage?,
-    baseColor: Color,
-    background: Color,
-    codeOffset: Int,
-    wrapLines: Boolean,
-) {
-    val spans = remember(line, language) { highlightLine(line, language) }
-    val annotated = remember(line, spans, codeOffset, baseColor) {
-        buildAnnotatedString {
-            append(line)
-            addStyle(SpanStyle(color = baseColor), 0, line.length)
-            if (codeOffset >= 0) {
-                spans.forEach { span ->
-                    val start = span.start.coerceAtLeast(codeOffset)
-                    if (span.end > start) addStyle(SpanStyle(color = span.color), start, span.end)
-                }
-            }
-        }
-    }
-    Row(
-        Modifier
-            .background(background)
-            .then(if (wrapLines) Modifier.fillMaxWidth() else Modifier)
-            .padding(horizontal = 16.dp, vertical = 1.dp),
-    ) {
-        Text(
-            annotated,
-            style = MaterialTheme.typography.bodySmall,
-            fontFamily = ScoutrMono,
-            color = baseColor,
-            maxLines = if (wrapLines) Int.MAX_VALUE else 1,
-            softWrap = wrapLines,
-        )
+        content(lines)
     }
 }
 

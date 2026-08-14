@@ -1,3 +1,4 @@
+import { fileEditFromClaudeResult } from "../file-edit.js";
 import {
   collapseTranscriptText,
   MAX_SESSION_TITLE_LENGTH,
@@ -136,6 +137,11 @@ function parseUserRecord(record: Record<string, unknown>): TranscriptEntry | nul
       };
       const text = blockText(result.content);
       if (text) entry.content = [{ type: "text", text }];
+      // `toolUseResult` sits on the record, not inside the message: Edit and
+      // Write report the change they made as a `structuredPatch` there, which
+      // the tool_result text only summarizes in prose.
+      const edit = fileEditFromClaudeResult(record.toolUseResult);
+      if (edit) entry.content.push(edit);
       return entry;
     }
   }
