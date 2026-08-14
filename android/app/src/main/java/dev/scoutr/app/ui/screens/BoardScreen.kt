@@ -52,7 +52,6 @@ import androidx.lifecycle.compose.LifecycleStartEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -125,7 +124,6 @@ fun BoardScreen(
     // a swipe is easy to trigger while scrolling, and every board card is by
     // definition a running agent.
     var pendingClose by remember { mutableStateOf<AgentCard?>(null) }
-    var idleExpanded by rememberSaveable { mutableStateOf(false) }
 
     if (ui.loading && ui.board.total == 0) {
         Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -189,11 +187,7 @@ fun BoardScreen(
                     boardSection("Needs you", ui.board.needsYou, onOpenAgent, reduceMotion, onReviewAgent, { pendingClose = it })
                     boardSection("Working", ui.board.working, onOpenAgent, reduceMotion, onReviewAgent, { pendingClose = it })
                     boardSection("Done", ui.board.done, onOpenAgent, reduceMotion, onReviewAgent, { pendingClose = it })
-                    if (idleExpanded) {
-                        boardSection("Idle", ui.board.idle, onOpenAgent, reduceMotion, onReviewAgent, { pendingClose = it })
-                    } else {
-                        collapsedBoardSection("Idle", ui.board.idle.size) { idleExpanded = true }
-                    }
+                    boardSection("Idle", ui.board.idle, onOpenAgent, reduceMotion, onReviewAgent, { pendingClose = it })
                     boardSection("Other", ui.board.unknown, onOpenAgent, reduceMotion, onReviewAgent, { pendingClose = it })
                 }
                 item { Spacer(Modifier.height(24.dp)) }
@@ -251,29 +245,6 @@ private fun LazyListScope.boardSection(
                 fadeOutSpec = ScoutrMotion.itemSpec(reduceMotion),
             ),
         )
-    }
-}
-
-private fun LazyListScope.collapsedBoardSection(
-    title: String,
-    count: Int,
-    onExpand: () -> Unit,
-) {
-    if (count == 0) return
-    item(key = "collapsed_header_$title") {
-        PressTintSurface(
-            onClick = onExpand,
-            color = Color.Transparent,
-            pressedColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.65f),
-            modifier = Modifier.fillMaxWidth().testTag("board_${title.lowercase()}_toggle"),
-        ) {
-            Text(
-                text = "${title.uppercase()} $count · tap to expand",
-                style = ScoutrType.monoMeta,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                modifier = Modifier.padding(horizontal = 4.dp, vertical = 12.dp),
-            )
-        }
     }
 }
 
