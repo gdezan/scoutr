@@ -254,7 +254,7 @@ fun ChatScreen(
                                 (!ui.exists && ui.agentStatus == "working"))
                     ChatList(
                         entries = ui.entries,
-                        questions = ui.questions,
+                        questions = ui.questionCards,
                         answeringQuestionId = ui.answeringQuestionId,
                         pendingMessages = ui.pendingMessages,
                         showThinking = showThinking,

@@ -71,6 +71,50 @@ class QuestionMergeTest {
     }
 
     @Test
+    fun aLocallyAnsweredCardResolvesBeforeTheTranscriptCatchesUp() {
+        // An ask is written to the transcript only when all of its questions
+        // are submitted, so without the overlay the card a user just answered
+        // would keep offering its options — the tap would look lost.
+        val state = ChatUiState(
+            questions = listOf(question("a"), question("b")),
+            localAnswers = mapOf("a" to LocalAnswer("", listOf("Yes"))),
+        )
+        val answered = state.questionCards.first { it.id == "a" }
+        assertTrue(answered.answered)
+        assertEquals(listOf("Yes"), answered.selected)
+        assertEquals(null, answered.answerText)
+        assertEquals(false, state.questionCards.first { it.id == "b" }.answered)
+        // One card is still open, so the composer keeps answering the ask.
+        assertTrue(state.hasPendingQuestion)
+    }
+
+    @Test
+    fun aLocalFreeTextAnswerShowsAsTheAnswerText() {
+        val state = ChatUiState(
+            questions = listOf(question("a")),
+            localAnswers = mapOf("a" to LocalAnswer("Something else", emptyList())),
+        )
+        assertEquals("Something else", state.questionCards.single().answerText)
+        assertEquals(false, state.hasPendingQuestion)
+    }
+
+    @Test
+    fun theTranscriptAnswerWinsOverTheLocalOne() {
+        val state = ChatUiState(
+            questions = listOf(question("a", answered = true).copy(answerText = "Yes")),
+            localAnswers = mapOf("a" to LocalAnswer("stale", emptyList())),
+        )
+        assertEquals("Yes", state.questionCards.single().answerText)
+    }
+
+    @Test
+    fun localAnswersAreDroppedOnceTheTranscriptRecordsThem() {
+        val local = mapOf("a" to LocalAnswer("Yes", emptyList()), "b" to LocalAnswer("No", emptyList()))
+        val pruned = pruneLocalAnswers(local, listOf(question("a", answered = true), question("b")))
+        assertEquals(setOf("b"), pruned.keys)
+    }
+
+    @Test
     fun sanitizeCollapsesNewlinesAndStripsControlChars() {
         assertEquals("yes", sanitizeAnswerText("  yes  "))
         assertEquals("line1 line2", sanitizeAnswerText("line1\nline2"))

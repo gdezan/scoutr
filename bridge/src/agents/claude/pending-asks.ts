@@ -1,0 +1,114 @@
+import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
+
+/**
+ * Claude's pending AskUserQuestion asks, recorded by a hook.
+ *
+ * Claude Code does not write the assistant record that holds an
+ * `AskUserQuestion` tool call until the ask is answered — verified live
+ * against 2.1.232: while the questionnaire is on screen the session JSONL
+ * still ends at the user's prompt. A transcript-only card could therefore
+ * only ever appear after someone answered in the terminal, which is exactly
+ * when it is no longer useful.
+ *
+ * The `PreToolUse` hook does fire while the ask is open, and carries the
+ * session id, the `tool_use_id`, and the full questions — the same ids the
+ * transcript will later use — so a sidecar written there becomes the very
+ * same card once the answers land. `scoutr-bridge hook claude` writes it;
+ * `PostToolUse` removes it; see `docs/adr/0006`.
+ */
+export interface PendingAsk {
+  sessionId: string;
+  /** The tool call id; question card ids are `${toolUseId}#${index}`. */
+  toolUseId: string;
+  /** Hook time, ISO — the card's timestamp until the transcript has one. */
+  timestamp: string;
+  transcriptPath: string;
+  /** Raw `tool_input.questions`, parsed by the same reader as the transcript. */
+  questions: unknown[];
+}
+
+/**
+ * Where sidecars live. Derived from XDG the same way the bridge config is, so
+ * the hook process and the daemon agree without sharing any state.
+ */
+export function pendingAsksDir(): string {
+  const configHome = process.env.XDG_CONFIG_HOME?.trim() || join(homedir(), ".config");
+  return join(configHome, "scoutr", "pending-asks");
+}
+
+/** A sidecar is stale long after any human would have answered it. */
+export const PENDING_ASK_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
+function sidecarPath(sessionId: string): string {
+  // Session ids are uuids; anything else could escape the directory.
+  if (!/^[A-Za-z0-9._-]{1,128}$/.test(sessionId)) throw new Error("invalid session id");
+  return join(pendingAsksDir(), `${sessionId}.json`);
+}
+
+export function writePendingAsk(ask: PendingAsk): void {
+  const path = sidecarPath(ask.sessionId);
+  mkdirSync(pendingAsksDir(), { recursive: true });
+  writeFileSync(path, JSON.stringify(ask), "utf8");
+}
+
+export function clearPendingAsk(sessionId: string): void {
+  try {
+    rmSync(sidecarPath(sessionId), { force: true });
+  } catch {
+    // The hook must never fail the tool call it is reporting on.
+  }
+}
+
+/** The open ask of a session, or null when there is none (or it is stale). */
+export function readPendingAsk(sessionId: string): PendingAsk | null {
+  if (!sessionId) return null;
+  let raw: string;
+  try {
+    raw = readFileSync(sidecarPath(sessionId), "utf8");
+  } catch {
+    return null; // no open ask — the common case, one failed stat
+  }
+  let ask: PendingAsk;
+  try {
+    ask = JSON.parse(raw) as PendingAsk;
+  } catch {
+    return null;
+  }
+  if (!ask || typeof ask.toolUseId !== "string" || !Array.isArray(ask.questions)) return null;
+  const age = Date.now() - Date.parse(ask.timestamp);
+  if (Number.isFinite(age) && age > PENDING_ASK_MAX_AGE_MS) {
+    clearPendingAsk(sessionId);
+    return null;
+  }
+  return ask;
+}
+
+/**
+ * Drop sidecars left behind by a session that died mid-ask (the PostToolUse
+ * hook never ran). Called when the daemon starts, so a phantom card cannot
+ * outlive the agent that asked.
+ */
+export function pruneStalePendingAsks(now = Date.now()): number {
+  let removed = 0;
+  let names: string[];
+  try {
+    names = readdirSync(pendingAsksDir());
+  } catch {
+    return 0;
+  }
+  for (const name of names) {
+    if (!name.endsWith(".json")) continue;
+    try {
+      const ask = JSON.parse(readFileSync(join(pendingAsksDir(), name), "utf8")) as PendingAsk;
+      const age = now - Date.parse(ask.timestamp);
+      if (!Number.isFinite(age) || age <= PENDING_ASK_MAX_AGE_MS) continue;
+    } catch {
+      // Unreadable sidecar: nothing can use it.
+    }
+    rmSync(join(pendingAsksDir(), name), { force: true });
+    removed += 1;
+  }
+  return removed;
+}

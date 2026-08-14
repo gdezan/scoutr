@@ -1,0 +1,182 @@
+import assert from "node:assert/strict";
+import { mkdtemp, readFile, writeFile, mkdir, rm } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { beforeEach, afterEach, describe, it } from "node:test";
+import { handleClaudeHook, installClaudeHook, CLAUDE_HOOK_COMMAND } from "../src/agents/claude/hook.js";
+import { pendingAsksDir, pruneStalePendingAsks, readPendingAsk, writePendingAsk } from "../src/agents/claude/pending-asks.js";
+import { claudeQuestions } from "../src/agents/claude/questions.js";
+import type { Transcript } from "../src/transcript.js";
+
+const SESSION = "9f1c2d3e-0000-0000-0000-000000000001";
+
+function emptyTranscript(id = SESSION): Transcript {
+  return {
+    version: 3,
+    id,
+    cwd: "/work",
+    timestamp: "2026-08-14T00:00:00Z",
+    entries: [],
+    model: null,
+    thinkingLevel: null,
+    lastEntryId: null,
+    title: null,
+    preview: "",
+  };
+}
+
+function preToolUse(toolUseId = "toolu_ask"): string {
+  return JSON.stringify({
+    hook_event_name: "PreToolUse",
+    session_id: SESSION,
+    transcript_path: "/home/u/.claude/projects/p/s.jsonl",
+    tool_name: "AskUserQuestion",
+    tool_use_id: toolUseId,
+    tool_input: {
+      questions: [
+        {
+          question: "Which color?",
+          header: "Color",
+          multiSelect: false,
+          options: [{ label: "Red", description: "Warm" }, { label: "Green" }],
+        },
+      ],
+    },
+  });
+}
+
+describe("claude pending asks", () => {
+  let home = "";
+  const realHome = process.env.XDG_CONFIG_HOME;
+
+  beforeEach(async () => {
+    home = await mkdtemp(join(tmpdir(), "scoutr-hook-"));
+    process.env.XDG_CONFIG_HOME = home;
+  });
+  afterEach(async () => {
+    if (realHome === undefined) delete process.env.XDG_CONFIG_HOME;
+    else process.env.XDG_CONFIG_HOME = realHome;
+    await rm(home, { recursive: true, force: true });
+  });
+
+  it("shows the open ask as unanswered cards, with the ids the transcript will use", () => {
+    // Claude writes the tool call to its JSONL only once the ask is answered,
+    // so without the hook this transcript has no card to show at all.
+    handleClaudeHook(preToolUse());
+    const questions = claudeQuestions(emptyTranscript());
+    assert.equal(questions.length, 1);
+    assert.equal(questions[0]?.id, "toolu_ask#0");
+    assert.equal(questions[0]?.callId, "toolu_ask");
+    assert.equal(questions[0]?.answered, false);
+    assert.deepEqual(questions[0]?.options.map((o) => o.label), ["Red", "Green"]);
+  });
+
+  it("clears the ask when the tool result comes back", () => {
+    handleClaudeHook(preToolUse());
+    handleClaudeHook(JSON.stringify({
+      hook_event_name: "PostToolUse",
+      session_id: SESSION,
+      tool_name: "AskUserQuestion",
+      tool_use_id: "toolu_ask",
+    }));
+    assert.equal(readPendingAsk(SESSION), null);
+    assert.deepEqual(claudeQuestions(emptyTranscript()), []);
+  });
+
+  it("drops the sidecar once the transcript carries the same call", () => {
+    handleClaudeHook(preToolUse());
+    const transcript = emptyTranscript();
+    transcript.entries = [
+      {
+        entryId: "a1",
+        parentId: null,
+        timestamp: "2026-08-14T00:00:01Z",
+        role: "assistant",
+        content: [
+          {
+            type: "toolCall",
+            id: "toolu_ask",
+            name: "AskUserQuestion",
+            arguments: { questions: [{ question: "Which color?", header: "Color", options: [{ label: "Red" }] }] },
+          },
+        ],
+      },
+    ];
+    const questions = claudeQuestions(transcript);
+    assert.equal(questions.length, 1); // the transcript's card, not a duplicate
+    assert.equal(questions[0]?.entryId, "a1");
+    assert.equal(readPendingAsk(SESSION), null); // and the sidecar is gone
+  });
+
+  it("ignores other tools and unparseable payloads", () => {
+    handleClaudeHook(JSON.stringify({ hook_event_name: "PreToolUse", session_id: SESSION, tool_name: "Bash" }));
+    handleClaudeHook("not json");
+    assert.equal(readPendingAsk(SESSION), null);
+  });
+
+  it("forgets an ask nobody could still be looking at", () => {
+    writePendingAsk({
+      sessionId: SESSION,
+      toolUseId: "toolu_old",
+      timestamp: new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString(),
+      transcriptPath: "",
+      questions: [{ question: "Old?", header: "Old", options: [{ label: "Yes" }] }],
+    });
+    assert.equal(readPendingAsk(SESSION), null);
+    assert.equal(existsSync(join(pendingAsksDir(), `${SESSION}.json`)), false);
+  });
+
+  it("prunes sidecars left by a session that died mid-ask", () => {
+    writePendingAsk({
+      sessionId: SESSION,
+      toolUseId: "toolu_old",
+      timestamp: new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString(),
+      transcriptPath: "",
+      questions: [],
+    });
+    assert.equal(pruneStalePendingAsks(), 1);
+    assert.equal(pruneStalePendingAsks(), 0);
+  });
+});
+
+describe("claude hook installation", () => {
+  let dir = "";
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), "scoutr-claude-settings-"));
+  });
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it("adds the hooks without disturbing existing settings", async () => {
+    const path = join(dir, "settings.json");
+    await mkdir(dir, { recursive: true });
+    await writeFile(
+      path,
+      JSON.stringify({
+        model: "opus",
+        hooks: { PreToolUse: [{ matcher: "Bash", hooks: [{ type: "command", command: "audit" }] }] },
+      }),
+    );
+    const first = await installClaudeHook(CLAUDE_HOOK_COMMAND, path);
+    assert.equal(first.changed, true);
+    const settings = JSON.parse(await readFile(path, "utf8")) as Record<string, any>;
+    assert.equal(settings.model, "opus");
+    assert.equal(settings.hooks.PreToolUse.length, 2);
+    assert.equal(settings.hooks.PreToolUse[0].matcher, "Bash");
+    assert.equal(settings.hooks.PreToolUse[1].hooks[0].command, CLAUDE_HOOK_COMMAND);
+    assert.equal(settings.hooks.PostToolUse[0].matcher, "AskUserQuestion");
+
+    const second = await installClaudeHook(CLAUDE_HOOK_COMMAND, path);
+    assert.equal(second.changed, false);
+  });
+
+  it("writes a fresh settings file when there is none", async () => {
+    const path = join(dir, "nested", "settings.json");
+    const result = await installClaudeHook(CLAUDE_HOOK_COMMAND, path);
+    assert.equal(result.changed, true);
+    const settings = JSON.parse(await readFile(path, "utf8")) as Record<string, any>;
+    assert.equal(settings.hooks.PreToolUse[0].hooks[0].command, CLAUDE_HOOK_COMMAND);
+  });
+});

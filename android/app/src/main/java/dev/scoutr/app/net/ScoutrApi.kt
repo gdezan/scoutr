@@ -81,10 +81,16 @@ interface ScoutrApi {
     suspend fun sendCommandJson(command: JsonObject): WsFrame
     suspend fun steer(target: String, text: String): WsFrame
     suspend fun runSlashCommand(paneId: String, text: String): WsFrame
+    /**
+     * Answer a question card. The app sends intent only — which card, which
+     * option labels, what text — and the bridge drives the agent's own
+     * questionnaire. `questionId` is empty when the pane is blocked on a
+     * plain prompt rather than a question card.
+     */
     suspend fun answerQuestion(
         paneId: String,
-        text: String,
-        keys: List<String> = emptyList(),
-        trailingKeys: List<String> = emptyList(),
+        questionId: String = "",
+        text: String = "",
+        selectedLabels: List<String> = emptyList(),
     ): WsFrame
 }

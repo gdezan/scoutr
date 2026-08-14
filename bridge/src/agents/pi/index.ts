@@ -15,11 +15,14 @@ import { findPaneSessionPath, findPaneWorkspace } from "../../herdr/panes.js";
 import { shellQuote } from "../../shell.js";
 import type {
   AgentBackend,
+  AnswerProgress,
+  AnswerRequest,
   ControlAction,
   ControlParams,
   LaunchParams,
   ModelsCatalog,
 } from "../types.js";
+import { piAnswerPlan } from "./questionnaire.js";
 import { parsePiTranscript, writePiSessionTitle } from "./transcript.js";
 import { readModelsCatalog } from "./models.js";
 import { readCommandsCatalog } from "./commands.js";
@@ -99,32 +102,32 @@ export function piExtractQuestions(transcript: Transcript): QuestionEntry[] {
   return extractQuestions(transcript.entries);
 }
 
+/**
+ * Deliver one answer. With a question in hand the keys come from pi's
+ * questionnaire grammar (see `questionnaire.ts`); without one the pane is
+ * blocked on something else (e.g. a permission prompt), so the text is typed
+ * and submitted as-is.
+ */
 export async function piAnswerQuestion(
   herdr: HerdrPort,
-  paneId: string,
-  answer: string,
-  keys: string[] = [],
-  trailingKeys?: string[],
-): Promise<void> {
-  const safe = sanitizeAnswerText(answer);
-  if (keys.length > 0) {
-    // pi's questionnaire is keyboard-only: arrows move, space toggles,
-    // enter chooses/submits. Typed text is dropped while an option list is
-    // focused (and enter would pick the first option), so option/skip
-    // answers travel entirely as keys; custom answers open the "Type
-    // something" editor with keys, then type the text and submit it with
-    // the trailing keys (editor enter, plus a review-tab enter for the last
-    // question of a multi-question ask).
-    await herdr.paneSendKeys(paneId, keys);
-    if (safe) {
-      await herdr.paneSendText(paneId, safe);
-      await herdr.paneSendKeys(paneId, trailingKeys ?? ["Enter"]);
-    }
-    return;
+  request: AnswerRequest,
+): Promise<AnswerProgress | null> {
+  const safe = sanitizeAnswerText(request.text);
+  const { paneId, question, group, progress, selectedLabels } = request;
+  if (!question) {
+    if (!safe) throw new Error("answer text is empty");
+    await herdr.paneSendText(paneId, safe);
+    await herdr.paneSendKeys(paneId, ["Enter"]);
+    return null;
   }
-  // No questionnaire known (e.g. a permission prompt): plain type+enter.
-  await herdr.paneSendText(paneId, safe);
-  await herdr.paneSendKeys(paneId, ["Enter"]);
+  const plan = piAnswerPlan(question, group, progress, safe, selectedLabels);
+  if (plan.custom && !safe) throw new Error("answer has neither an option nor text");
+  await herdr.paneSendKeys(paneId, plan.keys);
+  if (plan.custom) {
+    await herdr.paneSendText(paneId, safe);
+    await herdr.paneSendKeys(paneId, plan.trailingKeys);
+  }
+  return plan.progress;
 }
 
 export async function piControl(herdr: HerdrPort, params: ControlParams): Promise<void> {

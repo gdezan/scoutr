@@ -13,7 +13,7 @@ import {
   claudeResumeCommand,
 } from "../src/agents/claude/index.js";
 import { parseClaudeTranscript } from "../src/agents/claude/transcript.js";
-import { claudeDeliverInitialPrompt } from "../src/agents/claude/index.js";
+import { claudeDeliverInitialPrompt, claudeExtractQuestions } from "../src/agents/claude/index.js";
 import { fakeHerdr } from "./support/fake-herdr.js";
 
 /** CLAUDECONFIGDIR honing: point the claude adapter at a temp store. */
@@ -246,6 +246,117 @@ describe("claude adapter", () => {
       assert.deepEqual([...claudeBackend.capabilities], ["abort", "compact", "close", "set_model"]);
       assert.equal(claudeBackend.hasModelCatalog, false);
       assert.equal(claudeBackend.hasSlashCommands, false);
+    });
+  });
+
+  describe("AskUserQuestion", () => {
+    /** The shape Claude Code writes: the call carries the questions... */
+    function askRecords(questions: unknown[], answers?: Record<string, string>): string {
+      const lines: Record<string, unknown>[] = [
+        assistantRecord("a1", [
+          { type: "tool_use", id: "toolu_ask", name: "AskUserQuestion", input: { questions } },
+        ]),
+      ];
+      if (answers) {
+        lines.push({
+          type: "user",
+          uuid: "u2",
+          parentUuid: "a1",
+          timestamp: "2026-01-01T00:00:03.000Z",
+          message: {
+            role: "user",
+            content: [
+              { type: "tool_result", tool_use_id: "toolu_ask", content: "Your questions have been answered." },
+            ],
+          },
+          toolUseResult: { questions, answers, annotations: {} },
+        });
+      }
+      return lines.map((line) => JSON.stringify(line)).join("\n");
+    }
+
+    const colorQuestion = {
+      question: "Which color?",
+      header: "Color",
+      multiSelect: false,
+      options: [
+        { label: "Red", description: "Warm" },
+        { label: "Green", description: "Calm" },
+      ],
+    };
+    const sizeQuestion = {
+      question: "Which sizes?",
+      header: "Size",
+      multiSelect: true,
+      options: [{ label: "Small" }, { label: "Large" }, { label: "Extra, roomy" }],
+    };
+
+    it("reads an unanswered ask as one card per question", () => {
+      const transcript = parseClaudeTranscript(askRecords([colorQuestion, sizeQuestion]));
+      const questions = claudeExtractQuestions(transcript);
+      assert.equal(questions.length, 2);
+      assert.deepEqual(questions[0], {
+        id: "toolu_ask#0",
+        callId: "toolu_ask",
+        entryId: "a1",
+        question: "Which color?",
+        header: "Color",
+        options: [
+          { label: "Red", description: "Warm" },
+          { label: "Green", description: "Calm" },
+        ],
+        multiSelect: false,
+        answered: false,
+        answerText: null,
+        selected: [],
+        timestamp: "2026-01-01T00:00:02.000Z",
+      });
+      assert.equal(questions[1]?.multiSelect, true);
+      assert.deepEqual(questions[1]?.options[0], { label: "Small", description: "" });
+    });
+
+    it("pairs answers by question text, the only key Claude records", () => {
+      const transcript = parseClaudeTranscript(
+        askRecords([colorQuestion, sizeQuestion], {
+          "Which color?": "Green",
+          "Which sizes?": "Small, Large",
+        }),
+      );
+      const questions = claudeExtractQuestions(transcript);
+      assert.equal(questions[0]?.answered, true);
+      assert.equal(questions[0]?.answerText, "Green");
+      assert.deepEqual(questions[0]?.selected, []);
+      assert.equal(questions[1]?.answered, true);
+      assert.equal(questions[1]?.answerText, null);
+      assert.deepEqual(questions[1]?.selected, ["Small", "Large"]);
+    });
+
+    it("splits a multi-select answer around a label that contains a comma", () => {
+      const transcript = parseClaudeTranscript(
+        askRecords([sizeQuestion], { "Which sizes?": "Small, Extra, roomy" }),
+      );
+      const questions = claudeExtractQuestions(transcript);
+      assert.deepEqual(questions[0]?.selected, ["Small", "Extra, roomy"]);
+    });
+
+    it("keeps a custom answer that matches no option", () => {
+      const transcript = parseClaudeTranscript(askRecords([colorQuestion], { "Which color?": "Teal" }));
+      const questions = claudeExtractQuestions(transcript);
+      assert.equal(questions[0]?.answerText, "Teal");
+      assert.equal(questions[0]?.answered, true);
+    });
+
+    it("keeps only the answers out of toolUseResult, never the whole result", () => {
+      const bulky = JSON.stringify({
+        type: "user",
+        uuid: "u3",
+        parentUuid: null,
+        timestamp: "2026-01-01T00:00:04.000Z",
+        message: { role: "user", content: [{ type: "tool_result", tool_use_id: "toolu_read", content: "ok" }] },
+        toolUseResult: { file: { content: "x".repeat(5000) } },
+      });
+      const transcript = parseClaudeTranscript(bulky);
+      assert.equal(transcript.entries[0]?.details, undefined);
     });
   });
 

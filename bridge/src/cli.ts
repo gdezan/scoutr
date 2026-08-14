@@ -7,6 +7,8 @@
  *   scoutr-bridge herdr watch           → stream live events (Ctrl-C to stop)
  *   scoutr-bridge pair                  → print the QR code the app scans to connect
  *   scoutr-bridge serve                 → run the bridge daemon (layer 2)
+ *   scoutr-bridge install-claude-hook   → let Claude report its open questions
+ *   scoutr-bridge hook claude           → the hook itself (stdin: Claude's payload)
  */
 import { HerdrClient, defaultSocketPath, HerdrError } from "./herdr/client.js";
 import { HerdrEventFeed } from "./herdr/feed.js";
@@ -59,6 +61,37 @@ async function main(): Promise<void> {
         }
         break;
       }
+      case "hook": {
+        // Called by Claude Code with the hook payload on stdin. It must stay
+        // silent on stdout (Claude reads it) and always exit 0: a hook that
+        // fails or stalls would disrupt the agent it only observes.
+        if (subcommand !== "claude") {
+          console.error("usage: scoutr-bridge hook claude   (reads the hook JSON on stdin)");
+          process.exitCode = 2;
+          break;
+        }
+        const { handleClaudeHook } = await import("./agents/claude/hook.js");
+        const chunks: Buffer[] = [];
+        for await (const chunk of process.stdin) chunks.push(chunk as Buffer);
+        try {
+          console.error(handleClaudeHook(Buffer.concat(chunks).toString("utf8")));
+        } catch (error) {
+          console.error(`scoutr hook: ${error instanceof Error ? error.message : String(error)}`);
+        }
+        process.exitCode = 0;
+        break;
+      }
+      case "install-claude-hook": {
+        const { installClaudeHook, CLAUDE_HOOK_COMMAND } = await import("./agents/claude/hook.js");
+        const { path, changed } = await installClaudeHook();
+        console.log(
+          changed
+            ? `added '${CLAUDE_HOOK_COMMAND}' to PreToolUse/PostToolUse in ${path}`
+            : `already installed in ${path}`,
+        );
+        console.log("restart any running claude session for the hook to take effect.");
+        break;
+      }
       case "pair": {
         const { loadOrCreateConfig } = await import("./config.js");
         const { buildPairingPayload } = await import("./pairing.js");
@@ -108,7 +141,13 @@ async function main(): Promise<void> {
         const { HerdrTerminalLauncher } = await import("./terminal/process.js");
         const { NtfyPublisher } = await import("./notify.js");
 
+        const { pruneStalePendingAsks } = await import("./agents/claude/pending-asks.js");
+
         const config = await loadOrCreateConfig();
+        // A session killed mid-ask leaves its sidecar behind; nothing else
+        // would ever clear it, and it would show as a phantom card.
+        const stale = pruneStalePendingAsks();
+        if (stale > 0) console.error(`cleared ${stale} stale pending ask(s)`);
         const feed = new HerdrEventFeed(socketPath);
         await feed.start();
         console.error(`connected to herdr at ${socketPath}`);
@@ -156,7 +195,7 @@ async function main(): Promise<void> {
       case "-h":
       default: {
         console.error(
-          "usage: scoutr-bridge <herdr status|herdr snapshot|herdr watch|pair|serve>",
+          "usage: scoutr-bridge <herdr status|herdr snapshot|herdr watch|pair|serve|install-claude-hook|hook claude>",
         );
         process.exitCode = 2;
       }

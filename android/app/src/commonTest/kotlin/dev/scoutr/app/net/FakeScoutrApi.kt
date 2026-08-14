@@ -195,16 +195,16 @@ class FakeScoutrApi : ScoutrApi {
 
     override suspend fun answerQuestion(
         paneId: String,
+        questionId: String,
         text: String,
-        keys: List<String>,
-        trailingKeys: List<String>,
+        selectedLabels: List<String>,
     ): WsFrame = send("answerQuestion", buildJsonObject {
         put("type", "answer_question")
         put("paneId", paneId)
+        if (questionId.isNotEmpty()) put("questionId", questionId)
         put("text", text)
-        if (keys.isNotEmpty()) put("keys", kotlinx.serialization.json.JsonArray(keys.map { JsonPrimitive(it) }))
-        if (trailingKeys.isNotEmpty()) {
-            put("trailingKeys", kotlinx.serialization.json.JsonArray(trailingKeys.map { JsonPrimitive(it) }))
+        if (selectedLabels.isNotEmpty()) {
+            put("selectedLabels", kotlinx.serialization.json.JsonArray(selectedLabels.map { JsonPrimitive(it) }))
         }
     })
 

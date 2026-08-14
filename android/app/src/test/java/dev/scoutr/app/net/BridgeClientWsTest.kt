@@ -98,26 +98,27 @@ class BridgeClientWsTest {
 
         val (answer, answerListener) = echoServer(listOf("""{"type":"ack"}"""))
         server.enqueue(MockResponse().withWebSocketUpgrade(answerListener))
-        runBlocking { client.answerQuestion("w1:p1", "yes", keys = listOf("down", "\u000d"), trailingKeys = listOf("\u001b")) }
+        runBlocking {
+            client.answerQuestion("w1:p1", questionId = "toolu_1#0", text = "", selectedLabels = listOf("Yes", "No"))
+        }
         val answerCommand = runBlocking { Json.parseToJsonElement(answer.await()).jsonObject }
         assertEquals("answer_question", answerCommand["type"]!!.jsonPrimitive.content)
-        assertEquals("yes", answerCommand["text"]!!.jsonPrimitive.content)
+        assertEquals("toolu_1#0", answerCommand["questionId"]!!.jsonPrimitive.content)
+        assertEquals("", answerCommand["text"]!!.jsonPrimitive.content)
         assertEquals(
-            listOf("down", "\u000d"),
-            answerCommand["keys"]!!.jsonArray.map { it.jsonPrimitive.content },
-        )
-        assertEquals(
-            listOf("\u001b"),
-            answerCommand["trailingKeys"]!!.jsonArray.map { it.jsonPrimitive.content },
+            listOf("Yes", "No"),
+            answerCommand["selectedLabels"]!!.jsonArray.map { it.jsonPrimitive.content },
         )
 
-        // Empty key lists are omitted from the wire frame rather than sent as [].
+        // A plain-prompt answer names no question, and empty lists are omitted
+        // from the wire frame rather than sent as [].
         val (omitted, omittedListener) = echoServer(listOf("""{"type":"ack"}"""))
         server.enqueue(MockResponse().withWebSocketUpgrade(omittedListener))
-        runBlocking { client.answerQuestion("w1:p1", "", keys = emptyList(), trailingKeys = emptyList()) }
+        runBlocking { client.answerQuestion("w1:p1", text = "yes") }
         val omittedCommand = runBlocking { Json.parseToJsonElement(omitted.await()).jsonObject }
-        assertEquals(null, omittedCommand["keys"])
-        assertEquals(null, omittedCommand["trailingKeys"])
+        assertEquals("yes", omittedCommand["text"]!!.jsonPrimitive.content)
+        assertEquals(null, omittedCommand["questionId"])
+        assertEquals(null, omittedCommand["selectedLabels"])
     }
 
     @Test

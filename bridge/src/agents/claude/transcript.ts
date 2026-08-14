@@ -1,4 +1,5 @@
 import { fileEditFromClaudeResult } from "../file-edit.js";
+import { claudeQuestionAnswers } from "./questions.js";
 import {
   collapseTranscriptText,
   MAX_SESSION_TITLE_LENGTH,
@@ -133,7 +134,10 @@ function parseUserRecord(record: Record<string, unknown>): TranscriptEntry | nul
         content: [],
         toolCallId: result.toolCallId,
         isError: result.isError ?? false,
-        details: result.content,
+        // Only the AskUserQuestion answers are kept as structured details;
+        // the rest of `toolUseResult` (file contents, command output) would
+        // ride along on every transcript poll for no reader.
+        details: claudeQuestionAnswers(record.toolUseResult) ?? undefined,
       };
       const text = blockText(result.content);
       if (text) entry.content = [{ type: "text", text }];

@@ -11,13 +11,18 @@ import {
 } from "../../transcript.js";
 import { findPaneWorkspace } from "../../herdr/panes.js";
 import { shellQuote } from "../../shell.js";
+import type { QuestionEntry } from "../../questions.js";
 import type {
   AgentBackend,
+  AnswerProgress,
+  AnswerRequest,
   ControlAction,
   ControlParams,
   LaunchParams,
 } from "../types.js";
 import { parseClaudeTranscript } from "./transcript.js";
+import { claudeQuestions } from "./questions.js";
+import { claudeAnswerPlan } from "./questionnaire.js";
 
 /** Claude config dir honors CLAUDECONFIGDIR (default ~/.claude), like the herdr hook. */
 export function claudeConfigDir(): string {
@@ -117,17 +122,44 @@ export async function claudeReadTranscript(path: string, opts?: TranscriptReadOp
   return parseClaudeTranscript(await readTranscriptText(path, opts), opts ?? {});
 }
 
-/** Claude has no ask_user_question equivalent; herdr's blocked state drives "needs you". */
-export function claudeExtractQuestions(): [] {
-  return [];
+export function claudeExtractQuestions(transcript: Transcript): QuestionEntry[] {
+  return claudeQuestions(transcript);
 }
 
-/** Claude blocks on an input prompt; type the answer and submit with Enter. */
-export async function claudeAnswerQuestion(herdr: HerdrPort, paneId: string, answer: string): Promise<void> {
-  const singleLine = answer.replace(/[\r\n\u2028\u2029]+/g, " ");
-  if (!singleLine.trim()) throw new Error("answer text is empty");
-  await herdr.paneSendText(paneId, singleLine);
-  await herdr.paneSendKeys(paneId, ["Enter"]);
+/**
+ * Gap between the individual key/text sends of one answer. Claude's TUI reads
+ * stdin in chunks and misparses a burst that arrives as one chunk (a batched
+ * `down down space` toggled the row the cursor had already left), so every
+ * step is its own send, spaced far enough apart to land in its own read.
+ */
+export const CLAUDE_STEP_DELAY_MS = 60;
+
+/**
+ * Deliver one answer. With a question in hand the answer travels through the
+ * AskUserQuestion questionnaire (see `questionnaire.ts`); without one the pane
+ * is blocked on an ordinary prompt, so the text is typed and submitted.
+ */
+export async function claudeAnswerQuestion(
+  herdr: HerdrPort,
+  request: AnswerRequest,
+  stepDelayMs = CLAUDE_STEP_DELAY_MS,
+): Promise<AnswerProgress | null> {
+  const { paneId, question, group, progress, text, selectedLabels } = request;
+  if (!question) {
+    const singleLine = text.replace(/[\r\n\u2028\u2029]+/g, " ");
+    if (!singleLine.trim()) throw new Error("answer text is empty");
+    await herdr.paneSendText(paneId, singleLine);
+    await herdr.paneSendKeys(paneId, ["Enter"]);
+    return null;
+  }
+  const plan = claudeAnswerPlan(question, group, progress, text, selectedLabels);
+  if (plan.steps.length === 0) throw new Error("answer has neither an option nor text");
+  for (const [index, step] of plan.steps.entries()) {
+    if (index > 0 && stepDelayMs > 0) await sleep(stepDelayMs);
+    if (step.kind === "key") await herdr.paneSendKeys(paneId, [step.value]);
+    else await herdr.paneSendText(paneId, step.value);
+  }
+  return plan.progress;
 }
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));

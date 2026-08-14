@@ -25,6 +25,36 @@ export interface ControlParams {
   text?: string;
 }
 
+/**
+ * Where an agent's questionnaire stands part-way through a multi-question ask.
+ *
+ * Both TUIs keep every question of one ask on screen as a tab strip and only
+ * write the answers to the transcript when the whole ask is submitted, so the
+ * in-flight state cannot be recovered from the session file — the bridge
+ * carries it between answers instead (see `answers.ts`).
+ */
+export interface AnswerProgress {
+  /** Question ids already answered in this ask. */
+  answered: string[];
+  /** Tab the questionnaire is showing now; index `n` is the submit tab. */
+  cursorTab: number;
+}
+
+/** One answer to deliver into a pane, in the agent's own questionnaire. */
+export interface AnswerRequest {
+  paneId: string;
+  /** The question being answered; null when the pane shows no questionnaire. */
+  question: QuestionEntry | null;
+  /** Every question of the same ask, in ask order; empty when question is null. */
+  group: QuestionEntry[];
+  /** Progress left by earlier answers to this ask. */
+  progress: AnswerProgress | null;
+  /** Free-text answer; "" when the user picked authored options. */
+  text: string;
+  /** Option labels the user picked, in the card's order. */
+  selectedLabels: string[];
+}
+
 export interface ModelInfo {
   id: string;
   name: string;
@@ -77,7 +107,13 @@ export interface AgentBackend {
   renameStoredSession?(path: string, title: string): Promise<void>;
 
   extractQuestions(transcript: Transcript): QuestionEntry[];
-  answerQuestion(herdr: HerdrPort, paneId: string, answer: string, keys?: string[], trailingKeys?: string[]): Promise<void>;
+  /**
+   * Deliver one answer into the pane. The backend owns its TUI's grammar —
+   * which keys move between questions, how an option is picked, how a custom
+   * answer is typed, how the ask is submitted — and returns the progress the
+   * next answer to the same ask starts from (null when there is none).
+   */
+  answerQuestion(herdr: HerdrPort, request: AnswerRequest): Promise<AnswerProgress | null>;
   control(herdr: HerdrPort, params: ControlParams): Promise<void>;
 
   /**

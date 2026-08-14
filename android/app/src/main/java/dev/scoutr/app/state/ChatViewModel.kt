@@ -93,103 +93,40 @@ fun sanitizeAnswerText(text: String): String {
 }
 
 /**
- * Progress of one ask_user_question run inside pi's TUI questionnaire.
+ * An answer this device has sent that the transcript has not echoed back yet.
  *
- * The questionnaire auto-advances one tab after every answered question
- * (capped at the review tab), so the current tab is one past the last
- * answered question's index. Keys computed for later questions navigate
- * relative to that tab.
+ * Neither agent writes a partly answered ask to its session file — every
+ * question of one ask flips to answered together, when the whole ask is
+ * submitted. Without this the card a user just answered would sit there
+ * unchanged until the last question of the ask was answered too, which reads
+ * as a lost tap. The card resolves to its answer bubble immediately instead,
+ * and the transcript's own answer replaces it on the next poll.
  */
-data class QuestionnaireRun(
-    /** Question ids already recorded in this run; re-answers are no-ops. */
-    val answered: Set<String> = emptySet(),
-    /** Index of the most recently answered question within its call group. */
-    val lastIndex: Int = -1,
-)
+data class LocalAnswer(val text: String, val labels: List<String>)
 
-/** Navigation + submit keys for one answer, plus any keys sent after text. */
-internal data class AnswerKeys(
-    val keys: List<String>,
-    val trailingKeys: List<String>,
-    val custom: Boolean,
-)
-
-/**
- * Compute the key sequence that selects an answer inside pi's TUI
- * questionnaire (the ask-user-question extension).
- *
- * The questionnaire is keyboard-only: up/down move, space toggles a
- * multi-select option, enter chooses/continues, tab moves between questions.
- * Typed text is dropped while an option list is focused and enter would pick
- * the first option, so option answers travel entirely as keys; custom
- * answers open the "Type something" editor (the first entry after the
- * authored options) with keys, then the caller sends the text and the bridge
- * submits it with a trailing enter. A multi-question ask (n > 1) shows a
- * review tab after the last question, which needs one more enter to submit.
- */
-internal fun answerNavigationKeys(
-    question: QuestionEntry,
-    group: List<QuestionEntry>,
-    lastAnsweredIndex: Int?,
-    answer: String,
-    selectedLabels: List<String> = emptyList(),
-): AnswerKeys {
-    val n = group.size
-    val k = group.indexOfFirst { it.id == question.id }
-    if (k < 0) return AnswerKeys(emptyList(), emptyList(), custom = true)
-    val tabCount = n + 1
-    val currentTab = (lastAnsweredIndex?.plus(1) ?: 0).coerceAtMost(n)
-    var delta = k - currentTab
-    if (delta < 0) delta += tabCount
-    val keys = mutableListOf<String>()
-    repeat(delta) { keys += "tab" }
-    val labels = selectedLabels.ifEmpty { if (answer.isNotEmpty()) listOf(answer) else emptyList() }
-    val indices = labels.mapNotNull { label -> question.options.indexOfFirst { it.label == label }.takeIf { it >= 0 } }
-    val custom = question.options.isEmpty() || indices.isEmpty()
-    if (custom) {
-        // "Type something" is the first entry after the authored options.
-        repeat(question.options.size) { keys += "down" }
-        keys += "enter"
-    } else if (question.multiSelect) {
-        var pos = 0
-        for (index in indices.sorted()) {
-            val step = index - pos
-            if (step > 0) repeat(step) { keys += "down" } else if (step < 0) repeat(-step) { keys += "up" }
-            keys += "space"
-            pos = index
-        }
-        keys += "enter"
-    } else {
-        repeat(indices[0]) { keys += "down" }
-        keys += "enter"
-    }
-    val last = n > 1 && k == n - 1
-    return if (custom) {
-        // Editor enter submits the answer; on the last question of a
-        // multi-question ask that lands on the review tab and a second
-        // enter submits the whole questionnaire.
-        AnswerKeys(keys, if (last) listOf("enter", "enter") else listOf("enter"), custom = true)
-    } else {
-        if (last) keys += "enter" // review-tab submit
-        AnswerKeys(keys, emptyList(), custom = false)
-    }
-}
-
-/** Questions from the same ask_user_question call, in ask order. */
-internal fun questionGroup(questions: List<QuestionEntry>, question: QuestionEntry): List<QuestionEntry> {
-    val call = questions.filter { it.callId.isNotEmpty() && it.callId == question.callId }
-    return call.ifEmpty { listOf(question) }
-}
-
-/** Drop finished questionnaire runs (their group is fully answered or gone). */
-internal fun pruneQuestionnaireProgress(
-    progress: Map<String, QuestionnaireRun>,
+/** Drop local answers whose question has landed answered, or is gone. */
+internal fun pruneLocalAnswers(
+    local: Map<String, LocalAnswer>,
     questions: List<QuestionEntry>,
-): Map<String, QuestionnaireRun> =
-    progress.filter { (callId, _) ->
-        val group = questions.filter { it.callId == callId }
-        group.isNotEmpty() && group.any { !it.answered }
+): Map<String, LocalAnswer> {
+    if (local.isEmpty()) return local
+    val byId = questions.associateBy { it.id }
+    return local.filterKeys { id ->
+        val question = byId[id]
+        question == null || !question.answered
     }
+}
+
+/** A question card with the answer this device sent overlaid on it. */
+internal fun overlayLocalAnswer(question: QuestionEntry, local: LocalAnswer?): QuestionEntry {
+    if (local == null || question.answered) return question
+    return question.copy(
+        answered = true,
+        answerText = local.text.ifBlank { null },
+        selected = local.labels,
+    )
+}
+
 internal fun dropConfirmedMessages(
     pending: List<PendingUserMessage>,
     incoming: List<SessionEntry>,
@@ -249,8 +186,8 @@ data class ChatUiState(
     val questions: List<QuestionEntry> = emptyList(),
     /** Question id currently sending an answer. */
     val answeringQuestionId: String? = null,
-    /** Answer-send progress per ask_user_question call; see QuestionnaireRun. */
-    val questionnaireProgress: Map<String, QuestionnaireRun> = emptyMap(),
+    /** Answers sent from this device that the transcript has not echoed yet. */
+    val localAnswers: Map<String, LocalAnswer> = emptyMap(),
     val questionError: String? = null,
     val exists: Boolean = true,
     /** Transcript read lifecycle; the entries/questions themselves stay in separate fields (they are merged in place). */
@@ -303,13 +240,22 @@ data class ChatUiState(
         get() = capabilities == null || SessionAction.SetThinking.wire in capabilities
 
     /**
+     * The cards to render: [questions] with any answer this device has already
+     * sent overlaid, so a card resolves the moment it is answered instead of
+     * waiting for the whole ask to reach the transcript.
+     */
+    val questionCards: List<QuestionEntry>
+        get() = if (localAnswers.isEmpty()) questions
+        else questions.map { overlayLocalAnswer(it, localAnswers[it.id]) }
+
+    /**
      * True while a question card is still waiting for an answer. Answered
      * questions stay in [questions] for the rest of the session as answer
      * bubbles, so "any question at all" is not the same thing — the working
      * indicator defers to a card only while one is actually pending.
      */
     val hasPendingQuestion: Boolean
-        get() = questions.any { !it.answered }
+        get() = questionCards.any { !it.answered }
 }
 
 /**
@@ -507,10 +453,11 @@ class ChatViewModel(
                 val previouslyAnswered = it.questions
                     .filter { q -> q.answered }
                     .mapTo(mutableSetOf()) { q -> q.id }
+                val questions = mergeQuestions(it.questions, response.questions)
                 it.copy(
                     entries = mergeSessionEntries(it.entries, response.entries, incremental = response.since != null),
-                    questions = mergeQuestions(it.questions, response.questions),
-                    questionnaireProgress = pruneQuestionnaireProgress(it.questionnaireProgress, response.questions),
+                    questions = questions,
+                    localAnswers = pruneLocalAnswers(it.localAnswers, questions),
                     pendingMessages = dropConfirmedMessages(
                         it.pendingMessages,
                         response.entries,
@@ -666,18 +613,16 @@ class ChatViewModel(
     }
 
     /**
-     * Answer a structured question card. The composed text is sanitized here
-     * (single line, no control chars, capped) and again on the bridge before
-     * it is typed into pi's questionnaire.
+     * Answer a structured question card. The text is sanitized here (single
+     * line, no control chars, capped) and again on the bridge, which turns the
+     * card and the picked labels into keystrokes for the agent's own
+     * questionnaire — the app never speaks a TUI's key grammar.
      */
     fun answerQuestion(questionId: String, text: String, selectedLabels: List<String> = emptyList()) {
         val safe = sanitizeAnswerText(text)
         if (safe.isEmpty() && selectedLabels.isEmpty()) return
-        if (_ui.value.questions.none { it.id == questionId }) return
+        if (_ui.value.questionCards.none { it.id == questionId && !it.answered }) return
         if (_ui.value.answeringQuestionId != null) return
-        val callId = _ui.value.questions.firstOrNull { it.id == questionId }?.callId.orEmpty()
-        val run = _ui.value.questionnaireProgress[callId]
-        if (run != null && questionId in run.answered) return // already recorded in this run
         _ui.update { it.copy(answeringQuestionId = questionId, questionError = null) }
         viewModelScope.launch {
             try {
@@ -703,30 +648,17 @@ class ChatViewModel(
     }
 
     /**
-     * Deliver one answer into the pane as keyboard navigation plus optional
-     * text, and record the questionnaire progress for the next answer.
-     * Throws on transport failure (callers handle retry UI).
+     * Deliver one answer to the bridge and record it locally, so the card
+     * resolves to its answer now rather than when the whole ask lands in the
+     * transcript. Throws on transport failure (callers handle retry UI), and
+     * nothing is recorded then — the card stays answerable.
      */
     private suspend fun sendAnswer(questionId: String, text: String, selectedLabels: List<String>) {
-        val state = _ui.value
-        val question = state.questions.firstOrNull { it.id == questionId } ?: return
-        val group = questionGroup(state.questions, question)
-        val run = state.questionnaireProgress[question.callId]
-        if (run != null && questionId in run.answered) return // already recorded in this run
         val safe = sanitizeAnswerText(text)
-        val nav = answerNavigationKeys(question, group, run?.lastIndex, safe, selectedLabels)
-        val sendText = if (nav.custom) safe else ""
-        bridge.answerQuestion(paneId, sendText, nav.keys, nav.trailingKeys)
-        val index = group.indexOfFirst { it.id == questionId }.coerceAtLeast(0)
+        bridge.answerQuestion(paneId, questionId, safe, selectedLabels)
+        if (questionId.isEmpty()) return
         _ui.update { state ->
-            val progress = state.questionnaireProgress[question.callId]
-            state.copy(
-                questionnaireProgress = state.questionnaireProgress +
-                    (question.callId to QuestionnaireRun(
-                        answered = (progress?.answered ?: emptySet()) + questionId,
-                        lastIndex = index,
-                    )),
-            )
+            state.copy(localAnswers = state.localAnswers + (questionId to LocalAnswer(safe, selectedLabels)))
         }
     }
 
@@ -769,9 +701,8 @@ class ChatViewModel(
                     // unanswered question is on screen, route through the
                     // questionnaire so the text lands in the "Type something"
                     // editor instead of pi dropping it and picking option 1.
-                    val pending = _ui.value.questions.firstOrNull { !it.answered }
-                    if (pending != null) sendAnswer(pending.id, message.text, emptyList())
-                    else bridge.answerQuestion(paneId, message.text)
+                    val pending = _ui.value.questionCards.firstOrNull { !it.answered }
+                    sendAnswer(pending?.id.orEmpty(), message.text, emptyList())
                 } else bridge.steer(paneId, message.text)
 
                 // The bridge accepted it, so it is no longer queued — only

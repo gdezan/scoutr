@@ -214,9 +214,32 @@ describe("agy adapter", () => {
 
     it("answers questions via herdr", async () => {
       const port = fakeHerdr();
-      await agyAnswerQuestion(port, "p1", "Option A\nNext", undefined, ["Enter"]);
+      await agyAnswerQuestion(port, {
+        paneId: "p1",
+        question: null,
+        group: [],
+        progress: null,
+        text: "Option A\nNext",
+        selectedLabels: [],
+      });
       assert.deepEqual(port.sent, [
         { method: "paneSendText", params: { pane_id: "p1", text: "Option A Next" } },
+        { method: "paneSendKeys", params: { pane_id: "p1", keys: ["Enter"] } },
+      ]);
+    });
+
+    it("delivers an option pick as the option label", async () => {
+      const port = fakeHerdr();
+      await agyAnswerQuestion(port, {
+        paneId: "p1",
+        question: null,
+        group: [],
+        progress: null,
+        text: "",
+        selectedLabels: ["Option A", "Option B"],
+      });
+      assert.deepEqual(port.sent, [
+        { method: "paneSendText", params: { pane_id: "p1", text: "Option A, Option B" } },
         { method: "paneSendKeys", params: { pane_id: "p1", keys: ["Enter"] } },
       ]);
     });

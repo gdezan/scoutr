@@ -12,6 +12,8 @@ import { findPaneWorkspace } from "../../herdr/panes.js";
 import { shellQuote } from "../../shell.js";
 import type {
   AgentBackend,
+  AnswerProgress,
+  AnswerRequest,
   ControlAction,
   ControlParams,
   LaunchParams,
@@ -83,25 +85,20 @@ export async function agyReadTranscript(path: string, opts?: TranscriptReadOpts)
   return transcript;
 }
 
+/**
+ * agy answers as plain text at its prompt — it has no keyboard-navigated
+ * questionnaire — so an option pick is delivered as the option label itself.
+ */
 export async function agyAnswerQuestion(
   herdr: HerdrPort,
-  paneId: string,
-  answer: string,
-  keys?: string[],
-  trailingKeys?: string[],
-): Promise<void> {
-  if (keys && keys.length > 0) {
-    await herdr.paneSendKeys(paneId, keys);
-  }
+  request: AnswerRequest,
+): Promise<AnswerProgress | null> {
+  const answer = request.text || request.selectedLabels.join(", ");
   const singleLine = answer.replace(/[\r\n\u2028\u2029]+/g, " ");
-  if (singleLine.trim()) {
-    await herdr.paneSendText(paneId, singleLine);
-    await herdr.paneSendKeys(paneId, trailingKeys ?? ["Enter"]);
-    return;
-  }
-  if (!keys || keys.length === 0) {
-    throw new Error("answer text is empty");
-  }
+  if (!singleLine.trim()) throw new Error("answer text is empty");
+  await herdr.paneSendText(request.paneId, singleLine);
+  await herdr.paneSendKeys(request.paneId, ["Enter"]);
+  return null;
 }
 
 export async function agyControl(herdr: HerdrPort, params: ControlParams): Promise<void> {

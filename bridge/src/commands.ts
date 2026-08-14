@@ -1,12 +1,22 @@
 import { MAX_ANSWER_LENGTH, sanitizeAnswerText } from "./questions.js";
-import { resolveBackendForPane } from "./agents/registry.js";
+import { answerQuestion, type AnswerDeps } from "./answers.js";
+import { readSession } from "./routes/sessions.js";
 import { MAX_PROMPT_LENGTH, PROMPT_FORBIDDEN_CHAR } from "./sessions.js";
 import type { SessionSnapshot } from "./herdr/types.js";
 import type { ServerDeps } from "./routes/types.js";
 
 export type CommandMessage =
   | { type: "steer"; target: string; text: string }
-  | { type: "answer_question"; paneId: string; text: string; keys?: string[]; trailingKeys?: string[] }
+  | {
+      type: "answer_question";
+      paneId: string;
+      /** Card id of the question being answered; omitted for a plain prompt. */
+      questionId?: string;
+      /** Free-text answer; omitted or "" when the user picked options. */
+      text?: string;
+      /** Option labels the user picked. */
+      selectedLabels?: string[];
+    }
   | { type: "slash_command"; paneId: string; text: string }
   | { type: "send_text"; paneId: string; text: string }
   | { type: "ping" }
@@ -49,34 +59,28 @@ export async function handleCommand(command: CommandMessage, deps: ServerDeps): 
       return { type: "steered", target, result: await deps.herdr.agentPrompt(target, text) };
     }
     case "answer_question": {
-      const { paneId, text, keys, trailingKeys } = command;
+      const { paneId, questionId, text, selectedLabels } = command;
       if (!paneId) throw new Error("answer_question requires paneId");
-      const ALLOWED_KEYS = new Set(["up", "down", "left", "right", "enter", "space", "tab", "esc"]);
-      const checkKeys = (seq: string[] | undefined, name: string) => {
-        if (seq === undefined) return;
-        if (!Array.isArray(seq) || seq.length > 32 || seq.some((k) => !ALLOWED_KEYS.has(k))) {
-          throw new Error(`answer_question ${name} must be a bounded sequence of navigation keys`);
-        }
-      };
-      checkKeys(keys, "keys");
-      checkKeys(trailingKeys, "trailingKeys");
-      const hasKeys = (keys?.length ?? 0) > 0;
-      const safe = sanitizeAnswerText(text);
-      if (!safe && !hasKeys) throw new Error("answer_question requires text or keys");
-      const backend = backendForPane(deps, paneId);
-      if (backend) {
-        // Each backend knows how an answer is delivered into its own UI
-        // (pi's questionnaire vs claude's input prompt). `keys` is the
-        // navigation sequence into pi's questionnaire (arrow/space/enter);
-        // `trailingKeys` are sent after the text (editor submit + review).
-        await backend.answerQuestion(deps.herdr, paneId, safe, keys ?? [], trailingKeys);
-      } else {
-        // Unknown agents get plain type-then-submit; questionnaire key
-        // protocols belong to a registered backend.
-        if (!safe) throw new Error("answer_question requires text for unknown agents");
-        await deps.herdr.paneSendText(paneId, safe);
-        await deps.herdr.paneSendKeys(paneId, ["Enter"]);
+      if (questionId !== undefined && (typeof questionId !== "string" || questionId.length > 200)) {
+        throw new Error("answer_question questionId must be a question card id");
       }
+      if (
+        selectedLabels !== undefined &&
+        (!Array.isArray(selectedLabels) ||
+          selectedLabels.length > 32 ||
+          selectedLabels.some((label) => typeof label !== "string" || label.length > MAX_ANSWER_LENGTH))
+      ) {
+        throw new Error("answer_question selectedLabels must be a bounded list of option labels");
+      }
+      const safe = sanitizeAnswerText(text ?? "");
+      // The app sends intent — the question and what the user picked — and
+      // the backend turns it into keystrokes for its own questionnaire.
+      await answerQuestion(answerDeps(deps), {
+        paneId,
+        questionId: questionId ?? "",
+        text: safe,
+        selectedLabels: selectedLabels ?? [],
+      });
       return { type: "answered", paneId, text: safe };
     }
     case "slash_command": {
@@ -123,6 +127,26 @@ export function validateSlashCommand(text: unknown): string {
   return text;
 }
 
-function backendForPane(deps: ServerDeps, paneId: string) {
-  return resolveBackendForPane(deps.feed.snapshot as SessionSnapshot | null, paneId);
+/**
+ * Answering needs the question the card id refers to, so it reads the pane's
+ * own transcript — the same memoized read the chat poll uses, so an answer
+ * costs a stat in the steady state.
+ */
+function answerDeps(deps: ServerDeps): AnswerDeps {
+  const snapshot = deps.feed.snapshot as SessionSnapshot | null;
+  return {
+    herdr: deps.herdr,
+    snapshot,
+    async readQuestions(backend, paneId) {
+      const pane = snapshot?.panes.find((candidate) => candidate.pane_id === paneId);
+      const agent = snapshot?.agents.find((candidate) => candidate.pane_id === paneId);
+      const ref = pane?.agent_session ?? agent?.agent_session ?? null;
+      if (!ref) return [];
+      const cwd = pane?.cwd ?? agent?.cwd ?? undefined;
+      const path = await backend.resolveSessionPath(ref, cwd ?? undefined);
+      if (!path) return [];
+      const session = await readSession(path, null);
+      return session.questions;
+    },
+  };
 }

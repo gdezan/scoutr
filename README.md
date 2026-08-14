@@ -119,6 +119,20 @@ curl -s -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8737/api/health
 # {"ok":true,"service":"scoutr-bridge","herdr":{"connected":true,"version":"0.8.0","protocol":19},...}
 ```
 
+### Claude question cards (one time)
+
+Claude Code writes an `AskUserQuestion` call to its session file only *after*
+the ask is answered, so without a hook the app can show the question only once
+it is too late to answer it. Install the hook that reports open asks:
+
+```bash
+scoutr-bridge install-claude-hook   # adds PreToolUse/PostToolUse to ~/.claude/settings.json
+```
+
+Restart any running `claude` session afterwards. Open asks then show up as
+answerable cards in chat; answering one from the app drives Claude's own
+questionnaire in the pane. pi needs no hook — it records the call immediately.
+
 ### Expose on the tailnet
 
 ```bash

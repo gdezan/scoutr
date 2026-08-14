@@ -15,7 +15,9 @@ pi agents, as an alternative to Moshi's paid herdr integration.
   `dev.scoutr.app`, minSdk 26 / targetSdk 36. No Hilt/Room; manual DI via
   `ScoutrApp.AppContainer`.
 - **Chat**: steer live herdr pi panes — read the pi session JSONL, `agent.prompt`
-  to steer, answer `ask_user_question` by sending the answer + Enter into the pane.
+  to steer, and answer question cards through the agent adapter — the app sends
+  the card id plus the picked labels, the adapter drives its own TUI
+  questionnaire (see `docs/adr/0006-answer-questions-through-the-agent-adapter.md`).
 - **Usage**: provider adapters read credential stores without writing them: Codex OAuth
   5h/7d windows and DeepSeek/xAI credentials from `~/.pi/agent/auth.json`, plus
   Claude Code quota windows from `~/.claude/.credentials.json`. Claude's own last

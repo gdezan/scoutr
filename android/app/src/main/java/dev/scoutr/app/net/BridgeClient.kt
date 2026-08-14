@@ -397,16 +397,18 @@ class BridgeClient(
 
     override suspend fun answerQuestion(
         paneId: String,
+        questionId: String,
         text: String,
-        keys: List<String>,
-        trailingKeys: List<String>,
+        selectedLabels: List<String>,
     ): WsFrame = sendCommandJson(
         buildJsonObject {
             put("type", "answer_question")
             put("paneId", paneId)
+            if (questionId.isNotEmpty()) put("questionId", questionId)
             put("text", text)
-            if (keys.isNotEmpty()) put("keys", JsonArray(keys.map { JsonPrimitive(it) }))
-            if (trailingKeys.isNotEmpty()) put("trailingKeys", JsonArray(trailingKeys.map { JsonPrimitive(it) }))
+            if (selectedLabels.isNotEmpty()) {
+                put("selectedLabels", JsonArray(selectedLabels.map { JsonPrimitive(it) }))
+            }
         },
     )
 }
