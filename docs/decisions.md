@@ -134,32 +134,19 @@ pi agents, as an alternative to Moshi's paid herdr integration.
   the request path instead.
 - Robolectric 4.14 caps at targetSdk 35, so JVM ViewModel tests pin
   `@Config(sdk = [35])` and idle the main looper for viewModelScope work.
-## Sessions v2 (layer 2) — Cursor-iOS design language
+## Sessions v2 (layer 2) — Cursor-iOS product patterns
 
-Design north star is the Cursor iOS app (docs/cursor-ios-design-brief.md): a
-near-black canvas with off-white type and one electric-blue accent reserved for
-AI-owned states. Applied per the brief's patterns (source of truth:
-android/app/src/main/java/dev/scoutr/app/ui/theme/DESIGN.md, committed with
-layer 2):
+The Cursor iOS brief remains a product-pattern reference for supervision, chat, review, and cache-first recovery. Its visual recommendations are superseded for Scoutr Android by ADR 0005 and `android/app/src/main/java/dev/scoutr/app/ui/theme/DESIGN.md`.
 
-- **Dark-first, always**: `ScoutrTheme` forces `darkTheme = true` (emulator
-  light mode was rendering light) and the window + system bars are dark in both
-  system modes (`windowLightStatusBar/NavigationBar` false + `enableEdgeToEdge`,
-  added in layer 3 after a device check).
-- **One accent color**: blue `#5B8CFF` only for AI-owned states (active run
-  pill, "needs you", composer send). User bubbles are neutral surfaces, not
-  primary (brief: "user vs AI" visual split).
-- **Mono only for code/data/paths**: tool output, model ids, workspace paths
-  (brief's type hierarchy).
-- **Chat opens at the last message** and follows while pinned; scrolling up
-  shows the scroll-to-end FAB (brief's "jump to latest" pattern). Auto-scroll
-  is guarded (`scrollToItem` + `scrollBy(Float.MAX_VALUE)`, which clamps; a
-  single `scrollToItem(index, Int.MAX_VALUE)` overflows).
-- **Tool calls are one muted chip**, collapsed, tap to expand command + output
-  inline; thinking blocks dimmed, hidden by the details toggle (brief: activity
-  details are opt-in).
-- **Motion 150-250ms** via `animateItem`/`AnimatedVisibility` (brief's
-  restraint).
+## Design system v2 (layer 3)
+
+Scoutr Android is always dark and uses green `#8DF08D` for live/AI-owned state, gray for done, red for user attention, and teal `#2C6F72` only for charts/data. Space Grotesk is the UI face; Martian Mono is used for small machine facts and code; JetBrains Mono is reserved for full-screen terminal content. Compact 4/6/8dp geometry, unfilled 9dp status rings, and no loading spinners or skeletons are the shared visual contract.
+
+- **Chat** keeps the transcript-centric event stream, assistant spine, inline tool details, thinking toggle, true-bottom follow behavior, and multiline Enter-never-sends composer. The send action is a filled 6dp square.
+- **Sessions** uses recency-ordered repository tabs derived from session `cwd`, plus a scope filter that keeps Active, Completed, Pinned, and Archived reachable.
+- **Motion** keeps the intentional live-state ripple and blocked pulse; reduce motion renders a static ring. Loading feedback is text or static feedback, not a spinner or skeleton.
+- **Mono** remains restricted to code, data, paths, commands, model ids, and terminal output.
+
 
 ## Session controls — v1 limits
 

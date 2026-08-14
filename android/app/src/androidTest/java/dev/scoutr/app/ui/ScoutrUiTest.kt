@@ -114,8 +114,8 @@ class ScoutrUiTest {
             }
         }
 
-        composeRule.onNodeWithText("Needs you").assertExists()
-        composeRule.onNodeWithText("Working").assertExists()
+        composeRule.onNodeWithText("NEEDS YOU 1").assertExists()
+        composeRule.onNodeWithText("WORKING 1").assertExists()
         composeRule.onNodeWithText("hestia").assertExists()
         composeRule.onNodeWithText("agents-mobile").assertExists()
     }

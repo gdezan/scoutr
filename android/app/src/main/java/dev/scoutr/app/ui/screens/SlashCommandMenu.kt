@@ -1,5 +1,6 @@
 package dev.scoutr.app.ui.screens
 
+import dev.scoutr.app.ui.theme.ScoutrMono
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -17,7 +18,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Surface
@@ -32,7 +32,6 @@ import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
@@ -56,12 +55,12 @@ internal fun SlashCommandMenu(
     }
     Surface(
         modifier = modifier.fillMaxWidth().padding(horizontal = 12.dp).testTag("slash_command_menu"),
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(8.dp),
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
         tonalElevation = 3.dp,
     ) {
         when {
-            loading -> CommandMenuStatus("Loading commands…", progress = true)
+            loading -> CommandMenuStatus("Loading commands…")
             error != null -> CommandMenuError(error, onRetry)
             commands.isEmpty() && query.isEmpty() -> CommandMenuStatus("No commands available")
             commands.isEmpty() -> CommandMenuStatus("No commands match “$query”")
@@ -86,7 +85,7 @@ internal fun SlashCommandMenu(
 private fun CommandRow(command: SlashCommandInfo, selected: Boolean, onClick: () -> Unit) {
     Surface(
         onClick = onClick,
-        color = if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.06f) else MaterialTheme.colorScheme.surfaceContainerHigh,
+        color = if (selected) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.surfaceContainerHigh,
         modifier = Modifier
             .fillMaxWidth()
             .semantics { this.selected = selected }
@@ -97,7 +96,7 @@ private fun CommandRow(command: SlashCommandInfo, selected: Boolean, onClick: ()
                 Modifier
                     .width(3.dp)
                     .fillMaxHeight()
-                    .background(if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHigh),
+                    .background(if (selected) MaterialTheme.colorScheme.outline else MaterialTheme.colorScheme.surfaceContainerHigh),
             )
             Column(Modifier.weight(1f).padding(horizontal = 12.dp, vertical = 5.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -106,10 +105,10 @@ private fun CommandRow(command: SlashCommandInfo, selected: Boolean, onClick: ()
                             withStyle(SpanStyle(fontWeight = FontWeight.SemiBold)) { append("/${command.name}") }
                             command.argumentHint?.let { hint ->
                                 append("  ")
-                                withStyle(SpanStyle(fontFamily = FontFamily.Monospace)) { append(hint) }
+                                withStyle(SpanStyle(fontFamily = ScoutrMono)) { append(hint) }
                             }
                         },
-                        color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                        color = MaterialTheme.colorScheme.onSurface,
                         style = MaterialTheme.typography.bodyMedium,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
@@ -139,10 +138,9 @@ private fun CommandRow(command: SlashCommandInfo, selected: Boolean, onClick: ()
 }
 
 @Composable
-private fun CommandMenuStatus(text: String, progress: Boolean = false) {
+private fun CommandMenuStatus(text: String) {
     Box(Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(16.dp), contentAlignment = Alignment.CenterStart) {
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-            if (progress) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
             Text(text, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }

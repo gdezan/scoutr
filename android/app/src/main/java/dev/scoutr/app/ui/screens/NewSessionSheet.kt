@@ -1,5 +1,6 @@
 package dev.scoutr.app.ui.screens
 
+import dev.scoutr.app.ui.theme.ScoutrMono
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -29,7 +30,6 @@ import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.outlined.StarBorder
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
@@ -54,7 +54,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
@@ -259,7 +258,7 @@ private fun FolderSummary(
         Surface(
             onClick = onOpenPicker,
             color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
-            shape = RoundedCornerShape(12.dp),
+            shape = RoundedCornerShape(8.dp),
             modifier = Modifier.fillMaxWidth(),
         ) {
             Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -268,7 +267,7 @@ private fun FolderSummary(
                 Text(
                     ui.path.ifBlank { "Loading folders…" },
                     style = MaterialTheme.typography.bodyMedium,
-                    fontFamily = FontFamily.Monospace,
+                    fontFamily = ScoutrMono,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f).testTag("folder_path"),
@@ -279,6 +278,7 @@ private fun FolderSummary(
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 ui.folderChoices.forEach { folder ->
                     FilterChip(
+                        shape = RoundedCornerShape(6.dp),
                         selected = folder == ui.path,
                         onClick = { onJumpTo(folder) },
                         label = { Text(crumbLabel(folder, ui.home), maxLines = 1) },
@@ -299,6 +299,7 @@ private fun BackendSection(ui: NewSessionUiState, onSelect: (String) -> Unit) {
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             ui.agentKinds.forEach { kind ->
                 FilterChip(
+                    shape = RoundedCornerShape(6.dp),
                     selected = kind.id == ui.selectedAgent,
                     onClick = { onSelect(kind.id) },
                     label = { Text(kind.displayName) },
@@ -328,7 +329,7 @@ private fun ModelSummary(
         Surface(
             onClick = onOpenPicker,
             color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
-            shape = RoundedCornerShape(12.dp),
+            shape = RoundedCornerShape(8.dp),
             modifier = Modifier.fillMaxWidth(),
         ) {
             Row(Modifier.padding(start = 14.dp, top = 12.dp, bottom = 12.dp, end = 6.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -346,7 +347,7 @@ private fun ModelSummary(
                         Text(
                             it.key,
                             style = MaterialTheme.typography.bodySmall,
-                            fontFamily = FontFamily.Monospace,
+                            fontFamily = ScoutrMono,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
@@ -378,12 +379,14 @@ private fun ThinkingLevelSection(ui: NewSessionUiState, onSelect: (String?) -> U
         SectionLabel("Thinking")
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             FilterChip(
+                shape = RoundedCornerShape(6.dp),
                 selected = ui.selectedThinkingLevel == null,
                 onClick = { onSelect(null) },
                 label = { Text("Model default") },
             )
             levels.forEach { level ->
                 FilterChip(
+                    shape = RoundedCornerShape(6.dp),
                     selected = ui.selectedThinkingLevel == level,
                     onClick = { onSelect(level) },
                     label = { Text(level) },
@@ -418,6 +421,7 @@ private fun LauncherActions(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         OutlinedButton(
+            shape = MaterialTheme.shapes.small,
             onClick = onSavePreset,
             enabled = (!ui.selectedAgentHasModelCatalog || ui.selectedModel != null) && ui.path.isNotBlank() && !ui.loadingDirs,
             modifier = Modifier.heightIn(min = 48.dp).testTag("save_preset"),
@@ -425,12 +429,12 @@ private fun LauncherActions(
             Text("Save preset")
         }
         Button(
+            shape = MaterialTheme.shapes.small,
             onClick = onCreate,
             enabled = ui.canCreate,
             modifier = Modifier.weight(1f).heightIn(min = 48.dp).testTag("create_session"),
         ) {
             if (ui.creating) {
-                CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
                 Spacer(Modifier.width(10.dp))
                 Text("Starting…")
             } else {

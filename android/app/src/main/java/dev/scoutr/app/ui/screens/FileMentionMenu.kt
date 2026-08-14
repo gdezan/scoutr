@@ -1,5 +1,6 @@
 package dev.scoutr.app.ui.screens
 
+import dev.scoutr.app.ui.theme.ScoutrMono
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -19,7 +20,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.outlined.InsertDriveFile
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -33,7 +33,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -62,12 +61,12 @@ internal fun FileMentionMenu(
     }
     Surface(
         modifier = modifier.fillMaxWidth().padding(horizontal = 12.dp).testTag("file_mention_menu"),
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(8.dp),
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
         tonalElevation = 3.dp,
     ) {
         when {
-            loading -> FileMentionStatus("Loading files…", progress = true)
+            loading -> FileMentionStatus("Loading files…")
             error != null -> FileMentionError(error, onRetry)
             candidates.isEmpty() && query.isEmpty() -> FileMentionStatus("No files available")
             candidates.isEmpty() -> FileMentionStatus("No files match “$query”")
@@ -104,7 +103,7 @@ internal fun FileMentionMenu(
 private fun FileMentionRow(candidate: FileCandidate, selected: Boolean, onClick: () -> Unit) {
     Surface(
         onClick = onClick,
-        color = if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.06f) else MaterialTheme.colorScheme.surfaceContainerHigh,
+        color = if (selected) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.surfaceContainerHigh,
         modifier = Modifier
             .fillMaxWidth()
             .semantics { this.selected = selected }
@@ -115,7 +114,7 @@ private fun FileMentionRow(candidate: FileCandidate, selected: Boolean, onClick:
                 Modifier
                     .width(3.dp)
                     .fillMaxHeight()
-                    .background(if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHigh),
+                    .background(if (selected) MaterialTheme.colorScheme.outline else MaterialTheme.colorScheme.surfaceContainerHigh),
             )
             Icon(
                 imageVector = if (candidate.isDirectory) Icons.Filled.Folder else Icons.Outlined.InsertDriveFile,
@@ -126,10 +125,10 @@ private fun FileMentionRow(candidate: FileCandidate, selected: Boolean, onClick:
             Column(Modifier.weight(1f).padding(horizontal = 10.dp, vertical = 5.dp)) {
                 Text(
                     text = if (candidate.isDirectory) "${candidate.name}/" else candidate.name,
-                    color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                    color = MaterialTheme.colorScheme.onSurface,
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.SemiBold,
-                    fontFamily = FontFamily.Monospace,
+                    fontFamily = ScoutrMono,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -137,7 +136,7 @@ private fun FileMentionRow(candidate: FileCandidate, selected: Boolean, onClick:
                     Text(
                         candidate.parent,
                         style = MaterialTheme.typography.bodySmall,
-                        fontFamily = FontFamily.Monospace,
+                        fontFamily = ScoutrMono,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
@@ -149,10 +148,9 @@ private fun FileMentionRow(candidate: FileCandidate, selected: Boolean, onClick:
 }
 
 @Composable
-private fun FileMentionStatus(text: String, progress: Boolean = false) {
+private fun FileMentionStatus(text: String) {
     Box(Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(16.dp), contentAlignment = Alignment.CenterStart) {
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-            if (progress) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
             Text(text, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }

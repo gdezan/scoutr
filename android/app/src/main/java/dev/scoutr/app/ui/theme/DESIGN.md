@@ -1,90 +1,76 @@
 # Scoutr — design system
 
-_Written from the built world after the layer-2 design pass (impeccable
-finish step). North star: the pinned Cursor-iOS brief in
-`docs/cursor-ios-design-brief.md`; direction contract lives in
-`Theme.kt`'s KDoc._
+Scoutr is a dark-first, glanceable supervision console for agents running on a
+host. The phone is the pilot seat: surfaces answer what is live, what needs the
+operator, and what is safe to touch. The board is the visual anchor; transcripts
+stay quiet and readable.
 
 ## World
 
-Near-black canvas, elevated charcoal surfaces, off-white type, dim gray
-secondary, one electric-blue accent. The running agent's state is the visual
-anchor; the interface disappears into the task (Operate mode). Blue is
-reserved for AI-owned states: active run, "needs you", the composer's send,
-the scroll-to-end button. Status is never encoded by blue alone — success
-(green), error (red), and warning (amber) stay on their native semantic
-colors.
+- **Always dark.** The physical scene is a phone in a dim room; never follow
+  system light mode.
+- **OLED canvas.** `background` is true near-black. Boards and transcripts do
+  not get shadows, gradients, or glow.
+- **Tonal hierarchy.** `surface` is the calm panel; `surfaceContainer` is the
+  tile; `surfaceContainerHighest` is reserved for the strongest neutral bubble
+  or thinking block.
+- **Status is the color language.** Green means live/working, gray means done
+  or settled, red means the operator is needed or something failed, and amber
+  means a warning or threshold. Teal belongs to Usage charts only.
 
 ## Tokens (`ui/theme/Theme.kt`)
 
 | Role | Value | Use |
 |---|---|---|
-| `background` | `#0B0C0E` | canvas |
-| `surface` | `#121316` | cards, panels |
-| `surfaceVariant` | `#1B1D21` | chips, inputs, FABs |
-| `surfaceContainerHigh/Highest` | `#16171B` / `#1A1C20` | user bubbles, thinking blocks |
-| `onBackground`/`onSurface` | `#ECEDF0` | primary text |
-| `onSurfaceVariant` | `#A8AEB9` | secondary text (≥4.5:1 on surfaces) |
-| `primary` | `#5B8CFF` | AI accent (active state, send, FAB) |
-| `outline` | `#363B43` | 1px dividers, input borders |
-| `error` | `#E5484D` | tool errors, failures |
+| `background` | `#0B0C0E` | canvas, board, transcript |
+| `surface` | `#121316` | cards and panels |
+| `surfaceContainer` | `#16171B` | tiles and controls |
+| `surfaceContainerHighest` | `#1A1C20` | user bubbles, thinking blocks |
+| `surfaceVariant` | `#1B1D21` | quiet selected/secondary surfaces |
+| `onSurface` | `#ECEDF0` | primary text |
+| `onSurfaceVariant` | `#A8AEB9` | secondary text and settled states |
+| `primary` | `#8DF08D` | live agent, AI-owned action, active send |
+| `primaryContainer` | `#12301A` | live/AI-owned container only |
+| `secondary` | `#2C6F72` | Usage data and charts only |
+| `error` | `#E5484D` | needs-you, failures, destructive actions |
+| `tertiary` | `#E8B84B` | warnings and high usage thresholds |
+| `outline` | `#363B43` | dividers and field borders |
+| `outlineVariant` | `#26292E` | quiet separators |
 
-Always dark — the physical scene is a phone in a dim room; the app never
-follows system light.
+Shapes are compact: 4dp extra-small, 6dp small, and 8dp medium/large. A
+status dot is a 9dp outlined ring with a 2.5dp stroke; it is never a filled
+circle. Pills are not a general-purpose component: use a bounded 6dp shape for
+status metadata and controls.
 
 ## Typography
 
-- One family: the Material default sans for everything (headings, labels,
-  body) — no display/body pairing in product UI.
-- **Monospace only for code, data, and measurement**: pane ids, workspace
-  paths, tool names, tool output, model labels, the header's model·status
-  line. Never as a costume.
-- Weights: `SemiBold` on tool names and section headers; medium body;
-  label sizes for captions. Muted labels at `onSurfaceVariant`.
+- **Space Grotesk** is the UI family: headings, labels, buttons, and body.
+- **Martian Mono** is bundled for machine facts: paths, commands, hashes, tool
+  output, model/provider identifiers, and measurements.
+- **JetBrains Mono** is bundled and used only by the full-screen terminal grid.
+- Mono is never used as decoration or for ordinary labels.
 
 ## Components
 
-- **Board card**: 6dp status dot (semantic color), title + mono path at 60%
-  opacity, muted time-in-state pill (`now`/`12m`/`2h`/`3d`), filled accent
-  pill reserved for "needs you", header count pills (`Working · 1`), hidden
-  empty sections, one centered muted line for the zero state.
-- **Chat header**: back arrow, title + pane id, mono `model · status` label
-  (accent when "needs you"), details toggle (eye icon, accent when on),
-  1px divider.
-- **Message rows**: user = right-aligned neutral bubble (`surfaceContainerHighest`,
-  18dp radius, max 288dp, 4dp right margin); assistant = plain full-width
-  text (no bubble) with tool-call chips inline when details are on;
-  model caption lives in the header only.
-- **Tool chips** (call + result): `surfaceVariant` tonal chip, 12dp radius,
-  mono `▸ name` header + command/output in mono. Collapsed: command on one
-  line / output clamped to 3 lines with ellipsis. Tap toggles `▾` expanded.
-  Errors tint `error`. Tool output text at `onSurface` 0.85 for contrast.
-- **Thinking blocks**: `surfaceContainerHighest` card, "thinking" label +
-  italic body, only visible with details on.
-- **Composer**: rounded 22dp field, `surfaceContainerHigh` fill, outline
-  border, blue border + cursor on focus, send icon blue when there is text.
-- **Scroll-to-end FAB**: 40dp `surfaceVariant` circle with blue down arrow,
-  fades/slides in only when the transcript is scrolled up; tap returns to
-  the true bottom and resumes following.
+- **Board:** section header plus compact count; cards carry a status ring, title,
+  latest activity, mono workspace path, and quiet time-in-state. Needs-you is
+  the only loud card treatment: red ring/border and red metadata. Done is gray.
+- **Chat:** assistant rows are plain readable text; user rows use a neutral
+  bounded bubble; tool calls are quiet tonal rows and expand only when details
+  are enabled. The composer is a 6dp outlined field, multiline, and Enter
+  always inserts a newline.
+- **Sessions:** reuse the board tile geometry with date-group headers. Search
+  and picker fields use the shared 6dp field.
+- **Usage:** teal for usage data, amber/red only for threshold states. It must
+  not look like an agent status screen.
+- **Review:** additions use `#3FC9E8`, not the live green. Paths, hashes, and
+  diff lines use Martian Mono.
+- **Terminal:** edge-to-edge true mono output, JetBrains Mono, with the
+  hierarchy and modifier rows kept out of the transcript.
 
-## Behavior
+## Behavior and motion
 
-- Chat opens at the true bottom of the last message and follows appends
-  while the user is at the bottom; any scroll up stops following and
-  surfaces the FAB. Auto-scroll is index-bounded and exception-guarded —
-  concurrent transcript growth can never crash it.
-- Board polls `/api/agents` every 3s and ntfy polls separately. Long-lived sockets are not ambient infrastructure; the planned terminal uses dedicated sockets only while visible and contains abrupt closes.
-- Details toggle (eye) shows thinking blocks and expands all tool calls.
-
-## Motion
-
-Restrained, state-conveying only: FAB fade/slide in-out (150–250ms),
-LazyColumn `animateItem()` placement on new messages, animated tool-chip
-expand via maxLines. No orchestrated load sequences.
-
-## States
-
-Loading = centered spinner (skeletons deferred); error = inline `error`
-text naming the problem; empty transcript = centered guidance line; every
-interactive control has an enabled/disabled pair (composer send dims when
-empty or sending).
+Agent-busy motion uses `WorkingIndicator`; no unrelated screen animation is
+allowed. Motion is restrained, no-bouncy, and yields to `LocalReduceMotion`.
+Loading indicators are reserved for actual loading. Errors are inline and name
+the problem. Empty states explain the next action.

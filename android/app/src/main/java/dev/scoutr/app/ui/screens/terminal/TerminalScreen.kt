@@ -3,6 +3,7 @@ package dev.scoutr.app.ui.screens.terminal
 import android.content.ClipboardManager
 import android.content.Context
 import android.view.inputmethod.InputMethodManager
+import androidx.core.content.res.ResourcesCompat
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -46,6 +47,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.compose.LifecycleStartEffect
 import com.termux.view.TerminalView
+import dev.scoutr.app.R
 import dev.scoutr.app.data.TerminalPreferencesStore
 import dev.scoutr.app.ui.imeOrNavigationBarsPadding
 import dev.scoutr.app.state.TerminalConnectionState
@@ -230,6 +232,10 @@ fun TerminalScreen(
                     factory = { ctx ->
                         val view = TerminalView(ctx, null)
                         view.isFocusable = true
+                        // TerminalView.setTypeface assumes its renderer already exists; initialize
+                        // the renderer before applying the bundled terminal font.
+                        view.setTextSize((fontSpRef.value * density).roundToInt())
+                        view.setTypeface(ResourcesCompat.getFont(ctx, R.font.jetbrains_mono))
                         view.isFocusableInTouchMode = true
                         view.setTerminalViewClient(
                             TerminalViewClient(

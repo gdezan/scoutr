@@ -92,4 +92,11 @@ class WorkingIndicatorTest {
             }
         }
     }
+
+    @Test
+    fun workingRippleUsesOneHalfCycleOffset() {
+        assertEquals(1_600, WORKING_RIPPLE_MS)
+        assertEquals(800, WORKING_RIPPLE_OFFSET_MS)
+        assertEquals(WORKING_RIPPLE_MS / 2, WORKING_RIPPLE_OFFSET_MS)
+    }
 }

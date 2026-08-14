@@ -1,9 +1,11 @@
 package dev.scoutr.app.ui.screens
 
+import dev.scoutr.app.ui.theme.ScoutrMono
 import android.widget.Toast
-
+import android.text.format.DateUtils
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.AnchoredDraggableState
 import androidx.compose.foundation.gestures.DraggableAnchors
 import androidx.compose.foundation.gestures.Orientation
@@ -23,10 +25,12 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
@@ -50,11 +54,10 @@ import androidx.compose.material.icons.outlined.DriveFileRenameOutline
 import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material.icons.outlined.Unarchive
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
+import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -85,7 +88,6 @@ import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
@@ -93,12 +95,16 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import dev.scoutr.app.ui.components.ScoutrTextField
 import dev.scoutr.app.ui.components.ConfirmDialog
+import dev.scoutr.app.data.AgentStatus
 import dev.scoutr.app.data.SessionCatalogItem
 import dev.scoutr.app.state.HistoryItem
 import dev.scoutr.app.state.HistoryUiState
-import dev.scoutr.app.state.HistoryView
+import dev.scoutr.app.state.HistoryScope
 import dev.scoutr.app.state.ResumedSession
 import dev.scoutr.app.state.SessionHistoryViewModel
 import dev.scoutr.app.state.viewModelFactory
@@ -123,7 +129,8 @@ fun HistoryScreen(
         onStopOrDispose { viewModel.stopPolling() }
     }
 
-    var view by rememberSaveable { mutableStateOf(HistoryView.Active) }
+    var scopeFilter by rememberSaveable { mutableStateOf(HistoryScope.Active) }
+    var repoFilter by rememberSaveable { mutableStateOf("All") }
     var query by rememberSaveable { mutableStateOf("") }
     var pendingClose by remember { mutableStateOf<HistoryItem?>(null) }
     var pendingDelete by remember { mutableStateOf<HistoryItem?>(null) }
@@ -132,33 +139,41 @@ fun HistoryScreen(
     var anchors by rememberSaveable(stateSaver = HistoryAnchorMapSaver) {
         mutableStateOf(emptyMap())
     }
-    val sortedItems = remember(ui.items, view) { sortedHistoryItems(ui.items, view) }
-    var pendingTabRestore by remember { mutableStateOf<HistoryView?>(null) }
+    val repoTabs = remember(ui.items) { repositoryTabs(ui.items) }
+    // A search or refresh can remove the selected repository from the current
+    // catalog. Render All instead of leaving an invisible filter active.
+    val activeRepoFilter = repoFilter.takeIf { it in repoTabs } ?: "All"
+    val sortedItems = remember(ui.items, scopeFilter, activeRepoFilter) {
+        sortedHistoryItems(ui.items, scopeFilter, activeRepoFilter)
+    }
+    var pendingTabRestore by remember { mutableStateOf<String?>(null) }
     var anchorCaptureEnabled by remember { mutableStateOf(true) }
-
     // Tabs are parallel places: capture by stable path, then restore the tab's own anchor.
-    val latestSortedItems by rememberUpdatedState(sortedItems)
-    LaunchedEffect(view, sortedItems) {
-        if (sortedItems.isNotEmpty() && pendingTabRestore == view) {
-            val target = resolveHistoryAnchor(anchors[view], sortedItems)
+    val anchorKey = "$activeRepoFilter:${scopeFilter.name}"
+    LaunchedEffect(anchorKey, sortedItems) {
+        if (sortedItems.isNotEmpty() && pendingTabRestore == anchorKey) {
+            val target = resolveHistoryAnchor(anchors[anchorKey], sortedItems)
+            val targetIndex = target?.let {
+                historyListIndex(sortedItems, it.index, ui.truncated, it.headerVisible)
+            } ?: 0
             anchorCaptureEnabled = false
             historyListState.scrollToItem(
-                index = target?.index?.plus(if (ui.truncated) 1 else 0) ?: 0,
+                index = targetIndex,
                 scrollOffset = target?.scrollOffset ?: 0,
             )
             anchorCaptureEnabled = true
             pendingTabRestore = null
         }
     }
-    LaunchedEffect(view, anchorCaptureEnabled, pendingTabRestore) {
+    LaunchedEffect(anchorKey, anchorCaptureEnabled, pendingTabRestore) {
         if (!anchorCaptureEnabled || pendingTabRestore != null) return@LaunchedEffect
         snapshotFlow { historyListState.firstVisibleItemIndex to historyListState.firstVisibleItemScrollOffset }
-            .first { latestSortedItems.isNotEmpty() }
+            .first { sortedItems.isNotEmpty() }
         snapshotFlow {
             historyListState.firstVisibleItemIndex to historyListState.firstVisibleItemScrollOffset
         }.collect {
-            captureHistoryAnchor(historyListState, latestSortedItems)?.let { anchor ->
-                anchors = anchors + (view to anchor)
+            captureHistoryAnchor(historyListState, sortedItems)?.let { anchor ->
+                anchors = anchors + (anchorKey to anchor)
             }
         }
     }
@@ -167,22 +182,40 @@ fun HistoryScreen(
         modifier = modifier.fillMaxSize(),
         contentTag = "history_content",
     ) {
-        SearchField(
-            query = query,
-            onQuery = {
-                query = it
-                viewModel.setQuery(it)
-            },
-        )
-        ViewTabs(
-            view = view,
-            onSelect = { nextView ->
-                if (nextView != view) {
+        Row(
+            Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(Modifier.weight(1f)) {
+                SearchField(
+                    query = query,
+                    onQuery = {
+                        query = it
+                        viewModel.setQuery(it)
+                    },
+                )
+            }
+            ScopeFilterMenu(
+                selected = scopeFilter,
+                onSelect = { nextScope ->
                     captureHistoryAnchor(historyListState, sortedItems)?.let { anchor ->
-                        anchors = anchors + (view to anchor)
+                        anchors = anchors + (anchorKey to anchor)
                     }
-                    pendingTabRestore = nextView
-                    view = nextView
+                    scopeFilter = nextScope
+                    pendingTabRestore = "$activeRepoFilter:${nextScope.name}"
+                },
+            )
+        }
+        RepoTabs(
+            selected = activeRepoFilter,
+            repositories = repoTabs,
+            onSelect = { nextRepo ->
+                if (nextRepo != activeRepoFilter) {
+                    captureHistoryAnchor(historyListState, sortedItems)?.let { anchor ->
+                        anchors = anchors + (anchorKey to anchor)
+                    }
+                    repoFilter = nextRepo
+                    pendingTabRestore = "$nextRepo:${scopeFilter.name}"
                 }
             },
         )
@@ -194,11 +227,11 @@ fun HistoryScreen(
         }
         Box(Modifier.weight(1f)) {
             if (ui.loading && ui.items.isEmpty()) {
-                HistorySkeleton()
+                Text("Loading sessions…", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.fillMaxWidth().padding(vertical = 48.dp))
             } else {
                 HistoryList(
                     ui = ui,
-                    view = view,
+                    scope = scopeFilter,
                     sorted = sortedItems,
                     listState = historyListState,
                     onOpen = { item ->
@@ -286,32 +319,63 @@ private fun SearchField(query: String, onQuery: (String) -> Unit) {
 }
 
 @Composable
-private fun ViewTabs(view: HistoryView, onSelect: (HistoryView) -> Unit) {
-    // Horizontally scrollable so the four chips keep their intrinsic width:
-    // in a fixed Row the longest label ("Archived") gets squeezed and wraps
-    // onto two lines on narrow screens. Overflow scrolls instead of crushing.
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .horizontalScroll(rememberScrollState())
-            .padding(horizontal = 0.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        HistoryView.entries.forEach { candidate ->
-            FilterChip(
-                selected = view == candidate,
-                onClick = { onSelect(candidate) },
-                label = { Text(candidate.label, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                modifier = Modifier.testTag("history_view_${candidate.name}"),
-            )
+private fun ScopeFilterMenu(selected: HistoryScope, onSelect: (HistoryScope) -> Unit) {
+    var expanded by remember { mutableStateOf(false) }
+    Box {
+        TextButton(
+            onClick = { expanded = true },
+            modifier = Modifier.testTag("history_scope_filter"),
+        ) {
+            Text(selected.label, color = MaterialTheme.colorScheme.onSurface)
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            HistoryScope.entries.forEach { candidate ->
+                DropdownMenuItem(
+                    text = { Text(candidate.label) },
+                    onClick = {
+                        expanded = false
+                        onSelect(candidate)
+                    },
+                )
+            }
         }
     }
 }
 
 @Composable
+private fun RepoTabs(selected: String, repositories: List<String>, onSelect: (String) -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        repositories.forEach { repository ->
+            Box(
+                Modifier
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(
+                        if (selected == repository) MaterialTheme.colorScheme.surfaceVariant else Color.Transparent,
+                        RoundedCornerShape(6.dp),
+                    )
+                    .clickable { onSelect(repository) }
+                    .padding(horizontal = 12.dp, vertical = 8.dp)
+                    .testTag("history_repo_${repository.replace(' ', '_')}"),
+            ) {
+                Text(
+                    sessionRepoLabel(repository),
+                    style = MaterialTheme.typography.labelMedium.copy(fontFamily = ScoutrMono),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+    }
+}
+
+
+@Composable
 private fun HistoryList(
     ui: HistoryUiState,
-    view: HistoryView,
+    scope: HistoryScope,
     sorted: List<HistoryItem>,
     listState: LazyListState,
     onOpen: (HistoryItem) -> Unit,
@@ -326,11 +390,11 @@ private fun HistoryList(
     if (sorted.isEmpty()) {
         Box(Modifier.fillMaxWidth().padding(vertical = 72.dp), contentAlignment = Alignment.Center) {
             Text(
-                when (view) {
-                    HistoryView.Active -> "No active sessions"
-                    HistoryView.Completed -> "No completed sessions"
-                    HistoryView.Pinned -> "Nothing pinned yet"
-                    HistoryView.Archived -> "Nothing archived"
+                when (scope) {
+                    HistoryScope.Active -> "No active sessions"
+                    HistoryScope.Completed -> "No completed sessions"
+                    HistoryScope.Pinned -> "Nothing pinned yet"
+                    HistoryScope.Archived -> "Nothing archived"
                 },
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.testTag("history_empty"),
@@ -355,20 +419,36 @@ private fun HistoryList(
                 )
             }
         }
-        items(sorted, key = { it.session.path }) { item ->
-            HistoryRow(
-                item = item,
-                busy = ui.busyPath == item.session.path,
-                busyLabel = ui.busyLabel,
-                onOpen = { onOpen(item) },
-                onFork = { onFork(item) },
-                onRename = { onRename(item) },
-                onClose = { onClose(item) },
-                onDelete = { onDelete(item) },
-                onTogglePin = { onTogglePin(item) },
-                onToggleArchive = { onToggleArchive(item) },
-                onReview = { onReview(item) },
-            )
+        var previousDate: String? = null
+        sorted.forEach { historyItem ->
+            val dateKey = historyDateKey(historyItem.session.updatedAt)
+            if (dateKey != previousDate) {
+                previousDate = dateKey
+                item(key = "history_date_$dateKey") {
+                    Text(
+                        historyDateLabel(historyItem.session.updatedAt),
+                        style = MaterialTheme.typography.labelSmall.copy(fontFamily = ScoutrMono),
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp),
+                    )
+                }
+            }
+            item(key = historyItem.session.path) {
+                HistoryRow(
+                    item = historyItem,
+                    busy = ui.busyPath == historyItem.session.path,
+                    busyLabel = ui.busyLabel,
+                    onOpen = { onOpen(historyItem) },
+                    onFork = { onFork(historyItem) },
+                    onRename = { onRename(historyItem) },
+                    onClose = { onClose(historyItem) },
+                    onDelete = { onDelete(historyItem) },
+                    onTogglePin = { onTogglePin(historyItem) },
+                    onToggleArchive = { onToggleArchive(historyItem) },
+                    onReview = { onReview(historyItem) },
+                )
+            }
         }
     }
 }
@@ -380,48 +460,131 @@ private data class HistoryAnchor(
     val index: Int,
     val previousPath: String?,
     val nextPath: String?,
+    val headerVisible: Boolean,
 )
 
-private data class HistoryAnchorTarget(val index: Int, val scrollOffset: Int)
+private data class HistoryAnchorTarget(val index: Int, val scrollOffset: Int, val headerVisible: Boolean)
 
-private val HistoryAnchorMapSaver = Saver<Map<HistoryView, HistoryAnchor>, List<String>>(
+
+private val HistoryAnchorMapSaver = Saver<Map<String, HistoryAnchor>, List<String>>(
     save = { anchors ->
-        anchors.entries.flatMap { (view, anchor) ->
+        anchors.entries.flatMap { (key, anchor) ->
             listOf(
-                view.name,
+                key,
                 anchor.path,
                 anchor.scrollOffset.toString(),
                 anchor.index.toString(),
                 anchor.previousPath.orEmpty(),
                 anchor.nextPath.orEmpty(),
+                anchor.headerVisible.toString(),
             )
         }
     },
     restore = { saved ->
-        saved.chunked(6).associate { fields ->
-            HistoryView.valueOf(fields[0]) to HistoryAnchor(
+        saved.chunked(7).associate { fields ->
+            fields[0] to HistoryAnchor(
                 path = fields[1],
                 scrollOffset = fields[2].toInt(),
                 index = fields[3].toInt(),
                 previousPath = fields[4].ifEmpty { null },
                 nextPath = fields[5].ifEmpty { null },
+                headerVisible = fields[6].toBoolean(),
             )
         }
     }
 )
 
-private fun sortedHistoryItems(items: List<HistoryItem>, view: HistoryView): List<HistoryItem> {
-    val visible = when (view) {
-        HistoryView.Active -> items.filter { it.session.active && !it.archived }
-        HistoryView.Completed -> items.filter { !it.session.active && !it.archived }
-        HistoryView.Pinned -> items.filter { it.pinned }
-        HistoryView.Archived -> items.filter { it.archived }
+internal fun sortedHistoryItems(items: List<HistoryItem>, scope: HistoryScope, repository: String): List<HistoryItem> {
+    val scoped = when (scope) {
+        HistoryScope.Active -> items.filter { it.session.active && !it.archived }
+        HistoryScope.Completed -> items.filter { !it.session.active && !it.archived }
+        HistoryScope.Pinned -> items.filter { it.pinned }
+        HistoryScope.Archived -> items.filter { it.archived }
     }
+    val visible = scoped.filter { repository == "All" || sessionRepoKey(it.session.cwd) == repository }
     return visible.sortedWith(
         compareByDescending<HistoryItem> { it.pinned }
             .thenByDescending { it.session.active }
             .thenByDescending { it.session.updatedAt },
     )
+}
+
+internal fun repositoryTabs(items: List<HistoryItem>): List<String> = buildList {
+    add("All")
+    items
+        .sortedByDescending { it.session.updatedAt }
+        .map { sessionRepoKey(it.session.cwd) }
+        .distinct()
+        .forEach(::add)
+}
+
+/** Stable client-side repository identity used by Sessions tabs. */
+internal fun sessionRepoKey(cwd: String?): String {
+    val raw = cwd?.trim() ?: return "Other"
+    if (raw.isEmpty() || !raw.startsWith('/')) return "Other"
+
+    val segments = mutableListOf<String>()
+    for (segment in raw.split('/')) {
+        when {
+            segment.isEmpty() || segment == "." -> Unit
+            segment == ".." -> {
+                if (segments.isEmpty()) return "Other"
+                segments.removeAt(segments.lastIndex)
+            }
+            segment.any(Char::isISOControl) -> return "Other"
+            else -> segments += segment
+        }
+    }
+    return if (segments.isEmpty()) "Other" else "/${segments.joinToString("/")}"
+}
+
+private fun sessionRepoLabel(repository: String): String {
+    if (repository == "Other") return repository
+    val home = System.getenv("HOME")?.trimEnd('/')
+    return if (!home.isNullOrBlank() && (repository == home || repository.startsWith("$home/"))) {
+        "~" + repository.removePrefix(home)
+    } else {
+        repository
+    }
+}
+
+private fun historyDateKey(timestamp: Double): String =
+    SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date(timestamp.toLong()))
+
+private fun historyDateLabel(timestamp: Double): String {
+    val millis = timestamp.toLong()
+    return when {
+        DateUtils.isToday(millis) -> "Today"
+        DateUtils.isToday(millis - DateUtils.DAY_IN_MILLIS) -> "Yesterday"
+        else -> SimpleDateFormat("MMM d, yyyy", Locale.getDefault()).format(Date(millis))
+    }
+}
+
+
+private fun historyListIndex(
+    items: List<HistoryItem>,
+    itemIndex: Int,
+    truncated: Boolean,
+    headerVisible: Boolean,
+): Int {
+    var listIndex = if (truncated) 1 else 0
+    var previousDate: String? = null
+    items.take(itemIndex.coerceAtLeast(0)).forEach { item ->
+        val dateKey = historyDateKey(item.session.updatedAt)
+        if (dateKey != previousDate) {
+            previousDate = dateKey
+            listIndex++
+        }
+        listIndex++
+    }
+    if (itemIndex in items.indices && historyDateKey(items[itemIndex].session.updatedAt) != previousDate) {
+        listIndex++
+    }
+    return if (headerVisible) {
+        (listIndex - 1).coerceAtLeast(if (truncated) 1 else 0)
+    } else {
+        listIndex
+    }
 }
 
 private fun captureHistoryAnchor(
@@ -437,6 +600,11 @@ private fun captureHistoryAnchor(
         it.index >= listState.firstVisibleItemIndex && it.key in paths
     } ?: return null
     val path = item.key as String
+    val headerVisible = listState.layoutInfo.visibleItemsInfo
+        .firstOrNull { it.index == listState.firstVisibleItemIndex }
+        ?.key
+        ?.toString()
+        ?.startsWith("history_date_") == true
     val index = paths.indexOf(path)
     if (index < 0) return null
     return HistoryAnchor(
@@ -445,6 +613,7 @@ private fun captureHistoryAnchor(
         index = index,
         previousPath = paths.getOrNull(index - 1),
         nextPath = paths.getOrNull(index + 1),
+        headerVisible = headerVisible,
     )
 }
 
@@ -455,17 +624,17 @@ private fun resolveHistoryAnchor(
     if (anchor == null) return null
     val paths = items.map { it.session.path }
     val exactIndex = paths.indexOf(anchor.path)
-    if (exactIndex >= 0) return HistoryAnchorTarget(exactIndex, anchor.scrollOffset)
+    if (exactIndex >= 0) return HistoryAnchorTarget(exactIndex, anchor.scrollOffset, anchor.headerVisible)
 
     val nextIndex = anchor.nextPath?.let(paths::indexOf)?.takeIf { it >= 0 }
-    if (nextIndex != null) return HistoryAnchorTarget(nextIndex, 0)
+    if (nextIndex != null) return HistoryAnchorTarget(nextIndex, 0, false)
     // Anchor and its next neighbor are gone: the saved old ordered index prefers
     // the next surviving item at the old slot. When the removals run to the tail,
     // the clamp lands the prior item; an empty list falls back to the top.
     // (previousPath stays in the snapshot to document the anchor's neighborhood,
     // but the positional clamp subsumes the prior-item fallback.)
     if (paths.isEmpty()) return null
-    return HistoryAnchorTarget(anchor.index.coerceIn(0, paths.lastIndex), 0)
+    return HistoryAnchorTarget(anchor.index.coerceIn(0, paths.lastIndex), 0, false)
 }
 
 /** Swipe-to-reveal anchor values for a session row. */
@@ -496,6 +665,8 @@ private fun HistoryRow(
     onReview: () -> Unit,
 ) {
     val session = item.session
+    val status = historyStatus(session)
+    val statusColor = historyStatusColor(status, MaterialTheme.colorScheme)
     var menuOpen by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val clipboard = LocalClipboardManager.current
@@ -556,7 +727,7 @@ private fun HistoryRow(
         scope.launch { reveal.animateTo(RowReveal.Closed) }
     }
 
-    Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp))) {
+    Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp))) {
         // Action bar, right-aligned, revealed as the card slides left. It sizes
         // itself from the card rather than the other way round: a LazyColumn
         // item is measured with an unbounded height, so fillMaxSize() here
@@ -593,7 +764,7 @@ private fun HistoryRow(
                 .offset { IntOffset(reveal.requireOffset().roundToInt(), 0) }
                 .anchoredDraggable(reveal, reverseDirection = false, orientation = Orientation.Horizontal)
                 .fillMaxWidth()
-                .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(16.dp))
+                .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(8.dp))
                 .clickable {
                     if (reveal.currentValue == RowReveal.Open) closeReveal() else onOpen()
                 }
@@ -603,16 +774,13 @@ private fun HistoryRow(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Box(
                         Modifier
-                            .width(8.dp)
-                            .height(8.dp)
-                            .background(
-                                when {
-                                    item.pinned -> MaterialTheme.colorScheme.tertiary
-                                    session.active -> MaterialTheme.colorScheme.primary
-                                    else -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f)
-                                },
-                                RoundedCornerShape(50),
-                            ),
+                            .size(9.dp)
+                            .border(
+                                2.5.dp,
+                                statusColor,
+                                CircleShape,
+                            )
+                            .testTag("history_status_${session.id}"),
                     )
                     Spacer(Modifier.width(10.dp))
                     Text(
@@ -627,8 +795,7 @@ private fun HistoryRow(
                     Text(
                         text = menuOpenLabel(session, item),
                         style = MaterialTheme.typography.labelSmall,
-                        color = if (session.active) MaterialTheme.colorScheme.primary
-                        else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                        color = statusColor,
                     )
                     Box {
                         Icon(
@@ -704,7 +871,7 @@ private fun HistoryRow(
                     Text(
                         text = session.cwd,
                         style = MaterialTheme.typography.labelSmall,
-                        fontFamily = FontFamily.Monospace,
+                        fontFamily = ScoutrMono,
                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
@@ -728,7 +895,6 @@ private fun HistoryRow(
                 if (busy) {
                     Spacer(Modifier.height(8.dp))
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        CircularProgressIndicator(Modifier.width(14.dp).height(14.dp), strokeWidth = 2.dp)
                         Spacer(Modifier.width(8.dp))
                         Text(
                             busyLabel ?: "Working…",
@@ -742,7 +908,18 @@ private fun HistoryRow(
     }
 }
 
+internal fun historyStatus(session: SessionCatalogItem): AgentStatus =
+    AgentStatus.fromWire(session.status ?: if (session.active) "working" else "done")
+
+internal fun historyStatusColor(status: AgentStatus, scheme: ColorScheme): Color = when (status) {
+    AgentStatus.NeedsYou -> scheme.error
+    AgentStatus.Working -> scheme.primary
+    AgentStatus.Done -> scheme.onSurfaceVariant
+    AgentStatus.Idle -> scheme.outline
+    AgentStatus.Unknown -> scheme.onSurfaceVariant
+}
 private fun menuOpenLabel(session: SessionCatalogItem, item: HistoryItem): String = when {
+    historyStatus(session) == AgentStatus.NeedsYou -> "Needs you"
     item.pinned -> "Pinned"
     session.active -> "Running"
     else -> relativeTime(session.updatedAt)
@@ -792,7 +969,7 @@ private fun OfflineBanner(onRetry: () -> Unit) {
         Modifier
             .fillMaxWidth()
             .padding(horizontal = 0.dp)
-            .background(MaterialTheme.colorScheme.errorContainer, RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.errorContainer, RoundedCornerShape(8.dp))
             .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -817,7 +994,7 @@ private fun ErrorBanner(message: String, onDismiss: () -> Unit) {
         Modifier
             .fillMaxWidth()
             .padding(horizontal = 0.dp)
-            .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp))
             .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -827,64 +1004,6 @@ private fun ErrorBanner(message: String, onDismiss: () -> Unit) {
     }
 }
 
-/** Stable skeleton rows so the list does not flash spinners. */
-@Composable
-private fun HistorySkeleton() {
-    Column(
-        Modifier.fillMaxSize().padding(vertical = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        repeat(6) { index ->
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .height(76.dp)
-                    .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(16.dp))
-                    .padding(16.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Box(
-                    Modifier
-                        .width(8.dp)
-                        .height(8.dp)
-                        .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(50)),
-                )
-                Spacer(Modifier.width(10.dp))
-                Column(Modifier.weight(1f)) {
-                    Box(
-                        Modifier
-                            .fillMaxWidth(0.55f)
-                            .height(14.dp)
-                            .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(4.dp)),
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    Box(
-                        Modifier
-                            .fillMaxWidth(0.8f)
-                            .height(10.dp)
-                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f), RoundedCornerShape(4.dp)),
-                    )
-                }
-                Spacer(Modifier.width(10.dp))
-                Box(
-                    Modifier
-                        .width(40.dp)
-                        .height(16.dp)
-                        .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(50)),
-                )
-            }
-            if (index == 5) {
-                Box(
-                    Modifier
-                        .fillMaxWidth()
-                        .height(76.dp)
-                        .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(16.dp))
-                        .padding(16.dp),
-                )
-            }
-        }
-    }
-}
 
 @Composable
 private fun rememberHistoryViewModel(): SessionHistoryViewModel {

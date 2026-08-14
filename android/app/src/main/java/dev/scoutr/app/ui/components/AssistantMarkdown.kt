@@ -1,5 +1,6 @@
 package dev.scoutr.app.ui.components
 
+import dev.scoutr.app.ui.theme.ScoutrMono
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
@@ -7,7 +8,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLinkStyles
 import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
@@ -34,7 +34,7 @@ fun AssistantMarkdown(
     val scheme = MaterialTheme.colorScheme
     val type = MaterialTheme.typography
     // Mono is one size everywhere — inline and fenced code are the same content class.
-    val mono = type.bodyMedium.copy(fontFamily = FontFamily.Monospace, fontSize = 13.sp)
+    val mono = type.bodyMedium.copy(fontFamily = ScoutrMono, fontSize = 13.sp)
     Markdown(
         content = content,
         modifier = modifier.fillMaxWidth(),

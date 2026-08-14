@@ -56,6 +56,7 @@ class ModelsTest {
         assertEquals(AgentStatus.NeedsYou, AgentStatus.fromWire("blocked"))
         assertEquals(AgentStatus.Working, AgentStatus.fromWire("working"))
         assertEquals(AgentStatus.Done, AgentStatus.fromWire("done"))
+        assertEquals(AgentStatus.Done, AgentStatus.fromWire("completed"))
         assertEquals(AgentStatus.Unknown, AgentStatus.fromWire("nonsense"))
     }
 

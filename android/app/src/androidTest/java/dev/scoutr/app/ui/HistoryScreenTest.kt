@@ -16,6 +16,7 @@ import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTouchInput
@@ -149,13 +150,22 @@ class HistoryScreenTest {
 
     private fun firstVisibleSessionPath(listState: LazyListState): String? =
         listState.layoutInfo.visibleItemsInfo
-            .firstOrNull { it.index == listState.firstVisibleItemIndex }
-            ?.key as? String
+            .filter { it.index >= listState.firstVisibleItemIndex }
+            .mapNotNull { it.key as? String }
+            .firstOrNull { it.startsWith("/") }
 
     private val catalogBody = """
         {"ok":true,"truncated":false,"sessions":[
           {"id":"abc","path":"/root/sessions/abc.jsonl","title":"Fix billing bug","cwd":"/repo/a","model":"openai-codex/gpt-5.4","updatedAt":${System.currentTimeMillis()}.0,"preview":"User asked to fix the billing math","active":true,"paneId":"pane1","workspaceId":"ws1","status":"blocked"},
           {"id":"def","path":"/root/sessions/def.jsonl","agentKind":"claude","title":"Docs refresh","cwd":"/repo/b","model":"anthropic/claude-sonnet-4-6","updatedAt":${System.currentTimeMillis() - 3_600_000}.0,"preview":"Update the README","active":false}
+        ]}
+    """.trimIndent()
+
+    private val repositoryFilterCatalogBody = """
+        {"ok":true,"truncated":false,"sessions":[
+          {"id":"active-a","path":"/root/sessions/active-a.jsonl","title":"Active A","cwd":"/repo/a","updatedAt":${System.currentTimeMillis()}.0,"preview":"active","active":true,"paneId":"pane-a","workspaceId":"ws1"},
+          {"id":"done-b","path":"/root/sessions/done-b.jsonl","title":"Done B","cwd":"/repo/b","updatedAt":${System.currentTimeMillis() - 3_600_000}.0,"preview":"done b","active":false},
+          {"id":"done-c","path":"/root/sessions/done-c.jsonl","title":"Done C","cwd":"/repo/c","updatedAt":${System.currentTimeMillis() - 7_200_000}.0,"preview":"done c","active":false}
         ]}
     """.trimIndent()
 
@@ -201,6 +211,11 @@ class HistoryScreenTest {
         }
     }
 
+    private fun selectScope(label: String) {
+        compose.onNodeWithTag("history_scope_filter").performClick()
+        compose.onNodeWithText(label).performClick()
+    }
+
     @Test
     fun rendersActiveRowsWithTitleModelAndCwd() {
         stubCatalog()
@@ -209,15 +224,33 @@ class HistoryScreenTest {
             compose.onAllNodes(androidx.compose.ui.test.hasTestTag("history_row_abc")).fetchSemanticsNodes().isNotEmpty()
         }
         compose.onNodeWithText("Fix billing bug").assertIsDisplayed()
+        compose.onNodeWithText("Needs you").assertIsDisplayed()
         compose.onNodeWithText("gpt-5.4").assertIsDisplayed()
-        compose.onNodeWithText("/repo/a").assertIsDisplayed()
+        assertEquals(2, compose.onAllNodesWithText("/repo/a").fetchSemanticsNodes().size)
     }
 
+    @Test
+    fun repositoryTabFiltersRowsWithinSelectedScope() {
+        stubCatalog(catalog = { repositoryFilterCatalogBody })
+        setContent(viewModel())
+        compose.waitUntil(5_000) {
+            compose.onAllNodes(androidx.compose.ui.test.hasTestTag("history_row_active-a")).fetchSemanticsNodes().isNotEmpty()
+        }
+
+        selectScope("Completed")
+        compose.waitUntil(5_000) {
+            compose.onAllNodes(androidx.compose.ui.test.hasTestTag("history_row_done-b")).fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithTag("history_row_done-c").assertIsDisplayed()
+        compose.onNodeWithTag("history_repo_/repo/b").performClick()
+        compose.onNodeWithTag("history_row_done-b").assertIsDisplayed()
+        compose.onNodeWithTag("history_row_done-c").assertDoesNotExist()
+    }
     @Test
     fun searchFiltersThroughTheBridge() {
         stubCatalog()
         setContent(viewModel())
-        compose.onNodeWithText("Completed").performClick()
+        selectScope("Completed")
         compose.waitUntil(5_000) {
             compose.onAllNodes(androidx.compose.ui.test.hasTestTag("history_row_def")).fetchSemanticsNodes().isNotEmpty()
         }
@@ -236,7 +269,7 @@ class HistoryScreenTest {
             compose.onAllNodes(androidx.compose.ui.test.hasTestTag("history_row_abc")).fetchSemanticsNodes().isNotEmpty()
         }
         // Switch to the Completed view where delete is enabled for the def row.
-        compose.onNodeWithText("Completed").performClick()
+        selectScope("Completed")
         compose.waitUntil(5_000) {
             compose.onAllNodes(androidx.compose.ui.test.hasTestTag("history_row_def")).fetchSemanticsNodes().isNotEmpty()
         }
@@ -248,14 +281,11 @@ class HistoryScreenTest {
 
 
     @Test
-    fun filterChipsStaySingleLineAtNarrowWidth() {
+    fun scopeMenuOffersEveryHistoryScopeAtNarrowWidth() {
         stubCatalog()
         val vm = viewModel() // build before composition: MockWebServer.url() reverse-DNS
         compose.setContent {
             ScoutrTheme {
-                // 320dp forces the four chips to overflow a fixed row: the old
-                // code wrapped "Archived" onto two lines here, doubling its
-                // height; the scrollable row keeps every chip single-line.
                 Box(Modifier.width(320.dp)) {
                     HistoryScreen(onOpenSession = {}, viewModel = vm)
                 }
@@ -264,14 +294,9 @@ class HistoryScreenTest {
         compose.waitUntil(5_000) {
             compose.onAllNodes(androidx.compose.ui.test.hasTestTag("history_row_abc")).fetchSemanticsNodes().isNotEmpty()
         }
-        val heights = listOf("Active", "Completed", "Pinned", "Archived").map { name ->
-            compose.onNodeWithTag("history_view_$name")
-                .getUnclippedBoundsInRoot()
-                .let { (it.bottom - it.top).value }
-        }
-        val max = heights.max()
-        heights.forEach { h ->
-            assertTrue("chips must be equal height (wrapped chip is ~2x): $heights", abs(h - max) < 1f)
+        compose.onNodeWithTag("history_scope_filter").performClick()
+        listOf("Active", "Completed", "Pinned", "Archived").forEach { scope ->
+            assertTrue(compose.onAllNodesWithText(scope).fetchSemanticsNodes().isNotEmpty())
         }
     }
 
@@ -295,7 +320,7 @@ class HistoryScreenTest {
     fun claudeSessionHidesRenameAndFork() {
         stubCatalog()
         setContent(viewModel())
-        compose.onNodeWithText("Completed").performClick()
+        selectScope("Completed")
         compose.waitUntil(5_000) {
             compose.onAllNodes(androidx.compose.ui.test.hasTestTag("history_row_def")).fetchSemanticsNodes().isNotEmpty()
         }
@@ -358,7 +383,7 @@ class HistoryScreenTest {
         }
         // The def row is inactive, so it lives in the Completed view, where its
         // revealed bar ends in Delete.
-        compose.onNodeWithText("Completed").performClick()
+        selectScope("Completed")
         compose.waitUntil(5_000) {
             compose.onAllNodes(androidx.compose.ui.test.hasTestTag("history_row_def")).fetchSemanticsNodes().isNotEmpty()
         }
@@ -397,7 +422,7 @@ class HistoryScreenTest {
         compose.waitForIdle()
         val activeAnchor = firstVisibleSessionPath(listState) to listState.firstVisibleItemScrollOffset
 
-        compose.onNodeWithText("Completed").performClick()
+        selectScope("Completed")
         compose.waitForIdle()
         compose.waitUntil(5_000) { firstVisibleSessionPath(listState) == "/sessions/completed-00.jsonl" }
         compose.onNodeWithTag("history_list").performTouchInput { swipeUp() }
@@ -405,14 +430,14 @@ class HistoryScreenTest {
         compose.waitForIdle()
         val completedAnchor = firstVisibleSessionPath(listState) to listState.firstVisibleItemScrollOffset
 
-        compose.onNodeWithText("Active").performClick()
+        selectScope("Active")
         compose.waitUntil(5_000) { firstVisibleSessionPath(listState) == activeAnchor.first }
         assertTrue(kotlin.math.abs(listState.firstVisibleItemScrollOffset - activeAnchor.second) <= 1)
-        compose.onNodeWithText("Completed").performClick()
+        selectScope("Completed")
         compose.waitUntil(5_000) { firstVisibleSessionPath(listState) == completedAnchor.first }
         assertTrue(kotlin.math.abs(listState.firstVisibleItemScrollOffset - completedAnchor.second) <= 1)
 
-        compose.onNodeWithText("Pinned").performClick()
+        selectScope("Pinned")
         compose.waitForIdle()
         compose.waitUntil(5_000) { firstVisibleSessionPath(listState) == "/sessions/active-00.jsonl" }
         compose.onNodeWithTag("history_list").performTouchInput { swipeUp() }
@@ -420,7 +445,7 @@ class HistoryScreenTest {
         compose.waitForIdle()
         val pinnedAnchor = firstVisibleSessionPath(listState) to listState.firstVisibleItemScrollOffset
 
-        compose.onNodeWithText("Archived").performClick()
+        selectScope("Archived")
         compose.waitForIdle()
         compose.waitUntil(5_000) { firstVisibleSessionPath(listState) == "/sessions/completed-15.jsonl" }
         compose.onNodeWithTag("history_list").performTouchInput { swipeUp() }
@@ -428,9 +453,9 @@ class HistoryScreenTest {
         compose.waitForIdle()
         val archivedAnchor = firstVisibleSessionPath(listState) to listState.firstVisibleItemScrollOffset
 
-        compose.onNodeWithText("Pinned").performClick()
+        selectScope("Pinned")
         compose.waitUntil(5_000) { firstVisibleSessionPath(listState) == pinnedAnchor.first }
-        compose.onNodeWithText("Archived").performClick()
+        selectScope("Archived")
         compose.waitUntil(5_000) { firstVisibleSessionPath(listState) == archivedAnchor.first }
     }
 
@@ -445,9 +470,9 @@ class HistoryScreenTest {
         compose.waitForIdle()
         val activeAnchor = firstVisibleSessionPath(listState)
 
-        compose.onNodeWithText("Archived").performClick()
+        selectScope("Archived")
         compose.onNodeWithTag("history_empty").assertIsDisplayed()
-        compose.onNodeWithText("Active").performClick()
+        selectScope("Active")
         compose.waitUntil(5_000) { firstVisibleSessionPath(listState) == activeAnchor }
     }
 
@@ -465,7 +490,7 @@ class HistoryScreenTest {
         val removedPath = firstVisibleSessionPath(listState)!!
         val removedIndex = removedPath.substringAfter("active-").substringBefore('.').toInt()
         val expectedPath = "/sessions/active-${(removedIndex + 1).toString().padStart(2, '0')}.jsonl"
-        compose.onNodeWithText("Completed").performClick()
+        selectScope("Completed")
         compose.waitForIdle()
         compose.waitUntil(5_000) { firstVisibleSessionPath(listState) == "/sessions/completed-00.jsonl" }
 
@@ -473,7 +498,7 @@ class HistoryScreenTest {
         vm.retry()
         compose.waitUntil(5_000) { vm.ui.value.items.none { it.session.path in removed } }
         compose.waitForIdle()
-        compose.onNodeWithText("Active").performClick()
+        selectScope("Active")
         compose.waitForIdle()
         compose.waitUntil(5_000) { firstVisibleSessionPath(listState) == expectedPath }
         assertEquals(expectedPath, firstVisibleSessionPath(listState))
@@ -490,7 +515,7 @@ class HistoryScreenTest {
         // Anchor deterministically a few rows in — away from the top and far from the
         // end (scrollToItem cannot place a near-bottom index at the top: the list
         // clamps) — then remove the anchor and both of its neighbors.
-        compose.onNodeWithTag("history_list").performScrollToIndex(5)
+        compose.onNodeWithTag("history_list").performScrollToIndex(6)
         compose.waitForIdle()
         val anchorPath = firstVisibleSessionPath(listState)!!
         val anchorIndex = anchorPath.substringAfter("active-").substringBefore('.').toInt()
@@ -499,7 +524,7 @@ class HistoryScreenTest {
         val removedIndexes = (anchorIndex - 1..anchorIndex + 1).filter { it in 0..29 }
         val expectedIndex = (anchorIndex + removedIndexes.size).coerceAtMost(27)
         val expectedPath = "/sessions/active-${expectedIndex.toString().padStart(2, '0')}.jsonl"
-        compose.onNodeWithText("Completed").performClick()
+        selectScope("Completed")
         compose.waitForIdle()
         compose.waitUntil(5_000) { firstVisibleSessionPath(listState) == "/sessions/completed-00.jsonl" }
 
@@ -507,7 +532,7 @@ class HistoryScreenTest {
         vm.retry()
         compose.waitUntil(5_000) { vm.ui.value.items.none { it.session.path in removed } }
         compose.waitForIdle()
-        compose.onNodeWithText("Active").performClick()
+        selectScope("Active")
         compose.waitForIdle()
         compose.waitUntil(5_000) { firstVisibleSessionPath(listState) == expectedPath }
         assertEquals(expectedPath, firstVisibleSessionPath(listState))
@@ -521,7 +546,7 @@ class HistoryScreenTest {
         val vm = viewModel()
         setContent(vm, listState)
         compose.waitUntil(5_000) { firstVisibleSessionPath(listState) == "/sessions/active-00.jsonl" }
-        compose.onNodeWithTag("history_list").performScrollToIndex(5)
+        compose.onNodeWithTag("history_list").performScrollToIndex(6)
         compose.waitForIdle()
         val anchorPath = firstVisibleSessionPath(listState)!!
         val anchorIndex = anchorPath.substringAfter("active-").substringBefore('.').toInt()
@@ -531,7 +556,7 @@ class HistoryScreenTest {
         val removedIndexes = setOf(anchorIndex, anchorIndex + 1)
         val expectedIndex = anchorIndex + removedIndexes.size
         val expectedPath = "/sessions/active-${expectedIndex.toString().padStart(2, '0')}.jsonl"
-        compose.onNodeWithText("Completed").performClick()
+        selectScope("Completed")
         compose.waitForIdle()
         compose.waitUntil(5_000) { firstVisibleSessionPath(listState) == "/sessions/completed-00.jsonl" }
 
@@ -539,7 +564,7 @@ class HistoryScreenTest {
         vm.retry()
         compose.waitUntil(5_000) { vm.ui.value.items.none { it.session.path in removed } }
         compose.waitForIdle()
-        compose.onNodeWithText("Active").performClick()
+        selectScope("Active")
         compose.waitForIdle()
         compose.waitUntil(5_000) { firstVisibleSessionPath(listState) == expectedPath }
         assertEquals(expectedPath, firstVisibleSessionPath(listState))
@@ -551,7 +576,7 @@ class HistoryScreenTest {
     fun emptyStateShowsForArchivedView() {
         stubCatalog()
         setContent(viewModel())
-        compose.onNodeWithText("Archived").performClick()
+        selectScope("Archived")
         compose.onNodeWithTag("history_empty").assertIsDisplayed()
     }
 }

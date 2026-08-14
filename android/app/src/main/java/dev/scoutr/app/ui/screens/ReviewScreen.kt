@@ -1,5 +1,6 @@
 package dev.scoutr.app.ui.screens
 
+import dev.scoutr.app.ui.theme.ScoutrMono
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -27,7 +28,6 @@ import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.WrapText
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.ModalBottomSheet
@@ -54,7 +54,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -188,7 +187,7 @@ private fun PickerMode(
         }
         if (ui.dirs is Loadable.Loading) {
             Box(Modifier.fillMaxWidth().padding(vertical = 48.dp), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator()
+                Text("Loading folders…", color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         } else {
             val dirs = (ui.dirs as? Loadable.Ready)?.value ?: emptyList()
@@ -237,7 +236,7 @@ private fun ReviewMode(
     val overview = ui.overview
     if (overview is Loadable.Loading) {
         Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            CircularProgressIndicator()
+            Text("Loading review…", color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         return
     }
@@ -333,7 +332,7 @@ private fun ReviewMode(
                             Text(
                                 artifact.path.removePrefix(overviewData.root).removePrefix("/"),
                                 style = MaterialTheme.typography.bodySmall,
-                                fontFamily = FontFamily.Monospace,
+                                fontFamily = ScoutrMono,
                                 color = MaterialTheme.colorScheme.onSurface,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
@@ -342,7 +341,7 @@ private fun ReviewMode(
                             Text(
                                 humanSize(artifact.size),
                                 style = MaterialTheme.typography.labelSmall,
-                                fontFamily = FontFamily.Monospace,
+                                fontFamily = ScoutrMono,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
@@ -388,7 +387,7 @@ private fun CommitSheet(
                 "${shortHash(commit.hash)} · ${commit.author} · ${commitDate(commit.date)}",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                fontFamily = FontFamily.Monospace,
+                fontFamily = ScoutrMono,
             )
             Spacer(Modifier.height(12.dp))
             if (commit.body.isBlank()) {
@@ -401,7 +400,7 @@ private fun CommitSheet(
                 Text(
                     commit.body,
                     style = MaterialTheme.typography.bodySmall,
-                    fontFamily = FontFamily.Monospace,
+                    fontFamily = ScoutrMono,
                     modifier = Modifier.testTag("commit_body"),
                 )
             }
@@ -430,14 +429,14 @@ private fun StatusRow(code: String, path: String) {
         Text(
             code,
             style = MaterialTheme.typography.labelMedium,
-            fontFamily = FontFamily.Monospace,
+            fontFamily = ScoutrMono,
             color = statusCodeColor(code),
             modifier = Modifier.width(28.dp),
         )
         Text(
             path,
             style = MaterialTheme.typography.bodyMedium,
-            fontFamily = FontFamily.Monospace,
+            fontFamily = ScoutrMono,
             color = MaterialTheme.colorScheme.onSurface,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
@@ -492,13 +491,17 @@ private fun DiffRow(
                 subtitle,
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                fontFamily = FontFamily.Monospace,
+                fontFamily = ScoutrMono,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
         }
         if (loading) {
-            CircularProgressIndicator(modifier = Modifier.width(16.dp).height(16.dp), strokeWidth = 2.dp)
+            Text(
+                "Loading…",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         } else {
             Icon(
                 Icons.Default.ChevronRight,
@@ -543,7 +546,7 @@ private fun DiffMode(
             Text(
                 "Diff ${ui.diffRef?.take(12) ?: ""}",
                 style = MaterialTheme.typography.labelMedium,
-                fontFamily = FontFamily.Monospace,
+                fontFamily = ScoutrMono,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.weight(1f),
             )
@@ -566,7 +569,7 @@ private fun DiffMode(
         HorizontalDivider()
         if (diffData?.truncated == true) TruncatedNote("file list truncated to 64 KiB — files past the cap are not listed")
         when {
-            diffLoad is Loadable.Loading -> CenteredSpinner()
+            diffLoad is Loadable.Loading -> CenteredLoading()
             diffLoad is Loadable.Failed ->
                 Text(
                     diffLoad.reason,
@@ -642,7 +645,7 @@ private fun PerFileView(
                         dir,
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontFamily = FontFamily.Monospace,
+                        fontFamily = ScoutrMono,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
@@ -706,7 +709,7 @@ private fun ColumnScope.FileDiffContent(
     wrapLines: Boolean,
 ) {
     when (val load = ui.fileDiff) {
-        is Loadable.Loading -> CenteredSpinner()
+        is Loadable.Loading -> CenteredLoading()
         is Loadable.Failed ->
             Text(
                 load.reason,
@@ -734,7 +737,7 @@ private fun ColumnScope.FileContent(
     wrapLines: Boolean,
 ) {
     when (val load = ui.fileContent) {
-        is Loadable.Loading -> CenteredSpinner()
+        is Loadable.Loading -> CenteredLoading()
         is Loadable.Failed ->
             Text(
                 load.reason,
@@ -833,7 +836,7 @@ private fun CodeLine(
         Text(
             annotated,
             style = MaterialTheme.typography.bodySmall,
-            fontFamily = FontFamily.Monospace,
+            fontFamily = ScoutrMono,
             color = baseColor,
             maxLines = if (wrapLines) Int.MAX_VALUE else 1,
             softWrap = wrapLines,
@@ -889,7 +892,7 @@ private fun FilePickerSheet(
                                     dir,
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    fontFamily = FontFamily.Monospace,
+                                    fontFamily = ScoutrMono,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
                                 )
@@ -898,7 +901,7 @@ private fun FilePickerSheet(
                         Text(
                             "+${stat.additions} −${stat.deletions}",
                             style = MaterialTheme.typography.labelSmall,
-                            fontFamily = FontFamily.Monospace,
+                            fontFamily = ScoutrMono,
                             color = when {
                                 stat.additions > 0 && stat.deletions == 0 -> DiffPalette.Added
                                 stat.deletions > 0 && stat.additions == 0 -> DiffPalette.Deleted
@@ -923,9 +926,9 @@ private fun FilePickerSheet(
 }
 
 @Composable
-private fun CenteredSpinner() {
+private fun CenteredLoading() {
     Box(Modifier.fillMaxWidth().padding(vertical = 48.dp), contentAlignment = Alignment.Center) {
-        CircularProgressIndicator()
+        Text("Loading…", color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 

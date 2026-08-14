@@ -1,5 +1,6 @@
 # Cursor for iOS — design and UX brief
 
+> **Superseded for Scoutr Android.** This brief remains the research source for Cursor's product patterns, but its visual recommendations are not the Android contract. Scoutr v2 is defined by `android/app/src/main/java/dev/scoutr/app/ui/theme/DESIGN.md`: always-dark, green for live/AI-owned state, gray for done, red for user attention, teal for charts/data, compact 4/6/8dp geometry, and no spinners or skeletons.
 **Research basis:** official Cursor docs, product page, launch post, changelog, and Apple App Store metadata. This brief separates **Fact** (directly documented) from **Inference** (a design recommendation based on those facts). It describes the public iPhone/iPad product, not an imagined mobile IDE.
 
 ## 1. Product summary

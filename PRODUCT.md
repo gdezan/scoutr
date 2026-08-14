@@ -28,13 +28,8 @@ brief, inference).
 
 ## Design north star (user-pinned)
 
-The user explicitly pinned **the Cursor iOS app as the design/UX north
-star** ("take heavy inspiration on it") and asked for `/impeccable`-grade
-design and animation. Cursor iOS is a directing/reviewing surface, not an
-IDE: near-black surfaces, off-white type, restrained typography, hard-edged
-depth, one electric-blue AI accent, mono only for paths/commands/diffs,
-stack-based navigation, attention-first cards, a streaming event timeline,
-and a persistent follow-up composer. (docs/cursor-ios-design-brief.md)
+The user explicitly pinned **the Cursor iOS app as the design/UX north star** for supervision patterns. Cursor remains the product reference; Scoutr Android's visual contract is the v2 system in `android/app/src/main/java/dev/scoutr/app/ui/theme/DESIGN.md` and ADR 0005: always-dark near-black surfaces, green `#8DF08D` for live/AI-owned state, gray for done, red for user attention, teal `#2C6F72` for Usage data, compact geometry, and restrained motion. Mono is limited to machine facts, code, paths, commands, and terminal output.
+
 
 **Mode: Operate.** The interface disappears into the task; consistency over
 surprise; calm cards so a running agent's state is the visual anchor.
@@ -44,8 +39,7 @@ surprise; calm cards so a running agent's state is the visual anchor.
 - Dark-first, always (never follows system light).
 - Grouped vertical board list (not kanban) — taste-reviewed; paths are the
   disambiguator between agents.
-- Board cards: 6dp status dot, muted time-in-state pill, filled accent pill
-  reserved for "needs you", workspace path in mono at 60% opacity.
+- Board cards: 9dp unfilled status rings, mono-caps section counts, quiet time-in-state metadata, and red treatment only for needs-you; workspace paths use Martian Mono.
 - Board polls `/api/agents` every 3s; abrupt OkHttp closure made a long-lived Board feed unsafe. The planned terminal is the narrow exception: dedicated terminal/topology sockets run only while its full-screen route is visible and contain cancellation/errors.
 - Chat: pane-native sessions (new herdr workspace + pane + pi --model),
   JSONL transcript polling with a since cursor, dedupe by entryId,

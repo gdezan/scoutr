@@ -584,6 +584,9 @@ class ChatListTest {
         }
         // The list opens on the transcript tail, not on the answer: the
         // bubble must NOT be pinned at the bottom next to the newest turn.
+        composeRule.onNodeWithTag("chat_list").performScrollToNode(
+            androidx.compose.ui.test.hasText("last message"),
+        )
         composeRule.onNodeWithText("last message").assertIsDisplayed()
         composeRule.onNodeWithTag("question_answer_call1#0").assertIsNotDisplayed()
         // Scroll up to the ask: the answer bubble renders right below it in

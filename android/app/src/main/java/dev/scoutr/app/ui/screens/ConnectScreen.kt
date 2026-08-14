@@ -18,7 +18,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -124,6 +123,7 @@ fun ConnectScreen(
         Spacer(Modifier.height(16.dp))
 
         OutlinedButton(
+            shape = MaterialTheme.shapes.small,
             onClick = {
                 scanError = null
                 scanLauncher.launch(
@@ -152,7 +152,6 @@ fun ConnectScreen(
         when (val s = state) {
             is Loadable.Loading -> {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
                     Spacer(Modifier.width(12.dp))
                     Text("Checking connection…")
                 }
@@ -166,6 +165,7 @@ fun ConnectScreen(
                 )
                 Spacer(Modifier.height(12.dp))
                 Button(
+                    shape = MaterialTheme.shapes.small,
                     onClick = { viewModel.connect(host, token) },
                     modifier = Modifier.fillMaxWidth().testTag("connect_button"),
                 ) {
@@ -175,6 +175,7 @@ fun ConnectScreen(
 
             else -> {
                 Button(
+                    shape = MaterialTheme.shapes.small,
                     onClick = { viewModel.connect(host, token) },
                     enabled = host.isNotBlank() && token.isNotBlank(),
                     modifier = Modifier.fillMaxWidth().testTag("connect_button"),

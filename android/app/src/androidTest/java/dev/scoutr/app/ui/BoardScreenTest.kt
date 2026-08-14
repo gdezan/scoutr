@@ -169,8 +169,8 @@ class BoardScreenTest {
             }
         }
 
-        compose.onNodeWithText("Needs you").assertIsDisplayed()
-        compose.onNodeWithText("Working").assertIsDisplayed()
+        compose.onNodeWithText("NEEDS YOU 1").assertIsDisplayed()
+        compose.onNodeWithText("WORKING 1").assertIsDisplayed()
         compose.onNodeWithTag("agent_card_p1").assertIsDisplayed()
         compose.onNodeWithText("Found the rounding error in the tax module").assertIsDisplayed()
         compose.onNodeWithText("gpt-5.4").assertIsDisplayed()
@@ -221,14 +221,13 @@ class BoardScreenTest {
     }
 
     @Test
-    fun skeletonShownWhileLoadingWithNoAgents() {
+    fun loadingFeedbackShownWhileNoAgents() {
         compose.setContent {
             ScoutrTheme {
                 BoardScreen(onOpenAgent = {}, viewModel = staticBoardViewModel(BoardUiState(loading = true)))
             }
         }
-        // Stable skeleton rows render instead of a centered spinner.
-        compose.onNodeWithTag("board_skeleton", useUnmergedTree = true).assertIsDisplayed()
+        compose.onNodeWithText("Loading agents…").assertIsDisplayed()
     }
 
     @Test

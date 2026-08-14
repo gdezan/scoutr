@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
@@ -21,7 +22,6 @@ import androidx.compose.material.icons.filled.Send
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -70,21 +70,28 @@ fun QuestionCard(
         QuestionAnswerBubble(question, modifier)
         return
     }
-    val accent = MaterialTheme.colorScheme.primary
+    val accent = MaterialTheme.colorScheme.error
     Card(
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(8.dp),
         border = BorderStroke(1.dp, accent.copy(alpha = 0.6f)),
         modifier = modifier.fillMaxWidth().testTag("question_card_${question.id}"),
     ) {
-        Column(Modifier.padding(14.dp)) {
+        Row(Modifier.padding(14.dp)) {
+            Box(
+                Modifier
+                    .width(3.dp)
+                    .fillMaxHeight()
+                    .background(accent, RoundedCornerShape(2.dp))
+            )
+            Column(Modifier.weight(1f).padding(start = 10.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (position != null) {
                     Text(
                         text = "Question ${position.first} of ${position.second}",
                         style = MaterialTheme.typography.labelSmall,
                         fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.primary,
+                        color = MaterialTheme.colorScheme.error,
                     )
                     Spacer(Modifier.width(8.dp))
                 }
@@ -95,9 +102,10 @@ fun QuestionCard(
                     modifier = Modifier.weight(1f),
                 )
                 if (sending) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.width(14.dp).height(14.dp),
-                        strokeWidth = 2.dp,
+                    Text(
+                        "Sending…",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.error,
                     )
                 }
             }
@@ -117,7 +125,8 @@ fun QuestionCard(
                 else -> SingleChoiceBody(question, sending, onAnswer)
             }
         }
-    }
+            }
+        }
 }
 
 
@@ -152,11 +161,13 @@ private fun ConfirmBody(
     val second = labels.getOrElse(1) { "No" }
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         OutlinedButton(
+            shape = MaterialTheme.shapes.small,
             onClick = { onAnswer(first, listOf(first)) },
             enabled = !sending,
             modifier = Modifier.weight(1f).testTag("question_confirm_${question.id}"),
         ) { Text(first) }
         OutlinedButton(
+            shape = MaterialTheme.shapes.small,
             onClick = { onAnswer(second, listOf(second)) },
             enabled = !sending,
             modifier = Modifier.weight(1f),
@@ -207,6 +218,7 @@ private fun MultiSelectBody(
         }
         Spacer(Modifier.height(4.dp))
         OutlinedButton(
+            shape = MaterialTheme.shapes.small,
             onClick = { onAnswer(selected.toList().joinToString(", "), selected.toList()) },
             enabled = !sending && selected.isNotEmpty(),
             modifier = Modifier.testTag("question_submit_${question.id}"),
@@ -276,7 +288,7 @@ private fun OptionList(
                         .height(14.dp)
                         .background(
                             MaterialTheme.colorScheme.surfaceVariant,
-                            RoundedCornerShape(50),
+                            RoundedCornerShape(7.dp),
                         ),
                 )
                 Spacer(Modifier.width(10.dp))
@@ -327,7 +339,7 @@ fun QuestionAnswerBubble(
                 .widthIn(max = 288.dp)
                 .background(
                     MaterialTheme.colorScheme.surfaceContainerHighest,
-                    RoundedCornerShape(18.dp),
+                    RoundedCornerShape(8.dp),
                 )
                 .padding(horizontal = 14.dp, vertical = 10.dp)
                 .testTag("question_answer_${question.id}"),

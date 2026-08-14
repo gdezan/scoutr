@@ -1,5 +1,6 @@
 package dev.scoutr.app.ui.screens
 
+import dev.scoutr.app.ui.theme.ScoutrMono
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -17,6 +18,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -45,7 +47,6 @@ import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -89,7 +90,6 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -199,12 +199,12 @@ fun ChatScreen(
         )
 
         val emptyTranscriptHint = !ui.exists && ui.pendingMessages.isEmpty()
-        val loadingSkeleton = ui.transcript is Loadable.Loading && ui.entries.isEmpty() && ui.pendingMessages.isEmpty()
+        val loadingTranscript = ui.transcript is Loadable.Loading && ui.entries.isEmpty() && ui.pendingMessages.isEmpty()
         Box(Modifier.weight(1f).fillMaxWidth()) {
             when {
-                loadingSkeleton -> {
+                loadingTranscript -> {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator()
+                        Text("Loading transcript…", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
 
@@ -408,7 +408,7 @@ private fun ChatHeader(
                 Text(
                     paneId,
                     style = MaterialTheme.typography.bodySmall,
-                    fontFamily = FontFamily.Monospace,
+                    fontFamily = ScoutrMono,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                 )
@@ -512,14 +512,14 @@ private fun ChatHeader(
 private fun HeaderStatusChip(status: String, modifier: Modifier = Modifier) {
     Surface(
         modifier = modifier,
-        shape = RoundedCornerShape(50),
-        color = if (status == "needs you") MaterialTheme.colorScheme.primaryContainer
+        shape = RoundedCornerShape(6.dp),
+        color = if (status == "needs you") MaterialTheme.colorScheme.errorContainer
         else MaterialTheme.colorScheme.surfaceContainerHighest,
     ) {
         Text(
             status,
             style = MaterialTheme.typography.labelMedium,
-            color = if (status == "needs you") MaterialTheme.colorScheme.onPrimaryContainer
+            color = if (status == "needs you") MaterialTheme.colorScheme.onErrorContainer
             else MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
         )
@@ -533,13 +533,13 @@ private fun HeaderConfigurationChip(
     onClick: (() -> Unit)?,
     testTag: String,
 ) {
-    val shape = RoundedCornerShape(50)
+    val shape = RoundedCornerShape(6.dp)
     val color = MaterialTheme.colorScheme.surfaceContainer
     val modifier = Modifier.testTag(testTag)
     val content: @Composable () -> Unit = {
         Row(Modifier.padding(horizontal = 12.dp, vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("$label  ", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text(value, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
+            Text(value, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, fontFamily = ScoutrMono)
         }
     }
     if (onClick != null) {
@@ -801,7 +801,7 @@ private fun UserBubble(entry: SessionEntry, modifier: Modifier = Modifier) {
                 .widthIn(max = 288.dp)
                 .background(
                     MaterialTheme.colorScheme.surfaceContainerHighest,
-                    RoundedCornerShape(18.dp),
+                    RoundedCornerShape(8.dp),
                 )
                 .padding(horizontal = 14.dp, vertical = 10.dp)
                 .testTag("user_bubble"),
@@ -827,7 +827,7 @@ private fun PendingUserBubble(
                     .widthIn(max = 288.dp)
                     .background(
                         MaterialTheme.colorScheme.surfaceContainerHighest,
-                        RoundedCornerShape(18.dp),
+                        RoundedCornerShape(8.dp),
                     )
                     .padding(horizontal = 14.dp, vertical = 10.dp)
                     .testTag("pending_user_bubble"),
@@ -840,7 +840,6 @@ private fun PendingUserBubble(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
-                    CircularProgressIndicator(Modifier.size(12.dp), strokeWidth = 1.5.dp)
                     Text("Queued", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 MessageDeliveryState.FAILED -> TextButton(
@@ -861,36 +860,56 @@ private fun AssistantBubble(
     expandTools: Boolean,
     modifier: Modifier = Modifier,
 ) {
-    Column(modifier.fillMaxWidth().testTag("assistant_bubble")) {
-        for (block in entry.content) {
-            when (block.type) {
-                "text" -> {
-                    val text = block.text?.trim()
-                    if (!text.isNullOrBlank()) {
-                        // Long-press selects, then the system toolbar offers Copy.
-                        // Only the prose is selectable — tool chips keep their
-                        // tap-to-expand gesture without selection fighting it.
-                        SelectionContainer(modifier = Modifier.padding(bottom = 4.dp)) {
-                            AssistantMarkdown(content = text)
+    Row(modifier.fillMaxWidth().testTag("assistant_bubble")) {
+        Box(
+            Modifier
+                .width(12.dp)
+                .fillMaxHeight()
+                .padding(start = 4.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Box(
+                Modifier
+                    .width(2.dp)
+                    .fillMaxHeight()
+                    .background(
+                        MaterialTheme.colorScheme.primary.copy(alpha = 0.55f),
+                        RoundedCornerShape(1.dp),
+                    )
+                    .testTag("assistant_spine"),
+            )
+        }
+        Column(Modifier.weight(1f)) {
+            for (block in entry.content) {
+                when (block.type) {
+                    "text" -> {
+                        val text = block.text?.trim()
+                        if (!text.isNullOrBlank()) {
+                            // Long-press selects, then the system toolbar offers Copy.
+                            // Only the prose is selectable — tool chips keep their
+                            // tap-to-expand gesture without selection fighting it.
+                            SelectionContainer(modifier = Modifier.padding(bottom = 4.dp)) {
+                                AssistantMarkdown(content = text)
+                            }
                         }
                     }
-                }
 
-                "thinking" -> {
-                    val thinking = block.thinking
-                    if (!thinking.isNullOrBlank() && showThinking) {
-                        ThinkingBlock(thinking, Modifier.padding(top = 4.dp))
+                    "thinking" -> {
+                        val thinking = block.thinking
+                        if (!thinking.isNullOrBlank() && showThinking) {
+                            ThinkingBlock(thinking, Modifier.padding(top = 4.dp))
+                        }
                     }
-                }
 
-                "toolCall" -> {
-                    // Quiet collapsed chip by default — a one-line dim summary;
-                    // the tools toggle (or a tap) reveals the full command.
-                    ToolCallChip(
-                        block = block,
-                        forceExpanded = expandTools,
-                        modifier = Modifier.padding(top = 4.dp),
-                    )
+                    "toolCall" -> {
+                        // Quiet collapsed chip by default — a one-line dim summary;
+                        // the tools toggle (or a tap) reveals the full command.
+                        ToolCallChip(
+                            block = block,
+                            forceExpanded = expandTools,
+                            modifier = Modifier.padding(top = 4.dp),
+                        )
+                    }
                 }
             }
         }
@@ -904,7 +923,7 @@ private fun ThinkingBlock(text: String, modifier: Modifier = Modifier) {
             .fillMaxWidth()
             .background(
                 MaterialTheme.colorScheme.surfaceContainerHighest,
-                RoundedCornerShape(12.dp),
+                RoundedCornerShape(8.dp),
             )
             .padding(horizontal = 12.dp, vertical = 8.dp)
             .testTag("thinking_block"),
@@ -977,7 +996,7 @@ private fun ToolCallChip(
         Text(
             if (expanded) "▾ $name" else "▸ $name",
             style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
-            fontFamily = FontFamily.Monospace,
+            fontFamily = ScoutrMono,
             fontWeight = FontWeight.SemiBold,
             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
         )
@@ -985,7 +1004,7 @@ private fun ToolCallChip(
         Text(
             command,
             style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
-            fontFamily = FontFamily.Monospace,
+            fontFamily = ScoutrMono,
             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
             maxLines = if (expanded) Int.MAX_VALUE else 1,
             overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
@@ -1015,7 +1034,7 @@ private fun ToolResultChip(
             Text(
                 "▸ $tool (error)",
                 style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
-                fontFamily = FontFamily.Monospace,
+                fontFamily = ScoutrMono,
                 fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.error,
             )
@@ -1024,7 +1043,7 @@ private fun ToolResultChip(
             Text(
                 output,
                 style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
-                fontFamily = FontFamily.Monospace,
+                fontFamily = ScoutrMono,
                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
                 maxLines = if (expanded) Int.MAX_VALUE else 2,
                 overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
@@ -1041,7 +1060,7 @@ private fun ToolChipContainer(
 ) {
     androidx.compose.material3.Surface(
         onClick = onClick,
-        shape = RoundedCornerShape(12.dp),
+        shape = RoundedCornerShape(8.dp),
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
         modifier = modifier.fillMaxWidth(),
     ) {
@@ -1154,9 +1173,9 @@ internal fun ChatComposer(
             enabled = enabled,
             minLines = 1,
             maxLines = 6,
-            shape = RoundedCornerShape(22.dp),
+            shape = RoundedCornerShape(6.dp),
             colors = OutlinedTextFieldDefaults.colors(
-                focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f),
+                focusedBorderColor = MaterialTheme.colorScheme.outline,
                 unfocusedBorderColor = MaterialTheme.colorScheme.outline,
                 focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
                 unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -1184,9 +1203,19 @@ internal fun ChatComposer(
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
-                    IconButton(
-                        onClick = { submit() },
-                        enabled = enabled && (value.text.isNotBlank() || attachment != null),
+                    Box(
+                        Modifier
+                            .size(40.dp)
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(
+                                if (enabled && (value.text.isNotBlank() || attachment != null)) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.surfaceVariant
+                                },
+                            )
+                            .clickable(enabled = enabled && (value.text.isNotBlank() || attachment != null)) { submit() },
+                        contentAlignment = Alignment.Center,
                     ) {
                         Icon(
                             imageVector = if (acceptingCompletion) Icons.AutoMirrored.Filled.KeyboardArrowRight else Icons.AutoMirrored.Filled.Send,
@@ -1195,8 +1224,11 @@ internal fun ChatComposer(
                                 acceptingCompletion -> "Complete command"
                                 else -> "Send"
                             },
-                            tint = if (value.text.isBlank()) MaterialTheme.colorScheme.onSurfaceVariant
-                            else MaterialTheme.colorScheme.primary,
+                            tint = if (enabled && (value.text.isNotBlank() || attachment != null)) {
+                                MaterialTheme.colorScheme.onPrimary
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
                         )
                     }
                 }
@@ -1280,7 +1312,7 @@ private fun AttachmentChip(
         }
     }
     Surface(
-        shape = RoundedCornerShape(12.dp),
+        shape = RoundedCornerShape(8.dp),
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
         modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp).testTag("attachment_chip"),
     ) {
@@ -1300,7 +1332,6 @@ private fun AttachmentChip(
                 Spacer(Modifier.width(10.dp))
             }
             if (uploading) {
-                CircularProgressIndicator(modifier = Modifier.width(14.dp).height(14.dp), strokeWidth = 2.dp)
                 Spacer(Modifier.width(8.dp))
                 Text("Uploading image…", style = MaterialTheme.typography.labelMedium)
             } else {

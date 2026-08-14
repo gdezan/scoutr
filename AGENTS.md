@@ -55,9 +55,9 @@ Primary references:
 
 ## Project invariants and traps
 
-- Android design is always-dark Material 3. Accent `#5B8CFF` is reserved for AI-owned states; use mono only for paths, commands, and tool output. Status is the color language.
-- Motion does not bounce or spin. Agent-busy state uses the expanding-ripple `WorkingIndicator`; under `LocalReduceMotion` it becomes a static ring. Prefer it over `CircularProgressIndicator` for agent-busy states.
-- Status mapping is consistent across screens: `blocked/NeedsYou -> error`, `working -> primary`, `done -> secondary`.
+- Android design is always-dark Material 3. Green `#8DF08D` is reserved for live/AI-owned states; teal `#2C6F72` is charts/data only, gray denotes done, and red denotes user attention. Use Space Grotesk for UI, Martian Mono for machine facts and code, and JetBrains Mono for full-screen terminal text; mono is never decorative.
+- Motion does not bounce or spin. Agent-busy state uses the expanding-ripple `WorkingIndicator`; under `LocalReduceMotion` it becomes a static ring. Loading states use observable text or a static ring, never spinners or skeletons.
+- Status mapping is consistent across screens: `blocked/NeedsYou -> error`, `working -> primary`, `done -> onSurfaceVariant`, `idle -> outline`.
 - Interactive terminal is one full-screen Herdr pane at a time with an overlay hierarchy selector; do not put raw terminal output back on Chat.
 - ViewModels talk to `ScoutrApi`; `BridgeClient` implements it. Unit tests use `FakeScoutrApi`. Emulator tests use a real `BridgeClient` with a fresh **unsaved** `ConnectionStore` so ViewModels do not start polling.
 - Run instrumentation only on the emulator, never the physical Pixel. If `emulator-5554` is absent, boot the `scoutr` AVD and confirm the target with `adb devices`.

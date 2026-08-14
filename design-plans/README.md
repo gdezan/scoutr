@@ -35,9 +35,9 @@ Status: `TODO` | `IN PROGRESS` | `DONE` | `BLOCKED (<reason>)` | `REJECTED (<rat
 
 All plans must preserve these settled Scoutr decisions:
 
-- Always-dark Material 3; near-black canvas and calm charcoal surfaces.
-- `#5B8CFF` is reserved for AI-owned states/actions. State is the color.
-- No bouncing or spinning. The working indicator's expanding ripple is the only loop.
+- Always-dark Material 3; true-black canvas and calm charcoal surfaces.
+- Green `#8DF08D` is reserved for live/AI-owned state; teal `#2C6F72` is charts/data only; gray denotes done; red denotes user attention.
+- No bouncing, spinning, spinners, skeletons, or looping progress bars. The working indicator's expanding ripple is the intentional live-state loop; reduce motion renders a static ring.
 - Enter inserts a newline and never sends.
 - Chat opens at and follows the true bottom while pinned; tool calls stay collapsed and thinking is opt-in.
 - Model catalogs use provider as their only section hierarchy; capability filter chips are removed, while context/reasoning may remain compact row metadata.
@@ -89,7 +89,7 @@ Runtime evidence uses only `adb -s emulator-5554`. Install the APK, drive with `
 ## Findings considered and rejected
 
 - **Confirm Abort in the command palette** — rejected because Scoutr deliberately leaves recoverable Abort ungated. Plan 002 confirms Close only.
-- **Replace blue on selected chips and filters** — rejected as an audit defect because `Theme.kt:48-51` explicitly documents the current selected-chip treatment. Revisit only through a deliberate design-system decision, not an incidental screen fix.
+- **Blue selected chips and filters** — superseded by design-system v2: selected controls use the green live-state token only when they represent live ownership; neutral filters stay tonal.
 - **Replace Board polling with a WebSocket** — rejected; three-second polling is a settled architecture/product choice.
 - **Put raw terminal output on Chat** — rejected; the planned Interactive Terminal remains its own full-screen route.
 - **Add a tablet master-detail shell now** — deferred. Plan 006 first fixes readability with bounded content; master-detail needs a separate navigation/state design if users still need it.

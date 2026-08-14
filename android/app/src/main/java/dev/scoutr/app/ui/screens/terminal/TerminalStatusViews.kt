@@ -9,7 +9,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -24,10 +23,10 @@ import dev.scoutr.app.state.TerminalUiState
 import dev.scoutr.app.ui.components.ConfirmDialog
 
 /**
- * Slice 7 overlay states for the terminal area: connecting, failed (retry),
- * unsupported, empty (no panes), and the observer takeover confirmation.
- * Status follows the settled mapping: connecting -> onSurfaceVariant,
- * failed/unsupported -> error, observing -> secondary, control -> primary.
+ * Overlay states for the terminal area: connecting, failed (retry), unsupported,
+ * empty (no panes), and the observer takeover confirmation. Status follows the
+ * settled mapping: connecting -> onSurfaceVariant, failed/unsupported -> error,
+ * observing -> onSurfaceVariant, control -> primary.
  */
 @Composable
 internal fun TerminalOverlay(
@@ -65,7 +64,6 @@ internal fun TerminalOverlay(
 private fun ConnectingOverlay(reconnecting: Boolean) {
     BoxCenter {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            CircularProgressIndicator(Modifier.size(28.dp), strokeWidth = 2.5.dp)
             Spacer(Modifier.size(14.dp))
             Text(
                 if (reconnecting) "Reconnecting…" else "Connecting…",
@@ -95,7 +93,7 @@ private fun FailedOverlay(message: String, retryable: Boolean, onRetry: () -> Un
             )
             if (retryable) {
                 Spacer(Modifier.size(14.dp))
-                Button(onClick = onRetry) { Text("Retry") }
+                Button(shape = MaterialTheme.shapes.small, onClick = onRetry) { Text("Retry") }
             }
         }
     }
@@ -142,7 +140,7 @@ private fun EmptyOverlay(paneCount: Int, onRetry: () -> Unit) {
                 textAlign = TextAlign.Center,
             )
             Spacer(Modifier.size(14.dp))
-            Button(onClick = onRetry) { Text("Open terminal") }
+            Button(shape = MaterialTheme.shapes.small, onClick = onRetry) { Text("Open terminal") }
         }
     }
 }
@@ -181,7 +179,7 @@ internal fun TakeoverDialog(
 @Composable
 internal fun PaneClosedNotice(paneName: String?, onOpenDrawer: () -> Unit) {
     Surface(
-        color = MaterialTheme.colorScheme.secondaryContainer,
+        color = MaterialTheme.colorScheme.surfaceContainer,
         shape = MaterialTheme.shapes.medium,
         modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
     ) {
@@ -192,7 +190,7 @@ internal fun PaneClosedNotice(paneName: String?, onOpenDrawer: () -> Unit) {
             Text(
                 if (paneName != null) "Pane \"$paneName\" closed" else "Pane closed",
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSecondaryContainer,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.weight(1f),
             )
             TextButton(onClick = onOpenDrawer) { Text("Choose another") }
@@ -206,7 +204,7 @@ internal fun TerminalStatusChip(state: TerminalUiState) {
     val (label, color) = when (val c = state.connection) {
         is dev.scoutr.app.state.TerminalConnectionState.Ready ->
             if (c.writable) "Control" to MaterialTheme.colorScheme.primary
-            else "Observing" to MaterialTheme.colorScheme.secondary
+            else "Observing" to MaterialTheme.colorScheme.onSurfaceVariant
         is dev.scoutr.app.state.TerminalConnectionState.Connecting,
         is dev.scoutr.app.state.TerminalConnectionState.Reconnecting,
         -> "Connecting" to MaterialTheme.colorScheme.onSurfaceVariant

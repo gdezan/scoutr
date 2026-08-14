@@ -1,5 +1,6 @@
 package dev.scoutr.app.ui.screens
 
+import dev.scoutr.app.ui.theme.ScoutrMono
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -49,7 +50,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
@@ -104,7 +104,7 @@ internal fun ModelPickerDialog(
                 )
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 when {
-                    ui.loadingModels -> PickerLoading()
+                    ui.loadingModels -> PickerLoading("Loading models…")
                     ui.modelError != null -> PickerError(ui.modelError, viewModel::retryModels)
                     ui.providers.isEmpty() -> ModelPickerEmpty("No models available")
                     ui.modelMatches.isEmpty() -> ModelPickerEmpty("No models match")
@@ -152,7 +152,7 @@ internal fun FolderPickerDialog(
                     Text(
                         ui.path,
                         style = MaterialTheme.typography.bodyMedium,
-                        fontFamily = FontFamily.Monospace,
+                        fontFamily = ScoutrMono,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f).testTag("folder_path"),
@@ -161,7 +161,7 @@ internal fun FolderPickerDialog(
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 Box(Modifier.weight(1f).fillMaxWidth()) {
                     when {
-                        ui.loadingDirs -> PickerLoading()
+                        ui.loadingDirs -> PickerLoading("Loading folders…")
                         ui.folderError != null -> PickerError(ui.folderError, viewModel::retryFolders)
                         ui.dirs.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                             Text("No subfolders", color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -174,7 +174,7 @@ internal fun FolderPickerDialog(
                                 Surface(
                                     onClick = { viewModel.enterDir(folder) },
                                     color = Color.Transparent,
-                                    shape = RoundedCornerShape(10.dp),
+                                    shape = RoundedCornerShape(6.dp),
                                     modifier = Modifier.fillMaxWidth().testTag("folder_item_$folder"),
                                 ) {
                                     Row(
@@ -183,7 +183,7 @@ internal fun FolderPickerDialog(
                                     ) {
                                         Icon(Icons.Default.Folder, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
                                         Spacer(Modifier.width(12.dp))
-                                        Text(folder, fontFamily = FontFamily.Monospace, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        Text(folder, fontFamily = ScoutrMono, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                     }
                                 }
                             }
@@ -191,6 +191,7 @@ internal fun FolderPickerDialog(
                     }
                 }
                 Button(
+                    shape = MaterialTheme.shapes.small,
                     onClick = onDismiss,
                     enabled = ui.path.isNotBlank() && !ui.loadingDirs && ui.folderError == null,
                     modifier = Modifier.fillMaxWidth().padding(16.dp).heightIn(min = 48.dp).testTag("use_folder"),
@@ -269,7 +270,7 @@ private fun ProviderHeader(name: String, count: Int) {
         Text(
             name,
             style = MaterialTheme.typography.labelSmall,
-            fontFamily = FontFamily.Monospace,
+            fontFamily = ScoutrMono,
             fontWeight = FontWeight.SemiBold,
             letterSpacing = 0.6.sp,
             color = MaterialTheme.colorScheme.onSurface,
@@ -300,8 +301,8 @@ private fun ModelPickerCatalogRow(
     Surface(
         onClick = onSelect,
         enabled = enabled,
-        color = if (selected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.72f) else Color.Transparent,
-        shape = RoundedCornerShape(10.dp),
+        color = if (selected) MaterialTheme.colorScheme.surfaceVariant else Color.Transparent,
+        shape = RoundedCornerShape(6.dp),
         modifier = Modifier
             .fillMaxWidth()
             .testTag("$modelTagPrefix${match.key}")
@@ -338,7 +339,7 @@ private fun ModelPickerCatalogRow(
                 Text(
                     match.key,
                     style = MaterialTheme.typography.bodySmall,
-                    fontFamily = FontFamily.Monospace,
+                    fontFamily = ScoutrMono,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -374,22 +375,13 @@ private fun ModelPickerCatalogRow(
 }
 
 @Composable
-private fun PickerLoading() {
-    Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        repeat(6) { index ->
-            Box(
-                Modifier
-                    .fillMaxWidth()
-                    .height(64.dp)
-                    .background(
-                        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f - index * 0.03f),
-                        RoundedCornerShape(10.dp),
-                    ),
-            )
-        }
-    }
+private fun PickerLoading(label: String) {
+    Text(
+        label,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.fillMaxWidth().padding(16.dp),
+    )
 }
-
 @Composable
 private fun PickerError(message: String, onRetry: () -> Unit) {
     Box(Modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {

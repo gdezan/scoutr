@@ -275,7 +275,10 @@ enum class AgentStatus(val wireName: String) {
     Unknown("unknown");
 
     companion object {
-        fun fromWire(name: String): AgentStatus = entries.firstOrNull { it.wireName == name } ?: Unknown
+        fun fromWire(name: String): AgentStatus = when (name) {
+            "completed" -> Done
+            else -> entries.firstOrNull { it.wireName == name } ?: Unknown
+        }
     }
 }
 

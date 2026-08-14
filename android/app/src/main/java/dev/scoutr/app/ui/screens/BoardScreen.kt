@@ -1,5 +1,6 @@
 package dev.scoutr.app.ui.screens
 
+import dev.scoutr.app.ui.theme.ScoutrMono
 import android.widget.Toast
 
 import androidx.compose.foundation.background
@@ -18,13 +19,16 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.border
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.WifiOff
 import androidx.compose.material.icons.outlined.Close
@@ -61,11 +65,11 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.scoutr.app.data.AgentCard
 import dev.scoutr.app.data.AgentStatus
@@ -83,10 +87,10 @@ import kotlin.math.roundToInt
 import kotlinx.coroutines.launch
 
 /**
- * Attention-first Board. Phase vocabulary is the section header plus a per-card
- * pill; cards carry the active model and the latest meaningful transcript line
- * so the user reads "what is it doing now" without opening the session.
- * Needs-you agents sort first and read strongest (filled accent pill + border).
+ * Attention-first Board. Phase vocabulary is the section header plus per-card
+ * status metadata; cards carry the active model and latest meaningful transcript
+ * line so the user reads "what is it doing now" without opening the session.
+ * Needs-you agents sort first and read strongest through red treatment and border.
  */
 @Composable
 fun BoardScreen(
@@ -117,7 +121,9 @@ fun BoardScreen(
     var pendingClose by remember { mutableStateOf<AgentCard?>(null) }
 
     if (ui.loading && ui.board.total == 0) {
-        BoardSkeleton(modifier)
+        Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Text("Loading agents…", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
         return
     }
 
@@ -158,6 +164,7 @@ fun BoardScreen(
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 96.dp),
             ) {
                 item { Spacer(Modifier.height(8.dp)) }
+                item { BoardLockup() }
                 if (!ui.connected) {
                     item { DisconnectedBanner(error = ui.error, onRetry = { viewModel.connect("", "") }) }
                 }
@@ -184,6 +191,38 @@ fun BoardScreen(
     }
 }
 
+@Composable
+private fun BoardLockup() {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(top = 4.dp, bottom = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            Modifier
+                .size(22.dp)
+                .border(2.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(6.dp)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Box(
+                Modifier
+                    .size(7.dp)
+                    .background(MaterialTheme.colorScheme.primary, RoundedCornerShape(4.dp)),
+            )
+        }
+        Spacer(Modifier.width(8.dp))
+        Text(
+            "SCOUTR",
+            style = MaterialTheme.typography.titleSmall,
+            fontFamily = ScoutrMono,
+            fontWeight = FontWeight.Bold,
+            letterSpacing = 1.2.sp,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+    }
+}
+
 /** Adds a section header + its agent cards to the LazyList. */
 private fun LazyListScope.boardSection(
     title: String,
@@ -200,22 +239,11 @@ private fun LazyListScope.boardSection(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                text = title,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold,
+                text = "${title.uppercase()} ${agents.size}",
+                style = MaterialTheme.typography.labelSmall.copy(fontFamily = ScoutrMono),
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 1.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Spacer(Modifier.width(8.dp))
-            Text(
-                text = agents.size.toString(),
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                modifier = Modifier
-                    .background(
-                        MaterialTheme.colorScheme.surfaceVariant,
-                        RoundedCornerShape(50),
-                    )
-                    .padding(horizontal = 8.dp, vertical = 1.dp),
             )
         }
     }
@@ -239,7 +267,7 @@ private fun DisconnectedBanner(error: String?, onRetry: () -> Unit) {
     Row(
         Modifier
             .fillMaxWidth()
-            .background(MaterialTheme.colorScheme.errorContainer, RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.errorContainer, RoundedCornerShape(8.dp))
             .padding(start = 12.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -334,7 +362,7 @@ private fun AgentCardRow(
         scope.launch { reveal.animateTo(BoardReveal.Closed) }
     }
 
-    Box(modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp))) {
+    Box(modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp))) {
         // Action bar, right-aligned, revealed as the card slides left. It
         // sizes itself from the card (matchParentSize) because LazyColumn
         // items measure with unbounded height.
@@ -370,7 +398,7 @@ private fun AgentCardRow(
                 .offset { IntOffset(reveal.requireOffset().roundToInt(), 0) }
                 .anchoredDraggable(reveal, reverseDirection = false, orientation = Orientation.Horizontal)
                 .fillMaxWidth()
-                .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(16.dp))
+                .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(8.dp))
                 .clickable {
                     if (reveal.currentValue == BoardReveal.Open) closeReveal() else onClick()
                 }
@@ -378,7 +406,7 @@ private fun AgentCardRow(
         ) {
             Card(
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                shape = RoundedCornerShape(16.dp),
+                shape = RoundedCornerShape(8.dp),
                 border = androidx.compose.foundation.BorderStroke(
                     width = if (isNeedsYou) 1.dp else 0.dp,
                     color = if (isNeedsYou) accent else Color.Transparent,
@@ -392,9 +420,8 @@ private fun AgentCardRow(
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Box(
                                 Modifier
-                                    .width(8.dp)
-                                    .height(8.dp)
-                                    .background(accent, RoundedCornerShape(50)),
+                                    .size(9.dp)
+                                    .border(2.5.dp, accent, CircleShape),
                             )
                             Spacer(Modifier.width(10.dp))
                             Text(
@@ -421,7 +448,7 @@ private fun AgentCardRow(
                             Text(
                                 text = agent.cwd ?: agent.workspaceId,
                                 style = MaterialTheme.typography.labelSmall,
-                                fontFamily = FontFamily.Monospace,
+                                fontFamily = ScoutrMono,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f),
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
@@ -432,7 +459,7 @@ private fun AgentCardRow(
                                 text = agent.model?.let { shortModel(it) } ?: "—",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f),
-                                fontFamily = FontFamily.Monospace,
+                                fontFamily = ScoutrMono,
                             )
                         }
                     }
@@ -475,14 +502,14 @@ private fun AgentCardRow(
 private fun statusColor(status: AgentStatus) = when (status) {
     AgentStatus.NeedsYou -> MaterialTheme.colorScheme.error
     AgentStatus.Working -> MaterialTheme.colorScheme.primary
-    AgentStatus.Done -> MaterialTheme.colorScheme.secondary
-    else -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+    AgentStatus.Done -> MaterialTheme.colorScheme.onSurfaceVariant
+    AgentStatus.Idle -> MaterialTheme.colorScheme.outline
+    AgentStatus.Unknown -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
 }
 
 /**
- * The section header already names the status, so the pill only earns its
- * place by carrying what the header cannot: time in state (blocked stays a
- * filled accent pill — the one loud thing on screen).
+ * The section header already names the status, so the bounded metadata label only
+ * earns its place by carrying what the header cannot: time in state.
  */
 @Composable
 private fun StatusPill(status: AgentStatus, statusSinceMs: Double?) {
@@ -493,7 +520,7 @@ private fun StatusPill(status: AgentStatus, statusSinceMs: Double?) {
         Modifier
             .background(
                 if (isNeedsYou) color else MaterialTheme.colorScheme.surfaceVariant,
-                RoundedCornerShape(50),
+                RoundedCornerShape(6.dp),
             )
             .padding(horizontal = 10.dp, vertical = 4.dp),
     ) {
@@ -518,72 +545,6 @@ private fun statusLabel(status: AgentStatus) = when (status) {
 /** Compact "time in state" from the bridge-stamped entry time. */
 internal fun timeInState(sinceMs: Double?, nowMs: Long = System.currentTimeMillis()): String? =
     sinceMs?.let { dev.scoutr.app.ui.relativeTime(it, nowMs = nowMs) }
-
-/** Stable skeleton rows (fixed geometry, no spinner flash) while first load runs. */
-@Composable
-private fun BoardSkeleton(modifier: Modifier = Modifier) {
-    ReadableContentColumn(
-        modifier = modifier.fillMaxSize().padding(top = 8.dp, bottom = 0.dp),
-        contentTag = "board_skeleton",
-    ) {
-    Column(
-        modifier = Modifier.fillMaxSize(),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        repeat(5) { index ->
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .height(92.dp)
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(MaterialTheme.colorScheme.surface)
-                    .padding(16.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Box(
-                    Modifier
-                        .width(8.dp)
-                        .height(8.dp)
-                        .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(50)),
-                )
-                Spacer(Modifier.width(10.dp))
-                Column(Modifier.weight(1f)) {
-                    Box(
-                        Modifier
-                            .fillMaxWidth(0.5f)
-                            .height(14.dp)
-                            .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(4.dp)),
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    Box(
-                        Modifier
-                            .fillMaxWidth(0.9f)
-                            .height(10.dp)
-                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f), RoundedCornerShape(4.dp)),
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    Box(
-                        Modifier
-                            .fillMaxWidth(0.6f)
-                            .height(10.dp)
-                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f), RoundedCornerShape(4.dp)),
-                    )
-                }
-                Spacer(Modifier.width(10.dp))
-                Box(
-                    Modifier
-                        .width(52.dp)
-                        .height(20.dp)
-                        .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(50)),
-                )
-            }
-            if (index == 4) {
-                Box(Modifier.fillMaxWidth().height(4.dp))
-            }
-        }
-    }
-}
-}
 
 @Composable
 private fun rememberBoardViewModel(): BoardViewModel {

@@ -24,7 +24,7 @@ data class HistoryItem(
     val archived: Boolean,
 )
 
-enum class HistoryView(val label: String) {
+enum class HistoryScope(val label: String) {
     Active("Active"),
     Completed("Completed"),
     Pinned("Pinned"),
@@ -33,7 +33,7 @@ enum class HistoryView(val label: String) {
 
 data class HistoryUiState(
     val items: List<HistoryItem> = emptyList(),
-    val loading: Boolean = false,
+    val loading: Boolean = true,
     val connected: Boolean = false,
     val error: String? = null,
     val truncated: Boolean = false,
@@ -81,7 +81,10 @@ class SessionHistoryViewModel(
     /** Start the 8s catalog poll; no-op when already polling or offline. */
     fun startPolling() {
         if (lifecycleActive) return
-        if (connectionStore.saved == null) return
+        if (connectionStore.saved == null) {
+            _ui.update { it.copy(loading = false) }
+            return
+        }
         lifecycleActive = true
         poller.start(8.seconds) { refresh() }
     }
@@ -94,6 +97,7 @@ class SessionHistoryViewModel(
     }
 
     suspend fun refresh() {
+        _ui.update { it.copy(loading = true, error = null) }
         try {
             val response = bridge.sessionCatalog(query = query.ifBlank { null }, limit = 200)
             val pinned = store.pinnedPaths()
@@ -118,7 +122,7 @@ class SessionHistoryViewModel(
         } catch (c: CancellationException) {
             throw c
         } catch (_: Exception) {
-            // transient decode issues should not flap the list
+            _ui.update { it.copy(loading = false, error = "Unable to load sessions") }
         }
     }
 

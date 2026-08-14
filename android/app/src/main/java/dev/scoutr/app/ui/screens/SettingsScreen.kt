@@ -1,5 +1,6 @@
 package dev.scoutr.app.ui.screens
 
+import dev.scoutr.app.ui.theme.ScoutrMono
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -35,7 +36,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -153,7 +153,7 @@ private fun ConnectionSection(
             Text(
                 saved.host,
                 style = MaterialTheme.typography.bodyMedium,
-                fontFamily = FontFamily.Monospace,
+                fontFamily = ScoutrMono,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 overflow = TextOverflow.Ellipsis,
                 maxLines = 2,
@@ -168,7 +168,7 @@ private fun ConnectionSection(
             Text(
                 push ?: "Push not configured.",
                 style = MaterialTheme.typography.bodyMedium,
-                fontFamily = if (push != null) FontFamily.Monospace else FontFamily.Default,
+                fontFamily = ScoutrMono,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 overflow = TextOverflow.Ellipsis,
                 maxLines = 3,
@@ -325,7 +325,7 @@ private fun TerminalSection(preferences: TerminalPreferencesStore.ConnectionPref
             Text(
                 "${fontSizeSp.roundToInt()}",
                 style = MaterialTheme.typography.bodyMedium,
-                fontFamily = FontFamily.Monospace,
+                fontFamily = ScoutrMono,
                 modifier = Modifier.width(28.dp).testTag("settings_font_value"),
             )
             IconButton(
@@ -379,7 +379,7 @@ private fun SettingsSection(
     SectionLabel(label, modifier = Modifier.padding(start = 4.dp, bottom = 8.dp))
     Card(
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        shape = RoundedCornerShape(14.dp),
+        shape = RoundedCornerShape(8.dp),
         modifier = Modifier.fillMaxWidth(),
     ) {
         Column { content() }

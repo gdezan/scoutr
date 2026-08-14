@@ -33,7 +33,6 @@ import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
@@ -571,7 +570,7 @@ private fun ScoutrTab(
     val haptic = rememberHaptic()
     Column(
         modifier
-            .clip(RoundedCornerShape(12.dp))
+            .clip(RoundedCornerShape(6.dp))
             .clickable {
                 haptic(HapticEvent.Select)
                 onClick()
@@ -594,7 +593,7 @@ private fun ScoutrTab(
                     Modifier
                         .offset(x = 6.dp, y = (-6).dp)
                         .size(16.dp)
-                        .background(MaterialTheme.colorScheme.error, RoundedCornerShape(50)),
+                        .background(MaterialTheme.colorScheme.error, RoundedCornerShape(8.dp)),
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(

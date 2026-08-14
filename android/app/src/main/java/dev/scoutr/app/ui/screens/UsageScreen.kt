@@ -136,7 +136,7 @@ private fun ProviderCard(provider: UsageSnapshot, nowMillis: Long, onRefresh: ()
     Card(
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-        shape = RoundedCornerShape(12.dp),
+        shape = RoundedCornerShape(8.dp),
         modifier = Modifier.fillMaxWidth().testTag("usage_${provider.provider}"),
     ) {
         Column(
@@ -228,7 +228,7 @@ private fun UsageBar(window: UsageWindow, provider: String, nowSeconds: Long) {
     val color = when {
         percent >= 90 -> MaterialTheme.colorScheme.error
         percent >= 75 -> MaterialTheme.colorScheme.tertiary
-        else -> MaterialTheme.colorScheme.primary
+        else -> MaterialTheme.colorScheme.secondary
     }
     val reset = resetLabel(window.resetAt, nowSeconds)
     val amount = amountLabel(window)
@@ -358,29 +358,11 @@ private fun BalanceRow(window: UsageWindow) {
 
 @Composable
 private fun UsageLoading() {
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .semantics { contentDescription = "Loading usage" }
-            .testTag("usage_loading"),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
-    ) {
-        repeat(2) {
-            Column(
-                Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(MaterialTheme.colorScheme.surface)
-                    .padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp),
-            ) {
-                Box(Modifier.width(96.dp).height(18.dp).clip(RoundedCornerShape(4.dp)).background(MaterialTheme.colorScheme.surfaceVariant))
-                repeat(2) {
-                    Box(Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(8.dp)).background(MaterialTheme.colorScheme.surfaceVariant))
-                }
-            }
-        }
-    }
+    Text(
+        "Loading usage…",
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.fillMaxWidth().testTag("usage_loading"),
+    )
 }
 
 @Composable

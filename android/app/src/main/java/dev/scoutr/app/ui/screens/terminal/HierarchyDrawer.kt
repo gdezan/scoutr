@@ -1,5 +1,6 @@
 package dev.scoutr.app.ui.screens.terminal
 
+import dev.scoutr.app.ui.theme.ScoutrMono
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -25,7 +26,6 @@ import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
@@ -45,7 +45,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -126,7 +125,7 @@ internal fun HierarchyDrawer(
         if (error != null) {
             Surface(
                 color = MaterialTheme.colorScheme.errorContainer,
-                shape = RoundedCornerShape(10.dp),
+                shape = RoundedCornerShape(8.dp),
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
             ) {
                 Text(
@@ -152,7 +151,7 @@ internal fun HierarchyDrawer(
         HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f))
         if (busy) {
             Box(Modifier.fillMaxWidth().padding(vertical = 24.dp), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
+                Text("Updating terminal…", color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
         LazyColumn(
@@ -408,7 +407,7 @@ private fun PaneRow(
         Text(
             pane.paneId.takeLast(6),
             style = MaterialTheme.typography.labelSmall,
-            fontFamily = FontFamily.Monospace,
+            fontFamily = ScoutrMono,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         RowActions(

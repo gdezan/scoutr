@@ -35,7 +35,7 @@ fun ScoutrTextField(
         placeholder = { Text(placeholder) },
         singleLine = singleLine,
         keyboardOptions = keyboardOptions,
-        shape = RoundedCornerShape(14.dp),
+        shape = RoundedCornerShape(6.dp),
         colors = OutlinedTextFieldDefaults.colors(
             focusedBorderColor = MaterialTheme.colorScheme.outline,
             unfocusedBorderColor = MaterialTheme.colorScheme.outline,

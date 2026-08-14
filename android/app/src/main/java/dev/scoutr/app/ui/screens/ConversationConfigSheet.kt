@@ -1,5 +1,6 @@
 package dev.scoutr.app.ui.screens
 
+import dev.scoutr.app.ui.theme.ScoutrMono
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -22,7 +23,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
@@ -45,7 +45,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -108,7 +107,7 @@ internal fun ConversationConfigSheet(
                     )
                 }
                 if (configBusy) {
-                    CircularProgressIndicator(Modifier.padding(12.dp).width(20.dp), strokeWidth = 2.dp)
+                    Text("Applying…", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
                 }
                 IconButton(onClick = onDismiss) {
                     Icon(Icons.Default.Close, contentDescription = "Close conversation setup")
@@ -137,6 +136,7 @@ internal fun ConversationConfigSheet(
                     ) {
                         items(ui.availableThinkingLevels, key = { it }) { level ->
                             FilterChip(
+                                shape = RoundedCornerShape(6.dp),
                                 selected = level == ui.thinkingLevel,
                                 enabled = !configBusy,
                                 onClick = { onSelectThinking(level) },
@@ -158,7 +158,7 @@ internal fun ConversationConfigSheet(
             Text(
                 ui.model ?: "Not reported yet",
                 style = MaterialTheme.typography.bodyMedium,
-                fontFamily = FontFamily.Monospace,
+                fontFamily = ScoutrMono,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp),
@@ -181,7 +181,7 @@ internal fun ConversationConfigSheet(
 
             Box(Modifier.weight(1f).fillMaxWidth()) {
                 when {
-                    configuration is Loadable.Loading -> CircularProgressIndicator(Modifier.align(Alignment.Center))
+                    configuration is Loadable.Loading -> Text("Loading models…", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.align(Alignment.Center))
                     configuration is Loadable.Failed -> Text(
                         configuration.reason,
                         color = MaterialTheme.colorScheme.error,

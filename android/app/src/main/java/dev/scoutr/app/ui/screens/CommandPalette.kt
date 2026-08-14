@@ -1,5 +1,6 @@
 package dev.scoutr.app.ui.screens
 
+import dev.scoutr.app.ui.theme.ScoutrMono
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -22,7 +23,6 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SmartToy
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -45,7 +45,6 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -144,7 +143,7 @@ fun CommandPalette(
             }
             if (ui.loading && ui.results.isEmpty()) {
                 Box(Modifier.fillMaxWidth().padding(vertical = 48.dp), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator()
+                    Text("Searching…", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             } else if (ui.results.isEmpty()) {
                 Box(Modifier.fillMaxWidth().padding(vertical = 48.dp), contentAlignment = Alignment.Center) {
@@ -236,17 +235,14 @@ private fun PaletteRow(
             Text(
                 result.subtitle,
                 style = MaterialTheme.typography.labelSmall,
-                fontFamily = FontFamily.Monospace,
+                fontFamily = ScoutrMono,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
         }
         if (busy) {
-            CircularProgressIndicator(
-                modifier = Modifier.width(18.dp).height(18.dp),
-                strokeWidth = 2.dp,
-            )
+            Text("Working…", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
         } else if (running) {
             TextButton(onClick = onAbort) { Text("Abort", color = MaterialTheme.colorScheme.error) }
             TextButton(onClick = onClose) { Text("Close") }
