@@ -12,7 +12,7 @@ async function models(ctx: RouteContext): Promise<RouteResult> {
     return { status: 404, body: { ok: false, error: `unknown agent: ${agent}` } };
   }
   try {
-    // Catalog-less backends (e.g. claude) return an empty catalog, never a 404.
+    // A backend with no catalog returns an empty one, never a 404.
     return { status: 200, body: { ok: true, catalog: backend.models() } };
   } catch (error) {
     return {

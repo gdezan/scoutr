@@ -195,6 +195,46 @@ describe("session catalog", () => {
     assert.equal(catalog.truncated, true, "pi hit its per-root budget, so the listing is truncated");
   });
 
+  it("keeps the newest sessions of an over-budget root, not the ones the walk happened to reach first", async () => {
+    // The claude store grows to ~1000 transcripts across project dirs. When the
+    // per-root budget was spent in directory order, today's sessions — written
+    // into a project dir the walk reached last — never made the listing at all.
+    const piRoot = await mkdtemp(join(tmpdir(), "scoutr-catalog-pi-"));
+    process.env.PI_CODING_AGENT_SESSION_DIR = piRoot;
+    const claudeRoot = await mkdtemp(join(tmpdir(), "scoutr-catalog-claude-"));
+    process.env.CLAUDECONFIGDIR = claudeRoot;
+    const projects = join(claudeRoot, "projects");
+
+    const claudeLine = (id: string, cwd: string, timestamp: string) => JSON.stringify({
+      type: "user",
+      uuid: `u-${id}`,
+      sessionId: id,
+      cwd,
+      timestamp,
+      message: { role: "user", content: `prompt ${id}` },
+    });
+
+    // First project dir: over the per-root budget on its own, all of it old.
+    const stale = join(projects, "-work-old-");
+    await mkdir(stale, { recursive: true });
+    const staleAt = new Date("2026-01-01T00:00:00.000Z");
+    for (let i = 0; i < 1200; i += 1) {
+      const file = join(stale, `old-${String(i).padStart(4, "0")}.jsonl`);
+      await writeFile(file, `${claudeLine(`old-${i}`, "/work/old", "2026-01-01T00:00:00.000Z")}\n`);
+      await utimes(file, staleAt, staleAt);
+    }
+
+    // Second project dir, written after the budget would already be spent.
+    const fresh = join(projects, "-work-today-");
+    await mkdir(fresh, { recursive: true });
+    const freshFile = join(fresh, "today.jsonl");
+    await writeFile(freshFile, `${claudeLine("today", "/work/today", "2026-08-14T00:00:00.000Z")}\n`);
+    await utimes(freshFile, new Date(), new Date());
+
+    const catalog = await listSessionCatalog({ roots: [piRoot, projects], limit: 10 });
+    assert.equal(catalog.sessions[0]?.id, "today", "the newest session must survive the scan budget");
+  });
+
   it("rejects invalid limits and queries", async () => {
     const root = await newCatalogRoot();
     await assert.rejects(() => listSessionCatalog({ roots: [root], limit: 0 }), SessionCatalogError);

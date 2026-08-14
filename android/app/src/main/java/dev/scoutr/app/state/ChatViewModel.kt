@@ -320,7 +320,7 @@ class ChatViewModel(
         val agent = _ui.value.agentKind ?: return
         val agentChanged = agent != configurationAgent
         // configurationAgent is set only after a successful fetch, so an
-        // empty catalog (catalog-less backend like claude) is cached too —
+        // empty catalog (a backend that publishes none) is cached too —
         // never refetch on the 2.5s poll cycle. A failed fetch leaves
         // configurationAgent unset and retries on the next poll.
         if (!agentChanged) return

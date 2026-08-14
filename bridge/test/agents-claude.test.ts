@@ -75,6 +75,32 @@ describe("claude adapter", () => {
     it("shell-quotes model and name", () => {
       assert.equal(claudeLaunchCommand({ model: "claude-sonnet-4-6", name: "a b'c" }), "claude --model 'claude-sonnet-4-6' --name 'a b'\\''c'");
     });
+    it("drops the picker's provider prefix from the model", () => {
+      assert.equal(claudeLaunchCommand({ model: "anthropic/claude-opus-5" }), "claude --model 'claude-opus-5'");
+    });
+    it("passes a thinking level as --effort", () => {
+      assert.equal(
+        claudeLaunchCommand({ model: "anthropic/claude-opus-5", thinkingLevel: "xhigh" }),
+        "claude --model 'claude-opus-5' --effort 'xhigh'",
+      );
+    });
+    it("ignores a thinking level claude does not accept", () => {
+      assert.equal(claudeLaunchCommand({ thinkingLevel: "off" }), "claude");
+    });
+  });
+
+  describe("models", () => {
+    it("offers an anthropic catalog the picker can key by provider/id", () => {
+      const catalog = claudeBackend.models();
+      assert.equal(catalog.providers.length, 1);
+      const provider = catalog.providers[0]!;
+      assert.equal(provider.name, "anthropic");
+      assert.ok(provider.models.some((model) => model.id === "claude-opus-5"));
+      for (const model of provider.models) {
+        assert.equal(model.provider, "anthropic");
+        assert.ok(model.thinkingLevels.includes("high"));
+      }
+    });
   });
 
   describe("resume", () => {
@@ -168,6 +194,11 @@ describe("claude adapter", () => {
       await claudeControl(herdr, { paneId: "p1", action: "set_model", text: "claude-sonnet-4-6" });
       assert.equal(herdr.sent[0].params.text, "/model claude-sonnet-4-6");
     });
+    it("strips the picker's provider prefix before /model", async () => {
+      const herdr = fakeHerdr();
+      await claudeControl(herdr, { paneId: "p1", action: "set_model", text: "anthropic/claude-opus-5" });
+      assert.equal(herdr.sent[0].params.text, "/model claude-opus-5");
+    });
     it("retries the initial prompt until the pane shows it, then stops", async () => {
       // Simulates the live drop: prompts sent in claude's first ~2s vanish,
       // so delivery must verify the pane text and re-send with backoff.
@@ -244,7 +275,7 @@ describe("claude adapter", () => {
     });
     it("advertises only its real capabilities", () => {
       assert.deepEqual([...claudeBackend.capabilities], ["abort", "compact", "close", "set_model"]);
-      assert.equal(claudeBackend.hasModelCatalog, false);
+      assert.equal(claudeBackend.hasModelCatalog, true);
       assert.equal(claudeBackend.hasSlashCommands, false);
     });
   });

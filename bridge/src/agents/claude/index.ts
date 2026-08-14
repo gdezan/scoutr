@@ -20,6 +20,7 @@ import type {
   LaunchParams,
 } from "../types.js";
 import { parseClaudeTranscript } from "./transcript.js";
+import { claudeEffortArg, claudeModelArg, readClaudeModelsCatalog } from "./models.js";
 import { claudeQuestions } from "./questions.js";
 import { claudeAnswerPlan } from "./questionnaire.js";
 
@@ -34,7 +35,9 @@ export function claudeSessionRoot(): string {
 
 export function claudeLaunchCommand(params: LaunchParams): string {
   const parts = ["claude"];
-  if (params.model) parts.push("--model", shellQuote(params.model));
+  if (params.model) parts.push("--model", shellQuote(claudeModelArg(params.model)));
+  const effort = claudeEffortArg(params.thinkingLevel);
+  if (effort) parts.push("--effort", shellQuote(effort));
   if (params.name) parts.push("--name", shellQuote(params.name));
   return parts.join(" ");
 }
@@ -229,7 +232,9 @@ export async function claudeControl(herdr: HerdrPort, params: ControlParams): Pr
       if (!text || text.length > 200 || /[\u0000-\u001f\u007f]/.test(text)) {
         throw new Error("valid model is required");
       }
-      await herdr.paneSendInput(paneId, `/model ${text}`, ["Enter"]);
+      // The app addresses a model by its picker key (`anthropic/claude-opus-5`);
+      // /model wants the model name alone.
+      await herdr.paneSendInput(paneId, `/model ${claudeModelArg(text)}`, ["Enter"]);
       return;
     }
     default: {
@@ -250,7 +255,7 @@ export const claudeBackend: AgentBackend = {
   id: "claude",
   displayName: "Claude Code",
   capabilities: CLAUDE_CAPABILITIES,
-  hasModelCatalog: false,
+  hasModelCatalog: true,
   hasSlashCommands: false,
 
   launchCommand: claudeLaunchCommand,
@@ -263,6 +268,6 @@ export const claudeBackend: AgentBackend = {
   answerQuestion: claudeAnswerQuestion,
   control: claudeControl,
   deliverInitialPrompt: claudeDeliverInitialPrompt,
-  models: () => ({ providers: [] }),
+  models: readClaudeModelsCatalog,
   commands: async () => ({ commands: [] }),
 };

@@ -78,7 +78,7 @@ data class NewSessionUiState(
             !loadingDirs && !loadingModels && !creating && folderError == null && modelError == null &&
             (selectedModel != null || !selectedAgentHasModelCatalog)
 
-    /** Derived: catalog-less backends (e.g. claude) never need a model pick. */
+    /** Derived: backends without a model catalog never need a model pick. */
     val selectedAgentHasModelCatalog: Boolean
         get() = agentKinds.firstOrNull { it.id == selectedAgent }?.hasModelCatalog != false
 }

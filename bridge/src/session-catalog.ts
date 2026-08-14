@@ -201,7 +201,7 @@ export async function listSessionCatalog(options: ListSessionCatalogOptions = {}
 async function findSessionFiles(roots: string[]): Promise<{ files: SessionFile[]; truncated: boolean }> {
   const files: SessionFile[] = [];
   // Fair per-root budget: the global candidate cap is split evenly so a giant
-  // first store (e.g. pi) can never starve later roots (e.g. claude).
+  // store (e.g. pi) can never starve another one (e.g. claude).
   const perRoot = Math.max(1, Math.floor(MAX_CANDIDATES / Math.max(1, roots.length)));
   let truncated = false;
   for (const root of roots) {
@@ -211,10 +211,19 @@ async function findSessionFiles(roots: string[]): Promise<{ files: SessionFile[]
     } catch {
       continue; // a missing store is an empty store
     }
-    const rootStart = files.length;
-    await scanRoot(canonicalRoot, files, rootStart + perRoot);
-    if (files.length >= rootStart + perRoot) truncated = true;
-    if (files.length >= MAX_CANDIDATES) break;
+    // Each root is scanned into its own bucket and trimmed *by recency*, not by
+    // directory order. Cutting the walk short instead dropped whichever files
+    // readdir happened to hand over last, which is how a claude store of ~1000
+    // transcripts hid today's sessions behind months-old ones.
+    const rootFiles: SessionFile[] = [];
+    await scanRoot(canonicalRoot, rootFiles, MAX_CANDIDATES);
+    if (rootFiles.length >= MAX_CANDIDATES) truncated = true;
+    rootFiles.sort((a, b) => b.mtimeMs - a.mtimeMs);
+    if (rootFiles.length > perRoot) {
+      rootFiles.length = perRoot;
+      truncated = true;
+    }
+    files.push(...rootFiles);
   }
   return { files, truncated };
 }
