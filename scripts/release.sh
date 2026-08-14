@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# If multiple adb devices are connected, install-app.sh presents an arrow-key picker.
 # One-shot release: deploy the bridge, then build + install the app on a device.
 set -euo pipefail
 cd "$(dirname "$0")/.."

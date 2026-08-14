@@ -283,8 +283,12 @@ scripts/install-app.sh     # build + install on a phone/emulator (--serial X, --
 scripts/release.sh         # deploy bridge + build + install in one go
 ```
 
-`install-app.sh` targets the single connected device; with several devices use
-`--serial <serial>` (or `SCOUTR_SERIAL`). Install on the S24 over wireless adb
+Common workflows are also available via `make help`, including `make release`,
+`make install`, and the bridge and Android test targets.
+
+`install-app.sh` installs to the only connected device automatically. With several
+ADB devices, it opens an arrow-key picker; use `--serial <serial>` (or
+`SCOUTR_SERIAL`) to select one explicitly. Install on the S24 over wireless adb
 today looks like: `adb pair 100.78.204.15:<port> <code>` then
 `scripts/install-app.sh`.
 
