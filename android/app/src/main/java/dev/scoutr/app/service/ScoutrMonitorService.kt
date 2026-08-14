@@ -27,14 +27,12 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import okhttp3.OkHttpClient
-import java.util.concurrent.TimeUnit
-
 /**
- * Opt-in foreground service that keeps the ntfy poll alive while the app is
- * backgrounded. Pushed blocked/done events become notifications that deep-link
- * to the exact session and carry an inline Reply action that steers the pane.
- * Without it, pushes only surface on the next app launch.
+ * Opt-in, time-bounded foreground service that keeps the ntfy poll alive
+ * while the app is backgrounded. Pushed blocked/done events become
+ * notifications that deep-link to the exact session and carry an inline Reply
+ * action that steers the pane. Android 15 stops data-sync services after six
+ * background hours, and [onTimeout] ends this session without restarting it.
  */
 class ScoutrMonitorService : Service() {
 
@@ -77,10 +75,32 @@ class ScoutrMonitorService : Service() {
                 }
             }
         }
-        return START_STICKY
+        return START_NOT_STICKY
+    }
+
+    /**
+     * Android 15 can time out data-sync foreground services after six hours
+     * of background use. Stop immediately and clear the opt-in so the next
+     * app launch does not silently restart an expired monitoring session.
+     */
+    override fun onTimeout(startId: Int, fgsType: Int) {
+        stopAfterForegroundServiceTimeout()
+    }
+
+    override fun onTimeout(startId: Int) {
+        stopAfterForegroundServiceTimeout()
+    }
+
+    private fun stopAfterForegroundServiceTimeout() {
+        pollJob?.cancel()
+        pollJob = null
+        store.enabled = false
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        stopSelf()
     }
 
     override fun onDestroy() {
+        store.enabled = false
         scope.cancel()
         super.onDestroy()
     }
@@ -104,7 +124,7 @@ class ScoutrMonitorService : Service() {
         NotificationCompat.Builder(this, CHANNEL_MONITOR)
             .setSmallIcon(android.R.drawable.ic_menu_view)
             .setContentTitle("Scoutr monitoring")
-            .setContentText("Watching agents for blocked / done events")
+            .setContentText("Watching agents for blocked / done events (up to six hours on Android 15+)")
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()

@@ -3,10 +3,10 @@ package dev.scoutr.app.state
 import android.content.Context
 
 /**
- * Opt-in background monitoring: when enabled, a foreground service keeps the
+ * Opt-in, time-bounded background monitoring: a foreground service keeps the
  * ntfy poll alive while the app is backgrounded so blocked/done events reach
- * the notification shade with a deep link and an inline reply. Disabled by
- * default; the toggle lives in Settings.
+ * the notification shade. Android 15 ends a data-sync session after six
+ * background hours; the service clears this flag when that timeout fires.
  */
 class MonitoringStore(context: Context) {
 

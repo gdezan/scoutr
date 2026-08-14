@@ -84,6 +84,10 @@ class SettingsScreenTest {
         compose.onNodeWithTag("settings_monitoring_switch").performScrollTo().assertIsOff().performClick()
         compose.onNodeWithTag("settings_monitoring_switch").assertIsOn()
         compose.onNodeWithText("Background monitoring").assertExists()
+        compose.onNodeWithText(
+            "Watch agents for blocked / done events while the app is closed. " +
+                "Android 15+ limits data-sync monitoring to six hours in a 24-hour period.",
+        ).assertExists()
         assertTrue(lastToggle == true)
     }
 

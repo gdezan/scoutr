@@ -1,17 +1,11 @@
 package dev.scoutr.app
 
 import android.os.Bundle
-import android.os.Build
-
 import android.content.Intent
-import androidx.core.content.ContextCompat
-import android.Manifest
-import android.content.pm.PackageManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.SystemBarStyle
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
@@ -133,27 +127,10 @@ class MainActivity : ComponentActivity() {
     /** Consumed by the NavHost: scoutr://chat/<paneId> links from notifications. */
     private val deepLink = mutableStateOf<dev.scoutr.app.service.ScoutrDeepLink?>(null)
 
-    // Android 13+ requires a runtime opt-in before notifications can show.
-    private val requestNotifications = registerForActivityResult(
-        ActivityResultContracts.RequestPermission(),
-    ) {}
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
         deepLink.value = parseScoutrUri(intent.dataString)
-        // Resume background monitoring when the app starts if the user opted in.
-        val monitor = ScoutrApp.container(this).monitoringStore
-        if (monitor.enabled) {
-            ContextCompat.startForegroundService(this, Intent(this, dev.scoutr.app.service.ScoutrMonitorService::class.java))
-        }
-        if (
-            Build.VERSION.SDK_INT >= 33 &&
-            monitor.enabled &&
-            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
-        ) {
-            requestNotifications.launch(Manifest.permission.POST_NOTIFICATIONS)
-        }
         enableEdgeToEdge(
             statusBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
             navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),

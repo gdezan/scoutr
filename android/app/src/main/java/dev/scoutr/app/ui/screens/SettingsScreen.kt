@@ -186,9 +186,10 @@ private fun ConnectionSection(
 }
 
 /**
- * The opt-in background monitor. When on, a foreground service keeps the ntfy
- * poll alive so blocked/done events push to the shade with a deep link and an
- * inline reply, even when the app is closed.
+ * The opt-in, time-bounded background monitor. A foreground service keeps the
+ * ntfy poll alive so blocked/done events reach the notification shade with a
+ * deep link and inline reply, even when the app is closed. Android 15+ stops
+ * this session after six background hours and Scoutr will not restart it.
  */
 @Composable
 private fun MonitoringSection(onMonitoringChanged: ((Boolean) -> Unit)?) {
@@ -212,11 +213,11 @@ private fun MonitoringSection(onMonitoringChanged: ((Boolean) -> Unit)?) {
 
     SettingsSection(
         "Notifications",
-        footnote = "Monitoring only works while a connection is saved. Notifications deep-link to the exact session and support an inline Reply that steers the agent.",
+        footnote = "Monitoring only works while a connection is saved. On Android 15+, the system stops this background session after six hours in a 24-hour period. Notifications deep-link to the exact session and support an inline Reply that steers the agent.",
     ) {
         SettingsSwitchRow(
             title = "Background monitoring",
-            subtitle = "Watch agents for blocked / done events while the app is closed. Uses a foreground service.",
+            subtitle = "Watch agents for blocked / done events while the app is closed. Android 15+ limits data-sync monitoring to six hours in a 24-hour period.",
             checked = monitoring,
             onCheckedChange = { value ->
                 monitoring = value

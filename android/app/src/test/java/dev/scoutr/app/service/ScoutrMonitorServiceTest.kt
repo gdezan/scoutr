@@ -15,6 +15,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
@@ -112,5 +113,17 @@ class ScoutrMonitorServiceTest {
             ScoutrMonitorService.pollOnce(client, store, baseUrl(), "topic") {}
         }
         assertEquals("/topic/json?poll=1", server.takeRequest().path)
+    }
+
+    @Test
+    fun dataSyncTimeoutStopsServiceAndDisablesMonitoring() {
+        val app = RuntimeEnvironment.getApplication()
+        val service = Robolectric.buildService(ScoutrMonitorService::class.java).create().get()
+        MonitoringStore(app).enabled = true
+
+        service.onTimeout(1, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+
+        org.junit.Assert.assertFalse(MonitoringStore(app).enabled)
+        org.junit.Assert.assertTrue(org.robolectric.Shadows.shadowOf(service).isStoppedBySelf)
     }
 }
