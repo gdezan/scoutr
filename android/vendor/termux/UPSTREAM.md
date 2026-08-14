@@ -95,7 +95,7 @@ tests still pass unmodified.
   `TerminalOutput.onCopyTextToClipboard` → `TerminalSessionClient.onCopyTextToClipboard`.
   Scoutr blocks it in `RemoteTerminalSession` (see app `terminal/` package).
 - The pinned emulator has **no** OSC 8 / hyperlink parsing; link handling, when it arrives, must
-  be app-side (documented in `.plans/full-screen-interactive-terminal.md`).
+  be app-side; current terminal ownership and runtime limits are documented in `docs/terminal.md`.
 - OSC 0/1/2 → `TerminalSessionClient.onTitleChanged`; BEL → `onBell`; OSC 4/10/11/12/104 →
   `onColorsChanged`.
 

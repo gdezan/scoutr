@@ -8,7 +8,7 @@ import kotlinx.serialization.json.JsonObject
 
 /**
  * Slice 6 wire/domain types for GET /api/snapshot — the terminal hierarchy
- * source (design contract in .plans/full-screen-interactive-terminal.md).
+ * source (current contract in docs/terminal.md).
  *
  * The bridge answers `{ok:true, snapshot: SessionSnapshot}` where
  * SessionSnapshot is the herdr snapshot shape (snake_case). The domain

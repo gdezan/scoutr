@@ -209,8 +209,9 @@ curl -s -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8737/api/health | pyt
 ```
 
 > The bridge POSTs JSON to the ntfy **root** path (`{baseUrl}/` with `topic` in
-> the body) — ntfy only parses JSON bodies there. The app polls the topic
-> (`?poll=1&since=<id>`, 30s) and shows an Android notification.
+> the body) — `BoardViewModel` polls the topic while Board is STARTED; the
+> opt-in `ScoutrMonitorService` also polls every 30 seconds while background
+> monitoring is enabled. Each path shows local notifications with its own cursor.
 
 ---
 
@@ -235,7 +236,7 @@ sdkmanager "platform-tools" "emulator" "platforms;android-36" \
 ```bash
 cd android
 ./gradlew assembleDebug              # app/build/outputs/apk/debug/app-debug.apk
-./gradlew testDebugUnitTest          # JVM unit tests (8)
+./gradlew testDebugUnitTest          # JVM unit tests
 ./gradlew pixel2api36DebugAndroidTest   # Compose UI tests on Gradle Managed Device
 ```
 
@@ -358,18 +359,15 @@ today looks like: `adb pair 100.78.204.15:<port> <code>` then
 | stale API after code changes | `npm run build` first, then `systemctl --user restart scoutr-bridge` |
 | 401 on curl/ws | export the token: `TOKEN=$(...); curl -H "Authorization: Bearer $TOKEN" ...` (a bare shell var is not exported to child processes) |
 | ntfy shows raw JSON as message | the bridge POSTs JSON to the ntfy root `/`; if you published to `/<topic>`, messages already stored that way stay raw |
-| push doesn't arrive on the phone | the app polls while a screen is visible (board 3s, chat 2.5s); check `https://<host>.ts.net/ntfy/v1/health`; grant POST_NOTIFICATIONS (Android 13+) |
+| monitoring notifications do not arrive | enable the opt-in foreground monitoring session; check the ntfy health endpoint and grant `POST_NOTIFICATIONS` on Android 13+; Android 15 sessions are time-bounded |
 | app shows "Disconnected" forever | board polls unconditionally after connect — it recovers when the bridge returns; check the bridge is up |
 | WS steer crashes the app | the long-lived WS feed was removed in favor of 3s polling; use the current APK |
 
 ## 10. Known limits (v1)
 
-- The interactive terminal ships and replaces Live Output, but its performance
-  budgets (queue high/low water marks, slow-client timeout, 10,000-row
-  scrollback cap) are still the provisional constants chosen during
-  implementation — no benchmark evidence has been recorded against them yet.
-  It has been exercised on the emulator only; no physical-phone walk has been
-  performed. See `.plans/full-screen-interactive-terminal.md`.
+- The interactive terminal ships and replaces Live Output. Its current
+  ownership, lifecycle limits, and runtime evidence are documented in
+  `docs/terminal.md`.
 - Claude Code: status, steer, and transcripts all work via herdr — the session
   path guard is multi-backend. Residual limits: no fork-at-path resume (use
   `/fork` inside the session), no model catalog (the app hides the model
@@ -380,8 +378,10 @@ today looks like: `adb pair 100.78.204.15:<port> <code>` then
   (Gemini + thinking levels), slash commands & skills discovery, question/prompt handling,
   and controls (`abort`, `compact`, `close`, `set_model`, `set_thinking`).
 - Time-in-state pills only track agents whose status events flow (pi panes).
-- Push to a **killed** app: messages accumulate on ntfy (48h) and are delivered
-  on next launch via the `since` cursor. Instant delivery needs FCM or a
-  foreground service — out of scope (no cloud).
+- Notification monitoring has two lifecycle owners: `BoardViewModel` while Board is
+  STARTED, and the opt-in `ScoutrMonitorService` while background monitoring is
+  enabled. The service polls every 30 seconds, persists its cursor, and Android
+  15 can stop its data-sync foreground session after six hours. Opening Board
+  starts its separate foreground cursor; it does not replay the service cursor.
 - One bridge/host; multi-host pairing is future work.
 - Design rationale: `docs/decisions.md`.

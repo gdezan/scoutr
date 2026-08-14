@@ -1,16 +1,21 @@
 # Plan 010: Keep Sessions anchored while rows reorder
 
-> **Executor instructions**: Follow this plan step by step. After each step, run the stated verification and inspect the recording before continuing. If a STOP condition occurs, stop and report rather than improvising. When done, update this plan's row in `design-plans/README.md`.
+> **Executor instructions**: Treat this as an implementation plan, not a runtime
+> gate. First run the drift check, implement in small steps, and run only the
+> cheap checks named by each step. After the implementation is review-clean and
+> code-frozen, use `skills/scoutr-verification/SKILL.md` for one final runtime
+> acceptance pass. If a STOP condition occurs, stop and report rather than
+> improvising. When done, update this plan's row in `design-plans/README.md`.
 >
 > **Drift check (run first)**: `git diff --stat 0e67682..HEAD -- android/app/src/main/java/dev/scoutr/app/ui/screens/HistoryScreen.kt android/app/src/main/java/dev/scoutr/app/state/SessionHistoryViewModel.kt android/app/src/androidTest/java/dev/scoutr/app/ui/HistoryScreenTest.kt android/app/src/test/java/dev/scoutr/app/state/SessionHistoryViewModelTest.kt`
-> If Plan 009 is incomplete or Sessions sorting/list ownership changed, stop and reconcile before editing.
+> If Sessions sorting or list ownership changed materially, stop and reconcile this plan before editing.
 
 ## Status
 
 - **Priority**: P2
 - **Effort**: M
 - **Risk**: MED
-- **Depends on**: `design-plans/009-make-list-position-intentional.md`
+- **Depends on**: none
 - **Category**: feedback, friction, motion, mobile
 - **Planned at**: commit `0e67682`, 2026-08-12
 
@@ -36,33 +41,15 @@ Reuse the established Board pattern at `BoardScreen.kt:190-199`: `Modifier.anima
 - Under reduced motion, positions update immediately but the key-based viewport anchor still holds.
 - Existing sort order, poll cadence, swipe/actions, and tab membership do not change.
 
-## Commands
+## Verification evidence
 
-```bash
-cd android
-split=$(herdr pane split --current --direction right --cwd "$PWD" --no-focus)   # one pane per serial sequence (pattern: design-plans/README.md "Verification baseline")
-vp=$(printf '%s\n' "$split" | jq -r '.result.pane.pane_id')
-root="${PWD%/android}"
-m1="__SCOUTR_$(date +%s%N)_1__"
-herdr pane run "$vp" "(cd \"$root/android\" && ANDROID_HOME=\"$HOME/Android/sdk\" ./gradlew testDebugUnitTest --rerun-tasks); rc=\$?; printf '\n${m1}:%s\n' \"\$rc\"" && herdr pane wait-output "$vp" --regex "^${m1}:[0-9]+$"
-m2="__SCOUTR_$(date +%s%N)_2__"
-herdr pane run "$vp" "(cd \"$root/android\" && ANDROID_HOME=\"$HOME/Android/sdk\" ./gradlew pixel2api36DebugAndroidTest --rerun-tasks); rc=\$?; printf '\n${m2}:%s\n' \"\$rc\"" && herdr pane wait-output "$vp" --regex "^${m2}:[0-9]+$"
-m3="__SCOUTR_$(date +%s%N)_3__"
-herdr pane run "$vp" "(cd \"$root/android\" && ANDROID_HOME=\"$HOME/Android/sdk\" ./gradlew assembleDebug); rc=\$?; printf '\n${m3}:%s\n' \"\$rc\"" && herdr pane wait-output "$vp" --regex "^${m3}:[0-9]+$"
-m4="__SCOUTR_$(date +%s%N)_4__"
-herdr pane run "$vp" "(cd \"$root/android\" && ANDROID_SERIAL=emulator-5554 ANDROID_HOME=\"$HOME/Android/sdk\" ./gradlew connectedDebugAndroidTest --rerun-tasks -Pandroid.testInstrumentationRunnerArguments.class=dev.scoutr.app.ui.HistoryScreenTest); rc=\$?; printf '\n${m4}:%s\n' \"\$rc\"" && herdr pane wait-output "$vp" --regex "^${m4}:[0-9]+$"
-```
-
-Use an emulator-only deterministic fixture with at least 20 Active and 10 Completed sessions. Provide a controllable test refresh that reorders, inserts, and removes rows without waiting eight real seconds. Capture a bounded recording during pin and refresh sequences:
-
-```bash
-# Run this bounded recorder in the verify pane ($vp) while driving the fixture.
-timeout 30 adb -s emulator-5554 shell screenrecord --time-limit 20 /sdcard/session-reorder.mp4
-# After the recorder exits:
-timeout 30 adb -s emulator-5554 pull /sdcard/session-reorder.mp4 /tmp/session-reorder.mp4
-```
-
-Never run device commands without `-s emulator-5554`; bound each standalone `adb` call with a short `timeout 30` ceiling. Slow Gradle gates run in the verify pane and finish on a completion marker (pattern: `design-plans/README.md` "Verification baseline"); close the pane when the sequence ends.
+During implementation, run only cheap checks that do not require an emulator and
+add the targeted assertions needed by each step. The in-scope UI tests and
+recording belong to the review-clean/code-frozen final acceptance pass, using
+the workflow in `skills/scoutr-verification/SKILL.md` and a deterministic fixture
+with at least 20 Active and 10 Completed sessions. Exercise pin/unpin, poll
+reorder, insertion, and removal above the viewport there. Inspect the recording
+for stable identity, anchored offsets, and the established no-bounce placement motion.
 
 ## Scope
 
@@ -74,7 +61,7 @@ Never run device commands without `-s emulator-5554`; bound each standalone `adb
 
 **Out of scope**:
 - Sort order, tab definitions, polling interval, or catalog API
-- Per-tab position restoration (Plan 009)
+- Per-tab position restoration beyond reorder anchoring
 - Swipe affordances, action menus, confirmation semantics, or row visual redesign
 - Board animation behavior or global motion token changes
 - Keeping a row visible after an action intentionally removes it from the current tab
@@ -85,27 +72,39 @@ Never run device commands without `-s emulator-5554`; bound each standalone `adb
 
 Read `LocalReduceMotion` in the Sessions list and apply the same `animateItem` specs used by Board to each keyed `HistoryRow`. Do not introduce a custom spring, bounce, fade duration, or animation dependency. Ensure swipe offset state remains keyed to the session rather than the row's previous index.
 
-**Verify visually**: reorder two onscreen rows. At normal motion they move once along the vertical axis without flashing or cross-fading unrelated content. With reduced motion they update immediately.
+**Final acceptance**: reorder two onscreen rows. At normal motion they move once
+along the vertical axis without flashing or cross-fading unrelated content. With
+reduced motion they update immediately.
 
 ### Step 2: Preserve the visible key through catalog refreshes
 
-Build on Plan 009's list state/anchor snapshot. Immediately before applying or rendering a new sorted order, retain the first meaningfully visible session path and pixel offset, its old ordered index, and adjacent stable paths. After the keyed order changes, request that same path at that offset if it survives. If it is removed, use the saved neighbors/old index to retain the next surviving item, otherwise the prior item/top.
+Capture the current list-state anchor immediately before applying or rendering a
+new sorted order: retain the first meaningfully visible session path and pixel
+offset, its old ordered index, and adjacent stable paths. After the keyed order
+changes, request that same path at that offset if it survives. If it is removed,
+use the saved neighbors/old index to retain the next surviving item, otherwise
+the prior item/top.
 
 Do not reset merely because `updatedAt` changed when the sorted order did not.
 
-**Verify**: while positioned mid-list, insert and reorder rows above the viewport. The same named session remains at the same approximate screen coordinate; nearby visible moves animate once.
+**Final acceptance**: while positioned mid-list, insert and reorder rows above the
+viewport. The same named session remains at the same approximate screen
+coordinate; nearby visible moves animate once.
 
 ### Step 3: Anchor local pin/archive actions
 
 Before invoking pin/archive from a row, capture the acted-on path, visible offset, old ordered index, and adjacent stable paths. If the row remains in the current tab, preserve it at that offset while the list re-sorts. If the action removes it from the current tab, use the saved next/prior identities to anchor the nearest survivor and expose the changed state through the existing icon/action semantics—do not invent a toast or undo flow.
 
-**Verify**: in Active, pin a middle row and confirm it remains under the user's finger while the order changes. In Pinned, unpin a middle row and confirm one clean removal with the next row anchored. Repeat with reduce motion.
+**Final acceptance**: in Active, pin a middle row and confirm it remains under the
+user's finger while the order changes. In Pinned, unpin a middle row and confirm
+one clean removal with the next row anchored. Repeat with reduce motion.
 
 ### Step 4: Add deterministic reorder coverage
 
 Extend tests for: pinning a visible middle row; poll reorder above the viewport; insertion/removal above the viewport; acted-on row removal; no-op refresh; and reduced motion. Assert stable visible identities and offsets with a small tolerance, not only final sort order.
 
-**Verify**: focused tests pass repeatedly, then all Android gates pass. Inspect the recording at normal speed and frame-by-frame for teleportation, duplicate rows, bounce, or unrelated fades.
+**Verify**: add the focused assertions and defer their execution, the recording,
+and runtime acceptance to the review-clean/code-frozen final acceptance pass.
 
 ## Done criteria
 
@@ -115,11 +114,11 @@ Extend tests for: pinning a visible middle row; poll reorder above the viewport;
 - [ ] Removal anchors the nearest surviving row deterministically.
 - [ ] Keyed moves use existing no-bounce motion and honor reduce motion.
 - [ ] Swipe state/actions stay attached to the correct session after reorder.
-- [ ] Focused and full Android gates pass; only in-scope files changed.
+- [ ] Final runtime acceptance passes; only in-scope files changed.
 
 ## STOP conditions
 
-- Plan 009 did not establish a reusable key/offset anchor for Sessions.
+- The current Sessions list does not expose a reusable key/offset anchor.
 - A stable `session.path` is not unique in the live catalog.
 - Preserving the anchor requires delaying or dropping catalog updates.
 - `animateItem` breaks anchored-draggable state or associates an open action pane with the wrong session; report a minimal reproduction rather than shipping.

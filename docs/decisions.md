@@ -24,9 +24,17 @@ pi agents, as an alternative to Moshi's paid herdr integration.
   usage snapshot remains visible when its endpoint is unavailable. Expired xAI access
   tokens are refreshed in memory only.
 
-- **Push**: self-hosted ntfy on the host, tailscale-served at `/ntfy`; the Android
-  app polls the topic itself and shows a local notification (no separate ntfy app).
-- **Interactive terminal (shipped)**: Live Output is gone; a full-screen, one-pane Herdr terminal replaced it. Delivered in stages: delete Live Output, prove the 0.8.0 controller contract, add the dedicated binary `/ws/terminal` socket and hierarchy API, vendor the pinned Termux renderer, then the Android transport/state and the full-screen route. Herdr keeps owning processes, PTYs, and terminal state; the bridge owns capability, child lifecycle, and the 30s reconnect grace; Android owns the emulator, local scrollback, and input UX. Performance budgets remain provisional constants — see the limitations note in `.plans/full-screen-interactive-terminal.md` and `docs/adr/`.
+- **Push monitoring**: self-hosted ntfy on the host, tailscale-served at `/ntfy`;
+  `BoardViewModel` polls the topic while Board is STARTED, while the opt-in
+  `ScoutrMonitorService` polls every 30 seconds in the background. Both paths
+  show local notifications with separate cursors; the service persists its
+  cursor. The foreground service is time-bounded, returns `START_NOT_STICKY`,
+  and is not an always-on push channel.
+- **Interactive terminal (shipped)**: Live Output is gone; a full-screen, one-pane
+  Herdr terminal replaced it. Herdr owns processes, PTYs, and terminal state; the
+  bridge owns capability, child lifecycle, and the 30s reconnect grace; Android
+  owns the emulator, local scrollback, and input UX. The current contract and
+  evidence live in `docs/terminal.md`; ADRs retain historical decisions.
 
 ## Decisions learned from live E2E
 
@@ -42,18 +50,18 @@ pi agents, as an alternative to Moshi's paid herdr integration.
   Enter to submit; bare text is inert.
 - **Board self-heals**: the poll loop runs unconditionally after connect (not only
   on a successful first probe), so a down bridge recovers automatically.
-- **ntfy `since=<id>` cursor** makes polling resume-safe: the app seeds the last
-  message id and re-polls after it, so it never re-delivers or misses messages.
+- **ntfy cursors**: the service persists the last shown message ID and polls with
+  `since=<id>`, so service restarts resume without re-delivery. The Board's
+  lifecycle-scoped poll is separate and seeds the current latest ID.
 - **Publish path**: blocked (high priority) and done events are throttled to one
   per pane per 60s and are best-effort (never break the bridge).
-- **App-killed push**: the app does not own a push channel of its own — it polls
-  the ntfy topic (`?poll=1&since=<id>`) from a coroutine in BoardViewModel. While
-  the app is killed, messages simply accumulate on the ntfy server (48h cache);
-  on relaunch the poll seeds from the latest message id and delivers anything
-  published after it. So "push" to a killed app arrives as a normal notification
-  on next launch, not instantly; live delivery only works while the app runs.
-  A dedicated push token (FCM) or a foreground service would be needed for true
-  instant delivery to a killed app, and both are deliberately out of scope.
+- **Monitoring lifecycle**: notification monitoring is an opt-in, time-bounded
+  `ScoutrMonitorService` foreground session. It polls ntfy every 30 seconds,
+  resumes from the stored cursor, and stops at Android 15's six-hour data-sync
+  foreground-service limit. `BoardViewModel` has a separate topic poll only while
+  Board is STARTED and seeds the current latest ID; opening Board does not resume
+  the service cursor or replay service messages. If the service is inactive, ntfy
+  retains messages for the configured cache period.
 - **Bridge-owned `pi --mode rpc` sessions** answer extension_ui_request dialogs
   programmatically: the bridge surfaces pending dialogs to the app
   (`GET /api/rpc/:id`) and the app responds with a value via
@@ -100,13 +108,11 @@ pi agents, as an alternative to Moshi's paid herdr integration.
 
 ## Testing (self-served)
 
-- Bridge: `npm test` (26 live-socket/unit tests), `tsc --noEmit`.
-- Android: JVM unit tests, Compose UI tests on Gradle Managed Device
-  `pixel2api36` (aosp-atd), live E2E on a headless emulator via adb/uiautomator,
-  screenshots under /tmp/scoutr-e2e.
-- Live E2E includes: connect → board → chat/steer → ask_user_question answer →
-  usage rings → ntfy notification → bridge-restart survival.
-
+- Bridge: run `npm test` and `tsc --noEmit` (or the current bridge check script).
+- Android: JVM/Compose tests on the Gradle Managed Device `pixel2api36`, plus
+  runtime acceptance on `emulator-5554` when the changed risk is user-visible.
+- Runtime evidence should record the exercised flow and checks; do not embed
+  volatile test counts in product decisions.
 ## Security notes
 
 - The bridge token (`scoutr_<18 random bytes>`) is stored in

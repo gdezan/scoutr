@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
-# One-command verification: the four gates from AGENTS.md, fail-fast.
-# Slow Android gates run in a sibling herdr pane and complete on a unique
-# completion marker (`herdr pane wait-output`); the --timeout on the wait is a
-# safety ceiling only, never the completion mechanism.
+# Full verification entry point. Slow Android gates run in a sibling herdr pane
+# and complete on a unique completion marker (`herdr pane wait-output`); the
+# wait timeout is a safety ceiling only, never the completion mechanism.
 # Usage: scripts/verify.sh [--no-emulator]   (skips the GMD suite)
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -41,7 +40,7 @@ gate() { # $1=name; rest=gradle args (executed inside android/, one Gradle invoc
   echo "verify: $name ok"
 }
 
-gate unit-tests testDebugUnitTest --rerun-tasks
+gate unit-tests testDebugUnitTest
 if [[ "${1:-}" != "--no-emulator" ]]; then
   gate gmd pixel2api36DebugAndroidTest
 fi

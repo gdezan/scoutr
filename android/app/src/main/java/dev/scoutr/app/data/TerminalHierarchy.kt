@@ -4,8 +4,8 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonObject
 
 /**
- * Slice 4 bridge contract: POST /api/terminal/hierarchy (design contract in
- * .plans/full-screen-interactive-terminal.md). One serializable class with
+ * Slice 4 bridge contract: POST /api/terminal/hierarchy (current contract in
+ * docs/terminal.md). One serializable class with
  * optional operation-specific fields — kotlinx omits nulls (encodeDefaults is
  * false), so the wire body carries exactly `operation` plus the fields the
  * operation needs.

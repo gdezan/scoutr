@@ -1,6 +1,11 @@
 # Plan 007: Make Chat scrolling predictable under taps, appends, and drags
 
-> **Executor instructions**: Follow this plan step by step. After each step, run the stated verification and inspect any screenshot or recording before continuing. If a STOP condition occurs, stop and report rather than improvising. When done, update this plan's row in `design-plans/README.md`.
+> **Executor instructions**: Treat this as an implementation plan, not a runtime
+> gate. First run the drift check, implement in small steps, and run only the
+> cheap checks named by each step. After the implementation is review-clean and
+> code-frozen, use `skills/scoutr-verification/SKILL.md` for one final runtime
+> acceptance pass. If a STOP condition occurs, stop and report rather than
+> improvising. When done, update this plan's row in `design-plans/README.md`.
 >
 > **Drift check (run first)**: `git diff --stat 0e67682..HEAD -- android/app/src/main/java/dev/scoutr/app/ui/screens/ChatScreen.kt android/app/src/androidTest/java/dev/scoutr/app/ui/ChatListTest.kt`
 > If the scroll implementation or tests changed materially, reproduce the live behavior and reconcile this plan before editing.
@@ -39,43 +44,13 @@ Reuse the existing `LazyListState`, `scroll_to_end_fab` semantics, `LocalReduceM
 - Agent status changes alone do not reposition the transcript unless they add/remove a visible tail row while the user is already following.
 - With reduced motion, behavior is immediate but follows the same ownership and cancellation rules.
 
-## Commands
+## Verification evidence
 
-All device work targets the emulator explicitly; never use a physical phone. Quick `adb` calls get short `timeout 30` safety ceilings; slow Gradle gates run in a sibling pane and finish on a completion marker (pattern: `design-plans/README.md` "Verification baseline"):
-
-```bash
-cd android
-split=$(herdr pane split --current --direction right --cwd "$PWD" --no-focus)   # one pane per serial sequence
-vp=$(printf '%s\n' "$split" | jq -r '.result.pane.pane_id')
-root="${PWD%/android}"
-m1="__SCOUTR_$(date +%s%N)_1__"
-herdr pane run "$vp" "(cd \"$root/android\" && ANDROID_HOME=\"$HOME/Android/sdk\" ./gradlew testDebugUnitTest --rerun-tasks); rc=\$?; printf '\n${m1}:%s\n' \"\$rc\"" && herdr pane wait-output "$vp" --regex "^${m1}:[0-9]+$"
-m2="__SCOUTR_$(date +%s%N)_2__"
-herdr pane run "$vp" "(cd \"$root/android\" && ANDROID_HOME=\"$HOME/Android/sdk\" ./gradlew pixel2api36DebugAndroidTest --rerun-tasks); rc=\$?; printf '\n${m2}:%s\n' \"\$rc\"" && herdr pane wait-output "$vp" --regex "^${m2}:[0-9]+$"
-m3="__SCOUTR_$(date +%s%N)_3__"
-herdr pane run "$vp" "(cd \"$root/android\" && ANDROID_HOME=\"$HOME/Android/sdk\" ./gradlew assembleDebug); rc=\$?; printf '\n${m3}:%s\n' \"\$rc\"" && herdr pane wait-output "$vp" --regex "^${m3}:[0-9]+$"
-timeout 30 adb -s emulator-5554 install -r app/build/outputs/apk/debug/app-debug.apk
-timeout 30 adb -s emulator-5554 shell am force-stop dev.scoutr.app
-timeout 30 adb -s emulator-5554 shell am start -n dev.scoutr.app/.MainActivity
-```
-
-Run the focused instrumentation class with:
-
-```bash
-m4="__SCOUTR_$(date +%s%N)_4__"
-herdr pane run "$vp" "(cd \"$root/android\" && ANDROID_SERIAL=emulator-5554 ANDROID_HOME=\"$HOME/Android/sdk\" ./gradlew connectedDebugAndroidTest --rerun-tasks -Pandroid.testInstrumentationRunnerArguments.class=dev.scoutr.app.ui.ChatListTest); rc=\$?; printf '\n${m4}:%s\n' \"\$rc\"" && herdr pane wait-output "$vp" --regex "^${m4}:[0-9]+$"
-```
-
-For visual verification, use a deterministic `ChatListTest` fixture containing at least 30 short entries and one tall final entry. Record the emulator during each gesture sequence with a bounded screen recording, then pull it for inspection:
-
-```bash
-# Run this bounded recorder in the verify pane ($vp) while driving the gestures.
-timeout 30 adb -s emulator-5554 shell screenrecord --time-limit 20 /sdcard/chat-scroll.mp4
-# After the recorder exits:
-timeout 30 adb -s emulator-5554 pull /sdcard/chat-scroll.mp4 /tmp/chat-scroll.mp4
-```
-
-Start the recorder in the verify pane before each gesture sequence; wait for its own completion marker before pulling. A timeout at the explicit limit is acceptable only if the output file exists and is playable.
+During implementation, run only cheap checks that do not require an emulator and
+add the targeted assertions needed by each step. The in-scope `ChatListTest` and
+recording sequences belong to the review-clean/code-frozen final acceptance
+pass, using the workflow in `skills/scoutr-verification/SKILL.md` and a fixture
+with at least 30 short entries and one tall final entry.
 
 ## Scope
 
@@ -98,25 +73,37 @@ Replace the three independent, retrying jobs with one cancellable ownership path
 
 Keep the current true-bottom guarantee for a lazily measured tall final item, but converge using current layout/frame information without repeatedly placing the last item at the viewport top. Do not rely on ten fixed 16ms sleeps or `Float.MAX_VALUE` as the user-visible motion model.
 
-**Verify**: existing open-at-bottom and tall-tail tests pass. Add a test-visible invariant or injectable seam that proves at most one programmatic request owns the list and cancellation terminates the old request.
+**Final acceptance**: existing open-at-bottom and tall-tail tests pass. Add a
+test-visible invariant or injectable seam that proves at most one programmatic
+request owns the list and cancellation terminates the old request.
 
 ### Step 2: Make follow state respect user intent
 
 Separate “the user is pinned to the end” from transient `canScrollForward` values produced during a programmatic move. A user drag away from the end disables following; reaching the true end re-enables it. Appends while following settle at the new true bottom. Appends while scrolled up do not move the viewport. Status-only recomposition must not trigger a gratuitous jump.
 
-**Verify**: tests cover append-at-bottom, append-while-scrolled-up, and status change without transcript growth. All settle at the expected item without an extra scroll request.
+**Final acceptance**: tests cover append-at-bottom, append-while-scrolled-up, and
+status change without transcript growth. All settle at the expected item without
+an extra scroll request.
 
 ### Step 3: Make the button idempotent and interruptible
 
 Route the button through the same owner. Prevent rapid taps from spawning additional work. Preserve its accessible name and 48dp target. During settling, hide or disable it using the existing button treatment—no spinner and no new color. User-input mutation must cancel programmatic movement and leave the list where the gesture placed it.
 
-**Verify**: add tests for two rapid taps, button tap concurrent with append, and drag interruption. They must finish without cancellation leakage, oscillation, or a stale visible button after reaching the true bottom.
+**Final acceptance**: add tests for two rapid taps, button tap concurrent with
+append, and drag interruption. They must finish without cancellation leakage,
+oscillation, or a stale visible button after reaching the true bottom.
 
-### Step 4: Inspect motion on the emulator
+### Step 4: Define final motion acceptance
 
-Record these deterministic sequences at normal motion and with `LocalReduceMotion` enabled: (1) scroll up → one tap; (2) scroll up → rapid double tap; (3) scroll up → tap while appending; (4) scroll up → tap then immediately drag. Inspect the recording frame by frame.
+After review-clean/code-frozen state, record these deterministic sequences at
+normal motion and with `LocalReduceMotion` enabled: (1) scroll up → one tap;
+(2) scroll up → rapid double tap; (3) scroll up → tap while appending; (4)
+scroll up → tap then immediately drag. Inspect the recording frame by frame.
 
-**Verify visually**: every automatic move is monotonic toward the tail; no frame shows the tail jumping to the viewport top and back; double tap looks like one action; the immediate drag takes control; the button remains absent once the true bottom settles.
+**Final acceptance**: every automatic move is monotonic toward the tail; no frame
+shows the tail jumping to the viewport top and back; double tap looks like one
+action; the immediate drag takes control; the button remains absent once the
+true bottom settles.
 
 ## Done criteria
 
@@ -126,7 +113,7 @@ Record these deterministic sequences at normal motion and with `LocalReduceMotio
 - [ ] Normal- and reduced-motion recordings show no oscillation or repeated top-pin jump.
 - [ ] Appends do not move a user who is reading older messages.
 - [ ] The button retains its accessible name and touch target.
-- [ ] Full Android gates pass; only in-scope files changed.
+- [ ] Final runtime acceptance passes; only in-scope files changed.
 
 ## STOP conditions
 

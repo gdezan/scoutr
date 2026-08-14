@@ -1,6 +1,11 @@
 # Plan 011: Keep slash-command keyboard selection in view without jumping
 
-> **Executor instructions**: Follow this plan step by step. After each step, run the stated verification and inspect the recording before continuing. If a STOP condition occurs, stop and report rather than improvising. When done, update this plan's row in `design-plans/README.md`.
+> **Executor instructions**: Treat this as an implementation plan, not a runtime
+> gate. First run the drift check, implement in small steps, and run only the
+> cheap checks named by each step. After the implementation is review-clean and
+> code-frozen, use `skills/scoutr-verification/SKILL.md` for one final runtime
+> acceptance pass. If a STOP condition occurs, stop and report rather than
+> improvising. When done, update this plan's row in `design-plans/README.md`.
 >
 > **Drift check (run first)**: `git diff --stat 0e67682..HEAD -- android/app/src/main/java/dev/scoutr/app/ui/screens/SlashCommandMenu.kt android/app/src/main/java/dev/scoutr/app/ui/screens/ChatScreen.kt android/app/src/androidTest/java/dev/scoutr/app/ui/SlashCommandMenuTest.kt`
 > If menu row height, keyboard selection, or list behavior changed materially, stop and reconcile before editing.
@@ -39,33 +44,15 @@ The menu is capped at 182dp with 52dp rows. Preserve this size, row visuals, Ent
 - Filtering resets selection through the existing `LaunchedEffect(value, commandsValue)` behavior and the first matching command is visible.
 - Touch scrolling and tapping still work. Reduced motion uses immediate minimal movement; no bounce or flourish is added.
 
-## Commands
+## Verification evidence
 
-```bash
-cd android
-split=$(herdr pane split --current --direction right --cwd "$PWD" --no-focus)   # one pane per serial sequence (pattern: design-plans/README.md "Verification baseline")
-vp=$(printf '%s\n' "$split" | jq -r '.result.pane.pane_id')
-root="${PWD%/android}"
-m1="__SCOUTR_$(date +%s%N)_1__"
-herdr pane run "$vp" "(cd \"$root/android\" && ANDROID_HOME=\"$HOME/Android/sdk\" ./gradlew testDebugUnitTest --rerun-tasks); rc=\$?; printf '\n${m1}:%s\n' \"\$rc\"" && herdr pane wait-output "$vp" --regex "^${m1}:[0-9]+$"
-m2="__SCOUTR_$(date +%s%N)_2__"
-herdr pane run "$vp" "(cd \"$root/android\" && ANDROID_HOME=\"$HOME/Android/sdk\" ./gradlew pixel2api36DebugAndroidTest --rerun-tasks); rc=\$?; printf '\n${m2}:%s\n' \"\$rc\"" && herdr pane wait-output "$vp" --regex "^${m2}:[0-9]+$"
-m3="__SCOUTR_$(date +%s%N)_3__"
-herdr pane run "$vp" "(cd \"$root/android\" && ANDROID_HOME=\"$HOME/Android/sdk\" ./gradlew assembleDebug); rc=\$?; printf '\n${m3}:%s\n' \"\$rc\"" && herdr pane wait-output "$vp" --regex "^${m3}:[0-9]+$"
-m4="__SCOUTR_$(date +%s%N)_4__"
-herdr pane run "$vp" "(cd \"$root/android\" && ANDROID_SERIAL=emulator-5554 ANDROID_HOME=\"$HOME/Android/sdk\" ./gradlew connectedDebugAndroidTest --rerun-tasks -Pandroid.testInstrumentationRunnerArguments.class=dev.scoutr.app.ui.SlashCommandMenuTest); rc=\$?; printf '\n${m4}:%s\n' \"\$rc\"" && herdr pane wait-output "$vp" --regex "^${m4}:[0-9]+$"
-```
-
-Use a deterministic list of at least 12 commands and record a bounded emulator sequence while pressing Down through row 8 and Up through row 1:
-
-```bash
-# Run this bounded recorder in the verify pane ($vp) while sending key events.
-timeout 30 adb -s emulator-5554 shell screenrecord --time-limit 15 /sdcard/slash-navigation.mp4
-# After the recorder exits:
-timeout 30 adb -s emulator-5554 pull /sdcard/slash-navigation.mp4 /tmp/slash-navigation.mp4
-```
-
-All device work targets only `emulator-5554`; bound every standalone `adb` command with a short `timeout 30` ceiling. Slow Gradle gates run in the verify pane and finish on a completion marker (pattern: `design-plans/README.md` "Verification baseline"); close the pane when the sequence ends.
+During implementation, run only cheap checks that do not require an emulator and
+add the targeted assertions needed by each step. The in-scope UI tests and
+recording belong to the review-clean/code-frozen final acceptance pass, using
+the workflow in `skills/scoutr-verification/SKILL.md` and a deterministic list of
+at least 12 commands. Exercise Down through row 8 and Up through row 1,
+including touch and filter transitions, then inspect the recording for minimal
+measured movement and a continuously trackable highlight.
 
 ## Scope
 
@@ -87,7 +74,11 @@ All device work targets only `emulator-5554`; bound every standalone `adb` comma
 
 Replace index-prefixed filtered-list keys with a collision-safe identity. First inspect the command catalog/domain model for a canonical immutable ID and use it if present. If none exists, assign a `duplicateOrdinal` within each `(source, name)` group from the unfiltered ordered catalog, store that identity with the command before filtering, and use the full tuple as the row key. Never derive the discriminator from the filtered result index. Add a uniqueness assertion/test for catalogs containing duplicate names both across and within a source.
 
-**Verify**: filter a long list so indices shift. Surviving rows retain their identity, the selected highlight attaches to the correct command, and duplicate built-in/skill/prompt names produce no duplicate-key failure. If neither a canonical ID nor a stable unfiltered catalog order exists, STOP rather than guessing.
+**Final acceptance**: filter a long list so indices shift. Surviving rows retain their
+identity, the selected highlight attaches to the correct command, and duplicate
+built-in/skill/prompt names produce no duplicate-key failure. If neither a
+canonical ID nor a stable unfiltered catalog order exists, STOP rather than
+guessing.
 
 ### Step 2: Scroll only when selection crosses an edge
 
@@ -95,7 +86,10 @@ Replace unconditional top-pinning with a keep-visible routine based on `LazyList
 
 Avoid fixed delays, assumptions about exactly three visible rows, or an offset hard-coded from 182dp; font scale and density must use measured bounds.
 
-**Verify visually**: Down through initially visible rows leaves the menu fixed. The first offscreen selection advances content by approximately one row and keeps the highlight at the lower edge. Up mirrors this behavior. No selection snaps from bottom to top.
+**Final acceptance**: Down through initially visible rows leaves the menu fixed. The
+first offscreen selection advances content by approximately one row and keeps
+the highlight at the lower edge. Up mirrors this behavior. No selection snaps
+from bottom to top.
 
 ### Step 3: Add keyboard and filter-transition coverage
 
@@ -103,7 +97,8 @@ Extend the existing test fixture to at least 12 rows. Assert that an already-vis
 
 Expose a test-only list-state seam only if semantics bounds cannot make these assertions reliable; do not leak scroll state into production ViewModels.
 
-**Verify**: focused tests pass repeatedly, then all Android gates pass. Inspect the recording at normal speed and frame-by-frame.
+**Verify**: add the focused assertions and defer their execution, the recording,
+and runtime acceptance to the review-clean/code-frozen final acceptance pass.
 
 ## Done criteria
 
@@ -112,7 +107,7 @@ Expose a test-only list-state seam only if semantics bounds cannot make these as
 - [ ] Stable keys are unique for duplicate names and contain no current filtered-list index.
 - [ ] Clamp, Enter, filtering, and touch behavior remain correct.
 - [ ] The recording shows a continuously trackable highlight with no top-edge snapping.
-- [ ] Full Android gates pass; only in-scope files changed.
+- [ ] Final runtime acceptance passes; only in-scope files changed.
 
 ## STOP conditions
 

@@ -82,7 +82,7 @@ class RemoteTerminalSession(
 
         override fun onCopyTextToClipboard(session: TerminalSession, text: String) {
             // OSC 52 clipboard set: blocked by policy. Remote panes must not write the device
-            // clipboard (see .plans/full-screen-interactive-terminal.md failure handling).
+            // Remote panes must not write the device clipboard; see docs/terminal.md.
             Log.d(TAG, "Blocked OSC 52 clipboard set request")
         }
 

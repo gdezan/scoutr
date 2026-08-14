@@ -1,15 +1,15 @@
 # Scoutr development workflow
 
 Hard-won recipes for developing and verifying Scoutr (bridge + Android app).
-Read this before starting UI or bridge work so you don't rediscover the
-traps. AGENTS.md points here for the details.
-
+Use this for bridge deployment, scratch-bridge validation, emulator operation,
+Android test diagnostics, notification validation, and failure recovery. The
+verification phase boundary and check selection live in
+`skills/scoutr-verification/SKILL.md`.
 ## The two halves
 
-- **Bridge** (`bridge/`): Node/TS daemon. `npm run typecheck && npm test`
-  (the live test count lives in `AGENTS.md` only — it rots per commit). The daemon entry is
-  `src/cli.ts serve` — `src/server.ts` only exports `createScoutrServer`
-  and does nothing when run directly.
+- **Bridge** (`bridge/`): Node/TS daemon. Run `npm run typecheck && npm test`;
+  the daemon entry is `src/cli.ts serve` and `src/server.ts` only exports
+  `createScoutrServer`.
 - **Android** (`android/`): Compose app. Unit tests: `./gradlew
   testDebugUnitTest`. Emulator (Gradle Managed Device): `./gradlew
   pixel2api36DebugAndroidTest`. APK: `./gradlew assembleDebug`.
@@ -22,41 +22,40 @@ the `scoutr` AVD (the only one installed):
 ```bash
 $ANDROID_HOME/emulator/emulator -avd scoutr &
 # boot takes ~25-60s; confirm with:
-adb devices && adb shell getprop sys.boot_completed   # prints 1 when done
+adb devices && adb -s emulator-5554 shell getprop sys.boot_completed   # prints 1 when done
 ```
 
-Instrumentation suites and test APKs go ONLY on this emulator (or the
-pixel2api36 managed device) — never on the physical Pixel phone
-(`adb-RQCX308702X-...`): running the suite there spazzes its screen. Use
-the phone sparingly, for sparse key-integration walks only.
+Instrumentation suites and test APKs go only on `emulator-5554` or the
+`pixel2api36` managed device, never a physical phone. Use a physical device
+only for an explicitly requested integration walk.
 
-The app on it is a real build with a saved connection.
+The app on the interactive emulator is a real build with a saved connection.
+
 
 1. **Build + install**:
    ```bash
    cd android && ANDROID_HOME=$HOME/Android/sdk ./gradlew assembleDebug -q
-   adb install -r app/build/outputs/apk/debug/app-debug.apk
-   adb shell am force-stop dev.scoutr.app && adb shell am start -n dev.scoutr.app/.MainActivity
+   adb -s emulator-5554 install -r app/build/outputs/apk/debug/app-debug.apk
+   adb -s emulator-5554 shell am force-stop dev.scoutr.app && adb -s emulator-5554 shell am start -n dev.scoutr.app/.MainActivity
    ```
-2. **Drive it**: `adb shell input tap X Y`, `input text "..."` (use `%s` for
-   spaces), `input keyevent 4` (back) / `66` (enter) / `3` (home) / `111`
-   (esc). Read the current screen with:
+2. **Drive it**: `adb -s emulator-5554 shell input tap X Y`, `input text
+   "..."` (use `%s` for spaces), `input keyevent 4` (back) / `66` (enter) / `3`
+   (home) / `111` (esc). Read the current screen with:
    ```bash
-   adb shell uiautomator dump /sdcard/ui.xml && adb shell cat /sdcard/ui.xml
+   adb -s emulator-5554 shell uiautomator dump /sdcard/ui.xml && adb -s emulator-5554 shell cat /sdcard/ui.xml
    ```
    Parse bounds for tap targets: `text="..." bounds="[x1,y1][x2,y2]"`.
-3. **Screenshot**: `adb exec-out screencap -p > /tmp/shot.png`, then inspect
-   with the vision-pane workflow in AGENTS.md (or `read` if the model has
-   vision).
+3. **Screenshot**: `adb -s emulator-5554 exec-out screencap -p > /tmp/shot.png`, then inspect
+   with the vision-pane workflow in AGENTS.md (or `read` if the model has vision).
 4. **Repoint the app at a scratch bridge** (for features the real bridge
    can't serve, or to isolate): write the prefs directly as root:
    ```bash
-   adb root
+   adb -s emulator-5554 root
    cat > /tmp/scoutr_connection.xml <<'EOF'
    <?xml version='1.0' encoding='utf-8' standalone='yes' ?>
    <map><string name="host">http://10.0.2.2:8791</string><string name="token">testtoken1234567890</string></map>
    EOF
-   adb push /tmp/scoutr_connection.xml /data/data/dev.scoutr.app/shared_prefs/scoutr_connection.xml
+   adb -s emulator-5554 push /tmp/scoutr_connection.xml /data/data/dev.scoutr.app/shared_prefs/scoutr_connection.xml
    ```
    (10.0.2.2 is the host loopback from the emulator.)
 
@@ -122,7 +121,7 @@ app in your hand talks to that process, not to `tsx`.
   (`ConnectionStore(app).apply { save(...) }` or `.clear()`).
 - Poll-loop tests advance with `ShadowLooper.idleMainLooper()` +
   `delay(25)` in a `waitFor` loop; first poll is immediate.
-- The full emulator suite runs ~47 tests in ~2 min; run a single class with
+- To run a single class, use
   `-Pandroid.testInstrumentationRunnerArguments.class=dev.scoutr.app.ui.X`.
 
 ### Gradle Managed Device (pixel2api36) diagnostics
@@ -135,8 +134,8 @@ shows nothing from it. When a managed-device test fails:
 - Results XML (test names + counts): `app/build/outputs/androidTest-results/managedDevice/debug/pixel2api36/TEST-pixel2api36-_app-.xml` — written only when the run completes.
 - A very fast BUILD FAILED with no XML usually means the managed device
   failed to come up (cold start) — rerun once before debugging the test.
-- Re-running after a successful compile goes UP-TO-DATE and skips
-  execution; force with `--rerun-tasks`.
+- If a successful compile unexpectedly skips execution as UP-TO-DATE, capture
+  that evidence and use `--rerun-tasks` for the diagnostic rerun.
 - To see in-test state, dump the semantics tree from the test itself:
   `onRoot(useUnmergedTree = true).printToLog("DIAG")` (or `Thread.sleep`
   + printToLog) and read it from the per-test logcat file above.
@@ -181,7 +180,7 @@ curl -s -X POST "https://<host>/ntfy/" -H "Content-Type: application/json" \
 ```
 
 Enable monitoring in Settings, background the app (Home), wait ≤30 s for the
-service poll, expand the shade (`adb shell cmd statusbar expand-notifications`),
+service poll, expand the shade (`adb -s emulator-5554 shell cmd statusbar expand-notifications`),
 tap, and verify the exact chat opens.
 
 ## Papercuts to record when you hit them

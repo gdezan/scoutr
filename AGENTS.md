@@ -6,82 +6,58 @@
 
 ## Project map
 
-Scoutr is a self-hosted mobile scoutr for herdr panes and pi agents. A Node/TypeScript bridge daemon owns the herdr Unix socket and exposes a private HTTP/WS API; the Android app talks only to that API.
+Scoutr is a self-hosted Android console for herdr panes and pi agents. A
+Node/TypeScript bridge owns the herdr Unix socket and exposes a private HTTP/WS
+API; the Android app talks only to that API.
 
 - `bridge/` — Node/TS daemon. Entry: `src/cli.ts serve`; `server.ts` only exports `createScoutrServer`.
-  - `herdr/` owns socket client/feed and the `port.ts` seam.
-  - `routes/` owns auth/body/error mapping.
-  - Agent adapters live under `agents/`; shared JSONL parsing is in `transcript.ts`.
-  - Terminal child-process transport belongs under `terminal/`; do not put it on `HerdrPort`.
-  - Tests live in `bridge/test/`; offline HTTP tests use `bridge/test/support/fake-herdr.ts` and `fake-feed.ts`.
-- `android/` — Kotlin + Jetpack Compose Material 3, package `dev.scoutr.app`; manual DI via `ScoutrApp.AppContainer` (no Hilt/Room).
-  - `data/` DTOs + SharedPreferences stores
-  - `net/` `BridgeClient` behind `ScoutrApi`, plus `NtfyClient`
-  - `state/` ViewModels
-  - `service/` monitor service, deep links, reply receiver
-  - `ui/components/`, `ui/screens/`, `ui/theme/`, `ui/motion/`
-  - Terminal route: `terminal/RemoteTerminalSession.kt` (emulator seam, no PTY/JNI), `net/TerminalSocketClient.kt` + `TerminalTransport`, `state/TerminalViewModel.kt`, `ui/screens/terminal/`.
-  - `android/vendor/termux/` holds the pinned Apache-2.0 `terminal-emulator` and `terminal-view` subset; keep `UPSTREAM.md` accurate and do not vendor `termux-shared` or app code.
-
-Primary references:
-
-- Design contract: `android/app/src/main/java/dev/scoutr/app/ui/theme/DESIGN.md`
-- Current UX work and execution order: `design-plans/README.md`
-- Interactive terminal handoff: `.plans/full-screen-interactive-terminal.md`
-- Durable architecture decisions: `docs/adr/`
-- Verification recipes, emulator workflow, and failure recovery: `docs/dev-workflow.md`
-- Verification skill: `skills/scoutr-verification/SKILL.md`
-- Herdr agent orchestration: global `herdr-agent-delegation` skill
+  - `herdr/` owns the socket client/feed and `port.ts` seam.
+  - `routes/` owns auth, body, and error mapping.
+  - `agents/` contains agent adapters; `transcript.ts` owns shared JSONL parsing.
+  - `terminal/` owns terminal child-process transport; keep it off `HerdrPort`.
+  - Tests live in `bridge/test/`; offline HTTP tests use `test/support/fake-herdr.ts` and `fake-feed.ts`.
+- `android/` — Kotlin + Jetpack Compose Material 3, package `dev.scoutr.app`; manual DI through `ScoutrApp.AppContainer` (no Hilt/Room).
+  - `data/` DTOs and SharedPreferences stores; `net/` API clients; `state/` ViewModels;
+    `service/` monitoring and receivers; `ui/` screens, components, theme, and motion.
+  - Terminal code is under `terminal/`, `net/TerminalSocketClient.kt`, `state/TerminalViewModel.kt`, and `ui/screens/terminal/`.
+  - `android/vendor/termux/` contains only the pinned Apache-2.0 renderer subset; keep `UPSTREAM.md` accurate.
 
 ## Operating rules
 
-- **Avoid debugging loops.** Before each new attempt, identify what new evidence it can produce or what hypothesis it can eliminate. If it is materially similar to previous attempts or only succeeds by chance, stop, reassess assumptions, and choose a different diagnostic path.
-- **Run the narrowest useful experiment.** Prefer inspection, tracing, focused tests, or direct state verification over speculative edits. Unexpected results are evidence against the current mental model; do not work around them without understanding them.
-- **Prefer completion signals over elapsed-time guesses.** For recognized agents, use Herdr lifecycle waits (`agent prompt --wait`, `agent wait`). For ordinary shell processes, use `pane run` plus `pane wait-output` on a specific completion condition. Do not build sleep/poll loops. A timeout is a safety ceiling only when a reliable completion signal is unavailable or an external bound is actually required; it is not the normal completion mechanism. When a long command cannot emit a completion marker, require it to print periodic heartbeat markers and wait on each successive heartbeat, so a stall surfaces at the next heartbeat instead of after a long blind timeout.
-- **Use Herdr's semantic control surface.** Use agent commands for recognized agents and pane commands for ordinary terminals/processes. When delegating to an agent, follow the global `herdr-agent-delegation` skill rather than inventing sentinels or polling.
-- **Diagnose infrastructure failures before changing product behavior.** AAPT2, packaging, missing-dex, emulator-focus, socket, or harness failures are not evidence that production logic is wrong.
-- **Keep Android verification serial.** One Gradle invocation per checkout and one instrumentation run on `emulator-5554` at a time. Do not overlap Gradle jobs.
+- **Avoid debugging loops:** before each attempt, name the new evidence it can produce or hypothesis it can eliminate. If it repeats a materially similar attempt or succeeds only by chance, stop and reassess.
+- **Run the narrowest useful experiment:** prefer inspection, tracing, focused tests, or direct state verification over speculative edits.
+- **Diagnose infrastructure first:** AAPT2, packaging, missing-dex, emulator-focus, socket, and harness failures are not evidence that product behavior is wrong.
+- **Use completion signals:** recognized agents use Herdr lifecycle waits; ordinary long-running commands use a sibling pane and an explicit completion condition. Timeouts are safety ceilings, not completion mechanisms.
+- **Keep Android verification serial:** one Gradle invocation per checkout and one instrumentation run on `emulator-5554` at a time.
 
-## Verification
+## Verification boundary
 
-- **Keep expensive runtime verification terminal.** The normal order is: implement → cheap targeted checks → review/fix → review-clean/code-frozen → emulator/integration/E2E/runtime acceptance → commit. Do not alternate emulator runs with code-review cycles.
-- During implementation and review, run only the narrowest inexpensive checks that help develop or validate the code. Device/emulator/instrumentation/E2E work is not part of the normal inner loop.
-- Start final emulator/integration/E2E/runtime verification only after all review findings are resolved and no further implementation edits are planned. After a successful final acceptance pass, do not run another review merely because verification completed.
-- If final acceptance exposes a real defect, fix it, return to the review/cheap-check phase, then perform final acceptance again only once the code is review-clean.
-- Verification must remain proportional to risk. Each additional suite or runtime check must cover a material risk not already addressed.
-- Prefer incremental builds; use `--rerun-tasks` only when stale Gradle output is suspected or a specific task must genuinely be forced.
-- For slow/noisy/device-bound checks inside Herdr, prefer a sibling pane and `pane wait-output` on an explicit unique completion condition rather than sleeps or guessed durations.
-- Use `skills/scoutr-verification/SKILL.md` for the phase boundary, targeted checks, final runtime evidence, and full-verification criteria.
+Keep the normal flow terminal: implement → cheap targeted checks → review/fix →
+review-clean and code-frozen → final runtime acceptance → commit. Do not run
+emulator, instrumentation, integration, E2E, or visual acceptance in the normal
+inner loop. If final acceptance exposes a real defect, return to review and cheap
+checks before another final pass; a successful final pass is terminal.
 
-## Project invariants and traps
+Use `skills/scoutr-verification/SKILL.md` when selecting checks or running
+emulator/integration/E2E acceptance. Use `docs/dev-workflow.md` for deployment,
+scratch-bridge, emulator diagnostics, and recovery recipes. `--rerun-tasks` is
+exceptional: use it only after evidence of stale or skipped Gradle output.
 
-- Android design is always-dark Material 3. Green `#8DF08D` is reserved for live/AI-owned states; teal `#2C6F72` is charts/data only, gray denotes done, and red denotes user attention. Use Space Grotesk for UI, Martian Mono for machine facts and code, and JetBrains Mono for full-screen terminal text; mono is never decorative.
-- Motion does not bounce or spin. Agent-busy state uses the expanding-ripple `WorkingIndicator`; under `LocalReduceMotion` it becomes a static ring. Loading states use observable text or a static ring, never spinners or skeletons.
-- Status mapping is consistent across screens: `blocked/NeedsYou -> error`, `working -> primary`, `done -> onSurfaceVariant`, `idle -> outline`.
-- Interactive terminal is one full-screen Herdr pane at a time with an overlay hierarchy selector; do not put raw terminal output back on Chat.
-- ViewModels talk to `ScoutrApi`; `BridgeClient` implements it. Unit tests use `FakeScoutrApi`. Emulator tests use a real `BridgeClient` with a fresh **unsaved** `ConnectionStore` so ViewModels do not start polling.
-- Run instrumentation only on the emulator, never the physical Pixel. If `emulator-5554` is absent, boot the `scoutr` AVD and confirm the target with `adb devices`.
-- `MockWebServer.url()` performs reverse DNS; never call it on the main thread.
-- Robolectric shares SharedPreferences across tests; explicitly save/clear connections.
-- readSeek anchors are invalid after editing the same file; re-grep/re-digest, or use plain `edit` for small changes.
-- `XDG_CONFIG_HOME` selects the bridge config dir; `SCOUTR_REPO_ROOTS` allow-lists review repos; config tokens must be at least 16 characters.
-- ntfy drops custom JSON publish fields; deep links belong in ntfy's documented `click` field.
-- Claude does not write an `AskUserQuestion` call to its JSONL until the ask is answered, so a live card exists only because the `node bridge/dist/cli.js hook claude` sidecar reports it (installed with `install-claude-hook`; the command must be absolute — a hook inherits the agent's environment) (`agents/claude/pending-asks.ts`). pi records the call immediately and needs no hook.
-- Question answers travel as intent (`questionId` + `selectedLabels` + `text`); the TUI key grammar lives in each adapter's `questionnaire.ts`, never in the app. A partly answered ask exists only in the bridge's in-memory progress and the app's `localAnswers` — the transcript records the whole ask at once, on submit.
-- Composer contract: Enter inserts a newline and must never send; keep multiline + `ImeAction.None` + no-op `KeyboardActions`.
-- `pkill -f` / `pgrep -f` can match their own shell command. Use bracketed patterns or a pid mechanism.
-- `pane wait-output` checks existing output first. For command-completion markers, make the marker unique per run and match an anchored whole line so echoed command text or stale output cannot satisfy the wait.
+## Product and architecture invariants
 
-## Task-specific workflows
+- Android is always-dark Material 3. The design contract, tokens, typography, status colors, and motion rules live in `android/app/src/main/java/dev/scoutr/app/ui/theme/DESIGN.md`; follow it for UI work.
+- The terminal is one full-screen Herdr pane with an overlay hierarchy selector; raw terminal output never returns to Chat. Current terminal ownership, lifecycle, and limitations live in `docs/terminal.md`.
+- ViewModels talk to `ScoutrApi`; `BridgeClient` implements it; unit tests use `FakeScoutrApi`.
+- Instrumentation runs only on an emulator, never a physical Pixel. If `emulator-5554` is absent, boot the `scoutr` AVD and verify the target with `adb devices`.
+- Composer Enter inserts a newline and never sends. Keep multiline input, `ImeAction.None`, and no-op `KeyboardActions`.
+- Question answers travel as intent (`questionId`, `selectedLabels`, `text`); the adapter owns each TUI's questionnaire grammar, not the app. Claude's live ask hook and transcript timing are documented by ADR 0006.
 
-- **Herdr agent delegation:** use the global `herdr-agent-delegation` skill for sibling-pane agent start/prompt/wait/read/cleanup. Lifecycle state is the source of truth; do not replace it with sleep/poll/sentinel loops.
-- **Visual/UI evidence:** inspect screenshots or rendered UI directly when vision is available; otherwise use `skills/scoutr-vision/SKILL.md`. Do not infer visual correctness from code alone.
-- **Pre-commit review:** use `skills/scoutr-review/SKILL.md`. Every concrete finding must be fixed or consciously dismissed before committing.
-- **Verification/emulator work:** use `skills/scoutr-verification/SKILL.md` and `docs/dev-workflow.md` for the full procedure and recovery steps.
+## Task-specific pointers
 
-## Engineering principles
-
-- Remove obsolete paths rather than adding backward-compatibility layers, fallbacks, or migrations unless the user explicitly requires compatibility.
-- Choose the simplest implementation that fully satisfies current requirements without knowingly creating an imminent rewrite. Do not add abstractions, configuration, or indirection for hypothetical future requirements.
-- Grow the system in working end-to-end layers. Keep components modular and concerns separated; do not trade a working product for unfinished complexity.
-- Prefer existing dependencies, then well-maintained established libraries, before custom implementations. Read the library documentation before concluding it cannot support the requirement. Reimplement only when the dependency would cost more than the code it replaces, and record why in the commit.
+- **Bridge deployment or Android/emulator diagnostics:** use `docs/dev-workflow.md`.
+- **Verification selection and final runtime evidence:** use `skills/scoutr-verification/SKILL.md`.
+- **Pre-commit review:** use `skills/scoutr-review/SKILL.md`; resolve or consciously dismiss every concrete finding before committing.
+- **Visual evidence when the active model cannot inspect images:** use `skills/scoutr-vision/SKILL.md`.
+- **Herdr sibling-pane delegation:** use the global `herdr-agent-delegation` skill for start, prompt, wait, read, recovery, and cleanup.
+- **Terminal implementation or review:** use `docs/terminal.md` plus ADRs 0001 and 0002.
+- **UX plan execution:** use `design-plans/README.md` for active order and status, then read the selected plan fully.

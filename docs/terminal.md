@@ -1,0 +1,54 @@
+# Interactive terminal
+
+Scoutr's terminal is a shipped, full-screen destination for interacting with one
+existing Herdr pane at a time. It replaces the former Live Output screen; there
+is no `pane.read` or read-only-output fallback.
+
+## Current contract
+
+- Android shows one pane edge to edge. The terminal route hides Scoutr's bottom
+  navigation but leaves the system bars visible.
+- The hierarchy drawer can select and manage Herdr workspaces, tabs, and panes.
+  Scoutr does not reproduce Herdr's split layout or synchronize desktop focus.
+- A supported pane can be observed, controlled, resized, taken over after
+  confirmation, disconnected, resumed, renamed, and closed.
+- Unsupported Herdr capabilities remain visible as a terminal destination with
+  a precise capability explanation; they do not fall back to Chat output.
+- Terminal traffic uses the dedicated authenticated `/ws/terminal` WebSocket.
+  Hierarchy snapshots and mutations use typed authenticated HTTP. Terminal
+  bytes are binary and are not sent through the ordinary JSON `/ws` feed.
+
+## Ownership boundaries
+
+- **Herdr** owns processes, PTYs, terminal state, screen replay, writable
+  controller arbitration, hierarchy, and persistence.
+- **Bridge** owns capability detection, the terminal child-process adapter,
+  authenticated transport, backpressure, hierarchy validation, and the mobile
+  reconnect grace window.
+- **Android** owns the terminal emulator, active-visit scrollback, viewport
+  measurement, input UX, mobile selection, and per-connection preferences.
+
+The bridge's terminal child-process transport belongs under `bridge/src/terminal/`
+and must not be added to `HerdrPort`. Android's renderer and route live under
+`android/app/src/main/java/dev/scoutr/app/terminal/` and
+`ui/screens/terminal/`.
+
+## Lifecycle and safety
+
+There is one active mobile terminal pane at a time, one mobile writer, and no
+queued terminal input or content across generations. Leaving the route permits
+a 30-second bridge grace window so returning to the same pane can resume its
+session. A new generation resets transport state before accepting bytes.
+
+The terminal does not claim unmeasured performance guarantees. Queue bounds,
+slow-client handling, and the 10,000-row scrollback cap remain implementation
+limits until benchmark evidence changes them. Current runtime evidence covers
+the emulator; a physical-phone integration walk remains outstanding.
+
+## Source of truth
+
+Use ADR 0001 for the bridge/WebSocket and Herdr ownership rationale, ADR 0002
+for the vendored Termux renderer and licensing boundary, and the design contract
+at `android/app/src/main/java/dev/scoutr/app/ui/theme/DESIGN.md` for terminal
+visual rules. The ignored pre-implementation terminal plan is historical and is
+not a current contract or verification checklist.
