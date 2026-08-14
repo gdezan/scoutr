@@ -26,19 +26,6 @@ fun quickPicks(home: String): List<String> = listOf(home, "$home/Dev").filter(St
 fun crumbLabel(crumb: String, home: String): String = if (crumb == home) "~" else crumb.substringAfterLast('/')
 
 
-/** A reusable first-prompt template that never invents repository facts. */
-data class SessionTaskTemplate(
-    val id: String,
-    val title: String,
-    val prompt: String,
-)
-
-val SESSION_TASK_TEMPLATES = listOf(
-    SessionTaskTemplate("fix_bug", "Fix a bug", "Diagnose the reported bug, reproduce it, then implement and verify the smallest complete fix."),
-    SessionTaskTemplate("investigate_tests", "Investigate tests", "Investigate the failing tests, identify the root cause, and report the safest fix before changing behavior."),
-    SessionTaskTemplate("review_changes", "Review changes", "Review the current changes for correctness, regressions, security issues, and missing verification. Do not modify files."),
-    SessionTaskTemplate("plan_feature", "Plan a feature", "Read the relevant product and code context, then propose a dependency-aware implementation plan with verification steps."),
-)
 
 data class NewSessionUiState(
     val loadingDirs: Boolean = true,
@@ -289,11 +276,6 @@ class NewSessionViewModel(
 
     fun setInitialPrompt(prompt: String) {
         _ui.update { it.copy(initialPrompt = prompt.take(100_000)) }
-    }
-
-    fun applyTaskTemplate(templateId: String) {
-        val template = SESSION_TASK_TEMPLATES.firstOrNull { it.id == templateId } ?: return
-        _ui.update { it.copy(initialPrompt = template.prompt, launcherError = null) }
     }
 
     fun savePreset(title: String) {

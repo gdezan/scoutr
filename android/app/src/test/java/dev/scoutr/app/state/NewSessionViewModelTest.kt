@@ -60,7 +60,7 @@ class NewSessionViewModelTest {
     }
 
     @Test
-    fun pickerPreferencesTemplatesAndPresetsPersist() {
+    fun pickerPreferencesAndPresetsPersist() {
         val viewModel = NewSessionViewModel(fake, settingsStore)
         viewModel.waitForLoaded()
 
@@ -69,7 +69,7 @@ class NewSessionViewModelTest {
         viewModel.setDefaultModel("openai-codex/gpt-5.4")
         viewModel.setThinkingLevel("high")
         viewModel.setName("review")
-        viewModel.applyTaskTemplate("review_changes")
+        viewModel.setInitialPrompt("Review the current changes")
         viewModel.savePreset("Review preset")
 
         val ui = viewModel.ui.value

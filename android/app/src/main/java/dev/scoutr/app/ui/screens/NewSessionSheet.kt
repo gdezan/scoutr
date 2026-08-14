@@ -28,7 +28,6 @@ import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.outlined.StarBorder
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -53,8 +52,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
@@ -65,13 +62,12 @@ import androidx.compose.ui.unit.dp
 import dev.scoutr.app.state.NewSessionUiState
 import dev.scoutr.app.ui.components.SectionLabel
 import dev.scoutr.app.state.NewSessionViewModel
-import dev.scoutr.app.state.SESSION_TASK_TEMPLATES
 import dev.scoutr.app.state.crumbLabel
 import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.foundation.text.KeyboardOptions
 
-/** Fast session launcher with prompt-first composition and focused folder/model pickers. */
+/** Fast session launcher with focused folder and model pickers. */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun NewSessionSheet(
@@ -115,8 +111,6 @@ fun NewSessionSheet(
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(20.dp),
                 verticalArrangement = Arrangement.spacedBy(22.dp),
             ) {
-                item { PromptSection(ui, viewModel) }
-                item { TemplateSection(viewModel::applyTaskTemplate) }
                 if (ui.agentKinds.size >= 2) {
                     item { BackendSection(ui, viewModel::selectAgent) }
                 }
@@ -198,7 +192,7 @@ private fun LauncherHeader(onDismiss: () -> Unit) {
         Column(Modifier.weight(1f)) {
             Text("Start a session", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
             Text(
-                "One setup, then the agent starts with your task.",
+                "Choose the workspace and agent settings, then start.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -209,42 +203,6 @@ private fun LauncherHeader(onDismiss: () -> Unit) {
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-private fun PromptSection(ui: NewSessionUiState, viewModel: NewSessionViewModel) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        SectionLabel("Task")
-        OutlinedTextField(
-            value = ui.initialPrompt,
-            onValueChange = viewModel::setInitialPrompt,
-            placeholder = { Text("Describe the outcome, constraints, and how to verify it…") },
-            minLines = 4,
-            maxLines = 8,
-            keyboardOptions = KeyboardOptions(
-                capitalization = KeyboardCapitalization.Sentences,
-                imeAction = ImeAction.Default,
-            ),
-            modifier = Modifier.fillMaxWidth().semantics { contentDescription = "Task description" }.testTag("initial_prompt"),
-        )
-    }
-}
-
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-private fun TemplateSection(onApply: (String) -> Unit) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        SectionLabel("Templates")
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            SESSION_TASK_TEMPLATES.forEach { template ->
-                AssistChip(
-                    onClick = { onApply(template.id) },
-                    label = { Text(template.title) },
-                    modifier = Modifier.testTag("task_template_${template.id}"),
-                )
-            }
-        }
-    }
-}
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable

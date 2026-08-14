@@ -238,7 +238,7 @@ class NewSessionSheetTest {
     }
 
     @Test
-    fun launcherSendsPromptAndExecutionSettingsInOneCreateRequest() {
+    fun launcherCreatesSessionWithExecutionSettings() {
         stubEndpoints(
             home = """{"ok":true,"listing":{"path":"/home/gdezan","dirs":["Dev","Downloads"]}}""",
             dev = """{"ok":true,"listing":{"path":"/home/gdezan/Dev","dirs":["agents-mobile"]}}""",
@@ -252,7 +252,6 @@ class NewSessionSheetTest {
             NewSessionSheet(viewModel = vm, onDismiss = {}, onCreated = { createdPane = it })
         }
 
-        compose.onNodeWithTag("initial_prompt").performTextInput("Fix the flaky sync test")
         compose.onNodeWithTag("open_folder_picker").performScrollTo().performClick()
         waitFor("folder_item_Dev")
         compose.onNodeWithTag("folder_item_Dev").performClick()
@@ -283,7 +282,6 @@ class NewSessionSheetTest {
         val body = createRequest.body.readUtf8()
         assertTrue(body.contains("\"cwd\":\"/home/gdezan/Dev\""))
         assertTrue(body.contains("\"model\":\"openai-codex/gpt-5.4\""))
-        assertTrue(body.contains("\"initialPrompt\":\"Fix the flaky sync test\""))
         assertTrue(body.contains("\"thinkingLevel\":\"high\""))
     }
 
