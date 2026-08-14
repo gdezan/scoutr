@@ -13,6 +13,7 @@ import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.captureToImage
+import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -38,8 +39,9 @@ import org.junit.Test
 import java.util.concurrent.TimeUnit
 import java.io.FileOutputStream
 /**
- * Read-only review center against a local mock bridge: repo picker, branch +
- * status + log overview, and a bounded diff of the working tree.
+ * Read-only review center against a local mock bridge: repo picker, the §9c
+ * header/stat-strip/file-tile layout, tiles that expand in place into their
+ * hunks, and the commit log behind the header's history glyph.
  */
 class ReviewScreenTest {
 
@@ -206,8 +208,17 @@ class ReviewScreenTest {
         compose.onNodeWithText("projects").assertIsDisplayed()
     }
 
+    /** Selecting the repo lands straight on the working tree's file tiles (§9c). */
+    private fun openRepo() {
+        compose.onNodeWithText("worktrees").performClick()
+        compose.onNodeWithTag("review_select").performClick()
+        compose.waitUntil(5000) {
+            compose.onAllNodes(androidx.compose.ui.test.hasTestTag(FILE_A)).fetchSemanticsNodes().isNotEmpty()
+        }
+    }
+
     @Test
-    fun wideReviewOverviewIsBoundedAndDiffStaysFullWidth() {
+    fun wideReviewOverviewIsBounded() {
         stubApi()
         val vm = viewModel()
         compose.setContent {
@@ -217,33 +228,19 @@ class ReviewScreenTest {
                 }
             }
         }
-        compose.onNodeWithText("worktrees").performClick()
-        compose.onNodeWithTag("review_select").performClick()
-        compose.waitUntil(5_000) {
-            compose.onAllNodes(androidx.compose.ui.test.hasText("Working tree")).fetchSemanticsNodes().isNotEmpty()
-        }
+        openRepo()
         val rootBounds = compose.onRoot().getUnclippedBoundsInRoot()
         val overviewBounds = compose.onNodeWithTag("review_capture_root").getUnclippedBoundsInRoot()
         if (rootBounds.right - rootBounds.left > 1008.dp) {
-            org.junit.Assert.assertTrue("wide review overview should be 960dp", kotlin.math.abs((overviewBounds.right - overviewBounds.left).value - 960f) <= 1f)
-        }
-
-        compose.onNodeWithText("diff vs HEAD").performClick()
-        compose.waitUntil(5_000) {
-            compose.onAllNodes(androidx.compose.ui.test.hasText("+new line")).fetchSemanticsNodes().isNotEmpty() &&
-                compose.onAllNodes(androidx.compose.ui.test.hasTestTag("diff_file_selector")).fetchSemanticsNodes().isNotEmpty()
-        }
-        val diffBounds = compose.onNodeWithTag("review_capture_root").getUnclippedBoundsInRoot()
-        if (rootBounds.right - rootBounds.left > 1008.dp) {
             org.junit.Assert.assertTrue(
-                "Review diff should span the widened root",
-                kotlin.math.abs((diffBounds.right - diffBounds.left).value - (rootBounds.right - rootBounds.left).value) <= 1f,
+                "wide review overview should be 960dp",
+                kotlin.math.abs((overviewBounds.right - overviewBounds.left).value - 960f) <= 1f,
             )
         }
     }
 
     @Test
-    fun overviewShowsBranchStatusAndCommits() {
+    fun overviewShowsBranchStatsAndFileTiles() {
         stubApi()
         val vm = viewModel()
         compose.setContent {
@@ -253,23 +250,18 @@ class ReviewScreenTest {
                 }
             }
         }
-        // Drill to the repo dir and select it as the review target.
-        compose.onNodeWithText("worktrees").performClick()
-        compose.onNodeWithTag("review_select").performClick()
-
-        compose.waitUntil(5000) {
-            compose.onAllNodes(androidx.compose.ui.test.hasText("Working tree")).fetchSemanticsNodes().isNotEmpty()
-        }
-        // Header subtitle is now one mono `repo · branch · N files` line (§9c).
-        compose.onNodeWithText("main \u00b7 2 files", substring = true).assertIsDisplayed()
+        openRepo()
+        // The header is one title plus one mono `repo · ref · N files` line (§9c).
+        compose.onNodeWithText("main · 2 files", substring = true).assertIsDisplayed()
+        // The stat strip totals the diff, not the open file.
+        compose.onNodeWithText("+2").assertIsDisplayed()
         compose.onNodeWithText("src/server.ts").assertIsDisplayed()
         compose.onNodeWithText("notes.txt").assertIsDisplayed()
-        compose.onNodeWithText("feat: add review center").assertIsDisplayed()
         capture("diff-overview")
     }
 
     @Test
-    fun workingTreeDiffShowsBoundedLines() {
+    fun fileTileExpandsInPlaceIntoItsHunks() {
         stubApi()
         val vm = viewModel()
         compose.setContent {
@@ -279,23 +271,20 @@ class ReviewScreenTest {
                 }
             }
         }
-        compose.onNodeWithText("worktrees").performClick()
-        compose.onNodeWithTag("review_select").performClick()
-
-        compose.waitUntil(5000) {
-            compose.onAllNodes(androidx.compose.ui.test.hasText("Working tree")).fetchSemanticsNodes().isNotEmpty()
-        }
-        compose.onNodeWithText("diff vs HEAD").performClick()
+        openRepo()
+        compose.onNodeWithTag(FILE_A).performClick()
 
         compose.waitUntil(5000) {
             compose.onAllNodes(androidx.compose.ui.test.hasText("+new line")).fetchSemanticsNodes().isNotEmpty()
         }
         compose.onNodeWithText("+new line").assertIsDisplayed()
+        // Expansion happens in the list: the other tile is still on screen.
+        compose.onNodeWithText("notes.txt").assertIsDisplayed()
         capture("diff-file-1")
     }
 
     @Test
-    fun filePickerSheetListsFilesAndSwitchesSelection() {
+    fun expandingAnotherFileSwapsTheOpenDiff() {
         stubApi()
         val vm = viewModel()
         compose.setContent {
@@ -305,37 +294,24 @@ class ReviewScreenTest {
                 }
             }
         }
-        compose.onNodeWithText("worktrees").performClick()
-        compose.onNodeWithTag("review_select").performClick()
+        openRepo()
+        compose.onNodeWithTag(FILE_A).performClick()
         compose.waitUntil(5000) {
-            compose.onAllNodes(androidx.compose.ui.test.hasText("Working tree")).fetchSemanticsNodes().isNotEmpty()
-        }
-        compose.onNodeWithText("diff vs HEAD").performClick()
-        compose.waitUntil(5000) {
-            compose.onAllNodes(androidx.compose.ui.test.hasTestTag("diff_file_selector")).fetchSemanticsNodes().isNotEmpty()
+            compose.onAllNodes(androidx.compose.ui.test.hasText("+new line")).fetchSemanticsNodes().isNotEmpty()
         }
 
-        compose.onNodeWithTag("diff_file_selector").performClick()
-        compose.waitUntil(5000) {
-            compose.onAllNodes(androidx.compose.ui.test.hasTestTag("diff_file_sheet")).fetchSemanticsNodes().isNotEmpty()
-        }
-        compose.onNodeWithTag("diff_file_0").assertIsDisplayed()
-        compose.onNodeWithTag("diff_file_1").assertIsDisplayed()
-
-        compose.onNodeWithTag("diff_file_1").performClick()
-        compose.waitUntil(5000) {
-            compose.onAllNodes(androidx.compose.ui.test.hasText("2 / 2  notes.txt", substring = true)).fetchSemanticsNodes().isNotEmpty()
-        }
+        compose.onNodeWithTag(FILE_B).performClick()
         compose.waitUntil(5000) {
             // The per-file fetch must actually swap the body to notes.txt's
             // hunks — a stale-body regression would still show "+new line".
-            compose.onAllNodes(androidx.compose.ui.test.hasText("+note", substring = true)).fetchSemanticsNodes().isNotEmpty()
+            compose.onAllNodes(androidx.compose.ui.test.hasText("+note", substring = true)).fetchSemanticsNodes().isNotEmpty() &&
+                compose.onAllNodes(androidx.compose.ui.test.hasText("+new line")).fetchSemanticsNodes().isEmpty()
         }
         capture("diff-file-2")
     }
 
     @Test
-    fun commitSheetShowsBodyAndOpensDiff() {
+    fun historySheetShowsCommitBodyAndLoadsItsDiff() {
         stubApi()
         val vm = viewModel()
         compose.setContent {
@@ -345,22 +321,31 @@ class ReviewScreenTest {
                 }
             }
         }
-        compose.onNodeWithText("worktrees").performClick()
-        compose.onNodeWithTag("review_select").performClick()
-        compose.waitUntil(5000) {
-            compose.onAllNodes(androidx.compose.ui.test.hasText("Working tree")).fetchSemanticsNodes().isNotEmpty()
-        }
+        openRepo()
 
-        compose.onNodeWithText("feat: add review center").performClick()
+        compose.onNodeWithTag("review_history").performClick()
+        compose.waitUntil(5000) {
+            compose.onAllNodes(androidx.compose.ui.test.hasTestTag("commit_sheet")).fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithText("feat: add review center").assertIsDisplayed()
+
+        compose.onAllNodes(androidx.compose.ui.test.hasTestTag("commit_body_toggle")).onFirst().performClick()
         compose.waitUntil(5000) {
             compose.onAllNodes(androidx.compose.ui.test.hasTestTag("commit_body")).fetchSemanticsNodes().isNotEmpty()
         }
         compose.onNodeWithText("Adds a read-only review center.", substring = true).assertIsDisplayed()
         capture("commit-sheet", overlay = true)
 
-        compose.onNodeWithTag("commit_diff_button").performClick()
+        // Picking the commit rereads the file list against that commit, and the
+        // header's ref swaps from the branch to the hash.
+        compose.onNodeWithText("feat: add review center").performClick()
         compose.waitUntil(5000) {
-            compose.onAllNodes(androidx.compose.ui.test.hasTestTag("diff_file_selector")).fetchSemanticsNodes().isNotEmpty()
+            compose.onAllNodes(androidx.compose.ui.test.hasText("a1b2c3d4", substring = true)).fetchSemanticsNodes().isNotEmpty()
         }
+    }
+
+    private companion object {
+        const val FILE_A = "review_file_src/server.ts"
+        const val FILE_B = "review_file_notes.txt"
     }
 }

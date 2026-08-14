@@ -64,8 +64,13 @@ status metadata and controls.
   and picker fields use the shared 6dp field.
 - **Usage:** teal for usage data, amber/red only for threshold states. It must
   not look like an agent status screen.
-- **Review:** additions use `#3FC9E8`, not the live green. Paths, hashes, and
-  diff lines use Martian Mono.
+- **Review:** one header carrying the title plus a mono `~/repo · ref · N files`
+  line, a three-tile stat strip (added / removed / files), and file tiles that
+  expand in place into their hunks. Commits live behind the header's history
+  glyph; switch-repo, refresh, and wrap sit in its overflow. Additions use
+  `#3FC9E8`, not the live green. Paths, hashes, and diff lines use Martian Mono.
+  The reference's Commit / Stage / Revert bar is deliberately absent — the
+  bridge's repo surface is read-only, so Review has nothing to write.
 - **Terminal:** edge-to-edge true mono output, JetBrains Mono, with a compact
   workspace › tab › pane breadcrumb selector above the grid and hierarchy and
   modifier rows kept out of the transcript.

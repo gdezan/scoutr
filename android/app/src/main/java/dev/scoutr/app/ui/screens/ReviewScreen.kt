@@ -1,12 +1,11 @@
 package dev.scoutr.app.ui.screens
 
-import dev.scoutr.app.ui.theme.ScoutrMono
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -14,46 +13,43 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
-import dev.scoutr.app.ui.shortenHostPath
-import dev.scoutr.app.ui.theme.ScoutrType
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ChevronRight
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Code
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.WrapText
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.key
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -63,21 +59,31 @@ import dev.scoutr.app.ScoutrApp
 import dev.scoutr.app.data.AppearancePreferencesStore
 import dev.scoutr.app.data.RepoCommit
 import dev.scoutr.app.data.RepoDiffFileStat
+import dev.scoutr.app.data.RepoOverviewResponse
 import dev.scoutr.app.state.DiffViewMode
 import dev.scoutr.app.state.Loadable
+import dev.scoutr.app.state.ReviewUiState
 import dev.scoutr.app.state.ReviewViewModel
-import dev.scoutr.app.ui.components.ScoutrTextField
 import dev.scoutr.app.ui.components.ReadableContentColumn
+import dev.scoutr.app.ui.components.ScoutrTextField
+import dev.scoutr.app.ui.nav.TabScaffold
+import dev.scoutr.app.ui.shortenHostPath
 import dev.scoutr.app.ui.theme.DiffPalette
+import dev.scoutr.app.ui.theme.ScoutrMono
+import dev.scoutr.app.ui.theme.ScoutrType
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
 /**
  * Read-only review center: pick a repo from the bridge's allow-list, read its
- * branch/status/log, and open a bounded diff against the working tree or any
- * recent commit. Everything goes through the read-only /api/repo surface —
- * no checkout, no mutation.
+ * branch/status/log, and read a bounded diff of the working tree or any recent
+ * commit. Everything goes through the read-only /api/repo surface — no
+ * checkout, no mutation, and so no stage/commit/revert controls.
+ *
+ * The layout is §9c's Review screen: one header carrying `~/repo · ref · N
+ * files`, a three-tile stat strip, and a list of file tiles that expand in
+ * place into their hunks. Commits live behind the header's history glyph.
  */
 @Composable
 fun ReviewScreen(
@@ -94,27 +100,146 @@ fun ReviewScreen(
     LaunchedEffect(Unit) {
         if (ui.repoPath == null) viewModel.openPicker()
     }
-    var diffOpen by rememberSaveable { mutableStateOf(false) }
 
-    if (ui.repoPath == null) {
-        PickerMode(viewModel, ui, modifier)
-    } else {
-        ReviewMode(
-            viewModel = viewModel,
+    var historyOpen by rememberSaveable { mutableStateOf(false) }
+    var wrapLines by rememberSaveable { mutableStateOf(false) }
+
+    val overviewData = (ui.overview as? Loadable.Ready)?.value
+    val rows = remember(ui.diff, ui.diffKind, overviewData) { fileRows(ui, overviewData) }
+
+    TabScaffold(
+        title = "Review",
+        subtitle = overviewData?.let { headerFacts(it, ui, rows.size) },
+        extraActions = {
+            if (ui.repoPath != null) {
+                IconButton(
+                    onClick = { historyOpen = true },
+                    modifier = Modifier.testTag("review_history"),
+                ) {
+                    Icon(Icons.Default.History, contentDescription = "Commits", modifier = Modifier.size(22.dp))
+                }
+                ReviewOverflow(
+                    wrapLines = wrapLines,
+                    onToggleWrap = { wrapLines = !wrapLines },
+                    onRefresh = viewModel::refresh,
+                    onSwitchRepo = viewModel::openPicker,
+                )
+            }
+        },
+        modifier = modifier,
+    ) { inner ->
+        Box(Modifier.padding(inner)) {
+            if (ui.repoPath == null) {
+                PickerMode(viewModel, ui)
+            } else {
+                ReviewMode(
+                    viewModel = viewModel,
+                    ui = ui,
+                    rows = rows,
+                    wrapLines = wrapLines,
+                    reviewFontSizeSp = reviewFontSizeSp,
+                )
+            }
+        }
+    }
+
+    if (historyOpen && overviewData != null) {
+        HistorySheet(
+            overview = overviewData,
             ui = ui,
-            diffOpen = diffOpen,
-            reviewFontSizeSp = reviewFontSizeSp,
-            onDiffChanged = { diffOpen = it },
-            modifier = modifier,
+            onWorkingTree = {
+                viewModel.loadDiff("HEAD")
+                historyOpen = false
+            },
+            onCommit = { commit ->
+                viewModel.loadDiff(commit.hash, "commit")
+                historyOpen = false
+            },
+            onDismiss = { historyOpen = false },
         )
     }
 }
 
+/** One row of the file list: a diffed path, or an untracked path git has no diff for. */
+private data class ReviewFileRow(
+    val path: String,
+    val additions: Int,
+    val deletions: Int,
+    val untracked: Boolean,
+)
+
+/**
+ * The file list is the diff's stat listing, plus the untracked paths from
+ * status — `git diff` never reports a file it has never seen, and a new file
+ * missing from Review is a change the operator cannot review.
+ */
+private fun fileRows(ui: ReviewUiState, overview: RepoOverviewResponse?): List<ReviewFileRow> {
+    val stats = (ui.diff as? Loadable.Ready)?.value?.stat.orEmpty()
+    val diffed = stats.map { ReviewFileRow(it.path, it.additions, it.deletions, untracked = false) }
+    if (ui.diffKind != "working" || overview == null) return diffed
+    val known = stats.mapTo(mutableSetOf()) { it.path }
+    val untracked = overview.status
+        .filter { it.code.startsWith("?") && it.path !in known }
+        .map { ReviewFileRow(it.path, additions = 0, deletions = 0, untracked = true) }
+    return diffed + untracked
+}
+
+/** `~/scoutr · main · 3 files` — one mono line of machine facts under the title (§9c). */
+private fun headerFacts(overview: RepoOverviewResponse, ui: ReviewUiState, fileCount: Int): String {
+    val working = ui.diffKind != "commit"
+    val ref = if (working) overview.branch ?: "detached HEAD" else shortHash(ui.diffRef.orEmpty())
+    val facts = listOf(shortenHostPath(overview.path), ref, "$fileCount files").joinToString(" · ")
+    return if (working) facts + syncSuffix(overview) else facts
+}
+
+@Composable
+private fun ReviewOverflow(
+    wrapLines: Boolean,
+    onToggleWrap: () -> Unit,
+    onRefresh: () -> Unit,
+    onSwitchRepo: () -> Unit,
+) {
+    var open by remember { mutableStateOf(false) }
+    Box {
+        IconButton(onClick = { open = true }, modifier = Modifier.testTag("review_menu")) {
+            Icon(Icons.Default.MoreVert, contentDescription = "More", modifier = Modifier.size(22.dp))
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            DropdownMenuItem(
+                text = { Text(if (wrapLines) "Wrap lines · on" else "Wrap lines · off") },
+                leadingIcon = { Icon(Icons.Default.WrapText, contentDescription = null) },
+                onClick = {
+                    onToggleWrap()
+                    open = false
+                },
+                modifier = Modifier.testTag("diff_wrap_toggle"),
+            )
+            DropdownMenuItem(
+                text = { Text("Refresh") },
+                leadingIcon = { Icon(Icons.Default.Refresh, contentDescription = null) },
+                onClick = {
+                    onRefresh()
+                    open = false
+                },
+                modifier = Modifier.testTag("review_refresh"),
+            )
+            DropdownMenuItem(
+                text = { Text("Switch repo") },
+                leadingIcon = { Icon(Icons.Default.FolderOpen, contentDescription = null) },
+                onClick = {
+                    onSwitchRepo()
+                    open = false
+                },
+                modifier = Modifier.testTag("review_switch_repo"),
+            )
+        }
+    }
+}
 
 @Composable
 private fun PickerMode(
     viewModel: ReviewViewModel,
-    ui: dev.scoutr.app.state.ReviewUiState,
+    ui: ReviewUiState,
     modifier: Modifier = Modifier,
 ) {
     // Editable path: breadcrumbs are nice, but dot-directories (the default
@@ -183,7 +308,7 @@ private fun PickerMode(
                 enabled = pathText.isNotBlank() || ui.dirPath.isNotBlank(),
                 modifier = Modifier.testTag("review_select"),
             ) {
-                Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.width(16.dp).height(16.dp))
+                Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
                 Spacer(Modifier.width(4.dp))
                 Text("Review this folder")
             }
@@ -249,10 +374,10 @@ private fun PickerMode(
 @Composable
 private fun ReviewMode(
     viewModel: ReviewViewModel,
-    ui: dev.scoutr.app.state.ReviewUiState,
-    diffOpen: Boolean,
+    ui: ReviewUiState,
+    rows: List<ReviewFileRow>,
+    wrapLines: Boolean,
     reviewFontSizeSp: Float,
-    onDiffChanged: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val overview = ui.overview
@@ -262,23 +387,10 @@ private fun ReviewMode(
         }
         return
     }
-    val overviewData = (overview as? Loadable.Ready)?.value
-    if (overviewData == null) {
+    if (overview !is Loadable.Ready) {
         Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Text((overview as? Loadable.Failed)?.reason ?: "No data", color = MaterialTheme.colorScheme.error)
         }
-        return
-    }
-    var commitSheet by remember { mutableStateOf<RepoCommit?>(null) }
-
-    if (diffOpen) {
-        DiffMode(
-            viewModel = viewModel,
-            ui = ui,
-            reviewFontSizeSp = reviewFontSizeSp,
-            onBack = { onDiffChanged(false) },
-            modifier = modifier.testTag("review_capture_root"),
-        )
         return
     }
 
@@ -286,461 +398,196 @@ private fun ReviewMode(
         modifier = modifier.fillMaxSize(),
         contentTag = "review_capture_root",
     ) {
-        Row(
-            Modifier.fillMaxWidth().padding(vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(Modifier.weight(1f)) {
+        StatStrip(ui, rows)
+        when (val diff = ui.diff) {
+            is Loadable.Failed ->
                 Text(
-                    overviewData.path.substringAfterLast('/'),
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
+                    diff.reason,
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(16.dp).testTag("review_diff_error"),
                 )
-                // `~/scoutr · main · 17 files` — one mono line of machine facts,
-                // the same shape the chat header and board tiles use (§9c).
-                Text(
-                    listOfNotNull(
-                        shortenHostPath(overviewData.path),
-                        overviewData.branch ?: "detached HEAD",
-                        "${overviewData.status.size} files",
-                    ).joinToString(" · ") + syncSuffix(overviewData),
-                    style = ScoutrType.monoMeta,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            // Icons, not labels: two text buttons crowded the header until the
-            // `~/repo · branch · N files` line clipped mid-word (§9c puts a single
-            // 22dp glyph in this slot).
-            IconButton(onClick = viewModel::openPicker) {
-                Icon(
-                    Icons.Default.FolderOpen,
-                    contentDescription = "Switch repo",
-                    modifier = Modifier.size(22.dp),
-                )
-            }
-            IconButton(onClick = viewModel::refresh) {
-                Icon(
-                    Icons.Default.Refresh,
-                    contentDescription = "Refresh",
-                    modifier = Modifier.size(22.dp),
-                )
-            }
-        }
-        HorizontalDivider()
-        LazyColumn(Modifier.weight(1f).fillMaxWidth()) {
-                if (overviewData.status.isNotEmpty()) {
-                    item {
-                        SectionLabel("Working tree")
-                    }
-                    items(overviewData.status, key = { it.path }) { entry ->
-                        StatusRow(entry.code, entry.path)
-                    }
-                    if (overviewData.statusTruncated) {
-                        item { TruncatedNote("status list truncated") }
-                    }
-                }
-                item {
-                    SectionLabel("Commits")
-                }
-                item {
-                    // Working-tree diff entry.
-                    DiffRow(
-                        title = "Working tree",
-                        subtitle = "diff vs HEAD",
-                        selected = ui.diffRef == "HEAD",
-                        loading = ui.diff is Loadable.Loading && ui.diffRef == "HEAD",
-                        onClick = { viewModel.loadDiff("HEAD"); onDiffChanged(true) },
-                    )
-                }
-                items(overviewData.log, key = { it.hash }) { commit ->
-                    DiffRow(
-                        title = commit.subject,
-                        subtitle = "${shortHash(commit.hash)} · ${commit.author} · ${commitDate(commit.date)}",
-                        selected = ui.diffRef == commit.hash,
-                        loading = ui.diff is Loadable.Loading && ui.diffRef == commit.hash,
-                        onClick = { commitSheet = commit },
-                    )
-                }
-                if (overviewData.logTruncated) {
-                    item { TruncatedNote("recent commits truncated") }
-                }
-                val artifacts = (ui.artifacts as? Loadable.Ready)?.value.orEmpty()
-                if (artifacts.isNotEmpty()) {
-                    item {
-                        SectionLabel("Generated artifacts")
-                    }
-                    items(artifacts, key = { it.path }) { artifact ->
-                        Row(
-                            Modifier.fillMaxWidth().padding(vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Text(
-                                artifact.path.removePrefix(overviewData.root).removePrefix("/"),
-                                style = MaterialTheme.typography.bodySmall,
-                                fontFamily = ScoutrMono,
-                                color = MaterialTheme.colorScheme.onSurface,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.weight(1f),
-                            )
-                            Text(
-                                humanSize(artifact.size),
-                                style = MaterialTheme.typography.labelSmall,
-                                fontFamily = ScoutrMono,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            is Loadable.Loading, Loadable.Idle -> CenteredLoading()
+            is Loadable.Ready ->
+                if (rows.isEmpty()) {
+                    CenteredNote("No changes", "diff_no_changes")
+                } else {
+                    LazyColumn(
+                        Modifier.fillMaxWidth().weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                        contentPadding = PaddingValues(bottom = 24.dp),
+                    ) {
+                        if (diff.value.truncated) {
+                            item { TruncatedNote("file list truncated to 64 KiB — files past the cap are not listed") }
+                        }
+                        items(rows, key = { it.path }) { row ->
+                            FileTile(
+                                row = row,
+                                expanded = ui.selectedFile == row.path,
+                                ui = ui,
+                                wrapLines = wrapLines,
+                                reviewFontSizeSp = reviewFontSizeSp,
+                                onToggle = {
+                                    if (ui.selectedFile == row.path) {
+                                        viewModel.closeFile()
+                                    } else {
+                                        viewModel.selectFile(
+                                            row.path,
+                                            if (row.untracked) DiffViewMode.File else DiffViewMode.Diff,
+                                        )
+                                    }
+                                },
+                                onViewMode = viewModel::setViewMode,
                             )
                         }
                     }
-                    if (ui.artifactsTruncated) {
-                        item { TruncatedNote("artifacts truncated") }
-                    }
                 }
-                item { Spacer(Modifier.height(24.dp)) }
-            }
-    }
-    commitSheet?.let { commit ->
-        CommitSheet(
-            commit = commit,
-            onOpenDiff = {
-                viewModel.loadDiff(commit.hash, "commit")
-                onDiffChanged(true)
-                commitSheet = null
-            },
-            onDismiss = { commitSheet = null },
-        )
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun CommitSheet(
-    commit: RepoCommit,
-    onOpenDiff: () -> Unit,
-    onDismiss: () -> Unit,
-) {
-    ModalBottomSheet(onDismissRequest = onDismiss, modifier = Modifier.testTag("commit_sheet")) {
-        Column(
-            Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp)
-                .verticalScroll(rememberScrollState())
-                .padding(bottom = 24.dp),
-        ) {
-            Text(commit.subject, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-            Spacer(Modifier.height(4.dp))
-            Text(
-                "${shortHash(commit.hash)} · ${commit.author} · ${commitDate(commit.date)}",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                fontFamily = ScoutrMono,
-            )
-            Spacer(Modifier.height(12.dp))
-            if (commit.body.isBlank()) {
-                Text(
-                    "No commit message body",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            } else {
-                Text(
-                    commit.body,
-                    style = MaterialTheme.typography.bodySmall,
-                    fontFamily = ScoutrMono,
-                    modifier = Modifier.testTag("commit_body"),
-                )
-            }
-            Spacer(Modifier.height(16.dp))
-            TextButton(onClick = onOpenDiff, modifier = Modifier.testTag("commit_diff_button")) { Text("Diff vs parent") }
         }
     }
 }
 
+/**
+ * `+128 added · −41 removed · 3 files` as three tiles (§9c). The counts ride
+ * the diff, so they hold a muted placeholder until it lands rather than
+ * flashing a wrong zero.
+ */
 @Composable
-private fun SectionLabel(title: String) {
-    Text(
-        title.uppercase(),
-        style = ScoutrType.monoSection,
-        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-        modifier = Modifier.padding(top = 14.dp, bottom = 6.dp),
-    )
-}
-
-@Composable
-private fun StatusRow(code: String, path: String) {
+private fun StatStrip(ui: ReviewUiState, rows: List<ReviewFileRow>) {
+    val stats: List<RepoDiffFileStat>? = (ui.diff as? Loadable.Ready)?.value?.stat
     Row(
-        Modifier.fillMaxWidth().padding(vertical = 5.dp),
-        verticalAlignment = Alignment.CenterVertically,
+        Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 10.dp).testTag("review_stat_strip"),
+        horizontalArrangement = Arrangement.spacedBy(2.dp),
     ) {
-        Text(
-            code,
-            style = ScoutrType.monoFact,
-            color = statusCodeColor(code),
-            modifier = Modifier.width(22.dp),
+        StatTile(
+            value = stats?.let { "+${it.sumOf(RepoDiffFileStat::additions)}" },
+            label = "added",
+            color = DiffPalette.Added,
+            modifier = Modifier.weight(1f),
         )
-        // Ellipsize the head, not the tail. Every path in a repo shares its
-        // leading directories, so tail-truncation renders a screen of identical
-        // `android/app/src/main/java/dev/sc…` rows; the filename is the fact
-        // worth reading, and §9c shows exactly that shortened form.
-        Text(
-            path,
-            style = ScoutrType.monoMeta,
-            color = MaterialTheme.colorScheme.onSurface,
-            maxLines = 1,
-            overflow = TextOverflow.StartEllipsis,
-            softWrap = false,
+        StatTile(
+            value = stats?.let { "−${it.sumOf(RepoDiffFileStat::deletions)}" },
+            label = "removed",
+            color = DiffPalette.Deleted,
+            modifier = Modifier.weight(1f),
+        )
+        StatTile(
+            value = stats?.let { "${rows.size}" },
+            label = "files",
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.weight(1f),
         )
     }
 }
 
 @Composable
-private fun statusCodeColor(code: String): Color {
-    val first = code.firstOrNull() ?: ' '
-    return when {
-        first == '?' -> DiffPalette.Added // untracked
-        first == 'D' -> DiffPalette.Deleted
-        first == 'R' -> DiffPalette.Renamed
-        first == 'U' -> DiffPalette.Conflict
-        first == 'M' || first == 'A' || first == 'C' -> DiffPalette.Modified
-        else -> DiffPalette.Ignored
-    }
-}
-
-@Composable
-private fun DiffRow(
-    title: String,
-    subtitle: String,
-    selected: Boolean,
-    loading: Boolean,
-    onClick: () -> Unit,
-) {
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .background(if (selected) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f) else Color.Transparent)
-            .clickable(onClick = onClick)
-            .padding(vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(
-            Icons.Default.Code,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Spacer(Modifier.width(12.dp))
-        Column(Modifier.weight(1f)) {
-            Text(
-                title,
-                style = MaterialTheme.typography.bodyMedium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Text(
-                subtitle,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                fontFamily = ScoutrMono,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-        if (loading) {
-            Text(
-                "Loading…",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        } else {
-            Icon(
-                Icons.Default.ChevronRight,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun DiffMode(
-    viewModel: ReviewViewModel,
-    ui: dev.scoutr.app.state.ReviewUiState,
-    reviewFontSizeSp: Float,
-    onBack: () -> Unit,
+private fun StatTile(
+    value: String?,
+    label: String,
+    color: androidx.compose.ui.graphics.Color,
     modifier: Modifier = Modifier,
 ) {
-    val diffLoad = ui.diff
-    val diffData = (diffLoad as? Loadable.Ready)?.value
-    val stats = diffData?.stat.orEmpty()
-    var fileSheetOpen by rememberSaveable { mutableStateOf(false) }
-    var wrapLines by rememberSaveable { mutableStateOf(false) }
-    // Auto-open the first file once per diff session — not after the user
-    // closes the per-file view.
-    var autoOpenedForRef by rememberSaveable(ui.diffRef) { mutableStateOf<String?>(null) }
-    LaunchedEffect(diffData, ui.diffRef) {
-        if (diffData != null && autoOpenedForRef != ui.diffRef) {
-            autoOpenedForRef = ui.diffRef
-            if (stats.isNotEmpty()) viewModel.selectFile(stats.first().path)
-        }
-    }
-
-    Column(modifier.fillMaxSize()) {
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            IconButton(onClick = onBack) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back to overview")
-            }
-            Text(
-                "Diff ${ui.diffRef?.take(12) ?: ""}",
-                style = MaterialTheme.typography.labelMedium,
-                fontFamily = ScoutrMono,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.weight(1f),
-            )
-            IconButton(
-                onClick = { wrapLines = !wrapLines },
-                modifier = Modifier.testTag("diff_wrap_toggle"),
-            ) {
-                Icon(
-                    Icons.Default.WrapText,
-                    contentDescription = "Wrap lines",
-                    tint = if (wrapLines) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            Text(
-                if (diffData?.truncated == true) "≥ ${stats.size} files (truncated)" else "${stats.size} files",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        HorizontalDivider()
-        if (diffData?.truncated == true) TruncatedNote("file list truncated to 64 KiB — files past the cap are not listed")
-        when {
-            diffLoad is Loadable.Loading -> CenteredLoading()
-            diffLoad is Loadable.Failed ->
-                Text(
-                    diffLoad.reason,
-                    color = MaterialTheme.colorScheme.error,
-                    style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier.padding(16.dp),
-                )
-            stats.isEmpty() -> CenteredNote("No changes", "diff_no_changes")
-            else -> PerFileView(
-                viewModel = viewModel,
-                ui = ui,
-                stats = stats,
-                wrapLines = wrapLines,
-                reviewFontSizeSp = reviewFontSizeSp,
-                onOpenPicker = { fileSheetOpen = true },
-            )
-        }
-    }
-    if (fileSheetOpen) {
-        FilePickerSheet(
-            stats = stats,
-            selectedPath = ui.selectedFile,
-            onPick = { path ->
-                viewModel.selectFile(path)
-                fileSheetOpen = false
-            },
-            onDismiss = { fileSheetOpen = false },
+    Column(
+        modifier
+            .clip(RoundedCornerShape(4.dp))
+            .background(MaterialTheme.colorScheme.surfaceContainer)
+            .padding(horizontal = 11.dp, vertical = 9.dp),
+    ) {
+        Text(
+            value ?: "—",
+            style = ScoutrType.monoFact,
+            color = if (value == null) MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f) else color,
+        )
+        Text(
+            label,
+            style = ScoutrType.monoMeta,
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+            modifier = Modifier.padding(top = 2.dp),
         )
     }
 }
 
+/**
+ * A file tile: one mono row of path and counts that expands in place into the
+ * file's hunks (§9c). Expansion is the selection — the ViewModel holds one
+ * open file, so opening another closes the last and its fetch is dropped.
+ */
 @Composable
-private fun PerFileView(
-    viewModel: ReviewViewModel,
-    ui: dev.scoutr.app.state.ReviewUiState,
-    stats: List<RepoDiffFileStat>,
+private fun FileTile(
+    row: ReviewFileRow,
+    expanded: Boolean,
+    ui: ReviewUiState,
     wrapLines: Boolean,
     reviewFontSizeSp: Float,
-    onOpenPicker: () -> Unit,
+    onToggle: () -> Unit,
+    onViewMode: (DiffViewMode) -> Unit,
 ) {
-    val selectedFile = ui.selectedFile
-    val selectedIndex = stats.indexOfFirst { it.path == selectedFile }
-    if (selectedFile == null || selectedIndex < 0) {
-        Column(Modifier.fillMaxSize()) {
-            Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("Pick a file to review", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    TextButton(onClick = onOpenPicker, modifier = Modifier.testTag("diff_pick_file")) { Text("Browse files") }
-                }
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(4.dp))
+            .background(MaterialTheme.colorScheme.surfaceContainer)
+            .testTag("review_file_${row.path}"),
+    ) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .clickable(onClick = onToggle)
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Icon(
+                if (expanded) Icons.Default.ExpandMore else Icons.Default.ChevronRight,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(16.dp),
+            )
+            // Ellipsize the head, not the tail. Every path in a repo shares its
+            // leading directories, so tail-truncation renders a screen of
+            // identical `android/app/src/main/java/dev/sc…` rows; the filename
+            // is the fact worth reading (§9c).
+            Text(
+                row.path,
+                style = ScoutrType.monoFact,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.StartEllipsis,
+                softWrap = false,
+                modifier = Modifier.weight(1f),
+            )
+            if (row.untracked) {
+                Text("new", style = ScoutrType.monoFact, color = DiffPalette.Added)
+            } else {
+                Text("+${row.additions}", style = ScoutrType.monoFact, color = DiffPalette.Added)
+                Text("−${row.deletions}", style = ScoutrType.monoFact, color = DiffPalette.Deleted)
             }
         }
-        return
-    }
-    Column(Modifier.fillMaxSize()) {
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            // Close (X), not a back arrow: the arrow is reserved for leaving
-            // DiffMode entirely, so the two affordances read differently.
-            IconButton(onClick = viewModel::closeFile, modifier = Modifier.testTag("diff_file_back")) {
-                Icon(Icons.Default.Close, contentDescription = "Close file")
-            }
-            Column(Modifier.weight(1f)) {
-                Text(
-                    selectedFile.substringAfterLast('/'),
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                val dir = selectedFile.substringBeforeLast('/', missingDelimiterValue = "")
-                if (dir.isNotEmpty()) {
-                    Text(
-                        dir,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontFamily = ScoutrMono,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-            }
-            ViewToggleButton("Diff", ui.viewMode == DiffViewMode.Diff, "diff_view_diff") {
-                viewModel.setViewMode(DiffViewMode.Diff)
-            }
-            ViewToggleButton("File", ui.viewMode == DiffViewMode.File, "diff_view_file") {
-                viewModel.setViewMode(DiffViewMode.File)
-            }
-        }
-        HorizontalDivider()
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            TextButton(
-                onClick = { viewModel.selectFile(stats[selectedIndex - 1].path) },
-                enabled = selectedIndex > 0,
-                modifier = Modifier.testTag("diff_previous"),
-            ) { Text("‹ Previous", modifier = Modifier.testTag("diff_previous_label")) }
-            Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                TextButton(
-                    onClick = onOpenPicker,
-                    modifier = Modifier.testTag("diff_file_selector"),
+        if (expanded) {
+            // Untracked files have no hunks; their tile opens on content and
+            // has nothing to toggle between.
+            if (!row.untracked) {
+                Row(
+                    Modifier.fillMaxWidth().padding(start = 8.dp, end = 8.dp, bottom = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text("${selectedIndex + 1} / ${stats.size}  $selectedFile", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Spacer(Modifier.weight(1f))
+                    ViewToggleButton("Diff", ui.viewMode == DiffViewMode.Diff, "diff_view_diff") {
+                        onViewMode(DiffViewMode.Diff)
+                    }
+                    ViewToggleButton("File", ui.viewMode == DiffViewMode.File, "diff_view_file") {
+                        onViewMode(DiffViewMode.File)
+                    }
                 }
             }
-            TextButton(
-                onClick = { viewModel.selectFile(stats[selectedIndex + 1].path) },
-                enabled = selectedIndex < stats.lastIndex,
-                modifier = Modifier.testTag("diff_next"),
-            ) { Text("Next ›") }
-        }
-        HorizontalDivider()
-        when (ui.viewMode) {
-            DiffViewMode.Diff -> FileDiffContent(ui, selectedFile, wrapLines, reviewFontSizeSp)
-            DiffViewMode.File -> FileContent(ui, selectedFile, wrapLines, reviewFontSizeSp)
+            // The transcript surface stays on the canvas black, one step below
+            // the tile it sits in (§9a).
+            Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.background).padding(vertical = 10.dp)) {
+                if (row.untracked || ui.viewMode == DiffViewMode.File) {
+                    FileContent(ui, row.path, wrapLines, reviewFontSizeSp)
+                } else {
+                    FileDiffContent(ui, row.path, wrapLines, reviewFontSizeSp)
+                }
+            }
         }
     }
 }
@@ -758,49 +605,64 @@ private fun ViewToggleButton(label: String, active: Boolean, tag: String, onClic
 }
 
 @Composable
-private fun ColumnScope.FileDiffContent(
-    ui: dev.scoutr.app.state.ReviewUiState,
+private fun FileDiffContent(
+    ui: ReviewUiState,
     selectedFile: String,
     wrapLines: Boolean,
     reviewFontSizeSp: Float,
 ) {
     when (val load = ui.fileDiff) {
-        is Loadable.Loading -> CenteredLoading()
+        is Loadable.Loading, Loadable.Idle -> CenteredLoading()
         is Loadable.Failed ->
             Text(
                 load.reason,
                 color = MaterialTheme.colorScheme.error,
                 style = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.padding(16.dp),
+                modifier = Modifier.padding(12.dp),
             )
         is Loadable.Ready -> {
             val language = languageForPath(selectedFile)
+            val lines = remember(load.value.diff) { hunkLines(load.value.diff) }
             key(selectedFile) {
-                LineBody(load.value.diff.split("\n"), wrapLines, scrollHorizontally = false) { lines ->
-                    DiffLines(lines, language, wrapLines, style = ScoutrType.monoCode(reviewFontSizeSp))
-                }
+                DiffLines(
+                    lines,
+                    language,
+                    wrapLines,
+                    horizontalPadding = 12.dp,
+                    style = ScoutrType.monoCode(reviewFontSizeSp),
+                )
             }
             if (load.value.truncated) TruncatedNote("file diff truncated to 64 KiB")
         }
-        Loadable.Idle -> Unit
     }
 }
 
+/**
+ * The tile already names the file, so the `diff --git`/`index`/`---`/`+++`
+ * preamble is repetition; the body opens on the first hunk (§9c). A diff with
+ * no `@@` at all (binary, mode-only) keeps every line it has.
+ */
+private fun hunkLines(diff: String): List<String> {
+    val lines = diff.split("\n")
+    val firstHunk = lines.indexOfFirst { it.startsWith("@@") }
+    return if (firstHunk > 0) lines.drop(firstHunk) else lines
+}
+
 @Composable
-private fun ColumnScope.FileContent(
-    ui: dev.scoutr.app.state.ReviewUiState,
+private fun FileContent(
+    ui: ReviewUiState,
     selectedFile: String,
     wrapLines: Boolean,
     reviewFontSizeSp: Float,
 ) {
     when (val load = ui.fileContent) {
-        is Loadable.Loading -> CenteredLoading()
+        is Loadable.Loading, Loadable.Idle -> CenteredLoading()
         is Loadable.Failed ->
             Text(
                 load.reason,
                 color = MaterialTheme.colorScheme.error,
                 style = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.padding(16.dp),
+                modifier = Modifier.padding(12.dp),
             )
         is Loadable.Ready -> {
             val body = load.value
@@ -810,118 +672,140 @@ private fun ColumnScope.FileContent(
                 else -> {
                     val language = languageForPath(selectedFile)
                     key(selectedFile) {
-                        LineBody(body.content.split("\n"), wrapLines) { lines ->
-                            CodeLines(lines, language, wrapLines, style = ScoutrType.monoCode(reviewFontSizeSp))
-                        }
+                        CodeLines(
+                            body.content.split("\n"),
+                            language,
+                            wrapLines,
+                            horizontalPadding = 12.dp,
+                            style = ScoutrType.monoCode(reviewFontSizeSp),
+                        )
                     }
                     if (body.truncated) TruncatedNote("file truncated to 256 KiB")
                 }
             }
         }
-        Loadable.Idle -> Unit
     }
 }
 
-/** Shared scrolling body for code lines; resets scroll position per file via [key]. */
-@Composable
-private fun ColumnScope.LineBody(
-    lines: List<String>,
-    wrapLines: Boolean,
-    scrollHorizontally: Boolean = true,
-    content: @Composable (lines: List<String>) -> Unit,
-) {
-    val verticalScroll = rememberScrollState()
-    val horizontalScroll = rememberScrollState()
-    Column(
-        Modifier
-            .weight(1f)
-            .fillMaxWidth()
-            .verticalScroll(verticalScroll)
-            .then(if (!wrapLines && scrollHorizontally) Modifier.horizontalScroll(horizontalScroll) else Modifier),
-    ) {
-        content(lines)
-    }
-}
-
+/**
+ * The commit log, one sheet behind the header's history glyph (§9c). A row
+ * loads that commit's diff into the same file list; the trailing chevron
+ * opens the message body without leaving the sheet.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun FilePickerSheet(
-    stats: List<RepoDiffFileStat>,
-    selectedPath: String?,
-    onPick: (String) -> Unit,
+private fun HistorySheet(
+    overview: RepoOverviewResponse,
+    ui: ReviewUiState,
+    onWorkingTree: () -> Unit,
+    onCommit: (RepoCommit) -> Unit,
     onDismiss: () -> Unit,
 ) {
-    var filter by remember { mutableStateOf("") }
-    val filtered = remember(stats, filter) {
-        if (filter.isBlank()) stats else stats.filter { it.path.contains(filter, ignoreCase = true) }
-    }
-    ModalBottomSheet(onDismissRequest = onDismiss, modifier = Modifier.testTag("diff_file_sheet")) {
-        Column(Modifier.fillMaxWidth()) {
-            ScoutrTextField(
-                value = filter,
-                onValueChange = { filter = it },
-                placeholder = "Filter files",
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp)
-                    .testTag("diff_file_filter"),
+    var openBody by remember { mutableStateOf<String?>(null) }
+    ModalBottomSheet(onDismissRequest = onDismiss, modifier = Modifier.testTag("commit_sheet")) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+            HistoryRow(
+                title = "Working tree",
+                subtitle = "diff vs HEAD",
+                selected = ui.diffKind != "commit",
+                onClick = onWorkingTree,
+                modifier = Modifier.testTag("review_working_tree"),
             )
-            Spacer(Modifier.height(8.dp))
+            SectionLabel("Commits")
             LazyColumn(Modifier.fillMaxWidth().heightIn(max = 420.dp)) {
-                items(filtered, key = { it.path }) { stat ->
-                    val index = stats.indexOfFirst { it.path == stat.path }
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .clickable { onPick(stat.path) }
-                            .padding(horizontal = 16.dp, vertical = 10.dp)
-                            .testTag("diff_file_$index"),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Column(Modifier.weight(1f)) {
-                            Text(
-                                stat.path.substringAfterLast('/'),
-                                style = MaterialTheme.typography.bodyMedium,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                            val dir = stat.path.substringBeforeLast('/', missingDelimiterValue = "")
-                            if (dir.isNotEmpty()) {
-                                Text(
-                                    dir,
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    fontFamily = ScoutrMono,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                            }
-                        }
-                        Text(
-                            "+${stat.additions} −${stat.deletions}",
-                            style = MaterialTheme.typography.labelSmall,
-                            fontFamily = ScoutrMono,
-                            color = when {
-                                stat.additions > 0 && stat.deletions == 0 -> DiffPalette.Added
-                                stat.deletions > 0 && stat.additions == 0 -> DiffPalette.Deleted
-                                else -> DiffPalette.Modified
+                items(overview.log, key = { it.hash }) { commit ->
+                    Column {
+                        HistoryRow(
+                            title = commit.subject,
+                            subtitle = "${shortHash(commit.hash)} · ${commit.author} · ${commitDate(commit.date)}",
+                            selected = ui.diffRef == commit.hash,
+                            onClick = { onCommit(commit) },
+                            trailing = {
+                                if (commit.body.isNotBlank()) {
+                                    IconButton(
+                                        onClick = {
+                                            openBody = if (openBody == commit.hash) null else commit.hash
+                                        },
+                                        modifier = Modifier.testTag("commit_body_toggle"),
+                                    ) {
+                                        Icon(
+                                            if (openBody == commit.hash) Icons.Default.ExpandMore else Icons.Default.ChevronRight,
+                                            contentDescription = "Commit message",
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.size(16.dp),
+                                        )
+                                    }
+                                }
                             },
                         )
-                        if (stat.path == selectedPath) {
-                            Spacer(Modifier.width(8.dp))
-                            Icon(
-                                Icons.Default.Check,
-                                contentDescription = "Selected",
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.width(18.dp).height(18.dp),
+                        if (openBody == commit.hash) {
+                            Text(
+                                commit.body,
+                                style = MaterialTheme.typography.bodySmall,
+                                fontFamily = ScoutrMono,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(bottom = 10.dp)
+                                    .testTag("commit_body"),
                             )
                         }
                     }
+                }
+                if (overview.logTruncated) {
+                    item { TruncatedNote("recent commits truncated") }
                 }
             }
             Spacer(Modifier.height(24.dp))
         }
     }
+}
+
+@Composable
+private fun HistoryRow(
+    title: String,
+    subtitle: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    trailing: @Composable () -> Unit = {},
+) {
+    Row(
+        modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(
+                title,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                subtitle,
+                style = ScoutrType.monoMeta,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        trailing()
+    }
+}
+
+@Composable
+private fun SectionLabel(title: String) {
+    Text(
+        title.uppercase(),
+        style = ScoutrType.monoSection,
+        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+        modifier = Modifier.padding(top = 14.dp, bottom = 6.dp),
+    )
 }
 
 @Composable
@@ -944,7 +828,7 @@ private fun TruncatedNote(text: String) {
         text,
         style = MaterialTheme.typography.labelSmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-        modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
     )
 }
 
@@ -961,7 +845,7 @@ fun rememberReviewViewModel(): ReviewViewModel {
     )
 }
 
-private fun syncSuffix(overview: dev.scoutr.app.data.RepoOverviewResponse): String {
+private fun syncSuffix(overview: RepoOverviewResponse): String {
     val upstream = overview.upstream ?: return ""
     return when {
         overview.ahead > 0 && overview.behind > 0 -> " · ahead ${overview.ahead}, behind ${overview.behind}"
@@ -969,10 +853,4 @@ private fun syncSuffix(overview: dev.scoutr.app.data.RepoOverviewResponse): Stri
         overview.behind > 0 -> " · behind ${overview.behind}"
         else -> " · in sync with $upstream"
     }
-}
-
-private fun humanSize(bytes: Long): String = when {
-    bytes >= 1024 * 1024 -> "%.1f MB".format(bytes / (1024.0 * 1024.0))
-    bytes >= 1024 -> "%.0f KB".format(bytes / 1024.0)
-    else -> "$bytes B"
 }

@@ -16,6 +16,8 @@ The app had accumulated blue-era theme tokens, inconsistent corner radii, defaul
 - Use compact structural patterns: the Board lockup and mono-caps count headers, the Chat assistant spine, inline tool detail tiles, and a filled 6dp square send action.
 - Use a 90ms press tint without scale, 140ms fade-only arrivals without placement motion, and a workspace › tab › pane breadcrumb selector for Terminal.
 - Group Sessions by dynamically derived repository tabs while keeping Active, Completed, Pinned, and Archived scopes reachable through the scope filter.
+- Lay Review out as reference §9c: one header (title plus a mono `~/repo · ref · N files` line and the tab's actions), a three-tile stat strip, and file tiles that expand in place into their hunks. Selecting a repo loads the working-tree diff, commits move behind a history sheet, and the full-screen per-file viewer is retired. The reference's Commit / Stage / Revert bar is not implemented: `/api/repo` is read-only by design, so Review has no write action to bind it to.
+- Give the shared tab top bar an optional mono subtitle and action slot rather than letting a screen draw a second header under it.
 - Bundle the approved fonts and use the supplied Scoutr icon asset for launcher and splash surfaces.
 
 ## Consequences

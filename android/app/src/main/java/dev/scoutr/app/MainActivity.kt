@@ -399,15 +399,10 @@ private fun ScoutrAppNav(
                 }
             }
             composable(Destination.Review.route) {
-                // Shared with the Sessions swipe action; see the hoisted instance above.
-                TabScaffold(
-                    title = "Review",
-                ) { innerReview ->
-                    ReviewScreen(
-                        viewModel = reviewViewModel,
-                        modifier = Modifier.padding(innerReview),
-                    )
-                }
+                // Shared with the Sessions swipe action; see the hoisted instance
+                // above. Review owns its own TabScaffold: the header carries the
+                // repo's mono facts and the commit/overflow actions (§9c).
+                ReviewScreen(viewModel = reviewViewModel)
             }
             composable(
                 route = Routes.TERMINAL,

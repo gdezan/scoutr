@@ -22,10 +22,6 @@ data class ReviewUiState(
     val repoPath: String? = null,
     val overview: Loadable<RepoOverviewResponse> = Loadable.Idle,
 
-    // Generated-artifact listing (bounded by the bridge); a failure here must
-    // not break the overview, so it has its own slot.
-    val artifacts: Loadable<List<dev.scoutr.app.data.RepoArtifact>> = Loadable.Idle,
-    val artifactsTruncated: Boolean = false,
     // Folder picker state.
     val dirPath: String = "",
     val dirs: Loadable<List<String>> = Loadable.Idle,
@@ -137,7 +133,9 @@ class ReviewViewModel(
                 _ui.update {
                     it.copy(repoPath = path, overview = Loadable.Ready(overview), lastRepoPath = path)
                 }
-                loadArtifacts(path)
+                // Review opens on the working tree's file list (§9c), so the
+                // stat listing is part of arriving — not a second tap.
+                loadDiff("HEAD")
             } catch (c: CancellationException) {
                 throw c
             } catch (error: Exception) {
@@ -148,30 +146,13 @@ class ReviewViewModel(
         }
     }
 
-    fun loadArtifacts(path: String) {
-        if (_ui.value.artifacts is Loadable.Loading) return
-        viewModelScope.launch {
-            _ui.update { it.copy(artifacts = Loadable.Loading) }
-            try {
-                val result = bridge.repoArtifacts(path)
-                _ui.update {
-                    it.copy(
-                        artifacts = Loadable.Ready(result.artifacts),
-                        artifactsTruncated = result.truncated,
-                    )
-                }
-            } catch (c: CancellationException) {
-                throw c
-            } catch (_: Exception) {
-                // Artifacts are supplementary; a failure must not break the overview.
-                _ui.update { it.copy(artifacts = Loadable.Idle) }
-            }
-        }
-    }
-
     fun loadDiff(ref: String, kind: String = "working") {
         val path = _ui.value.repoPath ?: return
-        if (_ui.value.diff is Loadable.Loading) return
+        // Only the same ref is deduplicated. Picking another commit while one
+        // is in flight has to win, or a tap in the history sheet silently does
+        // nothing; the response then applies only if its ref is still current.
+        val current = _ui.value
+        if (current.diff is Loadable.Loading && current.diffRef == ref && current.diffKind == kind) return
         viewModelScope.launch {
             _ui.update {
                 it.copy(
@@ -186,19 +167,25 @@ class ReviewViewModel(
             }
             try {
                 val diff = bridge.repoDiff(path, ref, kind)
-                _ui.update { it.copy(diff = Loadable.Ready(diff)) }
+                _ui.update { if (it.isCurrentDiff(path, ref, kind)) it.copy(diff = Loadable.Ready(diff)) else it }
             } catch (c: CancellationException) {
                 throw c
             } catch (error: Exception) {
                 _ui.update {
-                    it.copy(diff = Loadable.Failed(error.message ?: "Diff read failed", error.failureKind()))
+                    if (it.isCurrentDiff(path, ref, kind)) {
+                        it.copy(diff = Loadable.Failed(error.message ?: "Diff read failed", error.failureKind()))
+                    } else it
                 }
             }
         }
     }
 
-    /** Opens a file from the stat listing; fetches its hunks unless cached. */
-    fun selectFile(file: String) {
+    /**
+     * Opens a file from the stat listing; fetches its hunks unless cached.
+     * [mode] starts an untracked file on its content — git has no diff for a
+     * path it has never seen, so [DiffViewMode.Diff] would open on nothing.
+     */
+    fun selectFile(file: String, mode: DiffViewMode = DiffViewMode.Diff) {
         val state = _ui.value
         val path = state.repoPath ?: return
         val ref = state.diffRef ?: return
@@ -206,12 +193,15 @@ class ReviewViewModel(
         _ui.update {
             it.copy(
                 selectedFile = file,
-                viewMode = DiffViewMode.Diff,
+                viewMode = mode,
                 fileDiff = Loadable.Idle,
                 fileContent = Loadable.Idle,
             )
         }
-        loadFileDiff(path, ref, kind, file)
+        when (mode) {
+            DiffViewMode.Diff -> loadFileDiff(path, ref, kind, file)
+            DiffViewMode.File -> loadFileContent(path, ref, kind, file)
+        }
     }
 
     /** Flips the per-file viewer between hunks and the final file content. */
@@ -305,6 +295,9 @@ class ReviewViewModel(
             }
         }
     }
+
+    private fun ReviewUiState.isCurrentDiff(path: String, ref: String, kind: String): Boolean =
+        repoPath == path && diffRef == ref && diffKind == kind
 
     private fun ReviewUiState.isCurrentFile(path: String, ref: String, kind: String, file: String): Boolean =
         repoPath == path && diffRef == ref && diffKind == kind && selectedFile == file

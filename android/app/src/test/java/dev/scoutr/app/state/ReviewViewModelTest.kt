@@ -114,6 +114,13 @@ class ReviewViewModelTest {
         assertEquals(1, overview?.status?.size)
         assertEquals("initial commit", overview?.log?.first()?.subject)
         assertEquals("/home/test/repo-a", viewModel.ui.value.repoPath)
+
+        // Review lands on the working tree's file list, so the stat listing is
+        // part of arriving rather than a second tap (§9c).
+        val diffSettled = waitFor { viewModel.ui.value.diff is Loadable.Ready }
+        assertTrue("working diff never auto-loaded", diffSettled)
+        assertEquals("HEAD", viewModel.ui.value.diffRef)
+        assertEquals("working", viewModel.ui.value.diffKind)
     }
 
     @Test
@@ -140,12 +147,6 @@ class ReviewViewModelTest {
         fake.repoOverviewResult = Result.success(
             RepoOverviewResponse(ok = true, path = "/home/test/repo-a", root = "/home/test/repo-a", branch = "main"),
         )
-        fake.repoArtifactsResult = Result.success(
-            dev.scoutr.app.data.RepoArtifactsResponse(ok = true),
-        )
-        viewModel.selectRepo("/home/test/repo-a")
-        waitFor { viewModel.ui.value.overview is Loadable.Ready }
-
         fake.repoDiffResult = Result.success(
             RepoDiffResponse(
                 ok = true,
@@ -156,9 +157,9 @@ class ReviewViewModelTest {
         fake.repoFileDiffResult = Result.success(
             dev.scoutr.app.data.RepoFileDiffResponse(ok = true, diff = "+world\n", truncated = false),
         )
-        viewModel.loadDiff("HEAD")
+        viewModel.selectRepo("/home/test/repo-a")
 
-        val settled = waitFor { viewModel.ui.value.diff is Loadable.Ready }
+        val settled = waitFor { readyOf(viewModel.ui.value.diff)?.stat?.isNotEmpty() == true }
         assertTrue("diff never loaded", settled)
         assertEquals("HEAD", viewModel.ui.value.diffRef)
         assertEquals(1, readyOf(viewModel.ui.value.diff)?.stat?.size)
@@ -178,9 +179,6 @@ class ReviewViewModelTest {
         fake.repoOverviewResult = Result.success(
             RepoOverviewResponse(ok = true, path = "/home/test/repo-a", root = "/home/test/repo-a", branch = "main"),
         )
-        viewModel.selectRepo("/home/test/repo-a")
-        waitFor { viewModel.ui.value.overview is Loadable.Ready }
-
         fake.repoDiffResult = Result.success(
             RepoDiffResponse(
                 ok = true,
@@ -188,12 +186,12 @@ class ReviewViewModelTest {
                 stat = listOf(RepoDiffFileStat(path = "a.txt", additions = 1, deletions = 0)),
             ),
         )
-        viewModel.loadDiff("HEAD")
-        waitFor { viewModel.ui.value.diff is Loadable.Ready }
-
         fake.repoFileDiffResult = Result.success(
             dev.scoutr.app.data.RepoFileDiffResponse(ok = true, diff = "+world\n", truncated = false),
         )
+        viewModel.selectRepo("/home/test/repo-a")
+        waitFor { readyOf(viewModel.ui.value.diff)?.stat?.isNotEmpty() == true }
+
         viewModel.selectFile("a.txt")
         waitFor { viewModel.ui.value.fileDiff is Loadable.Ready }
         val afterFirst = fake.calls.count { it.name == "repoFileDiff" }
@@ -212,9 +210,6 @@ class ReviewViewModelTest {
         fake.repoOverviewResult = Result.success(
             RepoOverviewResponse(ok = true, path = "/home/test/repo-a", root = "/home/test/repo-a", branch = "main"),
         )
-        viewModel.selectRepo("/home/test/repo-a")
-        waitFor { viewModel.ui.value.overview is Loadable.Ready }
-
         fake.repoDiffResult = Result.success(
             RepoDiffResponse(
                 ok = true,
@@ -228,8 +223,8 @@ class ReviewViewModelTest {
         fake.repoFileResult = Result.success(
             dev.scoutr.app.data.RepoFileResponse(ok = true, content = "hello\nworld\n", truncated = false, binary = false, exists = true),
         )
-        viewModel.loadDiff("HEAD")
-        waitFor { viewModel.ui.value.diff is Loadable.Ready }
+        viewModel.selectRepo("/home/test/repo-a")
+        waitFor { readyOf(viewModel.ui.value.diff)?.stat?.isNotEmpty() == true }
         viewModel.selectFile("a.txt")
         waitFor { viewModel.ui.value.fileDiff is Loadable.Ready }
         viewModel.setViewMode(DiffViewMode.File)
@@ -250,9 +245,6 @@ class ReviewViewModelTest {
         fake.repoOverviewResult = Result.success(
             RepoOverviewResponse(ok = true, path = "/home/test/repo-a", root = "/home/test/repo-a", branch = "main"),
         )
-        viewModel.selectRepo("/home/test/repo-a")
-        waitFor { viewModel.ui.value.overview is Loadable.Ready }
-
         fake.repoDiffResult = Result.success(
             RepoDiffResponse(
                 ok = true,
@@ -266,8 +258,8 @@ class ReviewViewModelTest {
         fake.repoFileDiffResult = Result.success(
             dev.scoutr.app.data.RepoFileDiffResponse(ok = true, diff = "+world\n", truncated = false),
         )
-        viewModel.loadDiff("HEAD")
-        waitFor { viewModel.ui.value.diff is Loadable.Ready }
+        viewModel.selectRepo("/home/test/repo-a")
+        waitFor { readyOf(viewModel.ui.value.diff)?.stat?.isNotEmpty() == true }
 
         fake.repoFileResult = Result.success(
             dev.scoutr.app.data.RepoFileResponse(ok = true, content = "content of a\n", truncated = false, binary = false, exists = true),
@@ -290,6 +282,35 @@ class ReviewViewModelTest {
     }
 
     @Test
+    fun untrackedFileOpensOnContentNotHunks() {
+        stubDirs(dirs = listOf("repo-a"))
+        viewModel.openPicker()
+        waitFor { readyOf(viewModel.ui.value.dirs)?.isNotEmpty() == true }
+        fake.repoOverviewResult = Result.success(
+            RepoOverviewResponse(
+                ok = true,
+                path = "/home/test/repo-a",
+                root = "/home/test/repo-a",
+                branch = "main",
+                status = listOf(RepoStatusEntry(code = "??", path = "new.txt")),
+            ),
+        )
+        fake.repoFileResult = Result.success(
+            dev.scoutr.app.data.RepoFileResponse(ok = true, content = "brand new\n", truncated = false, binary = false, exists = true),
+        )
+        viewModel.selectRepo("/home/test/repo-a")
+        waitFor { viewModel.ui.value.diff is Loadable.Ready }
+
+        // git has no diff for a path it has never seen, so the tile opens on
+        // the file itself and must not spend a per-file diff read.
+        viewModel.selectFile("new.txt", DiffViewMode.File)
+        val settled = waitFor { viewModel.ui.value.fileContent is Loadable.Ready }
+        assertTrue("untracked file content never loaded", settled)
+        assertEquals("brand new\n", readyOf(viewModel.ui.value.fileContent)?.content)
+        assertEquals(0, fake.calls.count { it.name == "repoFileDiff" })
+    }
+
+    @Test
     fun refreshReloadsCurrentRepo() {
         stubDirs()
         viewModel.openPicker()
@@ -297,9 +318,6 @@ class ReviewViewModelTest {
 
         fake.repoOverviewResult = Result.success(
             RepoOverviewResponse(ok = true, path = "/home/test/repo-a", root = "/home/test/repo-a", branch = "main"),
-        )
-        fake.repoArtifactsResult = Result.success(
-            dev.scoutr.app.data.RepoArtifactsResponse(ok = true),
         )
         viewModel.selectRepo("/home/test/repo-a")
         waitFor { viewModel.ui.value.overview is Loadable.Ready }

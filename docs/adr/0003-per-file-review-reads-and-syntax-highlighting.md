@@ -1,5 +1,13 @@
 # Per-file review reads and syntax highlighting
 
+> Partly superseded by ADR 0005 (§9c Review layout): the bridge endpoints, caps,
+> path validation, per-(ref, kind, file) caching, and syntax highlighting below
+> all still hold, but the `DiffMode` screen they fed is gone. Files now expand in
+> place in the review list, so the prev/next buttons, the file-picker sheet, the
+> auto-select-first-file rule, and the commit `ModalBottomSheet` with its "Diff
+> vs parent" action no longer exist; the Diff/File toggle moved into the open
+> tile and wrap into the header overflow.
+
 Scoutr's review center moves from one globally truncated diff to a stat-first, per-file model served by three read-only bridge endpoints, and the Android DiffMode gains lazy per-file loading, a full-file view, wrapping, and syntax highlighting via the maintained `dev.snipme:highlights` library.
 
 ## Context
