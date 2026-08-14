@@ -60,9 +60,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.scoutr.app.ScoutrApp
-import dev.scoutr.app.data.ConnectionStore
+import dev.scoutr.app.data.AppearancePreferencesStore
 import dev.scoutr.app.data.RepoCommit
-import dev.scoutr.app.data.TerminalPreferencesStore
 import dev.scoutr.app.data.RepoDiffFileStat
 import dev.scoutr.app.state.DiffViewMode
 import dev.scoutr.app.state.Loadable
@@ -83,12 +82,12 @@ import java.util.Locale
 @Composable
 fun ReviewScreen(
     viewModel: ReviewViewModel,
-    terminalPreferences: TerminalPreferencesStore? = null,
-    saved: ConnectionStore.Saved? = null,
     modifier: Modifier = Modifier,
 ) {
     val ui by viewModel.ui.collectAsState()
-    val codeFontSizeSp = rememberReviewCodeFontSize(terminalPreferences, saved)
+    val context = LocalContext.current
+    val appearance = remember(context) { AppearancePreferencesStore(context) }
+    val reviewFontSizeSp = appearance.reviewFontSizeSp
 
     // Self-initializing: show the repo picker when no repo is selected. The
     // guard keeps a config change (rotation) from wiping the open review.
@@ -104,26 +103,13 @@ fun ReviewScreen(
             viewModel = viewModel,
             ui = ui,
             diffOpen = diffOpen,
-            codeFontSizeSp = codeFontSizeSp,
+            reviewFontSizeSp = reviewFontSizeSp,
             onDiffChanged = { diffOpen = it },
             modifier = modifier,
         )
     }
 }
 
-@Composable
-private fun rememberReviewCodeFontSize(
-    terminalPreferences: TerminalPreferencesStore?,
-    saved: ConnectionStore.Saved?,
-): Float {
-    if (terminalPreferences == null || saved == null) {
-        return TerminalPreferencesStore.ConnectionPreferences.DEFAULT_FONT_SIZE_SP
-    }
-    val revision by terminalPreferences.viewPreferencesRevision.collectAsState()
-    return remember(terminalPreferences, revision, saved.host, saved.token) {
-        terminalPreferences.forConnection(saved.host, saved.token).fontSizeSp
-    }
-}
 
 @Composable
 private fun PickerMode(
@@ -265,7 +251,7 @@ private fun ReviewMode(
     viewModel: ReviewViewModel,
     ui: dev.scoutr.app.state.ReviewUiState,
     diffOpen: Boolean,
-    codeFontSizeSp: Float,
+    reviewFontSizeSp: Float,
     onDiffChanged: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -289,7 +275,7 @@ private fun ReviewMode(
         DiffMode(
             viewModel = viewModel,
             ui = ui,
-            codeFontSizeSp = codeFontSizeSp,
+            reviewFontSizeSp = reviewFontSizeSp,
             onBack = { onDiffChanged(false) },
             modifier = modifier.testTag("review_capture_root"),
         )
@@ -583,7 +569,7 @@ private fun DiffRow(
 private fun DiffMode(
     viewModel: ReviewViewModel,
     ui: dev.scoutr.app.state.ReviewUiState,
-    codeFontSizeSp: Float,
+    reviewFontSizeSp: Float,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -650,7 +636,7 @@ private fun DiffMode(
                 ui = ui,
                 stats = stats,
                 wrapLines = wrapLines,
-                codeFontSizeSp = codeFontSizeSp,
+                reviewFontSizeSp = reviewFontSizeSp,
                 onOpenPicker = { fileSheetOpen = true },
             )
         }
@@ -674,7 +660,7 @@ private fun PerFileView(
     ui: dev.scoutr.app.state.ReviewUiState,
     stats: List<RepoDiffFileStat>,
     wrapLines: Boolean,
-    codeFontSizeSp: Float,
+    reviewFontSizeSp: Float,
     onOpenPicker: () -> Unit,
 ) {
     val selectedFile = ui.selectedFile
@@ -753,8 +739,8 @@ private fun PerFileView(
         }
         HorizontalDivider()
         when (ui.viewMode) {
-            DiffViewMode.Diff -> FileDiffContent(ui, selectedFile, wrapLines, codeFontSizeSp)
-            DiffViewMode.File -> FileContent(ui, selectedFile, wrapLines, codeFontSizeSp)
+            DiffViewMode.Diff -> FileDiffContent(ui, selectedFile, wrapLines, reviewFontSizeSp)
+            DiffViewMode.File -> FileContent(ui, selectedFile, wrapLines, reviewFontSizeSp)
         }
     }
 }
@@ -776,7 +762,7 @@ private fun ColumnScope.FileDiffContent(
     ui: dev.scoutr.app.state.ReviewUiState,
     selectedFile: String,
     wrapLines: Boolean,
-    codeFontSizeSp: Float,
+    reviewFontSizeSp: Float,
 ) {
     when (val load = ui.fileDiff) {
         is Loadable.Loading -> CenteredLoading()
@@ -791,7 +777,7 @@ private fun ColumnScope.FileDiffContent(
             val language = languageForPath(selectedFile)
             key(selectedFile) {
                 LineBody(load.value.diff.split("\n"), wrapLines, scrollHorizontally = false) { lines ->
-                    DiffLines(lines, language, wrapLines, style = ScoutrType.monoCode(codeFontSizeSp))
+                    DiffLines(lines, language, wrapLines, style = ScoutrType.monoCode(reviewFontSizeSp))
                 }
             }
             if (load.value.truncated) TruncatedNote("file diff truncated to 64 KiB")
@@ -805,7 +791,7 @@ private fun ColumnScope.FileContent(
     ui: dev.scoutr.app.state.ReviewUiState,
     selectedFile: String,
     wrapLines: Boolean,
-    codeFontSizeSp: Float,
+    reviewFontSizeSp: Float,
 ) {
     when (val load = ui.fileContent) {
         is Loadable.Loading -> CenteredLoading()
@@ -825,7 +811,7 @@ private fun ColumnScope.FileContent(
                     val language = languageForPath(selectedFile)
                     key(selectedFile) {
                         LineBody(body.content.split("\n"), wrapLines) { lines ->
-                            CodeLines(lines, language, wrapLines, style = ScoutrType.monoCode(codeFontSizeSp))
+                            CodeLines(lines, language, wrapLines, style = ScoutrType.monoCode(reviewFontSizeSp))
                         }
                     }
                     if (body.truncated) TruncatedNote("file truncated to 256 KiB")

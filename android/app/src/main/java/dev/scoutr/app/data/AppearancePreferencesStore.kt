@@ -5,8 +5,8 @@ import android.content.SharedPreferences
 
 /**
  * Device-global presentation preferences owned by Settings: the defaults a new
- * Chat visit starts from, and the single haptics switch every semantic haptic
- * is gated on.
+ * Chat visit starts from, adjustable machine-text sizes, and the single haptics
+ * switch every semantic haptic is gated on.
  *
  * Deliberately not per-connection — these are how the user likes the app to
  * feel, so forgetting a pairing leaves them alone. Chat reads the defaults as
@@ -39,6 +39,11 @@ class AppearancePreferencesStore(context: Context) {
         get() = prefs.getFloat(KEY_MARKDOWN_CODE_FONT_SIZE, DEFAULT_MARKDOWN_CODE_FONT_SIZE_SP)
         set(value) = prefs.edit().putFloat(KEY_MARKDOWN_CODE_FONT_SIZE, value.coerceIn(MIN_CODE_FONT_SIZE_SP, MAX_CODE_FONT_SIZE_SP)).apply()
 
+    /** Font size for diff and file content in the Review screen. */
+    var reviewFontSizeSp: Float
+        get() = prefs.getFloat(KEY_REVIEW_FONT_SIZE, DEFAULT_REVIEW_FONT_SIZE_SP)
+        set(value) = prefs.edit().putFloat(KEY_REVIEW_FONT_SIZE, value.coerceIn(MIN_CODE_FONT_SIZE_SP, MAX_CODE_FONT_SIZE_SP)).apply()
+
     /** Font size for expanded tool results and inline file-edit diffs. */
     var toolOutputFontSizeSp: Float
         get() = prefs.getFloat(KEY_TOOL_OUTPUT_FONT_SIZE, DEFAULT_TOOL_OUTPUT_FONT_SIZE_SP)
@@ -51,8 +56,9 @@ class AppearancePreferencesStore(context: Context) {
     companion object {
         const val FILE = "scoutr_appearance"
 
-        /** Defaults for the compact machine-text controls in Chat. */
+        /** Defaults for compact machine-text controls in Chat and Review. */
         const val DEFAULT_MARKDOWN_CODE_FONT_SIZE_SP = 11f
+        const val DEFAULT_REVIEW_FONT_SIZE_SP = 11f
         const val DEFAULT_TOOL_OUTPUT_FONT_SIZE_SP = 9.5f
         const val MIN_CODE_FONT_SIZE_SP = 8f
         const val MAX_CODE_FONT_SIZE_SP = 18f
@@ -65,6 +71,7 @@ class AppearancePreferencesStore(context: Context) {
         private const val KEY_SHOW_THINKING = "showThinkingDefault"
         private const val KEY_EXPAND_TOOLS = "expandToolsDefault"
         private const val KEY_MARKDOWN_CODE_FONT_SIZE = "markdownCodeFontSizeSp"
+        private const val KEY_REVIEW_FONT_SIZE = "reviewFontSizeSp"
         private const val KEY_TOOL_OUTPUT_FONT_SIZE = "toolOutputFontSizeSp"
         private const val KEY_HAPTICS = "hapticsEnabled"
     }

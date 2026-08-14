@@ -21,6 +21,7 @@ import type {
 } from "../types.js";
 import { parseClaudeTranscript } from "./transcript.js";
 import { claudeEffortArg, claudeModelArg, readClaudeModelsCatalog } from "./models.js";
+import { readClaudeCommandsCatalog } from "./commands.js";
 import { claudeQuestions } from "./questions.js";
 import { claudeAnswerPlan } from "./questionnaire.js";
 
@@ -256,7 +257,7 @@ export const claudeBackend: AgentBackend = {
   displayName: "Claude Code",
   capabilities: CLAUDE_CAPABILITIES,
   hasModelCatalog: true,
-  hasSlashCommands: false,
+  hasSlashCommands: true,
 
   launchCommand: claudeLaunchCommand,
   resumeCommand: claudeResumeCommand,
@@ -269,5 +270,5 @@ export const claudeBackend: AgentBackend = {
   control: claudeControl,
   deliverInitialPrompt: claudeDeliverInitialPrompt,
   models: readClaudeModelsCatalog,
-  commands: async () => ({ commands: [] }),
+  commands: (cwd) => readClaudeCommandsCatalog(cwd, claudeConfigDir()),
 };

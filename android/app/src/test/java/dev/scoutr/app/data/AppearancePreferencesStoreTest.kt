@@ -33,6 +33,7 @@ class AppearancePreferencesStoreTest {
         assertFalse(prefs.expandToolsDefault)
         assertTrue(prefs.hapticsEnabled)
         assertEquals(11f, prefs.markdownCodeFontSizeSp)
+        assertEquals(11f, prefs.reviewFontSizeSp)
         assertEquals(9.5f, prefs.toolOutputFontSizeSp, 0.01f)
     }
 
@@ -42,6 +43,7 @@ class AppearancePreferencesStoreTest {
         store().expandToolsDefault = true
         store().hapticsEnabled = false
         store().markdownCodeFontSizeSp = 13f
+        store().reviewFontSizeSp = 14f
         store().toolOutputFontSizeSp = 12.5f
 
         val reread = store()
@@ -49,6 +51,7 @@ class AppearancePreferencesStoreTest {
         assertTrue(reread.expandToolsDefault)
         assertFalse(reread.hapticsEnabled)
         assertEquals(13f, reread.markdownCodeFontSizeSp)
+        assertEquals(14f, reread.reviewFontSizeSp)
         assertEquals(12.5f, reread.toolOutputFontSizeSp, 0.01f)
     }
 
@@ -56,9 +59,11 @@ class AppearancePreferencesStoreTest {
     fun code_sizes_are_clamped_to_the_readable_range() {
         val prefs = store()
         prefs.markdownCodeFontSizeSp = 2f
+        prefs.reviewFontSizeSp = 30f
         prefs.toolOutputFontSizeSp = 30f
 
         assertEquals(8f, prefs.markdownCodeFontSizeSp)
+        assertEquals(18f, prefs.reviewFontSizeSp)
         assertEquals(18f, prefs.toolOutputFontSizeSp)
     }
 

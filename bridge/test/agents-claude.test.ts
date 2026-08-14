@@ -13,6 +13,7 @@ import {
   claudeResumeCommand,
 } from "../src/agents/claude/index.js";
 import { parseClaudeTranscript } from "../src/agents/claude/transcript.js";
+import { readClaudeCommandsCatalog } from "../src/agents/claude/commands.js";
 import { claudeDeliverInitialPrompt, claudeExtractQuestions } from "../src/agents/claude/index.js";
 import { fakeHerdr } from "./support/fake-herdr.js";
 
@@ -86,6 +87,53 @@ describe("claude adapter", () => {
     });
     it("ignores a thinking level claude does not accept", () => {
       assert.equal(claudeLaunchCommand({ thinkingLevel: "off" }), "claude");
+    });
+  });
+
+  describe("commands", () => {
+    it("lists built-ins plus the project's and user's own commands and skills", async () => {
+      const config = await claudeStore();
+      const project = await mkdtemp(join(tmpdir(), "scoutr-claude-cwd-"));
+
+      await mkdir(join(config, "commands"), { recursive: true });
+      await writeFile(
+        join(config, "commands", "standup.md"),
+        "---\ndescription: Write today's standup note\nargument-hint: <date>\n---\n\nSummarize what changed.\n",
+      );
+      // Subdirectories group commands but do not namespace them.
+      await mkdir(join(config, "commands", "frontend"), { recursive: true });
+      await writeFile(join(config, "commands", "frontend", "component.md"), "Scaffold a component.\n");
+
+      await mkdir(join(config, "skills", "unslop"), { recursive: true });
+      await writeFile(
+        join(config, "skills", "unslop", "SKILL.md"),
+        "---\nname: unslop\ndescription: Remove AI writing patterns from prose\n---\n\nBody.\n",
+      );
+
+      await mkdir(join(project, ".claude", "commands"), { recursive: true });
+      await writeFile(
+        join(project, ".claude", "commands", "deploy.md"),
+        "---\ndescription: Ship the bridge\n---\n\nRun the deploy.\n",
+      );
+
+      const catalog = await readClaudeCommandsCatalog(project, config);
+      const byName = new Map(catalog.commands.map((command) => [command.name, command]));
+
+      assert.equal(byName.get("model")?.source, "builtin");
+      assert.equal(byName.get("security-review")?.source, "skill", "bundled skills ship inside the CLI");
+      assert.equal(byName.get("deploy")?.description, "Ship the bridge");
+      assert.equal(byName.get("deploy")?.source, "prompt");
+      assert.equal(byName.get("standup")?.argumentHint, "<date>");
+      assert.equal(byName.get("component")?.description, "Scaffold a component.", "no frontmatter: first prose line");
+      assert.equal(byName.get("unslop")?.source, "skill");
+      assert.equal(new Set(catalog.commands.map((c) => c.name)).size, catalog.commands.length, "names are unique");
+    });
+
+    it("falls back to built-ins when the stores are missing", async () => {
+      const config = await mkdtemp(join(tmpdir(), "scoutr-claude-empty-"));
+      const catalog = await readClaudeCommandsCatalog(undefined, config);
+      assert.ok(catalog.commands.length > 0);
+      assert.ok(catalog.commands.every((command) => command.source === "builtin" || command.source === "skill"));
     });
   });
 
@@ -276,7 +324,7 @@ describe("claude adapter", () => {
     it("advertises only its real capabilities", () => {
       assert.deepEqual([...claudeBackend.capabilities], ["abort", "compact", "close", "set_model"]);
       assert.equal(claudeBackend.hasModelCatalog, true);
-      assert.equal(claudeBackend.hasSlashCommands, false);
+      assert.equal(claudeBackend.hasSlashCommands, true);
     });
   });
 

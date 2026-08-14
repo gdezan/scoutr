@@ -167,6 +167,11 @@ class SettingsScreenTest {
         compose.onNodeWithTag("settings_markdown_code_value").assertTextEquals("10")
         assertEquals(10f, appearance.markdownCodeFontSizeSp, 0.01f)
 
+        compose.onNodeWithTag("settings_review_code_value").performScrollTo().assertTextEquals("11")
+        compose.onNodeWithTag("settings_review_code_plus").performClick()
+        compose.onNodeWithTag("settings_review_code_value").assertTextEquals("12")
+        assertEquals(12f, appearance.reviewFontSizeSp, 0.01f)
+
         compose.onNodeWithTag("settings_tool_output_value").performScrollTo().assertTextEquals("9.5")
         compose.onNodeWithTag("settings_tool_output_plus").performClick()
         compose.onNodeWithTag("settings_tool_output_value").assertTextEquals("10")

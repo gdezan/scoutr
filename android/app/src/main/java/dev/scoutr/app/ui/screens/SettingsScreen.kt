@@ -288,15 +288,20 @@ private fun ChatSection(appearance: AppearancePreferencesStore) {
     }
 }
 
-/** Global code density controls; review code deliberately follows Terminal below. */
+/** Global machine-text size controls for Chat and Review. */
 @Composable
 private fun TypographySection(appearance: AppearancePreferencesStore) {
     var markdownCodeFontSizeSp by remember(appearance) { mutableFloatStateOf(appearance.markdownCodeFontSizeSp) }
+    var reviewFontSizeSp by remember(appearance) { mutableFloatStateOf(appearance.reviewFontSizeSp) }
     var toolOutputFontSizeSp by remember(appearance) { mutableFloatStateOf(appearance.toolOutputFontSizeSp) }
 
     fun setMarkdownCodeFontSize(value: Float) {
         appearance.markdownCodeFontSizeSp = value
         markdownCodeFontSizeSp = appearance.markdownCodeFontSizeSp
+    }
+    fun setReviewFontSize(value: Float) {
+        appearance.reviewFontSizeSp = value
+        reviewFontSizeSp = appearance.reviewFontSizeSp
     }
 
     fun setToolOutputFontSize(value: Float) {
@@ -306,7 +311,7 @@ private fun TypographySection(appearance: AppearancePreferencesStore) {
 
     SettingsSection(
         "Typography",
-        footnote = "Review diff and file content use the active connection's Terminal font size.",
+        footnote = "Review diff and file content use their own adjustable font size."
     ) {
         FontSizeStepperRow(
             title = "Markdown code",
@@ -320,6 +325,20 @@ private fun TypographySection(appearance: AppearancePreferencesStore) {
             plusTag = "settings_markdown_code_plus",
             smallerContentDescription = "Smaller Markdown code",
             largerContentDescription = "Larger Markdown code",
+        )
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        FontSizeStepperRow(
+            title = "Review code",
+            subtitle = "Diff and file content in the Review screen.",
+            fontSizeSp = reviewFontSizeSp,
+            minFontSizeSp = AppearancePreferencesStore.MIN_CODE_FONT_SIZE_SP,
+            maxFontSizeSp = AppearancePreferencesStore.MAX_CODE_FONT_SIZE_SP,
+            onFontSizeChange = ::setReviewFontSize,
+            minusTag = "settings_review_code_minus",
+            valueTag = "settings_review_code_value",
+            plusTag = "settings_review_code_plus",
+            smallerContentDescription = "Smaller Review code",
+            largerContentDescription = "Larger Review code",
         )
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         FontSizeStepperRow(
