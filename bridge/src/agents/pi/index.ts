@@ -28,6 +28,7 @@ import { readModelsCatalog } from "./models.js";
 import { readCommandsCatalog } from "./commands.js";
 
 const MAX_MODEL_LENGTH = 200;
+const PI_SHIFT_TAB_SEQUENCE = "\u001b[Z";
 const CONTROL_CHAR = /[\u0000-\u001f\u007f]/;
 
 /** pi's documented `--thinking` levels (README: Model Options). */
@@ -179,7 +180,11 @@ export async function piControl(herdr: HerdrPort, params: ControlParams): Promis
       }
       const model = requireCatalogModel(readModelsCatalog(), session.model);
       const keys = thinkingLevelKeys(session.thinkingLevel, text, model.thinkingLevels);
-      if (keys.length > 0) await herdr.paneSendKeys(paneId, keys);
+      if (keys.length > 0) {
+        // Herdr currently serializes logical shift+tab as plain tab. Pi's
+        // interactive TUI expects the terminal back-tab sequence instead.
+        await herdr.paneSendText(paneId, PI_SHIFT_TAB_SEQUENCE.repeat(keys.length));
+      }
       return;
     }
     default: {

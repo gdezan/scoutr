@@ -549,8 +549,8 @@ describe("controlSession", () => {
       await rm(sessionDir, { recursive: true, force: true });
       await rm(agentDir, { recursive: true, force: true });
     }
-    assert.deepEqual(herdr.calls.map((call) => call.method), ["session.snapshot", "session.snapshot", "pane.send_keys"]);
-    assert.deepEqual(herdr.calls[2].params.keys, ["shift+tab", "shift+tab"]);
+    assert.deepEqual(herdr.calls.map((call) => call.method), ["session.snapshot", "session.snapshot", "pane.send_text"]);
+    assert.equal(herdr.calls[2].params.text, "\u001b[Z\u001b[Z");
   });
 
   it("calculates deterministic thinking cycles and rejects unsupported targets", () => {
