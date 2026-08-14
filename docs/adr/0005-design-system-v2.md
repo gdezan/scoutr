@@ -14,6 +14,7 @@ The app had accumulated blue-era theme tokens, inconsistent corner radii, defaul
 - Render agent status as unfilled 9dp rings with 2.5dp strokes. Under reduce motion, animated indicators become static rings.
 - Replace loading spinners and skeletons with observable text or static feedback. Preserve the intentional live-state ripple in `WorkingIndicator`.
 - Use compact structural patterns: the Board lockup and mono-caps count headers, the Chat assistant spine, inline tool detail tiles, and a filled 6dp square send action.
+- Use a 90ms press tint without scale, 140ms fade-only arrivals without placement motion, and a workspace › tab › pane breadcrumb selector for Terminal.
 - Group Sessions by dynamically derived repository tabs while keeping Active, Completed, Pinned, and Archived scopes reachable through the scope filter.
 - Bundle the approved fonts and use the supplied Scoutr icon asset for launcher and splash surfaces.
 

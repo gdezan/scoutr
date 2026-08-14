@@ -13,9 +13,11 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -45,10 +47,13 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import dev.scoutr.app.data.TerminalSnapshot
 import androidx.lifecycle.compose.LifecycleStartEffect
 import com.termux.view.TerminalView
 import dev.scoutr.app.R
 import dev.scoutr.app.data.TerminalPreferencesStore
+import dev.scoutr.app.ui.components.PressTintSurface
+import dev.scoutr.app.ui.theme.ScoutrMono
 import dev.scoutr.app.ui.imeOrNavigationBarsPadding
 import dev.scoutr.app.state.TerminalConnectionState
 import dev.scoutr.app.state.TerminalViewModel
@@ -179,11 +184,11 @@ fun TerminalScreen(
                     Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text(
-                        text = ui.paneName ?: ui.title ?: "Terminal",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 1,
+                    TerminalBreadcrumb(
+                        snapshot = ui.snapshot,
+                        paneId = ui.paneId,
+                        paneName = ui.paneName ?: ui.title ?: "Terminal",
+                        onClick = { scope.launch { drawerState.open() } },
                         modifier = Modifier.weight(1f),
                     )
                     TerminalStatusChip(ui)
@@ -263,8 +268,8 @@ fun TerminalScreen(
                         view
                     },
                     // Font size lives in per-connection preferences, so pinch
-                    // zoom and a fresh entry to the route both land here rather
-                    // than in an effect that could race the factory's layout.
+                    // zoom and a fresh entry to the route land here instead
+                    // of an effect that could race the factory's layout.
                     update = { view -> view.setTextSize((fontSizeSp * density).roundToInt()) },
                     onRelease = { view ->
                         // Drop the repaint callback before the view dies: the
@@ -299,6 +304,52 @@ fun TerminalScreen(
                 state = modifierState,
                 visible = extraKeysVisible,
                 onToggleVisibility = { viewModel.updateExtraKeysVisible(!extraKeysVisible) },
+            )
+        }
+    }
+}
+
+@Composable
+private fun TerminalBreadcrumb(
+    snapshot: TerminalSnapshot?,
+    paneId: String?,
+    paneName: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val pane = snapshot?.let { current -> paneId?.let(current::pane) }
+    val workspace = pane?.let { snapshot?.workspaceName(it.workspaceId) } ?: "Workspace"
+    val tab = pane?.let { snapshot?.tabName(it.tabId) } ?: "Tab"
+    PressTintSurface(
+        onClick = onClick,
+        shape = MaterialTheme.shapes.extraSmall,
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        pressedColor = MaterialTheme.colorScheme.surfaceVariant,
+        modifier = modifier
+            .testTag("terminal_breadcrumb")
+            .padding(vertical = 1.dp),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 10.dp, vertical = 7.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = "$workspace › $tab › $paneName",
+                style = MaterialTheme.typography.labelMedium,
+                fontFamily = ScoutrMono,
+                fontWeight = FontWeight.Medium,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            Icon(
+                imageVector = Icons.Default.KeyboardArrowDown,
+                contentDescription = "Choose terminal pane",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(18.dp),
             )
         }
     }

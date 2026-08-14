@@ -2,10 +2,9 @@ package dev.scoutr.app.ui.screens
 
 import dev.scoutr.app.ui.theme.ScoutrMono
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.scrollBy
@@ -108,6 +107,7 @@ import dev.scoutr.app.data.SlashCommandInfo
 import dev.scoutr.app.data.entryText
 import dev.scoutr.app.ui.imeOrNavigationBarsPadding
 import dev.scoutr.app.ui.components.AssistantMarkdown
+import dev.scoutr.app.ui.components.PressTintSurface
 import dev.scoutr.app.ui.components.QuestionCard
 import dev.scoutr.app.ui.components.WorkingIndicator
 import dev.scoutr.app.ui.components.WorkingIndicatorMode
@@ -584,6 +584,30 @@ fun ChatList(
     val indicatorMode = workingIndicatorMode(starting, agentStatus, hasPendingQuestion)
 
     val reduceMotion = useReduceMotion()
+    var expandedToolIds by remember(entries.firstOrNull()?.entryId) {
+        mutableStateOf<Set<String>>(emptySet())
+    }
+    var collapsedToolIds by remember(entries.firstOrNull()?.entryId) {
+        mutableStateOf<Set<String>>(emptySet())
+    }
+    fun isToolExpanded(toolId: String): Boolean =
+        if (expandTools) toolId !in collapsedToolIds else toolId in expandedToolIds
+    fun toggleTool(toolId: String) {
+        if (expandTools) {
+            collapsedToolIds = if (toolId in collapsedToolIds) {
+                collapsedToolIds - toolId
+            } else {
+                collapsedToolIds + toolId
+            }
+        } else {
+            expandedToolIds = if (toolId in expandedToolIds) {
+                expandedToolIds - toolId
+            } else {
+                expandedToolIds + toolId
+            }
+        }
+    }
+
     var followNew by remember { mutableStateOf(true) }
 
     // A new entry only lands while the user is at the bottom; the moment they
@@ -659,8 +683,10 @@ fun ChatList(
                     is ChatRow.Entry -> MessageRow(
                         entry = row.entry,
                         showThinking = showThinking,
-                        expandTools = expandTools,
-                        Modifier.padding(top = entrySpacing(row.entry)).animateItem(
+                        toolExpanded = { toolId -> isToolExpanded(toolId) },
+                        resultToolKey = { entry -> toolResultKey(entry, entries) },
+                        onToggleTool = { toolId -> toggleTool(toolId) },
+                        modifier = Modifier.padding(top = entrySpacing(row.entry)).animateItem(
                             fadeInSpec = ScoutrMotion.itemSpec(reduceMotion),
                             placementSpec = ScoutrMotion.itemPlacementSpec(reduceMotion),
                             fadeOutSpec = ScoutrMotion.itemSpec(reduceMotion),
@@ -718,8 +744,8 @@ fun ChatList(
         }
         AnimatedVisibility(
             visible = notAtBottom,
-            enter = fadeIn() + slideInVertically { it / 2 },
-            exit = fadeOut() + slideOutVertically { it / 2 },
+            enter = fadeIn(animationSpec = tween(ScoutrMotion.DURATION_ARRIVE)),
+            exit = fadeOut(animationSpec = tween(ScoutrMotion.DURATION_ARRIVE)),
             modifier = Modifier.align(Alignment.BottomEnd).padding(end = 16.dp, bottom = 10.dp),
         ) {
             FloatingActionButton(
@@ -779,13 +805,27 @@ private suspend fun scrollChatToEnd(listState: LazyListState, lastIndex: Int) {
 private fun MessageRow(
     entry: SessionEntry,
     showThinking: Boolean,
-    expandTools: Boolean,
+    toolExpanded: (String) -> Boolean,
+    onToggleTool: (String) -> Unit,
+    resultToolKey: (SessionEntry) -> String,
     modifier: Modifier = Modifier,
 ) {
     when (entry.role) {
         "user" -> UserBubble(entry, modifier)
-        "assistant" -> AssistantBubble(entry, showThinking, expandTools, modifier)
-        "toolResult" -> ToolResultChip(entry, forceExpanded = expandTools, modifier)
+        "assistant" -> AssistantBubble(
+            entry = entry,
+            showThinking = showThinking,
+            toolExpanded = toolExpanded,
+            onToggleTool = onToggleTool,
+            modifier = modifier,
+        )
+        "toolResult" -> ToolResultChip(
+            entry = entry,
+            toolExpanded = toolExpanded,
+            resultToolKey = resultToolKey,
+            onToggleTool = onToggleTool,
+            modifier = modifier,
+        )
         else -> {}
     }
 }
@@ -857,7 +897,8 @@ private fun PendingUserBubble(
 private fun AssistantBubble(
     entry: SessionEntry,
     showThinking: Boolean,
-    expandTools: Boolean,
+    toolExpanded: (String) -> Boolean,
+    onToggleTool: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Row(modifier.fillMaxWidth().testTag("assistant_bubble")) {
@@ -870,17 +911,14 @@ private fun AssistantBubble(
         ) {
             Box(
                 Modifier
-                    .width(2.dp)
+                    .width(1.dp)
                     .fillMaxHeight()
-                    .background(
-                        MaterialTheme.colorScheme.primary.copy(alpha = 0.55f),
-                        RoundedCornerShape(1.dp),
-                    )
+                    .background(MaterialTheme.colorScheme.outlineVariant)
                     .testTag("assistant_spine"),
             )
         }
         Column(Modifier.weight(1f)) {
-            for (block in entry.content) {
+            for ((blockIndex, block) in entry.content.withIndex()) {
                 when (block.type) {
                     "text" -> {
                         val text = block.text?.trim()
@@ -902,11 +940,12 @@ private fun AssistantBubble(
                     }
 
                     "toolCall" -> {
-                        // Quiet collapsed chip by default — a one-line dim summary;
-                        // the tools toggle (or a tap) reveals the full command.
+                        // Quiet one-line machine fact; tapping it expands the linked
+                        // result tile below.
                         ToolCallChip(
                             block = block,
-                            forceExpanded = expandTools,
+                            isExpanded = toolExpanded(toolCallKey(entry.entryId, block, blockIndex)),
+                            onToggle = { onToggleTool(toolCallKey(entry.entryId, block, blockIndex)) },
                             modifier = Modifier.padding(top = 4.dp),
                         )
                     }
@@ -966,6 +1005,51 @@ fun toolCallCommand(block: ContentBlock): String {
     val compact = args.toString()
     return if (compact.length > 64) compact.take(61) + "…" else compact
 }
+/** Stable key shared by a tool-call row and its linked result state. */
+private fun toolCallKey(entryId: String, block: ContentBlock, blockIndex: Int): String =
+    block.id?.takeUnless { it.isBlank() } ?: "$entryId:tool:$blockIndex"
+
+/**
+ * Resolve a result to its call when the transcript omits or partially omits IDs.
+ * Pi normally provides the ID; parentId plus tool name remains a deterministic
+ * fallback for older or malformed transcript records.
+ */
+private fun toolResultKey(entry: SessionEntry, entries: List<SessionEntry>): String {
+    val inferredCallKey = inferredToolCallKey(entry, entries)
+    val explicitResultKey = entry.toolCallId?.takeUnless { it.isBlank() }
+    return inferredCallKey ?: explicitResultKey ?: "${entry.entryId}:result"
+}
+
+/** Match partial-ID results to the next unclaimed call in transcript order. */
+private fun inferredToolCallKey(entry: SessionEntry, entries: List<SessionEntry>): String? {
+    val parent = entries.firstOrNull { it.entryId == entry.parentId } ?: return null
+    val calls = parent.content.withIndex().filter { it.value.type == "toolCall" }
+    if (calls.isEmpty()) return null
+    val resultIndex = entries.indexOfFirst { it.entryId == entry.entryId }
+    val priorResults = if (resultIndex >= 0) entries.take(resultIndex) else emptyList()
+    val results = priorResults
+        .asSequence()
+        .plus(entry)
+        .filter { it.role == "toolResult" && it.parentId == entry.parentId }
+        .filter { entry.toolName == null || it.toolName == entry.toolName }
+    val claimedCallIndexes = mutableSetOf<Int>()
+    for (result in results) {
+        val explicitId = result.toolCallId?.takeUnless { it.isBlank() }
+        val explicitMatch = calls.indexOfFirst {
+            it.index !in claimedCallIndexes && it.value.id?.takeUnless(String::isBlank) == explicitId
+        }
+        val fallbackMatch = calls.indexOfFirst {
+            it.index !in claimedCallIndexes &&
+                (result.toolName == null || it.value.name == result.toolName)
+        }
+        val call = calls.getOrNull(if (explicitMatch >= 0) explicitMatch else fallbackMatch)
+        if (call == null) continue
+        claimedCallIndexes += call.index
+        if (result.entryId == entry.entryId) return toolCallKey(parent.entryId, call.value, call.index)
+    }
+    return null
+}
+
 
 /** Vertical rhythm: consecutive tool entries group at 4dp; prose gets air. */
 private fun entrySpacing(entry: SessionEntry): Dp = when {
@@ -977,57 +1061,68 @@ private fun entrySpacing(entry: SessionEntry): Dp = when {
 @Composable
 private fun ToolCallChip(
     block: ContentBlock,
-    forceExpanded: Boolean,
+    isExpanded: Boolean,
+    onToggle: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    var localExpanded by remember(block.id) { mutableStateOf(false) }
-    val expanded = forceExpanded || localExpanded
+    val expanded = isExpanded
     val command = toolCallCommand(block)
     val name = block.name ?: "tool"
-    // One-line index entry: label inline with the command, no fill — the mono
-    // face + ▸ caret alone read as machine metadata, keeping prose primary.
-    Row(
-        modifier
-            .fillMaxWidth()
-            .clickable { localExpanded = !localExpanded }
-            .testTag("tool_chip"),
-        verticalAlignment = Alignment.CenterVertically,
+    // Tool calls remain one-line machine facts; the linked result owns the
+    // expandable filled tile surface below.
+    PressTintSurface(
+        onClick = onToggle,
+        color = androidx.compose.ui.graphics.Color.Transparent,
+        pressedColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
+        modifier = modifier.fillMaxWidth().testTag("tool_chip"),
     ) {
-        Text(
-            if (expanded) "▾ $name" else "▸ $name",
-            style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
-            fontFamily = ScoutrMono,
-            fontWeight = FontWeight.SemiBold,
-            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
-        )
-        Spacer(Modifier.width(8.dp))
-        Text(
-            command,
-            style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
-            fontFamily = ScoutrMono,
-            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-            maxLines = if (expanded) Int.MAX_VALUE else 1,
-            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f),
-        )
+        Row(
+            Modifier.fillMaxWidth().padding(vertical = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                name,
+                style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                fontFamily = ScoutrMono,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(
+                command,
+                style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                fontFamily = ScoutrMono,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            Icon(
+                imageVector = if (expanded) Icons.Filled.KeyboardArrowDown else Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = if (expanded) "Collapse $name" else "Expand $name",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                modifier = Modifier.size(18.dp),
+            )
+        }
     }
 }
 
 @Composable
 private fun ToolResultChip(
     entry: SessionEntry,
-    forceExpanded: Boolean,
+    toolExpanded: (String) -> Boolean,
+    resultToolKey: (SessionEntry) -> String,
+    onToggleTool: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    var localExpanded by remember(entry.entryId) { mutableStateOf(false) }
-    val expanded = forceExpanded || localExpanded
+    val expanded = toolExpanded(resultToolKey(entry))
     val output = entryText(entry.content)
     val tool = entry.toolName ?: "tool"
     // Result = evidence: indented under its call, faint fill, no marker — the
     // indent and fill already say "this belongs to the row above." Errors keep
     // the explicit label so they break the pattern loudly.
     ToolChipContainer(
-        onClick = { localExpanded = !localExpanded },
+        onClick = { onToggleTool(resultToolKey(entry)) },
         modifier = modifier.fillMaxWidth().padding(start = 14.dp).testTag("tool_result"),
     ) {
         if (entry.isError == true) {
@@ -1058,10 +1153,11 @@ private fun ToolChipContainer(
     modifier: Modifier = Modifier,
     content: @Composable () -> Unit,
 ) {
-    androidx.compose.material3.Surface(
+    PressTintSurface(
         onClick = onClick,
-        shape = RoundedCornerShape(8.dp),
+        shape = RoundedCornerShape(4.dp),
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+        pressedColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.65f),
         modifier = modifier.fillMaxWidth(),
     ) {
         Column(Modifier.padding(horizontal = 10.dp, vertical = 6.dp)) {

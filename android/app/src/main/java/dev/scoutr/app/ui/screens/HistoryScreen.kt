@@ -5,7 +5,6 @@ import android.widget.Toast
 import android.text.format.DateUtils
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.AnchoredDraggableState
 import androidx.compose.foundation.gestures.DraggableAnchors
 import androidx.compose.foundation.gestures.Orientation
@@ -30,7 +29,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
@@ -99,6 +97,8 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import dev.scoutr.app.ui.components.ScoutrTextField
+import dev.scoutr.app.ui.components.StatusRing
+import dev.scoutr.app.ui.components.StatusRingAnimation
 import dev.scoutr.app.ui.components.ConfirmDialog
 import dev.scoutr.app.data.AgentStatus
 import dev.scoutr.app.data.SessionCatalogItem
@@ -772,15 +772,10 @@ private fun HistoryRow(
         ) {
             Column(Modifier.padding(start = 16.dp, top = 12.dp, bottom = 12.dp, end = 4.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(
-                        Modifier
-                            .size(9.dp)
-                            .border(
-                                2.5.dp,
-                                statusColor,
-                                CircleShape,
-                            )
-                            .testTag("history_status_${session.id}"),
+                    StatusRing(
+                        color = statusColor,
+                        animation = StatusRingAnimation.Static,
+                        modifier = Modifier.testTag("history_status_${session.id}"),
                     )
                     Spacer(Modifier.width(10.dp))
                     Text(

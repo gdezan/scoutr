@@ -44,8 +44,6 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.fadeIn
 
@@ -247,34 +245,23 @@ private fun ScoutrAppNav(
             navController = navController,
             startDestination = startDestination,
             modifier = Modifier.padding(inner),
-            // Shared-axis-style navigation: the incoming destination slides in
-            // softly while the outgoing one fades; reduced motion collapses to
-            // a straight swap.
+            // Destination changes are a short fade only; rows own their own
+            // 140ms arrival and never shift the list with placement animation.
             enterTransition = {
-                if (motion) {
-                    fadeIn(animationSpec = tween(0))
-                } else {
-                    slideInHorizontally(initialOffsetX = { it / 4 }) + fadeIn(
-                        animationSpec = tween(ScoutrMotion.DURATION_EMPHASIZED),
-                    )
-                }
+                if (motion) fadeIn(animationSpec = tween(0))
+                else fadeIn(animationSpec = tween(ScoutrMotion.DURATION_ARRIVE))
             },
             exitTransition = {
                 if (motion) fadeOut(animationSpec = tween(0))
-                else fadeOut(animationSpec = tween(ScoutrMotion.DURATION_STANDARD))
+                else fadeOut(animationSpec = tween(ScoutrMotion.DURATION_ARRIVE))
             },
             popEnterTransition = {
                 if (motion) fadeIn(animationSpec = tween(0))
-                else fadeIn(animationSpec = tween(ScoutrMotion.DURATION_STANDARD))
+                else fadeIn(animationSpec = tween(ScoutrMotion.DURATION_ARRIVE))
             },
             popExitTransition = {
-                if (motion) {
-                    fadeOut(animationSpec = tween(0))
-                } else {
-                    slideOutHorizontally(targetOffsetX = { it / 4 }) + fadeOut(
-                        animationSpec = tween(ScoutrMotion.DURATION_EMPHASIZED),
-                    )
-                }
+                if (motion) fadeOut(animationSpec = tween(0))
+                else fadeOut(animationSpec = tween(ScoutrMotion.DURATION_ARRIVE))
             },
         ) {
             composable(Routes.CONNECT) {

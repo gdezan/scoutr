@@ -11,6 +11,7 @@ import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.getBoundsInRoot
@@ -453,10 +454,10 @@ class ChatListTest {
             ScoutrTheme { ChatList(entries = listOf(entry)) }
         }
         // Collapsed by default even with details off: one-line no-fill row.
-        composeRule.onNodeWithText("▸ bash", substring = true).assertIsDisplayed()
-        composeRule.onNodeWithTag("tool_chip").performClick()
+        composeRule.onNodeWithText("bash", substring = true).assertIsDisplayed()
+        composeRule.onNodeWithContentDescription("Expand bash").performClick()
         composeRule.waitForIdle()
-        composeRule.onNodeWithText("▾ bash", substring = true).assertIsDisplayed()
+        composeRule.onNodeWithContentDescription("Collapse bash").assertIsDisplayed()
     }
 
     @Test
@@ -477,7 +478,7 @@ class ChatListTest {
         }
         // The tools toggle force-expands tool calls (thinking stays on by
         // default — the two toggles are independent).
-        composeRule.onNodeWithText("▾ read", substring = true).assertIsDisplayed()
+        composeRule.onNodeWithContentDescription("Collapse read").assertIsDisplayed()
     }
     @Test
     fun toolResultChipExpandsOnTap() {
@@ -495,6 +496,29 @@ class ChatListTest {
         composeRule.onNodeWithTag("tool_result").assertIsDisplayed()
         composeRule.onNodeWithTag("tool_result").performClick()
         composeRule.waitForIdle()
+        composeRule.onNodeWithText("line5", substring = true).assertIsDisplayed()
+    }
+
+    @Test
+    fun toolCallExpandsResultWhenTranscriptOmitsIds() {
+        val assistant = SessionEntry(
+            entryId = "assistant-no-id",
+            role = "assistant",
+            content = listOf(ContentBlock(type = "toolCall", name = "bash")),
+        )
+        val result = SessionEntry(
+            entryId = "result-no-id",
+            parentId = "assistant-no-id",
+            role = "toolResult",
+            toolName = "bash",
+            content = listOf(ContentBlock(type = "text", text = "line1\nline2\nline3\nline4\nline5")),
+        )
+        composeRule.setContent {
+            ScoutrTheme { ChatList(entries = listOf(assistant, result)) }
+        }
+        composeRule.onNodeWithContentDescription("Expand bash").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithContentDescription("Collapse bash").assertIsDisplayed()
         composeRule.onNodeWithText("line5", substring = true).assertIsDisplayed()
     }
 
@@ -553,7 +577,7 @@ class ChatListTest {
             ScoutrTheme { ChatList(entries = listOf(entry), showThinking = false, expandTools = true) }
         }
         // Tools expanded, thinking hidden: one toggle never affects the other.
-        composeRule.onNodeWithText("▾ bash", substring = true).assertIsDisplayed()
+        composeRule.onNodeWithContentDescription("Collapse bash").assertIsDisplayed()
         composeRule.onNodeWithTag("thinking_block").assertDoesNotExist()
     }
     @Test

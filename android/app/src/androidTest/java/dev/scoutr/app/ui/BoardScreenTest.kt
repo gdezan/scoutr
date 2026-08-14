@@ -420,7 +420,7 @@ class BoardScreenTest {
 
     private fun staticBoardViewModel(ui: BoardUiState): BoardViewModel {
         val context = androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().targetContext
-        val connection = ConnectionStore(context)
+        val connection = ConnectionStore(context).apply { clear() }
         // Unsaved connection: the VM init never polls, so the UI stays static.
         val bridge = dev.scoutr.app.net.BridgeClient(okhttp3.OkHttpClient(), connection)
         return BoardViewModel(bridge, connection, initialState = ui)

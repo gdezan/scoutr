@@ -26,7 +26,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.border
 import androidx.compose.material.icons.Icons
@@ -51,6 +50,7 @@ import androidx.lifecycle.compose.LifecycleStartEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -78,6 +78,9 @@ import dev.scoutr.app.state.viewModelFactory
 import dev.scoutr.app.ui.components.ConfirmDialog
 import dev.scoutr.app.ui.components.ReadableContentColumn
 import dev.scoutr.app.ui.components.PullRefreshIndicator
+import dev.scoutr.app.ui.components.StatusRing
+import dev.scoutr.app.ui.components.StatusRingAnimation
+import dev.scoutr.app.ui.components.PressTintSurface
 import dev.scoutr.app.ui.components.pullRefreshSemantics
 import dev.scoutr.app.ui.motion.ScoutrMotion
 import dev.scoutr.app.ui.motion.HapticEvent
@@ -119,6 +122,7 @@ fun BoardScreen(
     // a swipe is easy to trigger while scrolling, and every board card is by
     // definition a running agent.
     var pendingClose by remember { mutableStateOf<AgentCard?>(null) }
+    var idleExpanded by rememberSaveable { mutableStateOf(false) }
 
     if (ui.loading && ui.board.total == 0) {
         Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -182,7 +186,11 @@ fun BoardScreen(
                     boardSection("Needs you", ui.board.needsYou, onOpenAgent, reduceMotion, onReviewAgent, { pendingClose = it })
                     boardSection("Working", ui.board.working, onOpenAgent, reduceMotion, onReviewAgent, { pendingClose = it })
                     boardSection("Done", ui.board.done, onOpenAgent, reduceMotion, onReviewAgent, { pendingClose = it })
-                    boardSection("Idle", ui.board.idle, onOpenAgent, reduceMotion, onReviewAgent, { pendingClose = it })
+                    if (idleExpanded) {
+                        boardSection("Idle", ui.board.idle, onOpenAgent, reduceMotion, onReviewAgent, { pendingClose = it })
+                    } else {
+                        collapsedBoardSection("Idle", ui.board.idle.size) { idleExpanded = true }
+                    }
                     boardSection("Other", ui.board.unknown, onOpenAgent, reduceMotion, onReviewAgent, { pendingClose = it })
                 }
                 item { Spacer(Modifier.height(24.dp)) }
@@ -215,7 +223,6 @@ private fun BoardLockup() {
         Text(
             "SCOUTR",
             style = MaterialTheme.typography.titleSmall,
-            fontFamily = ScoutrMono,
             fontWeight = FontWeight.Bold,
             letterSpacing = 1.2.sp,
             color = MaterialTheme.colorScheme.onSurface,
@@ -259,6 +266,29 @@ private fun LazyListScope.boardSection(
                 fadeOutSpec = ScoutrMotion.itemSpec(reduceMotion),
             ),
         )
+    }
+}
+
+private fun LazyListScope.collapsedBoardSection(
+    title: String,
+    count: Int,
+    onExpand: () -> Unit,
+) {
+    if (count == 0) return
+    item(key = "collapsed_header_$title") {
+        PressTintSurface(
+            onClick = onExpand,
+            color = Color.Transparent,
+            pressedColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.65f),
+            modifier = Modifier.fillMaxWidth().testTag("board_${title.lowercase()}_toggle"),
+        ) {
+            Text(
+                text = "${title.uppercase()} $count · tap to expand",
+                style = MaterialTheme.typography.labelSmall.copy(fontFamily = ScoutrMono),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 4.dp, vertical = 12.dp),
+            )
+        }
     }
 }
 
@@ -393,19 +423,19 @@ private fun AgentCardRow(
             }
         }
         // Foreground card slides left on a horizontal drag.
-        Box(
-            Modifier
+        PressTintSurface(
+            onClick = { if (reveal.currentValue == BoardReveal.Open) closeReveal() else onClick() },
+            shape = RoundedCornerShape(8.dp),
+            color = MaterialTheme.colorScheme.surface,
+            pressedColor = MaterialTheme.colorScheme.surfaceVariant,
+            modifier = Modifier
                 .offset { IntOffset(reveal.requireOffset().roundToInt(), 0) }
                 .anchoredDraggable(reveal, reverseDirection = false, orientation = Orientation.Horizontal)
                 .fillMaxWidth()
-                .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(8.dp))
-                .clickable {
-                    if (reveal.currentValue == BoardReveal.Open) closeReveal() else onClick()
-                }
                 .testTag("agent_card_${agent.paneId}"),
         ) {
             Card(
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                colors = CardDefaults.cardColors(containerColor = Color.Transparent),
                 shape = RoundedCornerShape(8.dp),
                 border = androidx.compose.foundation.BorderStroke(
                     width = if (isNeedsYou) 1.dp else 0.dp,
@@ -418,10 +448,9 @@ private fun AgentCardRow(
                 ) {
                     Column(Modifier.weight(1f)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(
-                                Modifier
-                                    .size(9.dp)
-                                    .border(2.5.dp, accent, CircleShape),
+                            StatusRing(
+                                color = accent,
+                                animation = StatusRingAnimation.Static,
                             )
                             Spacer(Modifier.width(10.dp))
                             Text(

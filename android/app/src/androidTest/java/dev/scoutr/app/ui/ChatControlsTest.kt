@@ -232,7 +232,7 @@ class ChatControlsTest {
         compose.onNodeWithTag("thinking_block").assertIsDisplayed()
         // Tool calls start collapsed (one-line chip).
         compose.waitUntil(timeoutMillis = 5_000) {
-            compose.onAllNodes(androidx.compose.ui.test.hasText("\u25B8 bash", substring = true)).fetchSemanticsNodes().isNotEmpty()
+            compose.onAllNodes(androidx.compose.ui.test.hasContentDescription("Expand bash")).fetchSemanticsNodes().isNotEmpty()
         }
 
         // Hiding thinking must not touch the tool-call collapse state.
@@ -241,13 +241,13 @@ class ChatControlsTest {
             compose.onAllNodes(hasTestTag("thinking_block")).fetchSemanticsNodes().isEmpty()
         }
         compose.waitUntil(timeoutMillis = 5_000) {
-            compose.onAllNodes(androidx.compose.ui.test.hasText("\u25B8 bash", substring = true)).fetchSemanticsNodes().isNotEmpty()
+            compose.onAllNodes(androidx.compose.ui.test.hasContentDescription("Expand bash")).fetchSemanticsNodes().isNotEmpty()
         }
 
         // Expanding tool calls must not bring thinking back.
         compose.onNodeWithTag("toggle_tools").performClick()
         compose.waitUntil(timeoutMillis = 5_000) {
-            compose.onAllNodes(androidx.compose.ui.test.hasText("\u25BE bash", substring = true)).fetchSemanticsNodes().isNotEmpty()
+            compose.onAllNodes(androidx.compose.ui.test.hasContentDescription("Collapse bash")).fetchSemanticsNodes().isNotEmpty()
         }
         compose.waitUntil(timeoutMillis = 5_000) {
             compose.onAllNodes(hasTestTag("thinking_block")).fetchSemanticsNodes().isEmpty()
@@ -259,7 +259,7 @@ class ChatControlsTest {
             compose.onAllNodes(hasTestTag("thinking_block")).fetchSemanticsNodes().isNotEmpty()
         }
         compose.waitUntil(timeoutMillis = 5_000) {
-            compose.onAllNodes(androidx.compose.ui.test.hasText("\u25BE bash", substring = true)).fetchSemanticsNodes().isNotEmpty()
+            compose.onAllNodes(androidx.compose.ui.test.hasContentDescription("Collapse bash")).fetchSemanticsNodes().isNotEmpty()
         }
 
         // Collapsing tool calls must leave thinking visible — every
@@ -267,7 +267,7 @@ class ChatControlsTest {
         // toggles could not pass.
         compose.onNodeWithTag("toggle_tools").performClick()
         compose.waitUntil(timeoutMillis = 5_000) {
-            compose.onAllNodes(androidx.compose.ui.test.hasText("\u25B8 bash", substring = true)).fetchSemanticsNodes().isNotEmpty()
+            compose.onAllNodes(androidx.compose.ui.test.hasContentDescription("Expand bash")).fetchSemanticsNodes().isNotEmpty()
         }
         compose.waitUntil(timeoutMillis = 5_000) {
             compose.onAllNodes(hasTestTag("thinking_block")).fetchSemanticsNodes().isNotEmpty()
@@ -294,7 +294,7 @@ class ChatControlsTest {
 
         // Tools open ("▾"), thinking hidden — the seeded state, not the literals.
         compose.waitUntil(timeoutMillis = 10_000) {
-            compose.onAllNodes(androidx.compose.ui.test.hasText("▾ bash", substring = true))
+            compose.onAllNodes(androidx.compose.ui.test.hasContentDescription("Collapse bash"))
                 .fetchSemanticsNodes().isNotEmpty()
         }
         compose.onNodeWithTag("thinking_block").assertDoesNotExist()

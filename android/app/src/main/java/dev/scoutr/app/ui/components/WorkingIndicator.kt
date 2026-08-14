@@ -1,6 +1,6 @@
 package dev.scoutr.app.ui.components
 
-import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -8,10 +8,12 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -28,12 +30,16 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import dev.scoutr.app.ui.motion.LocalReduceMotion
 import kotlinx.coroutines.delay
 
 /** What the tail of the transcript says the agent is doing right now. */
 enum class WorkingIndicatorMode { Starting, Working, WaitingForYou }
+
+/** Animation modes for shared 9dp status rings. */
+enum class StatusRingAnimation { Static, Live, NeedsYou }
 
 /**
  * Render mode as a total function of state — including unmodelled statuses,
@@ -120,7 +126,11 @@ fun WorkingIndicator(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        if (mode == WorkingIndicatorMode.WaitingForYou) PulseGlyph(color) else RippleGlyph(color)
+        StatusRing(
+            color = color,
+            animation = if (mode == WorkingIndicatorMode.WaitingForYou) StatusRingAnimation.NeedsYou
+            else StatusRingAnimation.Live,
+        )
         Text(
             label,
             style = MaterialTheme.typography.labelMedium,
@@ -136,13 +146,43 @@ fun WorkingIndicator(
     }
 }
 
+/** Shared 9dp status ring used by Board, Sessions, and Chat. */
+@Composable
+fun StatusRing(
+    color: Color,
+    animation: StatusRingAnimation,
+    modifier: Modifier = Modifier,
+    layoutSize: Dp = STATUS_RING_SIZE,
+) {
+    Box(
+        modifier = modifier.size(layoutSize),
+        contentAlignment = Alignment.Center,
+    ) {
+        when (animation) {
+            StatusRingAnimation.Live -> RippleGlyph(color)
+            StatusRingAnimation.NeedsYou -> PulseGlyph(color)
+            StatusRingAnimation.Static -> Canvas(Modifier.size(STATUS_RING_SIZE)) {
+                drawCircle(
+                    color = color,
+                    radius = STATUS_RING_RADIUS.toPx(),
+                    style = Stroke(width = STATUS_RING_STROKE.toPx()),
+                )
+            }
+        }
+    }
+}
+
 /** A restrained error pulse for the blocked state; live work owns the ripple. */
 @Composable
 private fun PulseGlyph(color: Color) {
     val reduceMotion = LocalReduceMotion.current
     if (reduceMotion) {
-        Canvas(Modifier.size(GLYPH_SIZE)) {
-            drawCircle(color = color.copy(alpha = 0.55f), radius = 4.5.dp.toPx(), style = Stroke(width = 2.5.dp.toPx()))
+        Canvas(Modifier.requiredSize(GLYPH_SIZE)) {
+            drawCircle(
+                color = color,
+                radius = STATUS_RING_RADIUS.toPx(),
+                style = Stroke(width = STATUS_RING_STROKE.toPx()),
+            )
         }
         return
     }
@@ -151,16 +191,19 @@ private fun PulseGlyph(color: Color) {
         initialValue = 0f,
         targetValue = 1f,
         animationSpec = infiniteRepeatable(
-            animation = tween(WORKING_RIPPLE_MS, easing = FastOutSlowInEasing),
+            animation = tween(
+                WORKING_RIPPLE_MS / 2,
+                easing = CubicBezierEasing(0.42f, 0f, 0.58f, 1f),
+            ),
             repeatMode = RepeatMode.Reverse,
         ),
         label = "waitingPulse",
     )
-    Canvas(Modifier.size(GLYPH_SIZE)) {
+    Canvas(Modifier.requiredSize(GLYPH_SIZE)) {
         drawCircle(
             color = color.copy(alpha = 0.45f + 0.2f * (1f - progress)),
-            radius = (4.5.dp + 2.dp * progress).toPx(),
-            style = Stroke(width = 2.5.dp.toPx()),
+            radius = (STATUS_RING_RADIUS + 2.dp * progress).toPx(),
+            style = Stroke(width = STATUS_RING_STROKE.toPx()),
         )
     }
 }
@@ -174,8 +217,12 @@ private fun PulseGlyph(color: Color) {
 private fun RippleGlyph(color: Color) {
     val reduceMotion = LocalReduceMotion.current
     if (reduceMotion) {
-        Canvas(Modifier.size(GLYPH_SIZE)) {
-            drawCircle(color = color.copy(alpha = 0.55f), radius = 4.5.dp.toPx(), style = Stroke(width = 2.5.dp.toPx()))
+        Canvas(Modifier.requiredSize(GLYPH_SIZE)) {
+            drawCircle(
+                color = color,
+                radius = STATUS_RING_RADIUS.toPx(),
+                style = Stroke(width = STATUS_RING_STROKE.toPx()),
+            )
         }
         return
     }
@@ -199,18 +246,27 @@ private fun RippleGlyph(color: Color) {
         ),
         label = "ripple2",
     )
-    Canvas(Modifier.size(GLYPH_SIZE)) {
+    Canvas(Modifier.requiredSize(GLYPH_SIZE)) {
+        drawCircle(
+            color = color,
+            radius = STATUS_RING_RADIUS.toPx(),
+            style = Stroke(width = STATUS_RING_STROKE.toPx()),
+        )
         listOf(first, second).forEach { progress ->
-            val radius = (4.5.dp + (12.dp - 4.5.dp) * progress).toPx()
+            val radius = (STATUS_RING_RADIUS + (RIPPLE_MAX_RADIUS - STATUS_RING_RADIUS) * progress).toPx()
             drawCircle(
                 color = color.copy(alpha = 0.55f * (1f - progress)),
                 radius = radius,
-                style = Stroke(width = 2.5.dp.toPx()),
+                style = Stroke(width = STATUS_RING_STROKE.toPx()),
             )
         }
     }
 }
 
 private val GLYPH_SIZE = 24.dp
+private val STATUS_RING_SIZE = 9.dp
+private val STATUS_RING_STROKE = 2.5.dp
+private val STATUS_RING_RADIUS = 3.25.dp
+private val RIPPLE_MAX_RADIUS = 10.75.dp
 internal const val WORKING_RIPPLE_MS = 1600
 internal const val WORKING_RIPPLE_OFFSET_MS = WORKING_RIPPLE_MS / 2

@@ -2,53 +2,40 @@ package dev.scoutr.app.ui.motion
 
 import androidx.compose.animation.core.AnimationSpec
 import androidx.compose.animation.core.FiniteAnimationSpec
-import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
-
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.TransformOrigin
-import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.unit.IntOffset
 
 /**
- * Scoutr motion vocabulary — the one place springs, tweens, and their
- * reduce-motion variants are calibrated. The world is always-dark and
- * glance-first: interactive motion is quick and quiet; overlay arrival
- * (palette, sheets) is a short fade+scale from the bottom edge; nothing
- * ever bounces or spins.
+ * Scoutr motion vocabulary. Interactive feedback is quick and quiet: rows
+ * arrive with a fade, list placement never animates, and overlays fade only.
+ * The WorkingIndicator owns the only intentional looping animation.
  */
 object ScoutrMotion {
-
-    /** Standard interactive motion (rows, chips, list placement). */
-    const val DURATION_STANDARD = 220
-
-    /** Emphasized transitions (screen-level content swaps). */
-    const val DURATION_EMPHASIZED = 300
-
-    /** Overlay arrival (palette, dialogs). */
-    const val DURATION_OVERLAY = 180
-
-    /** Interactive rows settle fast and never bounce. */
-    fun standardSpring(): FiniteAnimationSpec<Float> =
-        spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMedium)
+    const val DURATION_PRESS = 90
+    const val DURATION_ARRIVE = 140
+    const val DURATION_OVERLAY = 140
 
     /** Fade spec for LazyColumn entries (animateItem). */
     fun itemSpec(reduceMotion: Boolean): FiniteAnimationSpec<Float> =
-        if (reduceMotion) tween(0) else standardSpring()
+        if (reduceMotion) tween(0) else tween(DURATION_ARRIVE)
 
-
-    /** Layout reflow when list items move (placement axis of animateItem). */
+    /** New rows never animate the list's placement axis. */
     fun itemPlacementSpec(reduceMotion: Boolean): FiniteAnimationSpec<IntOffset> =
-        if (reduceMotion) tween(0) else spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMedium)
+        tween(0)
 
-    /** Overlay arrival. */
+    /** Overlay arrival is a fade only. */
     fun overlaySpec(reduceMotion: Boolean): AnimationSpec<Float> =
         if (reduceMotion) tween(0) else tween(DURATION_OVERLAY)
 }
@@ -59,10 +46,7 @@ val LocalReduceMotion = staticCompositionLocalOf { false }
 @Composable
 fun useReduceMotion(): Boolean = LocalReduceMotion.current
 
-/**
- * Overlay arrival: fade + scale up from the bottom edge. Collapses to a
- * no-op under reduce motion. Wrap the overlay's content.
- */
+/** Fade an overlay into place without scale or translation. */
 @Composable
 fun OverlayPresence(
     reduceMotion: Boolean,
@@ -73,18 +57,12 @@ fun OverlayPresence(
         Box(modifier, content = content)
         return
     }
+    var visible by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { visible = true }
     val progress by animateFloatAsState(
-        targetValue = 1f,
+        targetValue = if (visible) 1f else 0f,
         animationSpec = ScoutrMotion.overlaySpec(reduceMotion),
         label = "overlayPresence",
     )
-    Box(
-        modifier.graphicsLayer {
-            alpha = progress
-            scaleX = 0.96f + 0.04f * progress
-            scaleY = 0.96f + 0.04f * progress
-            transformOrigin = TransformOrigin(0.5f, 0.9f)
-        },
-        content = content,
-    )
+    Box(modifier.alpha(progress), content = content)
 }

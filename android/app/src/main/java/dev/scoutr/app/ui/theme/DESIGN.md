@@ -52,25 +52,29 @@ status metadata and controls.
 
 ## Components
 
-- **Board:** section header plus compact count; cards carry a status ring, title,
+- **Board:** section header plus compact count; cards carry a 9dp status ring, title,
   latest activity, mono workspace path, and quiet time-in-state. Needs-you is
   the only loud card treatment: red ring/border and red metadata. Done is gray.
-- **Chat:** assistant rows are plain readable text; user rows use a neutral
-  bounded bubble; tool calls are quiet tonal rows and expand only when details
-  are enabled. The composer is a 6dp outlined field, multiline, and Enter
-  always inserts a newline.
+  Idle collapses to a count row until tapped.
+- **Chat:** assistant rows use a quiet 1px outline spine with readable text; tool
+  calls are one-line mono facts with a right-side details icon and expand into
+  4dp-radius inline result tiles. The composer is a 6dp outlined field,
+  multiline, and Enter always inserts a newline.
 - **Sessions:** reuse the board tile geometry with date-group headers. Search
   and picker fields use the shared 6dp field.
 - **Usage:** teal for usage data, amber/red only for threshold states. It must
   not look like an agent status screen.
 - **Review:** additions use `#3FC9E8`, not the live green. Paths, hashes, and
   diff lines use Martian Mono.
-- **Terminal:** edge-to-edge true mono output, JetBrains Mono, with the
-  hierarchy and modifier rows kept out of the transcript.
+- **Terminal:** edge-to-edge true mono output, JetBrains Mono, with a compact
+  workspace › tab › pane breadcrumb selector above the grid and hierarchy and
+  modifier rows kept out of the transcript.
 
 ## Behavior and motion
 
 Agent-busy motion uses `WorkingIndicator`; no unrelated screen animation is
-allowed. Motion is restrained, no-bouncy, and yields to `LocalReduceMotion`.
+allowed. Press tint uses a 90ms fade with no scale, new content arrives with
+a 140ms fade and zero placement motion, and overlays fade without translation.
+Motion yields to `LocalReduceMotion`, which makes status glyphs static.
 Loading indicators are reserved for actual loading. Errors are inline and name
 the problem. Empty states explain the next action.
