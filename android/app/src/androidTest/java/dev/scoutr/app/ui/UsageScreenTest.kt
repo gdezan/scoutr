@@ -94,6 +94,7 @@ class UsageScreenTest {
         compose.onNodeWithText("BALANCE BELOW ZERO").assertIsDisplayed()
         compose.onNodeWithText("Add credit before starting more work.").assertIsDisplayed()
         compose.onNodeWithContentDescription("Balance below zero, USD, negative $0.01").assertIsDisplayed()
+        compose.onNodeWithText("off-peak pricing · peak at 01:00 UTC").assertIsDisplayed()
         compose.onNodeWithTag("usage_anthropic").assertIsDisplayed()
         compose.onNodeWithTag("usage_google").assertIsDisplayed()
         compose.onNodeWithTag("usage_anthropic").assertIsDisplayed()

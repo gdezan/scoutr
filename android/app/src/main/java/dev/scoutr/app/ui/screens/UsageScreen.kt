@@ -198,6 +198,19 @@ private fun ProviderCard(provider: UsageSnapshot, nowMillis: Long, onRefresh: ()
                     }
                 }
             }
+
+            // DeepSeek is the only covered provider that bills by the UTC clock;
+            // amber is the warning tier, quiet gray the settled off-peak state.
+            if (provider.provider == "deepseek" && provider.windows.isNotEmpty()) {
+                val pricing = deepseekPricing(nowMillis / 1_000)
+                Text(
+                    text = pricing.label,
+                    style = ScoutrType.monoMeta,
+                    color = if (pricing.peak) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
     }
 }
@@ -481,6 +494,29 @@ internal fun resetLabel(resetAt: Long?, nowSeconds: Long): String? {
     val days = hours / 24
     val trailingHours = hours % 24
     return "resets in ${days}d" + if (trailingHours > 0) " ${trailingHours}h" else ""
+}
+
+/**
+ * DeepSeek bills by UTC clock: peak hours are 01:00–04:00 and 06:00–10:00 UTC,
+ * all other hours off-peak at half price (api-docs.deepseek.com/quick_start/pricing,
+ * effective 2026-08-16). The balance endpoint carries no time-of-day data, so the
+ * tier is derived from the device clock and refreshes on the screen's minute tick.
+ */
+internal data class DeepseekPricing(val peak: Boolean, val label: String)
+
+internal fun deepseekPricing(nowUtcSeconds: Long): DeepseekPricing {
+    val hour = ((nowUtcSeconds % 86_400) / 3_600).toInt()
+    val peak = hour in 1 until 4 || hour in 6 until 10
+    val nextTransition = when {
+        hour < 1 -> 1
+        hour < 4 -> 4
+        hour < 6 -> 6
+        hour < 10 -> 10
+        else -> 1
+    }
+    val nextHour = nextTransition.toString().padStart(2, '0')
+    val transition = if (peak) "off-peak at $nextHour:00 UTC" else "peak at $nextHour:00 UTC"
+    return DeepseekPricing(peak, (if (peak) "peak pricing" else "off-peak pricing") + " · $transition")
 }
 
 private fun updatedLabel(updatedAt: Long, nowMillis: Long): String? {

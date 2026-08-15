@@ -47,4 +47,26 @@ class UsageFormattingTest {
         assertNull(quotaTimeProgress(UsageWindow(windowSeconds = 3600), 1_000L))
         assertNull(quotaTimeProgress(UsageWindow(resetAt = 2_000L), 1_000L))
     }
+
+    @Test
+    fun derivesDeepseekPricingFromTheUtcClock() {
+        // Peak windows are 01:00–04:00 and 06:00–10:00 UTC; everything else is off-peak.
+        assertEquals(DeepseekPricing(true, "peak pricing · off-peak at 04:00 UTC"), deepseekPricing(hourUtc(2)))
+        assertEquals(DeepseekPricing(true, "peak pricing · off-peak at 10:00 UTC"), deepseekPricing(hourUtc(8)))
+        assertEquals(DeepseekPricing(false, "off-peak pricing · peak at 06:00 UTC"), deepseekPricing(hourUtc(5)))
+        assertEquals(DeepseekPricing(false, "off-peak pricing · peak at 01:00 UTC"), deepseekPricing(hourUtc(13)))
+        assertEquals(DeepseekPricing(false, "off-peak pricing · peak at 01:00 UTC"), deepseekPricing(hourUtc(0)))
+    }
+
+    @Test
+    fun deepseekPricingSplitsAtWindowEdges() {
+        assertEquals(true, deepseekPricing(hourUtc(1)).peak)
+        assertEquals(true, deepseekPricing(hourUtc(3)).peak)
+        assertEquals(false, deepseekPricing(hourUtc(4)).peak)
+        assertEquals(true, deepseekPricing(hourUtc(6)).peak)
+        assertEquals(true, deepseekPricing(hourUtc(9)).peak)
+        assertEquals(false, deepseekPricing(hourUtc(10)).peak)
+    }
+
+    private fun hourUtc(hour: Int): Long = hour * 3_600L
 }
