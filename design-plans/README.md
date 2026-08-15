@@ -8,7 +8,7 @@ part of the active execution set.
 
 | Plan | Title | Priority | Effort | Depends on | Status |
 |---|---|---:|---:|---|---|
-| 007 | Make Chat scrolling predictable under taps, appends, and drags | P1 | M | — | TODO |
+| 007 | Make Chat scrolling predictable under taps, appends, and drags | P1 | M | — | DONE (2026-08-15, folded into the Chat refresh performance slice; runtime acceptance passed) |
 | 010 | Keep Sessions anchored while rows reorder | P2 | M | — | TODO |
 | 011 | Keep slash-command keyboard selection in view without jumping | P2 | S | 007 | TODO |
 

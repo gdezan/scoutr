@@ -49,6 +49,50 @@ class PollerTest {
     }
 
     @Test
+    fun resetNextDeadlineDeferrsNextTickToAFullInterval() = runTest {
+        val poller = Poller(this)
+        var ticks = 0
+        poller.start(1.seconds) { ticks++ }
+        runCurrent()
+        assertEquals("immediate first tick", 1, ticks)
+
+        // Restart the deadline halfway through the interval: the next tick
+        // must land a full interval later, not on the original schedule.
+        advanceTimeBy(500)
+        runCurrent()
+        poller.resetNextDeadline()
+        runCurrent()
+        assertEquals("reset must not tick immediately", 1, ticks)
+
+        advanceTimeBy(500)
+        runCurrent()
+        assertEquals("old deadline must not fire", 1, ticks)
+
+        advanceTimeBy(500)
+        runCurrent()
+        assertEquals("new deadline fires a full interval after the reset", 2, ticks)
+
+        // The loop continues on the restarted schedule.
+        advanceTimeBy(1_000)
+        runCurrent()
+        assertEquals("loop keeps ticking after the reset", 3, ticks)
+        poller.stop()
+    }
+
+    @Test
+    fun resetNextDeadlineIsANoOpAfterStop() = runTest {
+        val poller = Poller(this)
+        var ticks = 0
+        poller.start(1.seconds) { ticks++ }
+        runCurrent()
+        poller.stop()
+        poller.resetNextDeadline()
+        advanceTimeBy(10.seconds.inWholeMilliseconds)
+        runCurrent()
+        assertEquals("no loop restarts after stop()", 1, ticks)
+    }
+
+    @Test
     fun stopCancelsTheLoop() = runTest {
         val poller = Poller(this)
         var ticks = 0

@@ -29,7 +29,21 @@ class PerformanceCounters {
         val totalDurationMs: Long,
         val statuses: Map<Int, Long>,
     )
-
+    /**
+     * Chat refresh coordinator activity. [started] is one authoritative read
+     * per pane; [joined] counts triggers that waited for that read instead of
+     * starting their own; [startedBySource] attributes the reads to their
+     * trigger; [inFlightCancelled] counts reads cancelled by STOPPED.
+     */
+    data class ChatRefreshSnapshot(
+        val started: Long,
+        val joined: Long,
+        val startedBySource: Map<String, Long>,
+        val pullsAttempted: Long,
+        val pullsCompleted: Long,
+        val pullsSucceeded: Long,
+        val inFlightCancelled: Long,
+    )
     data class Snapshot(
         val activeHttpRequests: Int,
         val httpRequests: Long,
@@ -42,6 +56,7 @@ class PerformanceCounters {
         val endpoints: Map<String, EndpointSnapshot>,
         val feedSocket: SocketSnapshot,
         val terminalSocket: SocketSnapshot,
+        val chatRefresh: ChatRefreshSnapshot,
     )
 
     internal class EndpointCounters {
@@ -72,6 +87,35 @@ class PerformanceCounters {
         val active: AtomicLong,
     )
 
+    internal class ChatRefreshCounters {
+        val started = AtomicLong()
+        val joined = AtomicLong()
+        val startedBySource = ConcurrentHashMap<String, AtomicLong>()
+        val pullsAttempted = AtomicLong()
+        val pullsCompleted = AtomicLong()
+        val pullsSucceeded = AtomicLong()
+        val inFlightCancelled = AtomicLong()
+
+        fun snapshot() = ChatRefreshSnapshot(
+            started = started.get(),
+            joined = joined.get(),
+            startedBySource = startedBySource.entries.associate { (source, count) -> source to count.get() },
+            pullsAttempted = pullsAttempted.get(),
+            pullsCompleted = pullsCompleted.get(),
+            pullsSucceeded = pullsSucceeded.get(),
+            inFlightCancelled = inFlightCancelled.get(),
+        )
+
+        fun reset() {
+            started.set(0)
+            joined.set(0)
+            startedBySource.clear()
+            pullsAttempted.set(0)
+            pullsCompleted.set(0)
+            pullsSucceeded.set(0)
+            inFlightCancelled.set(0)
+        }
+    }
     private val activeHttpRequests = AtomicInteger()
     private val httpRequests = AtomicLong()
     private val httpResponses = AtomicLong()
@@ -83,6 +127,7 @@ class PerformanceCounters {
     private val endpoints = ConcurrentHashMap<String, EndpointCounters>()
     private val feedSocketCounters = SocketCounters(AtomicLong(), AtomicLong(), AtomicLong())
     private val terminalSocketCounters = SocketCounters(AtomicLong(), AtomicLong(), AtomicLong())
+    private val chatRefreshCounters = ChatRefreshCounters()
 
     /** Begin one BridgeClient request; the returned handle is safe to settle once. */
     fun beginHttpRequest(path: String): HttpRequest? {
@@ -161,6 +206,32 @@ class PerformanceCounters {
             counters.active.updateAndGet { it.dec().coerceAtLeast(0) }
         }
     }
+    /** One authoritative Chat read began (the single-flight owner). */
+    fun beginChatRefresh(source: String) {
+        chatRefreshCounters.started.incrementAndGet()
+        chatRefreshCounters.startedBySource.computeIfAbsent(source) { AtomicLong() }.incrementAndGet()
+    }
+
+    /** A trigger joined an already-running Chat read instead of racing it. */
+    fun joinChatRefresh(source: String) {
+        chatRefreshCounters.joined.incrementAndGet()
+    }
+
+    /** A pull-to-refresh gesture was requested. */
+    fun chatPullAttempted() {
+        chatRefreshCounters.pullsAttempted.incrementAndGet()
+    }
+
+    /** A pull's refresh settled; [success] says whether it read the pane. */
+    fun chatPullCompleted(success: Boolean) {
+        chatRefreshCounters.pullsCompleted.incrementAndGet()
+        if (success) chatRefreshCounters.pullsSucceeded.incrementAndGet()
+    }
+
+    /** An in-flight Chat read was cancelled (the screen reached STOPPED). */
+    fun chatRefreshCancelled() {
+        chatRefreshCounters.inFlightCancelled.incrementAndGet()
+    }
 
     fun snapshot(): Snapshot = Snapshot(
         activeHttpRequests = activeHttpRequests.get(),
@@ -174,6 +245,7 @@ class PerformanceCounters {
         endpoints = endpoints.entries.associate { (endpoint, counters) -> endpoint to counters.snapshot() },
         feedSocket = feedSocketCounters.snapshot(),
         terminalSocket = terminalSocketCounters.snapshot(),
+        chatRefresh = chatRefreshCounters.snapshot(),
     )
 
     /** Reset a completed experiment; active HTTP or WebSocket work must be settled first. */
@@ -194,6 +266,7 @@ class PerformanceCounters {
             counters.opened.set(0)
             counters.closed.set(0)
         }
+        chatRefreshCounters.reset()
     }
 
     companion object {

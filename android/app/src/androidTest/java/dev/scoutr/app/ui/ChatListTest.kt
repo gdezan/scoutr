@@ -22,7 +22,10 @@ import androidx.compose.ui.test.printToLog
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.swipeDown
+import androidx.compose.ui.test.click
+import androidx.compose.ui.test.swipe
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.runtime.CompositionLocalProvider
 import dev.scoutr.app.data.ContentBlock
 import dev.scoutr.app.data.FileEditHunk
@@ -162,6 +165,165 @@ class ChatListTest {
         }
         composeRule.onNodeWithTag("scroll_to_end_fab").assertIsNotDisplayed()
         composeRule.onNodeWithText("tail line 119", substring = true).assertIsDisplayed()
+    }
+
+    @Test
+    fun rapidFabTapsSettleAtTheTrueBottom() {
+        val tail = (0 until 120).joinToString("\n") { "tail line $it" }
+        val list = tallList(30) + SessionEntry(
+            entryId = "id-tail",
+            role = "assistant",
+            content = listOf(ContentBlock(type = "text", text = tail)),
+        )
+        composeRule.setContent {
+            ScoutrTheme { ChatList(entries = list) }
+        }
+        // Wait for the open-at-bottom scroll to settle before interacting.
+        composeRule.waitUntil(10_000) {
+            composeRule.onAllNodesWithTag("scroll_to_end_fab").fetchSemanticsNodes().isEmpty()
+        }
+        composeRule.onNodeWithTag("chat_list").performTouchInput { swipeDown() }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("chat_list").performTouchInput { swipeDown() }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("scroll_to_end_fab").assertIsDisplayed()
+        // Two taps in one gesture injection: the second lands while the first
+        // scroll is still settling and must not start a second movement
+        // (plan 007 Step 3). The owner hides the button while settling.
+        composeRule.onNodeWithTag("scroll_to_end_fab").performTouchInput {
+            click()
+            click()
+        }
+        composeRule.waitUntil(10_000) {
+            composeRule.onAllNodesWithTag("scroll_to_end_fab").fetchSemanticsNodes().isEmpty()
+        }
+        composeRule.onNodeWithText("tail line 119", substring = true).assertIsDisplayed()
+    }
+
+    @Test
+    fun fabTapConcurrentWithAppendSettlesAtTheNewTail() {
+        val initial = tallList(30)
+        var list by mutableStateOf(initial)
+        composeRule.setContent {
+            ScoutrTheme { ChatList(entries = list) }
+        }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("chat_list").performScrollToNode(
+            androidx.compose.ui.test.hasText("message 5"),
+        )
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("scroll_to_end_fab").assertIsDisplayed()
+        // Tap the FAB and append in the same frame: the append must take over
+        // the single scroll owner and settle at the new tail (plan 007 Step 3).
+        composeRule.onNodeWithTag("scroll_to_end_fab").performClick()
+        list = initial + SessionEntry(
+            entryId = "id-extra",
+            role = "assistant",
+            content = listOf(ContentBlock(type = "text", text = "new tail")),
+        )
+        composeRule.waitUntil(10_000) {
+            composeRule.onAllNodesWithTag("scroll_to_end_fab").fetchSemanticsNodes().isEmpty()
+        }
+        composeRule.onNodeWithText("new tail").assertIsDisplayed()
+    }
+
+    @Test
+    fun dragInterruptingTheFabScrollLeavesTheListWhereTheGesturePlacedIt() {
+        val tail = (0 until 120).joinToString("\n") { "tail line $it" }
+        val list = tallList(30) + SessionEntry(
+            entryId = "id-tail",
+            role = "assistant",
+            content = listOf(ContentBlock(type = "text", text = tail)),
+        )
+        composeRule.setContent {
+            ScoutrTheme { ChatList(entries = list) }
+        }
+        composeRule.waitUntil(10_000) {
+            composeRule.onAllNodesWithTag("scroll_to_end_fab").fetchSemanticsNodes().isEmpty()
+        }
+        composeRule.onNodeWithTag("chat_list").performTouchInput { swipeDown() }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("chat_list").performTouchInput { swipeDown() }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("scroll_to_end_fab").assertIsDisplayed()
+        // Tap to start the scroll, then drag before it can finish: the drag
+        // must cancel the programmatic movement and own the resting place
+        // (plan 007 Step 3).
+        composeRule.onNodeWithTag("scroll_to_end_fab").performClick()
+        composeRule.onNodeWithTag("chat_list").performTouchInput { swipeDown() }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("scroll_to_end_fab").assertIsDisplayed()
+        composeRule.onNodeWithText("tail line 119", substring = true).assertIsNotDisplayed()
+    }
+
+    @Test
+    fun appendWhileScrolledUpDoesNotMoveTheViewport() {
+        val initial = tallList(30)
+        var list by mutableStateOf(initial)
+        composeRule.setContent {
+            ScoutrTheme { ChatList(entries = list) }
+        }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("chat_list").performScrollToNode(
+            androidx.compose.ui.test.hasText("message 5"),
+        )
+        composeRule.waitForIdle()
+        // A real drag away from the end turns follow off; a programmatic
+        // scroll (scrollToNode) is not user input and must not.
+        // A real drag away from the end turns follow off; a programmatic
+        // scroll (scrollToNode) is not user input and must not. Slow and short
+        // so the gesture ends without a fling carrying the anchor off-screen.
+        composeRule.onNodeWithTag("chat_list").performTouchInput {
+            swipe(
+                start = Offset(centerX, centerY),
+                end = Offset(centerX, centerY - 200f),
+                durationMillis = 400,
+            )
+        }
+        composeRule.waitForIdle()
+        val before = composeRule.onNodeWithText("message 5").getBoundsInRoot()
+        list = initial + SessionEntry(
+            entryId = "id-extra",
+            role = "assistant",
+            content = listOf(ContentBlock(type = "text", text = "new tail")),
+        )
+        composeRule.waitForIdle()
+        val after = composeRule.onNodeWithText("message 5").getBoundsInRoot()
+        assertEquals("viewport must not move on append while scrolled up", before, after)
+        composeRule.onNodeWithText("new tail").assertIsNotDisplayed()
+        composeRule.onNodeWithTag("scroll_to_end_fab").assertIsDisplayed()
+    }
+
+    @Test
+    fun statusOnlyChangeDoesNotMoveTheViewport() {
+        val list = tallList(30)
+        var status by mutableStateOf("working")
+        composeRule.setContent {
+            ScoutrTheme { ChatList(entries = list, agentStatus = status, showThinking = true) }
+        }
+        composeRule.waitUntil(10_000) {
+            composeRule.onAllNodesWithTag("scroll_to_end_fab").fetchSemanticsNodes().isEmpty()
+        }
+        composeRule.onNodeWithTag("chat_list").performScrollToNode(
+            androidx.compose.ui.test.hasText("message 5"),
+        )
+        composeRule.waitForIdle()
+        // Slow short drag, same reasoning as above: no fling, follow turns off.
+        composeRule.onNodeWithTag("chat_list").performTouchInput {
+            swipe(
+                start = Offset(centerX, centerY),
+                end = Offset(centerX, centerY - 200f),
+                durationMillis = 400,
+            )
+        }
+        composeRule.waitForIdle()
+        val before = composeRule.onNodeWithText("message 5").getBoundsInRoot()
+        // The tail indicator flips mode and label, but the bottom edge does
+        // not move, so the viewport must not (plan 007 Step 2).
+        status = "blocked"
+        composeRule.waitForIdle()
+        val after = composeRule.onNodeWithText("message 5").getBoundsInRoot()
+        assertEquals("status-only change must not move the viewport", before, after)
     }
 
     @Test

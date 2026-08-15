@@ -13,6 +13,7 @@ import dev.scoutr.app.net.FakeScoutrApi
 import dev.scoutr.app.state.Loadable
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -249,7 +250,7 @@ class ChatPendingMessageTest {
 
         agentCwd = null
         stubAgents()
-        viewModel.refresh()
+        viewModel.refreshNow()
 
         waitUntil("global catalog") { viewModel.ui.value.cwd == null && commandsCwds().lastOrNull() == null }
     }
@@ -263,10 +264,26 @@ class ChatPendingMessageTest {
 
         agentPresent = false
         stubAgents()
-        viewModel.refresh()
+        viewModel.refreshNow()
 
         waitUntil("global catalog") { viewModel.ui.value.cwd == null && commandsCwds().lastOrNull() == null }
     }
+
+    /** One coordinator refresh through the Main looper (a direct suspend call would deadlock). */
+    private fun ChatViewModel.refreshNow(source: RefreshSource = RefreshSource.PollTick) {
+        runBlocking {
+            val job = launch { refresh(source) }
+            repeat(200) {
+                org.robolectric.shadows.ShadowLooper.idleMainLooper(100, java.util.concurrent.TimeUnit.MILLISECONDS)
+                if (job.isCompleted) return@runBlocking
+                delay(25)
+            }
+            job.join()
+        }
+    }
+
+    private fun viewModel(): ChatViewModel =
+        ChatViewModel(fake, "w1:p1", "/tmp/session.jsonl", "working").also { it.startPolling() }
 
     @Test
     fun duplicateTextDropsOneMessagePerEntry() {
@@ -390,8 +407,6 @@ class ChatPendingMessageTest {
         assertEquals(emptyList<PendingUserMessage>(), dropConfirmedMessages(listOf(message), listOf(echo)))
     }
 
-    private fun viewModel(): ChatViewModel =
-        ChatViewModel(fake, "w1:p1", "/tmp/session.jsonl", "working").also { it.startPolling() }
 
     private suspend fun waitUntil(description: String = "condition", condition: () -> Boolean) {
         repeat(200) {

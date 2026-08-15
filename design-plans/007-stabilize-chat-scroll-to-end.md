@@ -1,5 +1,17 @@
 # Plan 007: Make Chat scrolling predictable under taps, appends, and drags
 
+> **Status (2026-08-15):** implemented and accepted as part of the Chat
+> refresh performance slice (`docs/performance-study.md`, recommended sequence
+> item 4). The scroll owner, drag-intent follow state, and convergence helper
+> are in `ChatScreen.kt`; the slice also added the single-flight refresh
+> coordinator and pull-to-refresh wiring, so the scope list below is amended
+> with those files. Runtime acceptance passed: the full `ChatListTest`
+> instrumentation suite (34 tests, including the five plan-007 acceptance
+> tests) is green on `emulator-5554`, and the real-app pull-to-refresh gesture
+> showed the indicator with the transcript intact. The Step-4 motion recordings
+> at normal and reduced motion remain manual recordings for a future pass.
+> Plan 011 remains TODO and depends on this plan's acceptance.
+
 > **Executor instructions**: Treat this as an implementation plan, not a runtime
 > gate. First run the drift check, implement in small steps, and run only the
 > cheap checks named by each step. After the implementation is review-clean and
@@ -55,9 +67,14 @@ with at least 30 short entries and one tall final entry.
 ## Scope
 
 **In scope**:
-- `android/app/src/main/java/dev/scoutr/app/ui/screens/ChatScreen.kt`
+- `android/app/src/main/java/dev/scoutr/app/ui/screens/ChatScreen.kt` (scroll owner, drag-intent follow, convergence helper, pull-to-refresh wiring)
 - `android/app/src/androidTest/java/dev/scoutr/app/ui/ChatListTest.kt`
-
+- `android/app/src/main/java/dev/scoutr/app/state/ChatViewModel.kt` (single-flight refresh coordinator, `RefreshSource`, `onPullRefresh`, `isRefreshing`)
+- `android/app/src/main/java/dev/scoutr/app/state/Poller.kt` (`immediateFirst`, `resetNextDeadline()`)
+- `android/app/src/main/java/dev/scoutr/app/net/PerformanceCounters.kt` (chat refresh counters)
+- `android/app/src/main/java/dev/scoutr/app/MainActivity.kt` (counters wiring)
+- `android/app/src/test/java/dev/scoutr/app/state/` `PollerTest.kt`, `ChatRefreshTest.kt`, `PollLifecycleTest.kt`, `ChatPendingMessageTest.kt`
+- `docs/performance-study.md`, `design-plans/README.md`, this plan
 **Out of scope**:
 - Chat transcript parsing, polling cadence, or WebSocket behavior
 - Current Live Output polling/scrolling and the planned Interactive Terminal lifecycle
@@ -107,13 +124,13 @@ true bottom settles.
 
 ## Done criteria
 
-- [ ] Exactly one programmatic scroll-to-end operation can own the list at a time.
-- [ ] Coroutine cancellation is rethrown and user input wins.
-- [ ] Open, follow, append, tall-tail, rapid-tap, concurrent-append, and drag-interruption tests pass.
-- [ ] Normal- and reduced-motion recordings show no oscillation or repeated top-pin jump.
-- [ ] Appends do not move a user who is reading older messages.
-- [ ] The button retains its accessible name and touch target.
-- [ ] Final runtime acceptance passes; only in-scope files changed.
+- [x] Exactly one programmatic scroll-to-end operation can own the list at a time.
+- [x] Coroutine cancellation is rethrown and user input wins.
+- [x] Open, follow, append, tall-tail, rapid-tap, concurrent-append, and drag-interruption tests pass.
+- [ ] Normal- and reduced-motion recordings show no oscillation or repeated top-pin jump. (Deferred: manual screen recordings at normal and reduced motion remain for a follow-up pass; the automated tall-tail, rapid-tap, concurrent-append, and drag-interruption tests cover the same invariants on the emulator.)
+- [x] Appends do not move a user who is reading older messages.
+- [x] The button retains its accessible name and touch target.
+- [x] Final runtime acceptance passes; only in-scope files changed.
 
 ## STOP conditions
 

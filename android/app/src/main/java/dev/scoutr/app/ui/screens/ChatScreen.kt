@@ -33,6 +33,7 @@ import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -61,6 +62,8 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -83,7 +86,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.Alignment
@@ -91,6 +94,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.foundation.border
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
+import androidx.compose.foundation.interaction.DragInteraction
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.shape.CircleShape
@@ -132,6 +136,8 @@ import dev.scoutr.app.ui.components.QuestionCard
 import dev.scoutr.app.ui.components.WorkingIndicator
 import dev.scoutr.app.ui.components.WorkingIndicatorMode
 import dev.scoutr.app.ui.components.workingIndicatorMode
+import dev.scoutr.app.ui.components.PullRefreshIndicator
+import dev.scoutr.app.ui.components.pullRefreshSemantics
 
 import dev.scoutr.app.ui.motion.ScoutrMotion
 import dev.scoutr.app.ui.motion.HapticEvent
@@ -150,7 +156,8 @@ import dev.scoutr.app.state.fillSlashCommand
 import dev.scoutr.app.state.matchSlashCommands
 import dev.scoutr.app.state.slashCommandQuery
 import androidx.lifecycle.compose.LifecycleStartEffect
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonPrimitive
 
@@ -222,22 +229,50 @@ fun ChatScreen(
 
         val emptyTranscriptHint = !ui.exists && ui.pendingMessages.isEmpty()
         val loadingTranscript = ui.transcript is Loadable.Loading && ui.entries.isEmpty() && ui.pendingMessages.isEmpty()
-        Box(Modifier.weight(1f).fillMaxWidth()) {
+        val failedTranscript =
+            ui.transcript is Loadable.Failed && ui.entries.isEmpty() && ui.pendingMessages.isEmpty()
+        val refreshState = rememberPullToRefreshState()
+        PullToRefreshBox(
+            isRefreshing = ui.isRefreshing,
+            onRefresh = viewModel::onPullRefresh,
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .pullRefreshSemantics(viewModel::onPullRefresh)
+                .testTag("chat_refresh_root"),
+            state = refreshState,
+            indicator = { PullRefreshIndicator(refreshState, ui.isRefreshing) },
+        ) {
             when {
                 loadingTranscript -> {
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    // The filler keeps the pull gesture usable before content
+                    // exists; the centered label only explains the wait.
+                    Box(
+                        Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
+                        contentAlignment = Alignment.Center,
+                    ) {
                         Text("Loading transcript…", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
 
                 emptyTranscriptHint -> {
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Box(
+                        Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
+                        contentAlignment = Alignment.Center,
+                    ) {
                         Text(
                             "No session transcript for this agent yet.\nUse the input below to steer it.",
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             style = MaterialTheme.typography.bodyMedium,
                         )
                     }
+                }
+
+                failedTranscript -> {
+                    // A failed load with nothing rendered stays quiet (no new
+                    // error surface); the filler keeps the pull gesture able
+                    // to retry the read.
+                    Box(Modifier.fillMaxSize().verticalScroll(rememberScrollState()))
                 }
 
                 else -> {
@@ -666,19 +701,34 @@ fun ChatList(
             .toMap()
     }
 
+    // Follow state is the user's intent, not a transient position reading:
+    // true while pinned to the end, false once a drag ends away from it, and
+    // true again when a drag ends at the true end or the button is tapped.
     var followNew by remember { mutableStateOf(true) }
 
-    // A new entry only lands while the user is at the bottom; the moment they
-    // scroll up, stop following and surface the scroll-to-end button.
+    // One owner of programmatic scroll-to-end (plan 007): a newer request —
+    // open-at-bottom, append-follow, or the button — cancels and replaces the
+    // prior one, and a finger drag cancels it too. Cancellation rethrows.
+    // Defined after `lastIndex` so the closure captures the tail row index
+    // current at the moment the request runs.
+    val scrollScope = rememberCoroutineScope()
+    var scrollJob by remember { mutableStateOf<Job?>(null) }
+
+    // A finger drag always wins: it stops any programmatic movement, and the
+    // position where it ends re-derives follow intent.
     LaunchedEffect(listState) {
-        snapshotFlow { listState.canScrollForward }.collect {
-            followNew = !it
+        listState.interactionSource.interactions.collect { interaction ->
+            when (interaction) {
+                is DragInteraction.Start -> scrollJob?.cancel()
+                is DragInteraction.Stop, is DragInteraction.Cancel ->
+                    followNew = !listState.canScrollForward
+            }
         }
     }
 
-    // Follow: initial open + every append while at the bottom. The index is
-    // computed the same way the LazyColumn emits items (entries, questions,
-    // pending, working indicator) so follow always lands on the true last item.
+    // Rows of the chat list in emission order; the follow index is computed
+    // the same way the LazyColumn emits items (entries, questions, pending,
+    // working indicator) so follow always lands on the true last item.
     val questionsByCall = questions.groupBy { it.callId.ifEmpty { it.id.substringBefore('#') } }
     // One assistant entry can hold several ask_user_question calls, so a
     // single entry may anchor several groups; groupBy keeps them all.
@@ -709,27 +759,39 @@ fun ChatList(
     val hasContent = lastIndex >= 0
     val lastItemKey = rows.lastOrNull()?.let { keyOf(it) }
 
+    fun scrollToEnd() {
+        scrollJob?.cancel()
+        followNew = true
+        lateinit var job: Job
+        job = scrollScope.launch {
+            try {
+                scrollChatToEnd(listState, lastIndex)
+            } finally {
+                // Clear the owner only when this job is still the current one
+                // (a newer request replaced it meanwhile), so the FAB's
+                // settling state re-enables when the movement actually ends.
+                if (scrollJob === job) scrollJob = null
+            }
+        }
+        scrollJob = job
+    }
+
     // Open-at-bottom: the moment content first arrives (and whenever the list
     // goes empty→non-empty again, e.g. a session switch) jump to the very end
-    // unconditionally. Gating this on followNew would race the position
-    // collector below, which briefly reports "not at bottom" while the list is
-    // still laid out at the top — the session would open scrolled up.
+    // unconditionally. Gating this on followNew would race the first layout,
+    // which briefly reports "not at bottom" while the list is still at the top.
     LaunchedEffect(hasContent) {
-        if (hasContent) {
-            followNew = true
-            scrollChatToEnd(listState, lastIndex)
-        }
+        if (hasContent) scrollToEnd()
     }
 
-    // Follow appends while the user is at the bottom; scrolling up stops it.
-    LaunchedEffect(rows.size, lastItemKey, indicatorMode) {
-        if (followNew && hasContent) {
-            followNew = true
-            scrollChatToEnd(listState, lastIndex)
-        }
+    // Follow appends while the user is at the bottom; a drag away from the end
+    // stops it. The keys are the tail row's identity only: a status-only
+    // change (the indicator's mode or label) never moves the bottom edge, so
+    // it must not issue a scroll request (plan 007).
+    LaunchedEffect(rows.size, lastItemKey) {
+        if (followNew && hasContent) scrollToEnd()
     }
 
-    val scope = rememberCoroutineScope()
     Box(modifier) {
         LazyColumn(
             state = listState,
@@ -805,17 +867,18 @@ fun ChatList(
             }
         }
         AnimatedVisibility(
-            visible = notAtBottom,
+            // Hidden while a programmatic scroll settles so rapid taps spawn
+            // no additional work (plan 007); the onClick guard below also
+            // covers the exit-animation window, when the button is still in
+            // the tree. The accessible name and 48dp target are unchanged.
+            visible = notAtBottom && scrollJob?.isActive != true,
             enter = fadeIn(animationSpec = tween(ScoutrMotion.DURATION_ARRIVE)),
             exit = fadeOut(animationSpec = tween(ScoutrMotion.DURATION_ARRIVE)),
             modifier = Modifier.align(Alignment.BottomEnd).padding(end = 16.dp, bottom = 10.dp),
         ) {
             FloatingActionButton(
                 onClick = {
-                    followNew = true
-                    scope.launch {
-                        scrollChatToEnd(listState, lastIndex.coerceAtLeast(0))
-                    }
+                    if (scrollJob?.isActive != true) scrollToEnd()
                 },
                 containerColor = MaterialTheme.colorScheme.surfaceVariant,
                 contentColor = MaterialTheme.colorScheme.primary,
@@ -831,35 +894,66 @@ fun ChatList(
 }
 
 /**
- * Jump to the true end of the chat list: the last item, then the maximum
- * remaining scroll. Shared by the open-at-bottom effect, the append-follow
- * effect, and the scroll-to-end button so all three land on the same spot.
+ * Move to the true bottom of [listState]: the tail row's bottom edge flush
+ * with the viewport end (trailing content padding included). Runs only from
+ * the single [ChatList] scroll owner, which cancels a superseded request;
+ * cancellation is rethrown, never retried.
  *
- * LazyColumn measures items lazily and estimates the height of items that
- * sit outside the viewport, so maxValue can understate the real content and
- * cap a single scroll below the true end. Each iteration therefore lets the
- * layout apply one step (position request, then scroll) before judging the
- * position: exposing the last item makes it measure at its real height, the
- * extent corrects, and the next scroll reaches the true bottom.
+ * LazyColumn measures items lazily and estimates the height of items outside
+ * the viewport, so one scroll can undershoot the true end. This converges
+ * with current layout info instead of fixed sleeps: position the tail in the
+ * viewport once (so it measures at its real height), then scroll by the
+ * remaining viewport distance, letting the layout correct its estimate each
+ * frame. scrollBy clamps at the real end, so it cannot overshoot or pin the
+ * tail back to the viewport top.
  */
-
-
 private suspend fun scrollChatToEnd(listState: LazyListState, lastIndex: Int) {
-    repeat(10) {
-        try {
+    if (lastIndex < 0) return
+    try {
+        if (listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index != lastIndex) {
             listState.scrollToItem(lastIndex)
-            // Let the layout apply the position request and measure the last
-            // item at its real height before scrolling further.
-            delay(16)
-            listState.scrollBy(Float.MAX_VALUE)
-            // Let the layout consume the scroll before judging the position.
-            delay(16)
-        } catch (_: Exception) {
-            // Concurrent append raced the scroll; retry.
+            withFrameNanos { }
         }
-        // Only trust "cannot scroll further" once the list has laid out;
-        // before that, totalItemsCount is 0 and canScrollForward is false.
-        if (listState.layoutInfo.totalItemsCount > 0 && !listState.canScrollForward) return
+        repeat(8) {
+            val info = listState.layoutInfo
+            val lastVisible = info.visibleItemsInfo.lastOrNull() ?: return
+            if (lastVisible.index < lastIndex) {
+                // The tail left the viewport (rows shrank or a jump landed
+                // short); re-position once, then continue converging.
+                listState.scrollToItem(lastIndex)
+            } else {
+                val remaining = info.viewportEndOffset - (lastVisible.offset + lastVisible.size)
+                if (remaining > 0) {
+                    listState.scrollBy(minOf(remaining, info.viewportSize.height).toFloat())
+                } else {
+                    // The tail's bottom sits at or below the viewport end: a
+                    // tall tail, the bottom content padding, or a stale extent
+                    // estimate (a cancelled scroll can leave the scrollable's
+                    // estimate behind while the tail is still cut below the
+                    // viewport end). Scroll down a viewport; scrollBy clamps
+                    // at the real end, so it cannot overshoot or pin the tail
+                    // back to the viewport top.
+                    val consumed = listState.scrollBy(info.viewportSize.height.toFloat())
+                    // Only a tail cut below the viewport end by more than the
+                    // bottom content padding is the stale-estimate case worth
+                    // repairing: re-snap so the measure corrects the estimate,
+                    // then the next iteration converges. At the true bottom
+                    // the tail is not cut (the negative remainder is just the
+                    // padding), so this never repositions a settled list or
+                    // pins a viewport-taller tail back to the top.
+                    if (consumed == 0f && remaining < -1f && lastVisible.index == lastIndex) {
+                        listState.scrollToItem(lastIndex)
+                    }
+                }
+            }
+            withFrameNanos { }
+        }
+    } catch (c: CancellationException) {
+        throw c
+    } catch (_: Exception) {
+        // Rows shrank mid-scroll (a pending bubble confirmed, a session
+        // switched); the next append or tap re-runs the owner with the new
+        // tail index.
     }
 }
 

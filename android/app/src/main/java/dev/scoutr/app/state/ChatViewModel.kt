@@ -10,9 +10,16 @@ import dev.scoutr.app.data.FileListing
 import dev.scoutr.app.data.SessionEntry
 import dev.scoutr.app.data.SlashCommandInfo
 import dev.scoutr.app.data.entryText
+import dev.scoutr.app.net.PerformanceCounters
 import dev.scoutr.app.net.ScoutrApi
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.async
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.io.IOException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -43,6 +50,26 @@ fun mergeSessionEntries(
  */
 enum class MessageDeliveryState { QUEUED, SENT, FAILED }
 
+/**
+ * Why a Chat refresh is running. Every trigger routes through the same
+ * single-flight coordinator, and the source is recorded in the performance
+ * counters so the study's traffic experiments can attribute each read to the
+ * trigger that caused it (no user-controlled values reach the counters).
+ */
+enum class RefreshSource {
+    /** The 2.5s poller tick; its immediate first tick doubles as the first paint. */
+    PollTick,
+    /** Post-send reconciliation loop. */
+    SendReconciliation,
+    /** A control action (set model/thinking, close, ...) just completed. */
+    ControlCompletion,
+    /** A slash command just completed. */
+    SlashCommandCompletion,
+    /** Post-answer reconciliation loop. */
+    AnswerReconciliation,
+    /** The user pulled to refresh. */
+    Pull,
+}
 data class PendingUserMessage(
     val localId: String,
     val text: String,
@@ -195,6 +222,12 @@ data class ChatUiState(
     val sending: Boolean = false,
     /** Send-path failures only (steer/upload/slash); read failures live in [transcript]. */
     val sendError: String? = null,
+    /**
+     * True only while a user-requested pull refresh is settling. Never true
+     * for a background poll: the indicator represents the user's gesture,
+     * and clears on success, failure, or lifecycle cancellation.
+     */
+    val isRefreshing: Boolean = false,
     /** Agent status from the last /api/agents poll ("working", "blocked", …). */
     val agentStatus: String = "working",
     /**
@@ -272,12 +305,24 @@ class ChatViewModel(
     val paneId: String,
     private val sessionPath: String?,
     agentStatus: String = "working",
+    private val performanceCounters: PerformanceCounters = PerformanceCounters(),
 ) : ViewModel() {
 
     private val _ui = MutableStateFlow(ChatUiState(agentStatus = agentStatus))
     val ui: StateFlow<ChatUiState> = _ui.asStateFlow()
 
     private val poller = Poller(viewModelScope)
+
+    /**
+     * Single-flight guard for the authoritative Chat read. [refreshGate] is
+     * held only to check-and-launch; the whole read runs inside
+     * [inFlightRefresh], so concurrent triggers await the same read instead
+     * of launching duplicate /api/agents + /api/sessions calls. stopPolling()
+     * cancels the in-flight read; the pane's own lifecycle (STARTED/STOPPED)
+     * is the stale-result guard — paneId never changes for this instance.
+     */
+    private val refreshGate = Mutex()
+    private var inFlightRefresh: Deferred<Boolean>? = null
 
     /** Resolved transcript path; a fresh session's card may not report it yet. */
     private var resolvedPath: String? = sessionPath
@@ -301,20 +346,29 @@ class ChatViewModel(
     fun startPolling() {
         if (lifecycleActive) return
         lifecycleActive = true
-        poller.start(2.5.seconds) { refresh() }
+        poller.start(2.5.seconds) { refresh(RefreshSource.PollTick) }
     }
 
-    /** Stop the transcript poll; in-flight one-shot actions are untouched. */
+    /**
+     * Stop the transcript poll; in-flight one-shot actions are untouched.
+     * Gates new refresh triggers and cancels the in-flight authoritative
+     * read, so no refresh traffic survives the screen reaching STOPPED.
+     */
     fun stopPolling() {
         if (!lifecycleActive) return
         lifecycleActive = false
         poller.stop()
+        inFlightRefresh?.let { inFlight ->
+            performanceCounters.chatRefreshCancelled()
+            inFlight.cancel()
+        }
     }
 
     /**
      * Model catalog for the session's backend. The backend id comes from the
-     * agents poll, so this no-ops until the card lands; refresh() re-invokes
-     * it after syncStatusAndPath() and whenever the kind changes.
+     * agents poll, so this no-ops until the card lands; the single-flight
+     * read re-invokes it after syncStatusAndPath() and whenever the kind
+     * changes.
      */
     suspend fun refreshConfiguration() {
         val agent = _ui.value.agentKind ?: return
@@ -433,8 +487,86 @@ class ChatViewModel(
         viewModelScope.launch { refreshCommands() }
     }
 
-    suspend fun refresh() {
-        try {
+    /**
+     * The one entry point for every Chat refresh trigger (poll tick, action
+     * reconciliation, pull). Single-flight: at most one authoritative read
+     * per pane runs at a time, and concurrent triggers join the in-flight
+     * read — they await its result and add no follow-up of their own.
+     *
+     * Returns true when the read landed (or was already done by a join),
+     * false when it failed or when the screen reached STOPPED. A
+     * cancellation of the caller itself (its coroutine is gone) rethrows;
+     * a cancellation of the shared read (stopPolling) while the caller is
+     * still alive reports false so the caller can settle its UI.
+     */
+    suspend fun refresh(source: RefreshSource): Boolean {
+        if (!lifecycleActive) return false
+        val deferred = refreshGate.withLock {
+            // Re-checked under the gate: stopPolling() does not take the gate,
+            // so a caller that passed the fast path above can resume here only
+            // after STOPPED — it must not register a new read.
+            if (!lifecycleActive) return false
+            inFlightRefresh?.takeIf { it.isActive }?.also {
+                performanceCounters.joinChatRefresh(source.name)
+            } ?: run {
+                performanceCounters.beginChatRefresh(source.name)
+                lateinit var d: Deferred<Boolean>
+                d = viewModelScope.async {
+                    try {
+                        readAndMerge()
+                    } finally {
+                        refreshGate.withLock {
+                            if (inFlightRefresh === d) inFlightRefresh = null
+                        }
+                    }
+                }
+                inFlightRefresh = d
+                d
+            }
+        }
+        return try {
+            deferred.await()
+        } catch (c: CancellationException) {
+            if (currentCoroutineContext().isActive) false else throw c
+        }
+    }
+
+    /**
+     * A pull-to-refresh gesture. The indicator represents only this
+     * user-requested refresh and clears on success, failure, or lifecycle
+     * cancellation; a pull joins an in-flight poll instead of racing it
+     * (repeated pulls are no-ops against the same read), and a successful
+     * pull resets the poll deadline so the next tick is a full interval
+     * away. Content stays rendered on failure — the entries are untouched.
+     */
+    fun onPullRefresh() {
+        performanceCounters.chatPullAttempted()
+        viewModelScope.launch {
+            _ui.update { it.copy(isRefreshing = true) }
+            var recorded = false
+            try {
+                val succeeded = refresh(RefreshSource.Pull)
+                performanceCounters.chatPullCompleted(success = succeeded)
+                recorded = true
+                if (succeeded) poller.resetNextDeadline()
+            } catch (c: CancellationException) {
+                // The pane reached STOPPED: the shared read was cancelled.
+                // The finally still records the failed pull and clears the indicator.
+                throw c
+            } finally {
+                if (!recorded) performanceCounters.chatPullCompleted(success = false)
+                _ui.update { it.copy(isRefreshing = false) }
+            }
+        }
+    }
+
+    /**
+     * The authoritative Chat read: board status/path, model catalog, slash
+     * commands, then the transcript. Runs as the single-flight owner; call
+     * [refresh] instead of this directly.
+     */
+    private suspend fun readAndMerge(): Boolean {
+        return try {
             val path = syncStatusAndPath()
             refreshConfiguration()
             if (_ui.value.commands !is Loadable.Ready || System.currentTimeMillis() - lastCommandRefreshAt >= COMMAND_REFRESH_MS) {
@@ -446,7 +578,7 @@ class ChatViewModel(
                 // state, not an error — the composer still steers the agent
                 // and the next poll picks the transcript up once it lands.
                 _ui.update { it.copy(transcript = Loadable.Ready(Unit), exists = false) }
-                return
+                return true
             }
             val response = bridge.session(path, since = _ui.value.entries.lastOrNull()?.entryId)
             _ui.update {
@@ -470,10 +602,12 @@ class ChatViewModel(
                     thinkingLevel = response.thinkingLevel ?: it.thinkingLevel,
                 )
             }
+            true
         } catch (c: CancellationException) {
             throw c
         } catch (e: Exception) {
             _ui.update { it.copy(transcript = Loadable.Failed(e.message ?: "session read failed", e.failureKind())) }
+            false
         }
     }
 
@@ -553,7 +687,7 @@ class ChatViewModel(
                 }
                 onSuccess()
                 delay(700)
-                refresh()
+                refresh(RefreshSource.ControlCompletion)
             } catch (c: CancellationException) {
                 throw c
             } catch (e: Exception) {
@@ -629,7 +763,7 @@ class ChatViewModel(
                 sendAnswer(questionId, safe, selectedLabels)
                 _ui.update { it.copy(answeringQuestionId = null) }
                 repeat(3) {
-                    refresh()
+                    refresh(RefreshSource.AnswerReconciliation)
                     val now = _ui.value.questions.firstOrNull { it.id == questionId }
                     if (now?.answered == true || now == null) return@launch
                     delay(750)
@@ -683,7 +817,7 @@ class ChatViewModel(
                 bridge.runSlashCommand(paneId, text)
                 _ui.update { it.copy(sending = false) }
                 delay(500)
-                refresh()
+                refresh(RefreshSource.SlashCommandCompletion)
             } catch (c: CancellationException) {
                 throw c
             } catch (error: Exception) {
@@ -723,7 +857,7 @@ class ChatViewModel(
                     )
                 }
                 repeat(3) {
-                    refresh()
+                    refresh(RefreshSource.SendReconciliation)
                     if (_ui.value.pendingMessages.none { it.localId == localId }) return@launch
                     delay(750)
                 }

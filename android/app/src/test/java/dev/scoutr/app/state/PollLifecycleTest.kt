@@ -4,10 +4,10 @@ import dev.scoutr.app.data.AgentCard
 import dev.scoutr.app.data.AgentsResponse
 import dev.scoutr.app.net.FakeScoutrApi
 import kotlinx.coroutines.CompletableDeferred
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
-import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertEquals
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -77,31 +77,31 @@ class PollLifecycleTest {
     }
 
     @Test
-    fun cancelledRefreshDoesNotWriteFailure() = runBlocking {
-        // Hold the transcript response so the test's refresh suspends mid-
-        // flight at the network seam.
+    fun stopPollingCancelsTheInFlightRefreshWithoutWritingFailure() = runBlocking {
+        // Hold the transcript response so the first poll tick suspends
+        // mid-flight at the network seam.
         val gate = CompletableDeferred<Unit>()
         fake.gates["session"] = gate
         val vm = ChatViewModel(fake, "w1:p1", "/repo/sessions/s.jsonl", "working")
+        vm.startPolling()
 
-        val job = launch { vm.refresh() }
-        // Wait until the refresh is actually suspended on the gate. delay()
-        // suspends so the runBlocking event loop can run the launched job.
         repeat(200) {
             if (fake.calls.count { it.name == "session" } >= 1) return@repeat
             idleMainLooper()
             kotlinx.coroutines.delay(10)
         }
-        assertEquals("the refresh reached the suspended session call", 1, fake.calls.count { it.name == "session" })
+        assertEquals("the tick reached the suspended session call", 1, fake.calls.count { it.name == "session" })
 
-        job.cancel()
-        job.join()
-        assertTrue("cancelled refresh must not write a transcript failure", vm.ui.value.transcript !is Loadable.Failed)
-
-        // Releasing the gate leaves no pending work; still no failure.
+        // STOPPED cancels the in-flight refresh; releasing the gate leaves
+        // the cancelled read without any work to do.
+        vm.stopPolling()
         gate.complete(Unit)
         idleMainLooper()
-        assertTrue(vm.ui.value.transcript !is Loadable.Failed)
+        assertTrue("a cancelled in-flight refresh must not write a transcript failure", vm.ui.value.transcript !is Loadable.Failed)
+
+        // A trigger arriving after STOPPED must not start a new read.
+        assertFalse("a trigger after STOPPED is a no-op", vm.refresh(RefreshSource.PollTick))
+        assertEquals(1, fake.calls.count { it.name == "session" })
     }
 
     /** Idle the main looper until the VM's refresh has landed its state. */

@@ -373,7 +373,7 @@ private fun ScoutrAppNav(
                 val agentStatus = backStackEntry.arguments?.getString("status") ?: "working"
                 val chatViewModel: ChatViewModel = viewModel(
                     factory = viewModelFactory<ChatViewModel> { app ->
-                        ChatViewModel(app.container.bridge, paneId, sessionPath, agentStatus)
+                        ChatViewModel(app.container.bridge, paneId, sessionPath, agentStatus, app.container.performanceCounters)
                     },
                     key = "chat_$paneId",
                 )
