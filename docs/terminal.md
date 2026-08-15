@@ -55,7 +55,7 @@ generation. Repeated delivery failures within a minute stop the retry and settle
 the route into a failure the pane menu can recover from.
 
 The terminal does not claim unmeasured performance guarantees. Queue bounds,
-slow-client handling, and the 10,000-row scrollback cap remain implementation
+slow-client handling, and the 50,000-row scrollback cap remain implementation
 limits until benchmark evidence changes them. Measured emulator counters for the
 batching path — including the finding that batching did not reduce emulator or
 repaint work, because Herdr already coalesces output into periodic frames — are

@@ -746,8 +746,8 @@ class TerminalViewModel(
         /** Window the delivery-failure allowance applies to; it expires on its own. */
         const val DELIVERY_FAILURE_WINDOW_MS = 60_000L
 
-        /** Plan "TerminalViewModel": ~10k transcript rows. */
-        const val TRANSCRIPT_ROWS = 10_000
+        /** Terminal scrollback retained for the active visit; capped by the vendored emulator at 50,000 rows. */
+        const val TRANSCRIPT_ROWS = 50_000
 
         /** Slice 6 uses the last known grid with nominal monospace cell dims; real pixels arrive with the view. */
         const val GRID_COLS = 80

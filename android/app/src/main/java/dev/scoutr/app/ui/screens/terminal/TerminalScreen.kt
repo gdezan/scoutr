@@ -15,9 +15,11 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -286,6 +288,12 @@ fun TerminalScreen(
                     },
                     modifier = Modifier.fillMaxSize(),
                 )
+                TerminalScrollControls(
+                    view = viewRef,
+                    modifier = Modifier
+                        .align(Alignment.CenterEnd)
+                        .padding(end = 8.dp),
+                )
 
                 TerminalOverlay(
                     state = ui,
@@ -311,6 +319,37 @@ fun TerminalScreen(
                 visible = extraKeysVisible,
                 onToggleVisibility = { viewModel.updateExtraKeysVisible(!extraKeysVisible) },
             )
+        }
+    }
+}
+@Composable
+private fun TerminalScrollControls(
+    view: TerminalView?,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier = modifier,
+        color = MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.92f),
+        shape = MaterialTheme.shapes.extraSmall,
+    ) {
+        Column(
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            IconButton(
+                onClick = { view?.scrollTerminalHistoryByPage(-1) },
+                enabled = view != null,
+                modifier = Modifier.testTag("terminal_scroll_up"),
+            ) {
+                Icon(Icons.Default.KeyboardArrowUp, contentDescription = "Scroll terminal up")
+            }
+            IconButton(
+                onClick = { view?.scrollTerminalHistoryByPage(1) },
+                enabled = view != null,
+                modifier = Modifier.testTag("terminal_scroll_down"),
+            ) {
+                Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Scroll terminal down")
+            }
         }
     }
 }

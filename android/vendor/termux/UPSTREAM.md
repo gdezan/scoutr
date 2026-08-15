@@ -52,7 +52,7 @@ Excluded (local-process/PTY/JNI path, never part of the remote model):
 
 ## Adaptations (Scoutr)
 
-Exactly two source files are modified from upstream; everything else in `src/` is byte-identical.
+Exactly three source files are modified from upstream; everything else in `src/` is byte-identical.
 
 ### `terminal-emulator/.../TerminalSession.java` — transport-neutral session
 
@@ -76,15 +76,16 @@ from and go to a remote transport. The adapted class:
 - removes all `android.os`/`android.system` imports, `Handler`, `ByteQueue` fields, `JNI` calls
   and `/proc/<pid>/cwd` access; `updateSize` no longer calls `JNI.setPtyWindowSize`.
 
-### `terminal-view/.../TerminalView.java` — `refreshEmulator()`
+### `terminal-view/.../TerminalView.java` — remote repaint and keyboard-independent scrolling
 
 Scoutr's `RemoteTerminalSession` replaces its `TerminalEmulator` on every remote stream generation
 (pane switch, reconnect, takeover; see `resetForGeneration` above), while upstream Termux never
 replaces an emulator inside a live session. The view's private `mEmulator` reference would
-otherwise stay stale and repaint the previous generation's content forever. Added one public
-method, `refreshEmulator()`, which re-fetches the emulator from the attached session, re-points the
+otherwise stay stale and repaint the previous generation's content forever. Added the public
+`refreshEmulator()` method, which re-fetches the emulator from the attached session, re-points the
 cursor blinker at it, and repaints. The app wires it as the session's `onScreenUpdated` callback
-(`TerminalScreen`). All other `TerminalView` behavior is untouched.
+(`TerminalScreen`). Added `scrollTerminalHistoryByPage(int)` so the app can expose page controls
+that work without keyboard focus. All other `TerminalView` behavior is untouched.
 
 `TerminalEmulator` and the rest of `com.termux.terminal` are untouched, so all upstream emulator
 tests still pass unmodified.

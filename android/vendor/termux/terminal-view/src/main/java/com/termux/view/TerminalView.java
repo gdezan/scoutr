@@ -1071,6 +1071,18 @@ public final class TerminalView extends View {
         return mTopRow;
     }
 
+    /** Scroll terminal history by one visible page without requiring keyboard focus. */
+    public void scrollTerminalHistoryByPage(int direction) {
+        if (mEmulator == null || direction == 0) return;
+        long time = SystemClock.uptimeMillis();
+        MotionEvent motionEvent = MotionEvent.obtain(time, time, MotionEvent.ACTION_DOWN, 0, 0, 0);
+        try {
+            doScroll(motionEvent, direction < 0 ? -mEmulator.mRows : mEmulator.mRows);
+        } finally {
+            motionEvent.recycle();
+        }
+    }
+
     public void setTopRow(int mTopRow) {
         this.mTopRow = mTopRow;
     }
