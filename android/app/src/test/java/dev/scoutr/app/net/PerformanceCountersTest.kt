@@ -86,4 +86,44 @@ class PerformanceCountersTest {
         assertEquals(0, counters.snapshot().httpRequests)
         assertEquals(0, counters.snapshot().endpoints.size)
     }
+
+    @Test
+    fun terminalThroughputCountersRecordHighWaterMarksAndReset() {
+        val counters = PerformanceCounters()
+
+        counters.terminalBinaryMessage(120)
+        counters.terminalBinaryMessage(80)
+        counters.terminalPendingBytes(4_096)
+        counters.terminalPendingBytes(1_024)
+        counters.terminalOutputBatch(200)
+        counters.terminalOutputBatch(50)
+        counters.terminalEmulatorAppend()
+        counters.terminalEmulatorAppend()
+        counters.terminalScreenUpdate()
+        counters.terminalQueueOverflow()
+
+        val terminal = counters.snapshot().terminal
+        assertEquals(2, terminal.binaryMessages)
+        assertEquals(200, terminal.bytesReceived)
+        assertEquals(2, terminal.outputBatches)
+        assertEquals(250, terminal.outputBytes)
+        // Maxima, not last values.
+        assertEquals(200, terminal.maxBatchBytes)
+        assertEquals(4_096, terminal.maxPendingBytes)
+        assertEquals(1, terminal.queueOverflows)
+        assertEquals(2, terminal.emulatorAppends)
+        assertEquals(1, terminal.screenUpdates)
+
+        counters.reset()
+        val cleared = counters.snapshot().terminal
+        assertEquals(0, cleared.binaryMessages)
+        assertEquals(0, cleared.bytesReceived)
+        assertEquals(0, cleared.outputBatches)
+        assertEquals(0, cleared.outputBytes)
+        assertEquals(0, cleared.maxBatchBytes)
+        assertEquals(0, cleared.maxPendingBytes)
+        assertEquals(0, cleared.queueOverflows)
+        assertEquals(0, cleared.emulatorAppends)
+        assertEquals(0, cleared.screenUpdates)
+    }
 }
