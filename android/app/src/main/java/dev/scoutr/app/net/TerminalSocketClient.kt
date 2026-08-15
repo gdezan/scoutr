@@ -108,6 +108,7 @@ class TerminalSocketClient(
 
             override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
                 if (ended) return
+                performanceCounters?.terminalBinaryMessage(bytes.size)
                 transportListener.onBytes(bytes.toByteArray())
             }
 

@@ -436,6 +436,7 @@ private fun ScoutrAppNav(
                             connectionStore = app.container.connectionStore,
                             preferencesStore = app.container.terminalPreferences,
                             initialPaneId = requestedPaneId,
+                            performanceCounters = app.container.performanceCounters,
                         )
                     },
                     key = "terminal_${requestedPaneId ?: "resolved"}",

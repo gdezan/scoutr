@@ -11,6 +11,7 @@ import dev.scoutr.app.data.TerminalPreferencesStore
 import dev.scoutr.app.data.TerminalSnapshot
 import dev.scoutr.app.data.toTerminalSnapshot
 import dev.scoutr.app.net.BridgeException
+import dev.scoutr.app.net.PerformanceCounters
 import dev.scoutr.app.net.ScoutrApi
 import dev.scoutr.app.net.TerminalMode
 import dev.scoutr.app.net.TerminalOpenRequest
@@ -22,6 +23,7 @@ import dev.scoutr.app.net.TerminalTransport
 import dev.scoutr.app.net.TerminalTransportListener
 import dev.scoutr.app.net.TopologyFeed
 import dev.scoutr.app.terminal.RemoteTerminalSession
+import dev.scoutr.app.terminal.TerminalOutputPump
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -51,9 +53,11 @@ import java.util.concurrent.Executors
  *  - no input queue: bytes produced by the terminal are forwarded only while
  *    Ready(writable=true) and dropped otherwise (no replay after reconnect);
  *  - every new generation resets the emulator ([RemoteTerminalSession.resetForGeneration])
- *    before any byte of that generation is fed; bytes are fed on the
- *    injectable single-thread [terminalIo] dispatcher so session access is
- *    serialized off the main thread;
+ *    before any byte of that generation is fed; output reaches the emulator
+ *    only through [TerminalOutputPump], whose single consumer runs on the
+ *    injectable single-thread [terminalIo] dispatcher, so session access is
+ *    serialized off the main thread and a burst of frames costs one emulator
+ *    append instead of one coroutine and one append per frame;
  *  - reconnect uses bounded exponential backoff (500 ms base, ×2, 8 s
  *    ceiling, ±20% jitter) while the route is started; onCleared cancels the
  *    socket WITHOUT release (bridge grace) whereas [release] sends `release`.
@@ -66,6 +70,7 @@ class TerminalViewModel(
     private val preferencesStore: TerminalPreferencesStore,
     initialPaneId: String? = null,
     injectedIo: CoroutineDispatcher? = null,
+    private val performanceCounters: PerformanceCounters? = null,
 ) : ViewModel() {
 
     /**
@@ -80,11 +85,19 @@ class TerminalViewModel(
     val ui: StateFlow<TerminalUiState> = _ui.asStateFlow()
 
     /** Emulator state for the active pane. Owned here, mutated only on [terminalIo]. */
-    internal val session: RemoteTerminalSession = RemoteTerminalSession(transcriptRows = TRANSCRIPT_ROWS)
+    internal val session: RemoteTerminalSession =
+        RemoteTerminalSession(transcriptRows = TRANSCRIPT_ROWS, counters = performanceCounters)
 
     private val terminalIo: CoroutineDispatcher
     private val ownsIo: Boolean
     private lateinit var terminalScope: CoroutineScope
+
+    /**
+     * The only path from the transport to the emulator. Transport callbacks enqueue and return;
+     * the pump's single consumer drains each burst into one append + one screen update. See
+     * [TerminalOutputPump] for the ordering and generation guarantees this relies on.
+     */
+    private val outputPump: TerminalOutputPump
 
     init {
         if (injectedIo != null) {
@@ -97,6 +110,10 @@ class TerminalViewModel(
             ownsIo = true
         }
         terminalScope = CoroutineScope(SupervisorJob() + terminalIo)
+        outputPump = TerminalOutputPump(
+            scope = terminalScope,
+            counters = performanceCounters,
+        ) { batch -> session.appendOutput(batch, 0, batch.size) }
         session.inputSink = { bytes -> forwardInput(bytes) }
         session.callbacks.onTitleChanged = { _ui.update { it.copy(title = session.getTitle()) } }
         session.callbacks.onBell = { _ui.update { it.copy(bellAt = it.bellAt + 1L) } }
@@ -189,8 +206,7 @@ class TerminalViewModel(
         if (!started) return
         val saved = connectionStore.saved ?: return
         reconnectJob?.cancel()
-        activeSocket?.release()
-        activeSocket = null
+        retireSocket()
         preferencesStore.forConnection(saved.host, saved.token).lastPaneId = paneId
         _ui.update { it.copy(paneClosedNotice = false, canTakeover = false) }
         openSocket(paneId)
@@ -199,8 +215,7 @@ class TerminalViewModel(
     /** Explicit detach: send `release` and settle to [TerminalConnectionState.Closed]. */
     fun release() {
         reconnectJob?.cancel()
-        activeSocket?.release()
-        activeSocket = null
+        retireSocket()
         _ui.update { it.copy(connection = TerminalConnectionState.Closed) }
     }
 
@@ -222,8 +237,7 @@ class TerminalViewModel(
         val paneId = _ui.value.paneId ?: return
         if (!started) return
         reconnectJob?.cancel()
-        activeSocket?.release()
-        activeSocket = null
+        retireSocket()
         _ui.update { it.copy(paneClosedNotice = false, canTakeover = false) }
         openSocket(paneId, intent = TerminalIntent.TAKEOVER)
     }
@@ -496,6 +510,24 @@ class TerminalViewModel(
 
     private class SocketRef {
         var socket: TerminalSocket? = null
+
+        /**
+         * Output generation this socket may feed, installed when its `ready` arrives. The handle
+         * itself is the gate: once a later socket replaces it, its enqueues are refused by the
+         * pump, so a stale socket cannot reach the new emulator even if a state check is missed.
+         */
+        @Volatile var output: TerminalOutputPump.Generation? = null
+    }
+
+    /**
+     * Retire the active socket and the output generation it feeds. Used for user-driven
+     * replacements (attach, takeover, observer restart, release) where the queued tail of the old
+     * generation must not render into what comes next.
+     */
+    private fun retireSocket() {
+        activeSocket?.release()
+        activeSocket = null
+        outputPump.clearGeneration()
     }
 
     private fun createListener(ref: SocketRef): TerminalTransportListener =
@@ -512,9 +544,15 @@ class TerminalViewModel(
                         paneClosedNotice = false,
                     )
                 }
-                terminalScope.launch {
-                    session.resetForGeneration(message.cols, message.rows, NOMINAL_CELL_WIDTH, NOMINAL_CELL_HEIGHT)
-                }
+                // Installing the generation both retires the previous one's queued bytes and
+                // schedules the emulator reset ahead of this generation's first batch, so the
+                // reset can never be reordered behind the output it must precede.
+                ref.output = outputPump.resetGeneration(
+                    onOverflow = { onOutputOverflow(ref) },
+                    prologue = {
+                        session.resetForGeneration(message.cols, message.rows, NOMINAL_CELL_WIDTH, NOMINAL_CELL_HEIGHT)
+                    },
+                )
             }
 
             override fun onOwnership(message: TerminalServerMessage.Ownership) {
@@ -522,9 +560,10 @@ class TerminalViewModel(
                 _ui.update { it.copy(canTakeover = message.canTakeover) }
             }
 
+            // Runs on the transport thread for every binary frame: enqueue and return. No
+            // coroutine is launched here; the pump's single consumer owns emulator delivery.
             override fun onBytes(bytes: ByteArray) {
-                if (!isCurrent(ref)) return
-                terminalScope.launch { session.appendOutput(bytes, 0, bytes.size) }
+                ref.output?.enqueue(bytes)
             }
 
             override fun onClosed(message: TerminalServerMessage.Closed) {
@@ -576,6 +615,20 @@ class TerminalViewModel(
             }
         }
 
+    /**
+     * The output queue for this generation hit its bound: the emulator cannot keep up with a
+     * burst this large. Fail the generation loudly (the pump has already dropped its queue rather
+     * than deliver a hole) and rebuild through a fresh one, which replays the screen — the same
+     * recovery shape as the bridge's slow-client policy. Called on the transport thread.
+     */
+    private fun onOutputOverflow(ref: SocketRef) {
+        if (!isCurrent(ref)) return
+        val frozen = (currentConnection as? TerminalConnectionState.Ready)?.generation
+        activeSocket?.cancel()
+        activeSocket = null
+        scheduleReconnect(frozen)
+    }
+
     private fun isCurrent(ref: SocketRef): Boolean =
         ref.socket != null && ref.socket === activeSocket
 
@@ -612,6 +665,7 @@ class TerminalViewModel(
         activeSocket = null
         reconnectJob?.cancel()
         feed?.stop()
+        outputPump.close()
         terminalScope.cancel()
         if (ownsIo) (terminalIo as? kotlinx.coroutines.ExecutorCoroutineDispatcher)?.close()
     }

@@ -60,6 +60,7 @@ import dev.scoutr.app.state.TerminalConnectionState
 import dev.scoutr.app.state.TerminalViewModel
 import dev.scoutr.app.ui.motion.HapticEvent
 import dev.scoutr.app.ui.motion.rememberHaptic
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.roundToInt
 import kotlinx.coroutines.launch
 
@@ -98,6 +99,11 @@ fun TerminalScreen(
     val modifierState = remember { ExtraKeyModifierState() }
     val writableRef = remember { mutableStateOf(false) }
     val fontSpRef = remember { mutableStateOf(TerminalPreferencesStore.ConnectionPreferences.DEFAULT_FONT_SIZE_SP) }
+
+    // Coalesces terminal repaints onto the UI thread: set while a repaint is
+    // posted, so a burst of output batches costs one posted Runnable.
+    val repaintPending = remember { AtomicBoolean(false) }
+    val repaintRef = remember { mutableStateOf<Runnable?>(null) }
 
     // Re-read on every write to the shared store, so pinch, the strip, and the
     // Settings rows all land here without leaving the route.
@@ -260,11 +266,24 @@ fun TerminalScreen(
                             ),
                         )
                         view.attachSession(viewModel.session)
-                        // Generation resets replace the session's emulator (see
-                        // RemoteTerminalSession.resetForGeneration); refreshEmulator
-                        // re-fetches it so the new generation's content renders
-                        // instead of the view repainting the stale emulator forever.
-                        viewModel.session.callbacks.onScreenUpdated = { view.refreshEmulator() }
+                        // Screen updates arrive on the terminal dispatcher, but
+                        // refreshEmulator touches view state (scroll position,
+                        // scrollbars, invalidate), so it must run on the UI
+                        // thread. One posted repaint is kept in flight at a
+                        // time: a burst of batches coalesces into the next
+                        // frame's repaint instead of queueing one Runnable per
+                        // batch. refreshEmulator (rather than a bare
+                        // invalidate) re-fetches the emulator, which generation
+                        // resets replace (see
+                        // RemoteTerminalSession.resetForGeneration).
+                        val repaint = Runnable {
+                            repaintPending.set(false)
+                            view.refreshEmulator()
+                        }
+                        repaintRef.value = repaint
+                        viewModel.session.callbacks.onScreenUpdated = {
+                            if (repaintPending.compareAndSet(false, true)) view.post(repaint)
+                        }
                         viewRef = view
                         view
                     },
@@ -277,6 +296,9 @@ fun TerminalScreen(
                         // session outlives the route and would otherwise hold a
                         // detached view alive and repaint into it.
                         viewModel.session.callbacks.onScreenUpdated = {}
+                        repaintRef.value?.let { view.removeCallbacks(it) }
+                        repaintRef.value = null
+                        repaintPending.set(false)
                         if (viewRef === view) viewRef = null
                     },
                     modifier = Modifier.fillMaxSize(),
