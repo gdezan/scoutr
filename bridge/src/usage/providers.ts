@@ -47,6 +47,7 @@ const CODEX_USAGE_URL = "https://chatgpt.com/backend-api/wham/usage";
 const CODEX_TOKEN_URL = "https://auth.openai.com/oauth/token";
 const CODEX_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann";
 const DEEPSEEK_BALANCE_URL = "https://api.deepseek.com/user/balance";
+const OPENCODE_GO_USAGE_URL = "https://opencode.ai/zen/go/v1/usage";
 const XAI_BILLING_URL = "https://cli-chat-proxy.grok.com/v1/billing?format=credits";
 const XAI_USER_URL = "https://cli-chat-proxy.grok.com/v1/user";
 const XAI_TOKEN_URL = "https://auth.x.ai/oauth2/token";
@@ -212,6 +213,69 @@ async function fetchDeepseekUsage({ store }: UsageContext): Promise<UsageSnapsho
   return { ...snapshot("deepseek", "DeepSeek", windows), updatedAt: Date.now() };
 }
 
+// ── OpenCode Go ───────────────────────────────────────────────────────
+
+/**
+ * The Go plan's three spend caps, in the order the console shows them.
+ * Zen (pay-as-you-go credits) has no equivalent endpoint — only Go reports usage.
+ */
+const OPENCODE_GO_WINDOWS: Array<{ key: string; label: string; windowSeconds?: number }> = [
+  { key: "rolling", label: "5h", windowSeconds: 5 * 60 * 60 },
+  { key: "weekly", label: "wk", windowSeconds: 7 * 24 * 60 * 60 },
+  // Monthly rides the billing anchor, not a fixed span, so the duration is left open.
+  { key: "monthly", label: "mo" },
+];
+
+export function parseOpencodeGoUsage(value: unknown): UsageSnapshot {
+  const root = value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined;
+  const usage = root?.usage;
+  if (!usage || typeof usage !== "object" || Array.isArray(usage)) {
+    throw new Error("OpenCode Go usage response was not an object");
+  }
+  const buckets = usage as Record<string, unknown>;
+
+  const windows: UsageWindow[] = [];
+  for (const { key, label, windowSeconds } of OPENCODE_GO_WINDOWS) {
+    const bucket = buckets[key];
+    if (!bucket || typeof bucket !== "object" || Array.isArray(bucket)) continue;
+    const record = bucket as Record<string, unknown>;
+    const percent = finite(record.percent);
+    if (percent === undefined) continue;
+    windows.push({
+      label,
+      usedPercent: clampPercent(percent),
+      windowSeconds,
+      resetAt: resetAtFromIso(record.resetsAt),
+    });
+  }
+
+  if (windows.length === 0) throw new Error("OpenCode Go usage response contained no recognized windows");
+  return snapshot("opencode-go", "OpenCode Go", windows);
+}
+
+async function fetchOpencodeGoUsage({ store }: UsageContext): Promise<UsageSnapshot> {
+  const auth = getApiKeyAuth(store, "opencode-go");
+  if (!auth) throw new Error("opencode-go credentials are not configured in pi's auth.json");
+
+  const body = await withTimeout(async (signal) => {
+    const response = await fetch(OPENCODE_GO_USAGE_URL, {
+      signal,
+      headers: {
+        accept: "application/json",
+        authorization: `Bearer ${auth.key}`,
+        // opencode.ai sits behind a WAF that 403s unrecognized clients before
+        // auth is ever considered — without a client-shaped user-agent even the
+        // documented /models endpoint is refused.
+        "user-agent": "opencode/1.0",
+      },
+    });
+    if (!response.ok) throw new Error(`OpenCode Go usage request returned ${response.status}`);
+    return (await response.json()) as Record<string, unknown>;
+  });
+
+  return parseOpencodeGoUsage(body);
+}
+
 // ── xAI ───────────────────────────────────────────────────────────────
 
 function centsVal(value: unknown): number | undefined {
@@ -366,6 +430,7 @@ export const USAGE_PROVIDERS: UsageProvider[] = [
   { id: "claude", label: "Claude", fetch: () => fetchClaudeUsage() },
   { id: "deepseek", label: "DeepSeek", fetch: fetchDeepseekUsage },
   { id: "xai", label: "xAI", fetch: fetchXaiUsage },
+  { id: "opencode-go", label: "OpenCode Go", fetch: fetchOpencodeGoUsage },
 ];
 
 export interface UsageServiceOptions {

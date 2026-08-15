@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { getCodexAuth, getApiKeyAuth, getOAuthAuth, persistOAuthAuth } from "../src/usage/auth.js";
 import { isExpiring } from "../src/usage/oauth.js";
 import { fetchClaudeUsage, parseClaudeUsage } from "../src/usage/claude.js";
-import { parseXaiUsage, USAGE_PROVIDERS, UsageService, type UsageProvider } from "../src/usage/providers.js";
+import { parseOpencodeGoUsage, parseXaiUsage, USAGE_PROVIDERS, UsageService, type UsageProvider } from "../src/usage/providers.js";
 
 test("auth helpers extract codex, oauth, and api-key credentials", () => {
   const store = {
@@ -76,7 +76,44 @@ test("parseClaudeUsage prefers the generalized limits array", () => {
 });
 
 test("Claude follows Codex in the usage provider registry", () => {
-  assert.deepEqual(USAGE_PROVIDERS.map((provider) => provider.id), ["codex", "claude", "deepseek", "xai"]);
+  assert.deepEqual(USAGE_PROVIDERS.map((provider) => provider.id), [
+    "codex",
+    "claude",
+    "deepseek",
+    "xai",
+    "opencode-go",
+  ]);
+});
+
+test("parseOpencodeGoUsage maps the Go plan's three spend caps", () => {
+  const snapshot = parseOpencodeGoUsage({
+    usage: {
+      rolling: { status: "ok", percent: 25, resetsAt: "2026-08-15T20:24:13.661Z" },
+      weekly: { status: "ok", percent: 91, resetsAt: "2026-08-17T00:00:00.661Z" },
+      monthly: { status: "ok", percent: 48, resetsAt: "2026-09-09T16:10:03.661Z" },
+    },
+  });
+
+  assert.equal(snapshot.provider, "opencode-go");
+  assert.equal(snapshot.label, "OpenCode Go");
+  assert.deepEqual(
+    snapshot.windows.map(({ label, usedPercent, windowSeconds }) => ({ label, usedPercent, windowSeconds })),
+    [
+      { label: "5h", usedPercent: 25, windowSeconds: 5 * 60 * 60 },
+      { label: "wk", usedPercent: 91, windowSeconds: 7 * 24 * 60 * 60 },
+      { label: "mo", usedPercent: 48, windowSeconds: undefined },
+    ],
+  );
+  assert.equal(snapshot.windows[0]?.resetAt, Math.floor(Date.parse("2026-08-15T20:24:13.661Z") / 1000));
+});
+
+test("parseOpencodeGoUsage skips buckets without a percent and rejects empty responses", () => {
+  const partial = parseOpencodeGoUsage({
+    usage: { rolling: { status: "ok", percent: 5 }, weekly: { status: "unknown" } },
+  });
+  assert.deepEqual(partial.windows.map((window) => window.label), ["5h"]);
+  assert.throws(() => parseOpencodeGoUsage({ usage: {} }), /no recognized windows/);
+  assert.throws(() => parseOpencodeGoUsage({ nope: 1 }), /was not an object/);
 });
 
 test("fetchClaudeUsage authenticates as Claude Code and keeps stale Claude cache on failure", { concurrency: false }, async () => {
