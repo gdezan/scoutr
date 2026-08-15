@@ -103,8 +103,11 @@ public class TerminalSession extends TerminalOutput {
 
     /**
      * Feed output received from the remote side into the terminal emulator. Must be called on the
-     * main thread; the client's {@link TerminalSessionClient#onTextChanged(TerminalSession)} is
-     * notified so the view can repaint.
+     * single thread that owns this session (Scoutr's terminal dispatcher); the client's
+     * {@link TerminalSessionClient#onTextChanged(TerminalSession)} is notified so the view can
+     * repaint, and that callback is responsible for reaching the UI thread.
+     *
+     * <p>{@code offset} is not supported by the emulator append below: callers must pass 0.
      */
     public void appendOutput(byte[] data, int offset, int count) {
         mEmulator.append(data, count);

@@ -3,12 +3,13 @@ package dev.scoutr.app.terminal
 import android.util.Log
 import com.termux.terminal.TerminalSession
 import com.termux.terminal.TerminalSessionClient
+import dev.scoutr.app.net.PerformanceCounters
 
 /**
  * Transport-neutral terminal session for a remote pane.
  *
  * Owns the vendored [TerminalSession] (see android/vendor/termux/UPSTREAM.md) with no local
- * process: [appendOutput] feeds bytes received from the remote side into the emulator and the
+ * process: [appendOutput] feeds one drained [TerminalOutputPump] batch into the emulator and the
  * [inputSink] routes bytes produced by the terminal (typed input, emulator query replies) to the
  * transport. Transport wiring, ViewModel and UI arrive in later slices; until then [inputSink]
  * stays null and written bytes are dropped (mirroring upstream behavior before the process
@@ -22,7 +23,8 @@ import com.termux.terminal.TerminalSessionClient
 class RemoteTerminalSession(
     transcriptRows: Int?,
     val callbacks: Callbacks = Callbacks(),
-) : TerminalSession(transcriptRows, SessionClient(callbacks)) {
+    private val counters: PerformanceCounters? = null,
+) : TerminalSession(transcriptRows, SessionClient(callbacks, counters)) {
     /**
      * Transport hook for bytes produced by the terminal. The receiver must not retain the array
      * beyond the call (it may be a reused internal buffer); it is copied before delivery.
@@ -40,6 +42,22 @@ class RemoteTerminalSession(
                 }
             )
         }
+
+    /**
+     * Feed one drained output batch into the emulator: one [com.termux.terminal.TerminalEmulator]
+     * append and one screen update per batch, whatever number of transport frames it was built
+     * from. Escape sequences split across those frames are handled by the emulator's own parser
+     * state, which spans appends.
+     *
+     * [offset] must be 0: the vendored session appends from the start of [data] (its emulator
+     * append takes a length, not a range), so a non-zero offset would silently feed the wrong
+     * bytes. [TerminalOutputPump] always produces batches that start at 0.
+     */
+    override fun appendOutput(data: ByteArray, offset: Int, count: Int) {
+        require(offset == 0) { "terminal output batches must start at offset 0" }
+        counters?.terminalEmulatorAppend()
+        super.appendOutput(data, offset, count)
+    }
 
     /**
      * Replace all terminal state (transcript, modes, colors, cursor, saved states) with a fresh
@@ -73,8 +91,12 @@ class RemoteTerminalSession(
     /** Bridges the vendored [TerminalSessionClient] contract to the app-facing [Callbacks]. */
     private class SessionClient(
         private val callbacks: Callbacks,
+        private val counters: PerformanceCounters?,
     ) : TerminalSessionClient {
-        override fun onTextChanged(changedSession: TerminalSession) = callbacks.onScreenUpdated()
+        override fun onTextChanged(changedSession: TerminalSession) {
+            counters?.terminalScreenUpdate()
+            callbacks.onScreenUpdated()
+        }
 
         override fun onTitleChanged(changedSession: TerminalSession) = callbacks.onTitleChanged()
 

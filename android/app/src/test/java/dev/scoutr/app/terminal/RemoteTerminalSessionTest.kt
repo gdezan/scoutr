@@ -1,5 +1,6 @@
 package dev.scoutr.app.terminal
 
+import dev.scoutr.app.net.PerformanceCounters
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -14,7 +15,8 @@ class RemoteTerminalSessionTest {
 
     private class Harness {
         val callbacks = RemoteTerminalSession.Callbacks()
-        val session = RemoteTerminalSession(transcriptRows = 200, callbacks)
+        val counters = PerformanceCounters()
+        val session = RemoteTerminalSession(transcriptRows = 200, callbacks, counters)
         var screenUpdates = 0
         var titleChanges = 0
         var sessionFinished = 0
@@ -39,6 +41,12 @@ class RemoteTerminalSessionTest {
         }
 
         fun transcript(): String = session.emulator!!.screen.getTranscriptTextWithoutJoinedLines()
+
+        /** Feed chunks the way the pump does: one contiguous batch per drain. */
+        fun feedBatched(chunks: List<String>) {
+            val batch = chunks.joinToString("").toByteArray(Charsets.UTF_8)
+            session.appendOutput(batch, 0, batch.size)
+        }
     }
 
 
@@ -134,5 +142,79 @@ class RemoteTerminalSessionTest {
 
         h.feed("new generation")
         assertEquals("new generation", h.transcript())
+    }
+
+    // --- Batched delivery (one append + one screen update per drained batch) ---
+
+    @Test
+    fun oneBatchProducesOneAppendAndOneScreenUpdate() {
+        val h = harness()
+        val updatesBefore = h.screenUpdates
+        val appendsBefore = h.counters.snapshot().terminal.emulatorAppends
+
+        // 40 network chunks the pump would have drained into a single batch.
+        val chunks = (1..40).map { "line $it\r\n" }
+        h.feedBatched(chunks)
+
+        assertEquals(1, h.screenUpdates - updatesBefore)
+        assertEquals(1L, h.counters.snapshot().terminal.emulatorAppends - appendsBefore)
+        assertEquals(
+            chunks.joinToString("") { it.removeSuffix("\r\n") + "\n" }.trimEnd('\n'),
+            h.transcript(),
+        )
+    }
+
+    @Test
+    fun largeBatchRendersEveryLine() {
+        val h = harness()
+        // Under the harness' 200-row transcript, so nothing scrolls out of history.
+        val lines = (1..150).map { "row $it" }
+        h.feedBatched(lines.map { "$it\r\n" })
+
+        val transcript = h.transcript().split("\n")
+        assertEquals(lines, transcript.filter { it.isNotEmpty() })
+        assertEquals(1L, h.counters.snapshot().terminal.emulatorAppends)
+    }
+
+    @Test
+    fun escapeSequenceSplitAcrossNetworkChunksStillRenders() {
+        // The pump can slice a burst anywhere, including mid-escape. Fed as
+        // separate appends, the emulator's parser state must span them.
+        val h = harness()
+        h.feed("\u001b[")
+        h.feed("31")
+        h.feed("mHello")
+        assertEquals("Hello", h.transcript())
+
+        // Same bytes coalesced into one batch must render identically.
+        val batched = harness()
+        batched.feedBatched(listOf("\u001b[", "31", "mHello"))
+        assertEquals(h.transcript(), batched.transcript())
+    }
+
+    @Test
+    fun titleBellAndColorCallbacksSurviveCoalescing() {
+        val h = harness()
+        // One batch carrying a title change, a BEL, a palette reset and text.
+        h.feedBatched(listOf("\u001b]2;Batched\u0007", "\u0007", "\u001b]104\u0007", "done"))
+
+        assertEquals("Batched", h.session.title)
+        assertEquals(1, h.titleChanges)
+        assertEquals(1, h.bells)
+        // The emulator constructor resets the palette once, so this is the second.
+        assertEquals(2, h.colorsChanged)
+        assertEquals("done", h.transcript())
+    }
+
+    @Test
+    fun appendRejectsANonZeroOffsetInsteadOfFeedingTheWrongBytes() {
+        val h = harness()
+        val bytes = "skip me".toByteArray()
+        try {
+            h.session.appendOutput(bytes, 2, bytes.size - 2)
+            throw AssertionError("expected a rejected offset")
+        } catch (expected: IllegalArgumentException) {
+            assertTrue(expected.message!!.contains("offset 0"))
+        }
     }
 }
