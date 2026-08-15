@@ -804,7 +804,7 @@ private fun HistoryRow(
                     )
                     Spacer(Modifier.width(10.dp))
                     AgentMark(session.agentKind)
-                    if (session.agentKind?.lowercase() == "claude") Spacer(Modifier.width(6.dp))
+                    Spacer(Modifier.width(6.dp))
                     Text(
                         text = agentDisplayTitle(session.title),
                         style = MaterialTheme.typography.titleMedium,

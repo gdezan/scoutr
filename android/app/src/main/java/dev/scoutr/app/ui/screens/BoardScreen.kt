@@ -413,9 +413,7 @@ private fun AgentCardRow(
                     Column(Modifier.weight(1f)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             AgentMark(agent.agentKind)
-                            if (agent.agentKind.lowercase() == "claude") {
-                                Spacer(Modifier.width(6.dp))
-                            }
+                            Spacer(Modifier.width(6.dp))
                             Text(
                                 text = agent.cardTitle(),
                                 style = MaterialTheme.typography.titleMedium,

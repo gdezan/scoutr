@@ -6,11 +6,14 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import dev.scoutr.app.ui.theme.ScoutrType
@@ -272,23 +275,41 @@ private fun UsageBar(window: UsageWindow, provider: String, nowSeconds: Long) {
                 maxLines = 1,
             )
         }
-        // A 4dp meter on the canvas color, not a tinted Material track: the
-        // hairline is what keeps Usage from reading as an agent status screen.
-        Box(
+        // The 4dp meter sits on the canvas color; the marker is a quiet time
+        // reference, not another status color or a text annotation.
+        BoxWithConstraints(
             Modifier
                 .fillMaxWidth()
                 .padding(top = 10.dp)
-                .height(4.dp)
-                .clip(RoundedCornerShape(2.dp))
-                .background(MaterialTheme.colorScheme.background),
+                .height(10.dp),
         ) {
             Box(
                 Modifier
-                    .fillMaxWidth(progress)
+                    .fillMaxWidth()
                     .height(4.dp)
+                    .align(Alignment.Center)
                     .clip(RoundedCornerShape(2.dp))
-                    .background(color),
-            )
+                    .background(MaterialTheme.colorScheme.background),
+            ) {
+                Box(
+                    Modifier
+                        .fillMaxWidth(progress)
+                        .height(4.dp)
+                        .align(Alignment.CenterStart)
+                        .clip(RoundedCornerShape(2.dp))
+                        .background(color),
+                )
+            }
+            quotaTimeProgress(window, nowSeconds)?.let { timeProgress ->
+                Box(
+                    Modifier
+                        .padding(start = maxWidth * timeProgress)
+                        .width(1.dp)
+                        .fillMaxHeight()
+                        .background(MaterialTheme.colorScheme.onSurfaceVariant)
+                        .testTag("usage_time_marker_${provider}_${window.label}"),
+                )
+            }
         }
         if (reset != null || amount != null) {
             Row(
@@ -434,6 +455,14 @@ internal fun windowTitle(label: String): String = when (label.lowercase()) {
     "mo" -> "Monthly limit"
     "plan" -> "Plan limit"
     else -> label
+}
+
+/** Returns where the quota period currently is, or null when no time window is known. */
+internal fun quotaTimeProgress(window: UsageWindow, nowSeconds: Long): Float? {
+    val duration = window.windowSeconds?.takeIf { it > 0 } ?: return null
+    val resetAt = window.resetAt ?: return null
+    val periodStart = resetAt - duration
+    return ((nowSeconds - periodStart).toDouble() / duration).coerceIn(0.0, 1.0).toFloat()
 }
 
 /**

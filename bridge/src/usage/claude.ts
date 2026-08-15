@@ -35,8 +35,18 @@ function claudeResetAt(value: unknown): number | undefined {
   const parsed = Date.parse(trimmed);
   return Number.isFinite(parsed) ? Math.floor(parsed / 1000) : undefined;
 }
+function claudeWindowSeconds(label: string): number | undefined {
+  if (label === "5h") return 5 * 60 * 60;
+  if (label === "7d" || label.startsWith("7d ")) return 7 * 24 * 60 * 60;
+  return undefined;
+}
 
-function claudeWindow(value: unknown, label: string, percentKey = "utilization"): UsageWindow | undefined {
+function claudeWindow(
+  value: unknown,
+  label: string,
+  percentKey = "utilization",
+  windowSeconds = claudeWindowSeconds(label),
+): UsageWindow | undefined {
   const record = recordOf(value);
   if (!record) return undefined;
   const usedPercent = finite(record[percentKey]) ?? finite(record.used_percentage);
@@ -44,6 +54,7 @@ function claudeWindow(value: unknown, label: string, percentKey = "utilization")
   return {
     label,
     usedPercent: clampPercent(usedPercent),
+    windowSeconds,
     resetAt: claudeResetAt(record.resets_at),
   };
 }

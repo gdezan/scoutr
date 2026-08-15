@@ -459,7 +459,7 @@ private fun ChatHeader(
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     AgentMark(agentKind, size = 14.dp)
-                    if (agentKind?.lowercase() == "claude") Spacer(Modifier.width(6.dp))
+                    Spacer(Modifier.width(6.dp))
                     Text(
                         agentDisplayTitle(sessionTitle),
                         // §7a header: 17/600/-.2, a step above the tile title.

@@ -1,6 +1,7 @@
 package dev.scoutr.app.ui.screens
 
 
+import dev.scoutr.app.data.UsageWindow
 import java.util.Locale
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -31,5 +32,19 @@ class UsageFormattingTest {
         assertEquals("resets in 12m", resetLabel(now + 12 * 60, now))
         assertEquals("resets in 2h 15m", resetLabel(now + (2 * 60 + 15) * 60, now))
         assertEquals("resets in 3d 2h", resetLabel(now + (3 * 24 + 2) * 60 * 60, now))
+    }
+    @Test
+    fun placesTimeMarkerAtElapsedShareOfWindow() {
+        val window = UsageWindow(windowSeconds = 5 * 60 * 60, resetAt = 10_000L)
+
+        assertEquals(0.5f, quotaTimeProgress(window, 10_000L - (2 * 60 * 60 + 30 * 60)))
+        assertEquals(0f, quotaTimeProgress(window, 10_000L - 6 * 60 * 60))
+        assertEquals(1f, quotaTimeProgress(window, 10_001L))
+    }
+
+    @Test
+    fun omitsTimeMarkerWithoutACompleteWindow() {
+        assertNull(quotaTimeProgress(UsageWindow(windowSeconds = 3600), 1_000L))
+        assertNull(quotaTimeProgress(UsageWindow(resetAt = 2_000L), 1_000L))
     }
 }

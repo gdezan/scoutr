@@ -37,11 +37,11 @@ test("parseClaudeUsage handles Claude Code's legacy quota windows", () => {
   assert.equal(snapshot.provider, "claude");
   assert.equal(snapshot.label, "Claude");
   assert.deepEqual(
-    snapshot.windows.map(({ label, usedPercent, resetAt }) => ({ label, usedPercent, resetAt })),
+    snapshot.windows.map(({ label, usedPercent, windowSeconds, resetAt }) => ({ label, usedPercent, windowSeconds, resetAt })),
     [
-      { label: "5h", usedPercent: 42.5, resetAt: 1_786_622_400 },
-      { label: "7d", usedPercent: 61, resetAt: 1_786_684_800 },
-      { label: "7d Opus", usedPercent: 12, resetAt: 1_786_684_800 },
+      { label: "5h", usedPercent: 42.5, windowSeconds: 5 * 60 * 60, resetAt: 1_786_622_400 },
+      { label: "7d", usedPercent: 61, windowSeconds: 7 * 24 * 60 * 60, resetAt: 1_786_684_800 },
+      { label: "7d Opus", usedPercent: 12, windowSeconds: 7 * 24 * 60 * 60, resetAt: 1_786_684_800 },
     ],
   );
 });
