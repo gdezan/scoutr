@@ -1,9 +1,10 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { getCodexAuth, getApiKeyAuth, getOAuthAuth } from "../src/usage/auth.js";
+import { getCodexAuth, getApiKeyAuth, getOAuthAuth, persistOAuthAuth } from "../src/usage/auth.js";
+import { isExpiring } from "../src/usage/oauth.js";
 import { fetchClaudeUsage, parseClaudeUsage } from "../src/usage/claude.js";
 import { parseXaiUsage, USAGE_PROVIDERS, UsageService, type UsageProvider } from "../src/usage/providers.js";
 
@@ -135,6 +136,142 @@ test("fetchClaudeUsage authenticates as Claude Code and keeps stale Claude cache
   }
 });
 
+test("fetchClaudeUsage refreshes an expired token and persists the rotated one", { concurrency: false }, async () => {
+  const configDir = await mkdtemp(join(tmpdir(), "scoutr-claude-refresh-"));
+  const statePath = `${configDir}.json`;
+  const credentialsPath = join(configDir, ".credentials.json");
+  const originalConfigDir = process.env.CLAUDECONFIGDIR;
+  const originalFetch = globalThis.fetch;
+  process.env.CLAUDECONFIGDIR = configDir;
+  await writeFile(
+    credentialsPath,
+    JSON.stringify({
+      claudeAiOauth: {
+        accessToken: "stale-token",
+        refreshToken: "refresh-1",
+        expiresAt: Date.now() - 1000,
+        subscriptionType: "max",
+      },
+    }),
+  );
+
+  try {
+    const seen: string[] = [];
+    globalThis.fetch = async (input, init) => {
+      const url = String(input);
+      seen.push(url);
+      if (url.endsWith("/v1/oauth/token")) {
+        assert.equal(init?.method, "POST");
+        const body = JSON.parse(String(init?.body)) as Record<string, string>;
+        assert.equal(body.grant_type, "refresh_token");
+        assert.equal(body.refresh_token, "refresh-1");
+        assert.equal(body.client_id, "9d1c250a-e61b-44d9-88ed-5944d1962f5e");
+        return new Response(
+          JSON.stringify({ access_token: "fresh-token", refresh_token: "refresh-2", expires_in: 3600 }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      assert.equal(new Headers(init?.headers).get("authorization"), "Bearer fresh-token");
+      return new Response(JSON.stringify({ five_hour: { utilization: 12 } }), { status: 200 });
+    };
+
+    const snapshot = await fetchClaudeUsage();
+    assert.equal(snapshot.windows[0]?.usedPercent, 12);
+    assert.equal(snapshot.error, undefined);
+    assert.ok(seen.some((url) => url.includes("/v1/oauth/token")), "expected a token refresh");
+
+    // The rotated refresh token must land on disk, and unrelated fields must survive.
+    const persisted = JSON.parse(await readFile(credentialsPath, "utf8")) as Record<string, any>;
+    assert.equal(persisted.claudeAiOauth.accessToken, "fresh-token");
+    assert.equal(persisted.claudeAiOauth.refreshToken, "refresh-2");
+    assert.equal(persisted.claudeAiOauth.subscriptionType, "max");
+    assert.ok(persisted.claudeAiOauth.expiresAt > Date.now());
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalConfigDir === undefined) delete process.env.CLAUDECONFIGDIR;
+    else process.env.CLAUDECONFIGDIR = originalConfigDir;
+    await rm(configDir, { recursive: true, force: true });
+    await rm(statePath, { force: true });
+  }
+});
+
+test("fetchClaudeUsage retries a 401 with the token Claude Code just wrote", { concurrency: false }, async () => {
+  const configDir = await mkdtemp(join(tmpdir(), "scoutr-claude-401-"));
+  const statePath = `${configDir}.json`;
+  const credentialsPath = join(configDir, ".credentials.json");
+  const originalConfigDir = process.env.CLAUDECONFIGDIR;
+  const originalFetch = globalThis.fetch;
+  process.env.CLAUDECONFIGDIR = configDir;
+  // Expiry still in the future, so nothing refreshes pre-emptively.
+  await writeFile(
+    credentialsPath,
+    JSON.stringify({ claudeAiOauth: { accessToken: "old-token", refreshToken: "r", expiresAt: Date.now() + 3_600_000 } }),
+  );
+
+  try {
+    let attempts = 0;
+    globalThis.fetch = async (input, init) => {
+      assert.ok(!String(input).includes("/v1/oauth/token"), "must not spend a refresh when the file is fresher");
+      attempts += 1;
+      const token = new Headers(init?.headers).get("authorization");
+      if (token === "Bearer old-token") {
+        // Simulate `claude` rotating the file behind us between the two attempts.
+        await writeFile(
+          credentialsPath,
+          JSON.stringify({ claudeAiOauth: { accessToken: "cli-token", refreshToken: "r", expiresAt: Date.now() + 3_600_000 } }),
+        );
+        return new Response(JSON.stringify({ error: { message: "expired" } }), { status: 401 });
+      }
+      assert.equal(token, "Bearer cli-token");
+      return new Response(JSON.stringify({ five_hour: { utilization: 77 } }), { status: 200 });
+    };
+
+    const snapshot = await fetchClaudeUsage();
+    assert.equal(snapshot.windows[0]?.usedPercent, 77);
+    assert.equal(attempts, 2);
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalConfigDir === undefined) delete process.env.CLAUDECONFIGDIR;
+    else process.env.CLAUDECONFIGDIR = originalConfigDir;
+    await rm(configDir, { recursive: true, force: true });
+    await rm(statePath, { force: true });
+  }
+});
+
+test("persistOAuthAuth merges into pi's auth store without dropping other providers", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "scoutr-pi-auth-"));
+  const authPath = join(dir, "auth.json");
+  await writeFile(
+    authPath,
+    JSON.stringify({
+      "openai-codex": { type: "oauth", access: "a1", refresh: "r1", expires: 1, accountId: "acct" },
+      deepseek: { type: "api-key", key: "sk-keep" },
+    }),
+  );
+
+  try {
+    await persistOAuthAuth(authPath, "openai-codex", { access: "a2", refresh: "r2", expires: 2 });
+    const store = JSON.parse(await readFile(authPath, "utf8")) as Record<string, any>;
+    assert.equal(store["openai-codex"].access, "a2");
+    assert.equal(store["openai-codex"].refresh, "r2");
+    assert.equal(store["openai-codex"].expires, 2);
+    // Fields the bridge does not manage must survive the write.
+    assert.equal(store["openai-codex"].accountId, "acct");
+    assert.equal(store["openai-codex"].type, "oauth");
+    assert.equal(store.deepseek.key, "sk-keep");
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("isExpiring refreshes only on a known-spent expiry", () => {
+  assert.equal(isExpiring(Date.now() - 1), true);
+  assert.equal(isExpiring(Date.now() + 60_000), true, "inside the skew window");
+  assert.equal(isExpiring(Date.now() + 3_600_000), false);
+  // Unknown expiry is not a reason to burn a rotation; the 401 path covers it.
+  assert.equal(isExpiring(undefined), false);
+});
+
 test("parseXaiUsage handles the monthly credits shape", () => {
   const snapshot = parseXaiUsage({
     config: {
@@ -211,11 +348,12 @@ test("failed refreshes keep successful data stale and remain retryable", async (
     },
   };
   const service = new UsageService({ cacheTtlMs: 1 });
+  const context = { store: {}, authPath: "/nonexistent/auth.json" };
 
-  await service.get(provider, {});
+  await service.get(provider, context);
   await new Promise((resolve) => setTimeout(resolve, 5));
-  const failed = await service.get(provider, {});
-  const retried = await service.get(provider, {});
+  const failed = await service.get(provider, context);
+  const retried = await service.get(provider, context);
 
   assert.equal(failed.updatedAt, 123);
   assert.deepEqual(failed.windows, [{ label: "day", usedPercent: 25 }]);

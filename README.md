@@ -346,8 +346,13 @@ today looks like: `adb pair 100.78.204.15:<port> <code>` then
   authenticated by bearer token (constant-time compare).
 - The bridge is read-only on herdr state except deliberate `agent.prompt` /
   `pane.send_text` when you act from the app.
-- The app never writes `~/.pi/agent/auth.json`; usage adapters read it
-  read-only.
+- Usage adapters read `~/.pi/agent/auth.json` and `~/.claude/.credentials.json`,
+  and write back **only** refreshed OAuth tokens. Anthropic and OpenAI rotate the
+  refresh token on every exchange, so persisting it is what keeps `pi`'s and
+  `claude`'s own logins working; discarding it strands the on-disk token one
+  rotation behind. Writes are atomic (temp file + rename, original mode
+  preserved) and merge into the file as read at write time, so fields the bridge
+  does not manage are never dropped.
 - `tailscale serve` restricts the API to your tailnet; the token is a second
   layer on top.
 

@@ -1,13 +1,29 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { claudeConfigDir } from "../agents/claude/index.js";
+import { updateJsonFile } from "./auth.js";
+import { isExpiring, requestTokenRefresh } from "./oauth.js";
 import type { UsageSnapshot, UsageWindow } from "./providers.js";
 
 const CLAUDE_USAGE_URL = "https://api.anthropic.com/api/oauth/usage";
 const CLAUDE_USAGE_BETA = "oauth-2025-04-20";
-const CLAUDE_USAGE_USER_AGENT = "claude-code/2.1.0";
 const CLAUDE_USAGE_TIMEOUT_MS = 10_000;
 const CLAUDE_CACHE_FRESH_MS = 60_000;
+
+/**
+ * Anthropic buckets requests by user-agent: an unrecognized one lands in an
+ * aggressively rate-limited pool that answers 429 almost immediately. Claude
+ * Code records its own version in ~/.claude.json, so track that rather than
+ * pinning a version string that silently ages out.
+ */
+const CLAUDE_FALLBACK_VERSION = "2.1.0";
+
+/** Anthropic moved token exchange to platform.claude.com; console 404s but still works for some accounts. */
+const CLAUDE_TOKEN_URLS = [
+  "https://platform.claude.com/v1/oauth/token",
+  "https://console.anthropic.com/v1/oauth/token",
+];
+const CLAUDE_CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -118,15 +134,90 @@ function defaultClaudeStatePath(): string {
   return `${claudeConfigDir()}.json`;
 }
 
-async function readClaudeAccessToken(path: string): Promise<string | undefined> {
+interface ClaudeCredentials {
+  accessToken: string;
+  refreshToken?: string;
+  expiresAt?: number;
+}
+
+async function readClaudeCredentials(path: string): Promise<ClaudeCredentials | undefined> {
   try {
     const root = recordOf(JSON.parse(await readFile(path, "utf8")));
     const oauth = recordOf(root?.claudeAiOauth);
-    return typeof oauth?.accessToken === "string" && oauth.accessToken !== "" ? oauth.accessToken : undefined;
+    const accessToken = typeof oauth?.accessToken === "string" ? oauth.accessToken : "";
+    if (accessToken === "") return undefined;
+    return {
+      accessToken,
+      refreshToken: typeof oauth?.refreshToken === "string" ? oauth.refreshToken : undefined,
+      expiresAt: finite(oauth?.expiresAt),
+    };
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
     throw error;
   }
+}
+
+/**
+ * Exchange the refresh token and merge the result back into the credential file.
+ *
+ * Anthropic rotates the refresh token, so persisting is what keeps `claude`'s
+ * own login alive — dropping the rotated token would leave the file one
+ * rotation behind and eventually force a re-login.
+ */
+async function refreshClaudeCredentials(
+  path: string,
+  credentials: ClaudeCredentials,
+): Promise<ClaudeCredentials> {
+  if (!credentials.refreshToken) {
+    throw new Error("Claude Code OAuth token expired and no refresh token is stored; run `claude` to sign in");
+  }
+
+  const refreshed = await requestTokenRefresh({
+    urls: CLAUDE_TOKEN_URLS,
+    clientId: CLAUDE_CLIENT_ID,
+    refreshToken: credentials.refreshToken,
+    encoding: "json",
+    label: "Claude",
+    reauthHint: "run `claude` and sign in again",
+    signal: AbortSignal.timeout(CLAUDE_USAGE_TIMEOUT_MS),
+  });
+
+  await updateJsonFile(path, (root) => {
+    const oauth = recordOf(root.claudeAiOauth) ?? {};
+    root.claudeAiOauth = {
+      ...oauth,
+      accessToken: refreshed.access,
+      ...(refreshed.refresh ? { refreshToken: refreshed.refresh } : {}),
+      expiresAt: refreshed.expires,
+    };
+    return root;
+  });
+
+  return { accessToken: refreshed.access, refreshToken: refreshed.refresh, expiresAt: refreshed.expires };
+}
+
+/** Claude Code records the version it last onboarded with; it is the closest thing to "installed version". */
+async function claudeUserAgent(statePath: string): Promise<string> {
+  try {
+    const root = recordOf(JSON.parse(await readFile(statePath, "utf8")));
+    const version = root?.lastOnboardingVersion;
+    if (typeof version === "string" && /^\d+\.\d+/.test(version)) return `claude-code/${version}`;
+  } catch {
+    // Fall through to the pinned version; a plausible UA still beats none.
+  }
+  return `claude-code/${CLAUDE_FALLBACK_VERSION}`;
+}
+
+async function requestClaudeUsage(accessToken: string, userAgent: string): Promise<Response> {
+  return fetch(CLAUDE_USAGE_URL, {
+    signal: AbortSignal.timeout(CLAUDE_USAGE_TIMEOUT_MS),
+    headers: {
+      authorization: `Bearer ${accessToken}`,
+      "anthropic-beta": CLAUDE_USAGE_BETA,
+      "content-type": "application/json",
+      "user-agent": userAgent,
+    },
+  });
 }
 
 async function readCachedClaudeUsage(path: string): Promise<UsageSnapshot | undefined> {
@@ -153,24 +244,42 @@ async function claudeUsageError(response: Response): Promise<Error> {
   return new Error(`Claude usage request returned ${response.status}${detail ? `: ${detail}` : ""}`);
 }
 
-/** Fetch Claude Code subscription usage, preserving Claude's last cached snapshot if the endpoint fails. */
+/**
+ * Fetch Claude Code subscription usage, preserving Claude's last cached snapshot if the endpoint fails.
+ *
+ * Access tokens live ~60 minutes and `claude` only refreshes them while it is
+ * running, so the token on disk is routinely expired by the time the app asks.
+ * The recovery ladder, cheapest first:
+ *
+ *   1. refresh proactively when `expiresAt` says the token is spent;
+ *   2. on a 401 anyway, re-read the file — `claude` may have just rotated it;
+ *   3. still 401 with an unchanged token: refresh and retry once.
+ */
 export async function fetchClaudeUsage(): Promise<UsageSnapshot> {
-  const cached = await readCachedClaudeUsage(defaultClaudeStatePath());
+  const statePath = defaultClaudeStatePath();
+  const credentialsPath = defaultClaudeCredentialsPath();
+  const cached = await readCachedClaudeUsage(statePath);
   if (cached && Date.now() - cached.updatedAt < CLAUDE_CACHE_FRESH_MS) return cached;
 
   try {
-    const accessToken = await readClaudeAccessToken(defaultClaudeCredentialsPath());
-    if (!accessToken) throw new Error("Claude Code OAuth credentials are not configured; run `claude` to sign in");
+    let credentials = await readClaudeCredentials(credentialsPath);
+    if (!credentials) throw new Error("Claude Code OAuth credentials are not configured; run `claude` to sign in");
 
-    const response = await fetch(CLAUDE_USAGE_URL, {
-      signal: AbortSignal.timeout(CLAUDE_USAGE_TIMEOUT_MS),
-      headers: {
-        authorization: `Bearer ${accessToken}`,
-        "anthropic-beta": CLAUDE_USAGE_BETA,
-        "content-type": "application/json",
-        "user-agent": CLAUDE_USAGE_USER_AGENT,
-      },
-    });
+    if (isExpiring(credentials.expiresAt)) {
+      credentials = await refreshClaudeCredentials(credentialsPath, credentials);
+    }
+
+    const userAgent = await claudeUserAgent(statePath);
+    let response = await requestClaudeUsage(credentials.accessToken, userAgent);
+
+    if (response.status === 401) {
+      void response.body?.cancel().catch(() => undefined);
+      const onDisk = await readClaudeCredentials(credentialsPath);
+      const fresher = onDisk && onDisk.accessToken !== credentials.accessToken ? onDisk : undefined;
+      credentials = fresher ?? (await refreshClaudeCredentials(credentialsPath, credentials));
+      response = await requestClaudeUsage(credentials.accessToken, userAgent);
+    }
+
     if (!response.ok) throw await claudeUsageError(response);
     return parseClaudeUsage(await response.json());
   } catch (error) {

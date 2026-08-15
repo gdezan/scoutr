@@ -10,7 +10,17 @@
  */
 
 import { fetchClaudeUsage } from "./claude.js";
-import { getCodexAuth, getApiKeyAuth, getOAuthAuth, readAuthStore, type AuthStore, type OAuthAuth } from "./auth.js";
+import {
+  getCodexAuth,
+  getApiKeyAuth,
+  getOAuthAuth,
+  persistOAuthAuth,
+  readAuthStore,
+  type AuthStore,
+  type CodexAuth,
+  type OAuthAuth,
+} from "./auth.js";
+import { isExpiring, requestTokenRefresh } from "./oauth.js";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -33,8 +43,9 @@ export interface UsageSnapshot {
 }
 
 const FETCH_TIMEOUT_MS = 10_000;
-const TOKEN_SKEW_MS = 5 * 60 * 1000;
 const CODEX_USAGE_URL = "https://chatgpt.com/backend-api/wham/usage";
+const CODEX_TOKEN_URL = "https://auth.openai.com/oauth/token";
+const CODEX_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann";
 const DEEPSEEK_BALANCE_URL = "https://api.deepseek.com/user/balance";
 const XAI_BILLING_URL = "https://cli-chat-proxy.grok.com/v1/billing?format=credits";
 const XAI_USER_URL = "https://cli-chat-proxy.grok.com/v1/user";
@@ -95,19 +106,58 @@ function parseCodexWindow(value: unknown, fallbackLabel: string): UsageWindow | 
   };
 }
 
-async function fetchCodexUsage(authStore: AuthStore): Promise<UsageSnapshot> {
-  const auth = getCodexAuth(authStore);
-  if (!auth) throw new Error("openai-codex credentials are not configured in pi's auth.json");
+/**
+ * Refresh Codex's access token and write the result back to pi's auth.json.
+ *
+ * OpenAI rotates the refresh token on every exchange, so the rotated value must
+ * be persisted — keeping it in memory only would leave the on-disk token one
+ * rotation stale and break pi's Codex login after the upstream grace window.
+ */
+async function refreshCodexAccess(authPath: string, auth: CodexAuth): Promise<CodexAuth> {
+  if (!auth.refresh) {
+    throw new Error("Codex OAuth token expired and no refresh token is stored; run `pi /login` and select Codex");
+  }
 
-  const body = await withTimeout(async (signal) => {
-    const response = await fetch(CODEX_USAGE_URL, {
+  const refreshed = await withTimeout((signal) =>
+    requestTokenRefresh({
+      urls: [CODEX_TOKEN_URL],
+      clientId: CODEX_CLIENT_ID,
+      refreshToken: auth.refresh!,
+      encoding: "json",
+      label: "Codex",
+      reauthHint: "run `pi /login` and select Codex",
+      signal,
+    }),
+  );
+
+  await persistOAuthAuth(authPath, "openai-codex", refreshed);
+  return { ...auth, access: refreshed.access, refresh: refreshed.refresh, expires: refreshed.expires };
+}
+
+async function fetchCodexUsage({ store, authPath }: UsageContext): Promise<UsageSnapshot> {
+  let auth = getCodexAuth(store);
+  if (!auth) throw new Error("openai-codex credentials are not configured in pi's auth.json");
+  if (isExpiring(auth.expires)) auth = await refreshCodexAccess(authPath, auth);
+
+  const requestUsage = (signal: AbortSignal, access: string) =>
+    fetch(CODEX_USAGE_URL, {
       signal,
       headers: {
         accept: "application/json",
-        authorization: `Bearer ${auth.access}`,
-        ...(auth.accountId ? { "chatgpt-account-id": auth.accountId } : {}),
+        authorization: `Bearer ${access}`,
+        ...(auth!.accountId ? { "chatgpt-account-id": auth!.accountId } : {}),
       },
     });
+
+  const body = await withTimeout(async (signal) => {
+    let response = await requestUsage(signal, auth!.access);
+    // A 401 despite a live-looking expiry means the token was revoked or the
+    // clock drifted; one refresh distinguishes that from a real auth failure.
+    if (response.status === 401) {
+      void response.body?.cancel().catch(() => undefined);
+      auth = await refreshCodexAccess(authPath, auth!);
+      response = await requestUsage(signal, auth.access);
+    }
     if (!response.ok) throw new Error(`Codex usage request returned ${response.status}`);
     return (await response.json()) as Record<string, unknown>;
   });
@@ -144,8 +194,8 @@ function parseDeepseekBalance(value: unknown): UsageWindow[] {
   return windows;
 }
 
-async function fetchDeepseekUsage(authStore: AuthStore): Promise<UsageSnapshot> {
-  const auth = getApiKeyAuth(authStore, "deepseek");
+async function fetchDeepseekUsage({ store }: UsageContext): Promise<UsageSnapshot> {
+  const auth = getApiKeyAuth(store, "deepseek");
   if (!auth) throw new Error("deepseek credentials are not configured in pi's auth.json");
 
   const body = await withTimeout(async (signal) => {
@@ -233,12 +283,16 @@ export function parseXaiUsage(value: unknown): UsageSnapshot {
 }
 
 /**
- * Refresh an expired xAI OAuth access token in memory only.
- * The bridge never writes auth.json (see auth.ts); pi's own login/refresh owns persistence.
+ * Refresh an expired xAI OAuth access token and persist the result.
+ *
+ * This used to refresh in memory only. That discarded the rotated refresh
+ * token, so every bridge restart re-refreshed with a token that was already one
+ * rotation behind — a slow path to a dead xAI login. The refreshed value is now
+ * written back to pi's auth.json.
  */
-async function refreshXaiAccess(auth: OAuthAuth): Promise<OAuthAuth> {
+async function refreshXaiAccess(authPath: string, auth: OAuthAuth): Promise<OAuthAuth> {
   const expires = finite(auth.expires);
-  if (expires !== undefined && expires - TOKEN_SKEW_MS > Date.now()) return auth;
+  if (!isExpiring(expires)) return auth;
   if (!auth.refresh) {
     if (expires !== undefined && expires <= Date.now()) {
       throw new Error("xAI OAuth token expired; run `pi /login` and select xAI");
@@ -246,42 +300,27 @@ async function refreshXaiAccess(auth: OAuthAuth): Promise<OAuthAuth> {
     return auth;
   }
 
-  const body = await withTimeout(async (signal) => {
-    const response = await fetch(XAI_TOKEN_URL, {
-      method: "POST",
+  const refreshed = await withTimeout((signal) =>
+    requestTokenRefresh({
+      urls: [XAI_TOKEN_URL],
+      clientId: XAI_CLIENT_ID,
+      refreshToken: auth.refresh!,
+      encoding: "form",
+      label: "xAI",
+      reauthHint: "run `pi /login` and select xAI",
       signal,
-      headers: {
-        accept: "application/json",
-        "content-type": "application/x-www-form-urlencoded",
-      },
-      body: new URLSearchParams({
-        grant_type: "refresh_token",
-        client_id: XAI_CLIENT_ID,
-        refresh_token: auth.refresh!,
-      }),
-    });
-    if (!response.ok) throw new Error(`xAI token refresh returned ${response.status}`);
-    return (await response.json()) as Record<string, unknown>;
-  });
+    }),
+  );
 
-  const access = typeof body.access_token === "string" ? body.access_token : undefined;
-  if (!access) throw new Error("xAI token refresh returned no access token");
-  const refresh = typeof body.refresh_token === "string" ? body.refresh_token : auth.refresh;
-  const expiresIn = finite(body.expires_in) ?? 3600;
-  return {
-    ...auth,
-    type: "oauth",
-    access,
-    refresh,
-    expires: Date.now() + expiresIn * 1000 - TOKEN_SKEW_MS,
-  };
+  await persistOAuthAuth(authPath, "xai", refreshed);
+  return { ...auth, type: "oauth", access: refreshed.access, refresh: refreshed.refresh, expires: refreshed.expires };
 }
 
-async function fetchXaiUsage(authStore: AuthStore): Promise<UsageSnapshot> {
-  const stored = getOAuthAuth(authStore, "xai");
+async function fetchXaiUsage({ store, authPath }: UsageContext): Promise<UsageSnapshot> {
+  const stored = getOAuthAuth(store, "xai");
   if (!stored) throw new Error("xAI OAuth is not configured in pi's auth.json (run /login and select xAI)");
 
-  const auth = await refreshXaiAccess(stored);
+  const auth = await refreshXaiAccess(authPath, stored);
 
   const headers: Record<string, string> = {
     accept: "application/json",
@@ -310,10 +349,16 @@ async function fetchXaiUsage(authStore: AuthStore): Promise<UsageSnapshot> {
 
 // ── Registry ──────────────────────────────────────────────────────────
 
+/** What a provider needs to authenticate: the parsed store, plus where to write refreshed tokens back. */
+export interface UsageContext {
+  store: AuthStore;
+  authPath: string;
+}
+
 export interface UsageProvider {
   id: string;
   label: string;
-  fetch: (store: AuthStore) => Promise<UsageSnapshot>;
+  fetch: (context: UsageContext) => Promise<UsageSnapshot>;
 }
 
 export const USAGE_PROVIDERS: UsageProvider[] = [
@@ -343,18 +388,17 @@ export class UsageService {
   async all(): Promise<UsageSnapshot[]> {
     // Claude owns a separate OAuth store, so a missing pi auth file must not hide it.
     const store = await readAuthStore(this.authPath).catch(() => ({}));
-    const results: UsageSnapshot[] = [];
-    for (const provider of USAGE_PROVIDERS) {
-      results.push(await this.get(provider, store));
-    }
-    return results;
+    const context: UsageContext = { store, authPath: this.authPath };
+    // Fetch in parallel: sequentially, four timing-out providers stack their
+    // 10s timeouts into a 40s wait for a screen that polls every 10s.
+    return Promise.all(USAGE_PROVIDERS.map((provider) => this.get(provider, context)));
   }
 
-  async get(provider: UsageProvider, store: AuthStore): Promise<UsageSnapshot> {
+  async get(provider: UsageProvider, context: UsageContext): Promise<UsageSnapshot> {
     const cached = this.cache.get(provider.id);
     if (cached && Date.now() - cached.at < this.ttlMs) return cached.snapshot;
     try {
-      const snapshotValue = await provider.fetch(store);
+      const snapshotValue = await provider.fetch(context);
       this.cache.set(provider.id, { snapshot: snapshotValue, at: Date.now() });
       return snapshotValue;
     } catch (error) {
