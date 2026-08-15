@@ -50,6 +50,77 @@ export const TERMINAL_LIMITS = {
   termGraceMs: 1_000,
 } as const;
 
+/**
+ * Outcome of feeding one pipe chunk to {@link NdjsonLineReader}. Both bound failures are fatal
+ * `line-too-long` conditions; they are distinguished only so the message can say whether the
+ * offending record ever terminated.
+ */
+export type NdjsonPushResult = "ok" | "stopped" | "line-too-long" | "pending-too-long";
+
+/**
+ * Splits a stream of pipe chunks into NDJSON lines without repeatedly copying the accumulated
+ * prefix.
+ *
+ * A record split across many pipe reads used to cost one `Buffer.concat` of everything received
+ * so far per chunk (quadratic in the number of reads for a large frame). Incomplete pieces are
+ * now retained as views and consolidated exactly once, when a newline proves the line is
+ * complete; a line that arrives whole inside one chunk is passed as a view with no copy at all.
+ *
+ * The `maxLineBytes` bound is checked against the accumulated length *before* consolidating, so
+ * an over-long record is rejected without ever being materialized.
+ */
+export class NdjsonLineReader {
+  private pending: Buffer[] = [];
+  private pendingBytes = 0;
+
+  constructor(private readonly maxLineBytes: number) {}
+
+  /**
+   * Feed one chunk. [onLine] receives each complete, non-empty line in order and returns false to
+   * stop consuming the rest of the chunk (used when a record proved fatal).
+   */
+  push(chunk: Buffer, onLine: (line: Buffer) => boolean): NdjsonPushResult {
+    let start = 0;
+    let newline: number;
+    while ((newline = chunk.indexOf(0x0a, start)) >= 0) {
+      const piece = chunk.subarray(start, newline);
+      start = newline + 1;
+      if (this.pendingBytes + piece.length > this.maxLineBytes) {
+        this.reset();
+        return "line-too-long";
+      }
+      let line: Buffer;
+      if (this.pendingBytes === 0) {
+        // Whole line inside this chunk: a view, no copy.
+        line = piece;
+      } else {
+        // The one consolidation copy per line that actually spanned chunks.
+        this.pending.push(piece);
+        line = Buffer.concat(this.pending, this.pendingBytes + piece.length);
+        this.reset();
+      }
+      if (line.length === 0) continue;
+      if (!onLine(line)) return "stopped";
+    }
+    const rest = chunk.subarray(start);
+    if (rest.length > 0) {
+      this.pending.push(rest);
+      this.pendingBytes += rest.length;
+    }
+    if (this.pendingBytes > this.maxLineBytes) {
+      this.reset();
+      return "pending-too-long";
+    }
+    return "ok";
+  }
+
+  /** Drop any incomplete line (a fatal record or a dead child ends the stream). */
+  reset(): void {
+    this.pending = [];
+    this.pendingBytes = 0;
+  }
+}
+
 export class TerminalError extends Error {
   readonly code: string;
   constructor(code: string, message: string) {
@@ -311,7 +382,7 @@ class HerdrTerminalProcess implements TerminalProcess {
   private released = false;
   private closedEmitted = false;
   private disposing = false;
-  private stdoutBuf: Buffer = Buffer.alloc(0);
+  private readonly stdoutLines: NdjsonLineReader;
   /** Records emitted before the first subscriber attaches (open() is resolving). */
   private buffered: TerminalRecord[] = [];
   private bufferedBytes = 0;
@@ -320,6 +391,7 @@ class HerdrTerminalProcess implements TerminalProcess {
     this.child = child;
     this.mode = mode;
     this.limits = limits;
+    this.stdoutLines = new NdjsonLineReader(limits.maxLineBytes);
     // Resolve on 'close', not 'exit': stderr data events complete before
     // 'close', so startup-failure messages can include the full stderr tail.
     this.exitedPromise = new Promise((resolve) => {
@@ -436,19 +508,14 @@ class HerdrTerminalProcess implements TerminalProcess {
   /** NDJSON ingestion: arbitrary chunk boundaries, multiple records per chunk, bounded lines. */
   private ingest(chunk: Buffer): void {
     if (this.hasExited || this.disposing) return;
-    this.stdoutBuf = this.stdoutBuf.length === 0 ? chunk : Buffer.concat([this.stdoutBuf, chunk]);
-    let newline: number;
-    while ((newline = this.stdoutBuf.indexOf(0x0a)) >= 0) {
-      const line = this.stdoutBuf.subarray(0, newline);
-      this.stdoutBuf = this.stdoutBuf.subarray(newline + 1);
-      if (line.length > this.limits.maxLineBytes) {
-        this.fatal("line-too-long", `terminal record exceeds ${this.limits.maxLineBytes} bytes`);
-        return;
-      }
-      if (line.length === 0) continue;
+    const result = this.stdoutLines.push(chunk, (line) => {
       this.handleLine(line);
-    }
-    if (this.stdoutBuf.length > this.limits.maxLineBytes) {
+      // A fatal record already killed the session; stop reading behind it.
+      return !this.disposing && !this.hasExited;
+    });
+    if (result === "line-too-long") {
+      this.fatal("line-too-long", `terminal record exceeds ${this.limits.maxLineBytes} bytes`);
+    } else if (result === "pending-too-long") {
       this.fatal("line-too-long", `terminal record exceeds ${this.limits.maxLineBytes} bytes without newline`);
     }
   }

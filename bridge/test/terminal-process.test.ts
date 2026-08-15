@@ -13,6 +13,8 @@ import { test } from "node:test";
 
 import {
   HerdrTerminalLauncher,
+  NdjsonLineReader,
+  TERMINAL_LIMITS,
   TerminalBoundsError,
   TerminalOwnershipConflictError,
   TerminalStartupError,
@@ -369,4 +371,93 @@ test("probe: observer handshake failure is unsupported", async () => {
   const cap = await env.launcher.probe("w1:p1");
   assert.equal(cap.status, "unsupported");
   assert.ok(cap.status === "unsupported" && cap.reason.includes("observer handshake failed"));
+});
+
+// --- NDJSON line splitting (the parser seam under the child process) ---
+
+/** Collect the lines one reader produces for a scripted chunk sequence. */
+function readAll(chunks: Buffer[], maxLineBytes = TERMINAL_LIMITS.maxLineBytes) {
+  const reader = new NdjsonLineReader(maxLineBytes);
+  const lines: string[] = [];
+  const results: string[] = [];
+  for (const chunk of chunks) {
+    results.push(
+      reader.push(chunk, (line) => {
+        lines.push(line.toString("utf8"));
+        return true;
+      }),
+    );
+  }
+  return { lines, results };
+}
+
+test("ndjson: one record split across many small chunks arrives whole and once", () => {
+  const record = JSON.stringify({ type: "terminal.frame", bytes: "a".repeat(4096) });
+  const chunks: Buffer[] = [];
+  const whole = Buffer.from(record + "\n", "utf8");
+  for (let at = 0; at < whole.length; at += 7) chunks.push(whole.subarray(at, at + 7));
+
+  const { lines, results } = readAll(chunks);
+  assert.deepEqual(lines, [record]);
+  assert.ok(results.every((r) => r === "ok"));
+});
+
+test("ndjson: multiple records in one chunk keep their order", () => {
+  const { lines } = readAll([Buffer.from('{"a":1}\n{"a":2}\n{"a":3}\n', "utf8")]);
+  assert.deepEqual(lines, ['{"a":1}', '{"a":2}', '{"a":3}']);
+});
+
+test("ndjson: a newline exactly on a chunk boundary splits cleanly", () => {
+  const { lines } = readAll([
+    Buffer.from('{"a":1}', "utf8"),
+    Buffer.from("\n", "utf8"),
+    Buffer.from('{"a":2}\n', "utf8"),
+  ]);
+  assert.deepEqual(lines, ['{"a":1}', '{"a":2}']);
+});
+
+test("ndjson: empty lines are skipped and a trailing partial is retained", () => {
+  const { lines } = readAll([Buffer.from('\n\n{"a":1}\ntail-without-newline', "utf8")]);
+  assert.deepEqual(lines, ['{"a":1}']);
+});
+
+test("ndjson: no byte is lost across arbitrary chunk boundaries", () => {
+  const records = Array.from({ length: 200 }, (_, i) => JSON.stringify({ seq: i, pad: "x".repeat(i) }));
+  const stream = Buffer.from(records.join("\n") + "\n", "utf8");
+  // Deterministic irregular chunking (1..97 bytes) over the whole stream.
+  const chunks: Buffer[] = [];
+  let at = 0;
+  let size = 1;
+  while (at < stream.length) {
+    chunks.push(stream.subarray(at, at + size));
+    at += size;
+    size = (size * 7 + 3) % 97 + 1;
+  }
+  const { lines } = readAll(chunks);
+  assert.deepEqual(lines, records);
+});
+
+test("ndjson: an over-long record is rejected before it is materialized", () => {
+  const reader = new NdjsonLineReader(1024);
+  // Terminated line over the bound.
+  assert.equal(reader.push(Buffer.from("x".repeat(2048) + "\n", "utf8"), () => true), "line-too-long");
+  // Unterminated accumulation over the bound, across chunks.
+  const fresh = new NdjsonLineReader(1024);
+  assert.equal(fresh.push(Buffer.from("y".repeat(600), "utf8"), () => true), "ok");
+  assert.equal(fresh.push(Buffer.from("y".repeat(600), "utf8"), () => true), "pending-too-long");
+  // The rejected prefix is dropped rather than carried into the next line.
+  const lines: string[] = [];
+  assert.equal(fresh.push(Buffer.from('{"a":1}\n', "utf8"), (l) => { lines.push(l.toString("utf8")); return true; }), "ok");
+  assert.deepEqual(lines, ['{"a":1}']);
+});
+
+test("ndjson: a handler that stops leaves the rest of the chunk unread", () => {
+  const reader = new NdjsonLineReader(1024);
+  const lines: string[] = [];
+  const result = reader.push(Buffer.from('{"a":1}\n{"a":2}\n{"a":3}\n', "utf8"), (line) => {
+    lines.push(line.toString("utf8"));
+    return lines.length < 2;
+  });
+  assert.equal(result, "stopped");
+  assert.deepEqual(lines, ['{"a":1}', '{"a":2}']);
 });
