@@ -60,6 +60,7 @@ class PerformanceCounters {
         val maxBatchBytes: Long,
         val maxPendingBytes: Long,
         val queueOverflows: Long,
+        val deliveryFailures: Long,
         val emulatorAppends: Long,
         val screenUpdates: Long,
     )
@@ -145,6 +146,7 @@ class PerformanceCounters {
         val maxBatchBytes = AtomicLong()
         val maxPendingBytes = AtomicLong()
         val queueOverflows = AtomicLong()
+        val deliveryFailures = AtomicLong()
         val emulatorAppends = AtomicLong()
         val screenUpdates = AtomicLong()
 
@@ -156,6 +158,7 @@ class PerformanceCounters {
             maxBatchBytes = maxBatchBytes.get(),
             maxPendingBytes = maxPendingBytes.get(),
             queueOverflows = queueOverflows.get(),
+            deliveryFailures = deliveryFailures.get(),
             emulatorAppends = emulatorAppends.get(),
             screenUpdates = screenUpdates.get(),
         )
@@ -168,6 +171,7 @@ class PerformanceCounters {
             maxBatchBytes.set(0)
             maxPendingBytes.set(0)
             queueOverflows.set(0)
+            deliveryFailures.set(0)
             emulatorAppends.set(0)
             screenUpdates.set(0)
         }
@@ -314,6 +318,11 @@ class PerformanceCounters {
     /** A generation was failed because its pending output exceeded the bound. */
     fun terminalQueueOverflow() {
         terminalCounters.queueOverflows.incrementAndGet()
+    }
+
+    /** A generation was retired because delivering one of its batches threw. */
+    fun terminalDeliveryFailure() {
+        terminalCounters.deliveryFailures.incrementAndGet()
     }
 
     /** One [dev.scoutr.app.terminal.RemoteTerminalSession] append into the emulator. */

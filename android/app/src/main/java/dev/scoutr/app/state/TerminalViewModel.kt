@@ -115,7 +115,13 @@ class TerminalViewModel(
         outputPump = TerminalOutputPump(
             scope = terminalScope,
             counters = performanceCounters,
-        ) { batch -> session.appendOutput(batch, 0, batch.size) }
+        ) { batch ->
+            session.appendOutput(batch, 0, batch.size)
+            // Rendering a batch is the only proof the failure was transient. Resetting on `ready`
+            // instead would defeat the cap below: a deterministic failure reaches Ready every
+            // cycle, so the counter would never accumulate.
+            consecutiveDeliveryFailures = 0
+        }
         session.inputSink = { bytes -> forwardInput(bytes) }
         session.callbacks.onTitleChanged = { _ui.update { it.copy(title = session.getTitle()) } }
         session.callbacks.onBell = { _ui.update { it.copy(bellAt = it.bellAt + 1L) } }
@@ -128,6 +134,12 @@ class TerminalViewModel(
     private var snapshotDebounce: Job? = null
     private var gridDebounce: Job? = null
     private var reconnectAttempt = 0
+
+    /**
+     * Consecutive generations retired by a delivery failure, cleared once a batch actually
+     * renders. Written from the terminal/transport threads that deliver output or report failure.
+     */
+    @Volatile private var consecutiveDeliveryFailures = 0
     private var feed: TopologyFeed? = null
 
     /** Last grid measured by the view (main thread); used for hello/resize/observer restart. */
@@ -628,6 +640,27 @@ class TerminalViewModel(
         val frozen = (currentConnection as? TerminalConnectionState.Ready)?.generation
         activeSocket?.cancel()
         activeSocket = null
+        if (failure == TerminalOutputFailure.DELIVERY_FAILED) {
+            // A delivery failure can be deterministic in the replayed content (an emulator or
+            // repaint defect on one escape sequence). Reconnecting replays the same bytes and
+            // fails at the same byte, and each cycle reaches Ready first, which resets the
+            // backoff — so retrying forever would be a tight loop. Give it a few chances, then
+            // stop and say so instead of hammering the pane.
+            if (++consecutiveDeliveryFailures > MAX_DELIVERY_FAILURES) {
+                consecutiveDeliveryFailures = 0
+                _ui.update {
+                    it.copy(
+                        connection = TerminalConnectionState.Failed(
+                            "terminal output could not be rendered",
+                            retryable = false,
+                        ),
+                    )
+                }
+                return
+            }
+        } else {
+            consecutiveDeliveryFailures = 0
+        }
         scheduleReconnect(frozen)
     }
 
@@ -687,12 +720,15 @@ class TerminalViewModel(
                 "batches=${terminal.outputBatches} batchBytes=${terminal.outputBytes} " +
                 "maxBatch=${terminal.maxBatchBytes} maxPending=${terminal.maxPendingBytes} " +
                 "appends=${terminal.emulatorAppends} screenUpdates=${terminal.screenUpdates} " +
-                "overflows=${terminal.queueOverflows}",
+                "overflows=${terminal.queueOverflows} deliveryFailures=${terminal.deliveryFailures}",
         )
     }
 
     companion object {
         private const val TAG = "ScoutrTerminal"
+
+        /** Consecutive delivery failures tolerated before the route stops retrying. */
+        const val MAX_DELIVERY_FAILURES = 3
 
         /** Plan "TerminalViewModel": ~10k transcript rows. */
         const val TRANSCRIPT_ROWS = 10_000

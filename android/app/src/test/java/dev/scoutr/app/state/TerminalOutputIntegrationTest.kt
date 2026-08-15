@@ -197,6 +197,38 @@ class TerminalOutputIntegrationTest {
         assertEquals(batchesBefore, counters.snapshot().terminal.outputBatches)
     }
 
+    @Test
+    fun repeatedDeliveryFailuresStopRetryingInsteadOfLooping() {
+        val vm = vm()
+        vm.start()
+
+        // A delivery failure that is deterministic in the replayed content would otherwise
+        // reconnect forever: every cycle reaches Ready, which resets the backoff.
+        repeat(TerminalViewModel.MAX_DELIVERY_FAILURES + 1) {
+            val socket = transport.lastSocket
+            socket.ready(generation = 1L + it)
+            socket.bytes("boom".toByteArray())
+            // Make the append throw for this batch only.
+            vm.session.callbacks.onScreenUpdated = { throw IllegalStateException("render failed") }
+            scheduler.advanceUntilIdle()
+            vm.session.callbacks.onScreenUpdated = {}
+            org.robolectric.shadows.ShadowLooper.idleMainLooper(
+                10,
+                java.util.concurrent.TimeUnit.SECONDS,
+            )
+        }
+
+        val connection = vm.ui.value.connection
+        assertTrue("expected a settled failure, got $connection", connection is TerminalConnectionState.Failed)
+        assertFalse((connection as TerminalConnectionState.Failed).retryable)
+        val opensAtGiveUp = transport.openedRequests.size
+
+        // No further reconnect is scheduled once it has given up.
+        org.robolectric.shadows.ShadowLooper.idleMainLooper(30, java.util.concurrent.TimeUnit.SECONDS)
+        assertEquals(opensAtGiveUp, transport.openedRequests.size)
+        assertTrue(counters.snapshot().terminal.deliveryFailures > 0)
+    }
+
     private inner class TestVmFactory : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T = vm() as T

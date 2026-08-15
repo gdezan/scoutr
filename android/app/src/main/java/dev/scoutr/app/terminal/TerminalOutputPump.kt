@@ -205,7 +205,11 @@ class TerminalOutputPump(
                     }
                 }
             } catch (error: Throwable) {
-                if (error is CancellationException) throw error
+                // Cancellation is the pump shutting down. A VirtualMachineError must not become a
+                // reconnect: replaying the screen is the most allocation-heavy response available,
+                // which is the worst possible answer to an OutOfMemoryError.
+                if (error is CancellationException || error is VirtualMachineError) throw error
+                counters?.terminalDeliveryFailure()
                 failGeneration(work.generation, TerminalOutputFailure.DELIVERY_FAILED)
             }
         }
@@ -251,6 +255,12 @@ class TerminalOutputPump(
             if (total >= maxBatchBytes) break
         }
 
+        // Invariant across the sizing and copying loops: no queued chunk is empty (enqueue
+        // rejects empty arrays) and headOffset is always inside the head, so total > 0 here. If
+        // that ever stopped holding, returning null parks the consumer rather than spinning on
+        // empty batches.
+        if (total <= 0) return null
+
         val batch = ByteArray(total)
         var at = 0
         while (at < total) {
@@ -289,11 +299,15 @@ class TerminalOutputPump(
         const val MAX_PENDING_BYTES = 4 * 1024 * 1024
 
         /**
-         * Maximum queued chunks for one generation. [MAX_PENDING_BYTES] bounds payload but not the
-         * per-entry overhead of the queue itself, so a flood of very small frames is bounded here
-         * instead. At realistic frame sizes the byte bound is always the one that trips first.
+         * Maximum queued chunks for one generation: a backstop against a flood of very small
+         * frames, whose ~24 bytes of per-entry overhead [MAX_PENDING_BYTES] does not account for.
+         *
+         * Deliberately loose. It must not become a second, tighter bound that retires a healthy
+         * generation: a program flushing per short line produces 50–200 byte frames, and 64k of
+         * those is still only a few MiB — the byte bound is what should trip there. At this depth
+         * the queue's own overhead stays around 1.5 MiB even in the 1-byte-frame worst case.
          */
-        const val MAX_PENDING_CHUNKS = 8192
+        const val MAX_PENDING_CHUNKS = 65536
     }
 }
 
