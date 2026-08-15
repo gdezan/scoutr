@@ -342,7 +342,7 @@ class ChatControlsTest {
             (vm.ui.value.configuration as? Loadable.Ready)?.value?.isNotEmpty() == true && vm.ui.value.model != null
         }
 
-        compose.onNodeWithTag("chat_thinking_config").assertIsDisplayed().performClick()
+        compose.onNodeWithTag("chat_thinking_config").performScrollTo().assertIsDisplayed().performClick()
         compose.onNodeWithTag("conversation_config_sheet").assertIsDisplayed()
         compose.onNodeWithTag("conversation_model_search").performTextInput("openai-codex/gpt-5.3")
         compose.onNodeWithTag("thinking_level_high").assertIsDisplayed()
@@ -361,7 +361,11 @@ class ChatControlsTest {
         val vm = ChatViewModel(bridge, "w1:p1", null, "working")
         compose.setContent { ChatScreen(viewModel = vm, onBack = {}) }
         compose.waitUntil(timeoutMillis = 10_000) { vm.ui.value.model != null }
-        compose.onNodeWithTag("chat_model_config").performClick()
+        // pi sessions carry a provider/id model; the rail shows the provider
+        // prefix as its own chip between the agent mark and the model.
+        compose.onNodeWithTag("chat_provider_config").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Provider openai-codex").assertIsDisplayed()
+        compose.onNodeWithTag("chat_model_config").performScrollTo().performClick()
         compose.onNodeWithTag("conversation_config_sheet").assertIsDisplayed()
         compose.onNodeWithTag("provider_header_openai-codex").assertIsDisplayed()
         compose.onNodeWithTag("provider_count_openai-codex").assertIsDisplayed()
@@ -399,7 +403,7 @@ class ChatControlsTest {
         compose.setContent { ChatScreen(viewModel = vm, onBack = {}) }
         compose.waitUntil(10_000) { (vm.ui.value.configuration as? Loadable.Ready)?.value?.isNotEmpty() == true }
 
-        compose.onNodeWithTag("chat_model_config").performClick()
+        compose.onNodeWithTag("chat_model_config").performScrollTo().performClick()
         compose.onNodeWithTag("conversation_model_list")
             .performScrollToNode(hasTestTag("conversation_model_omega/model-14"))
         compose.onNodeWithTag("conversation_model_search").performTextInput("alpha/model-03")
@@ -441,6 +445,8 @@ class ChatControlsTest {
         // Label and value are one annotated string: "Agent Legacy agent".
         compose.onNodeWithText("Legacy agent", substring = true).assertIsDisplayed()
         compose.onNodeWithTag("chat_thinking_config").assertDoesNotExist()
+        // The provider chip is pi-only; other backends don't get one.
+        compose.onNodeWithTag("chat_provider_config").assertDoesNotExist()
 
         // The conversation setup sheet skips the thinking section entirely.
         compose.onNodeWithTag("chat_model_config").performClick()
