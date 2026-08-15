@@ -1,5 +1,8 @@
 import { MAX_ANSWER_LENGTH, sanitizeAnswerText } from "./questions.js";
-import { answerQuestion, type AnswerDeps } from "./answers.js";
+
+/** Upper bound on questions in one ask; the AskUserQuestion tool caps at 4. */
+const MAX_ASK_QUESTIONS = 8;
+import { answerAsk, dismissAsk, type AnswerDeps } from "./answers.js";
 import { readSession } from "./routes/sessions.js";
 import { MAX_PROMPT_LENGTH, PROMPT_FORBIDDEN_CHAR } from "./sessions.js";
 import type { SessionSnapshot } from "./herdr/types.js";
@@ -8,15 +11,16 @@ import type { ServerDeps } from "./routes/types.js";
 export type CommandMessage =
   | { type: "steer"; target: string; text: string }
   | {
-      type: "answer_question";
+      type: "answer_ask";
       paneId: string;
-      /** Card id of the question being answered; omitted for a plain prompt. */
-      questionId?: string;
-      /** Free-text answer; omitted or "" when the user picked options. */
+      /** Tool call id of the ask being answered; omitted for a plain prompt. */
+      callId?: string;
+      /** One answer per question of the ask, in any order. */
+      answers?: Array<{ questionId: string; text?: string; selectedLabels?: string[] }>;
+      /** Free-text typed at a plain blocked prompt; ignored when callId is set. */
       text?: string;
-      /** Option labels the user picked. */
-      selectedLabels?: string[];
     }
+  | { type: "dismiss_ask"; paneId: string }
   | { type: "slash_command"; paneId: string; text: string }
   | { type: "send_text"; paneId: string; text: string }
   | { type: "ping" }
@@ -26,7 +30,8 @@ export type CommandResult =
   | { type: "pong"; ts: number }
   | { type: "subscribed"; filters: string[] }
   | { type: "steered"; target: string; result: unknown }
-  | { type: "answered"; paneId: string; text: string }
+  | { type: "answered"; paneId: string; callId: string }
+  | { type: "dismissed"; paneId: string }
   | { type: "command_sent"; paneId: string; text: string }
   | { type: "sent"; paneId: string };
 
@@ -58,30 +63,52 @@ export async function handleCommand(command: CommandMessage, deps: ServerDeps): 
       }
       return { type: "steered", target, result: await deps.herdr.agentPrompt(target, text) };
     }
-    case "answer_question": {
-      const { paneId, questionId, text, selectedLabels } = command;
-      if (!paneId) throw new Error("answer_question requires paneId");
-      if (questionId !== undefined && (typeof questionId !== "string" || questionId.length > 200)) {
-        throw new Error("answer_question questionId must be a question card id");
+    case "answer_ask": {
+      const { paneId, callId, answers, text } = command;
+      if (!paneId) throw new Error("answer_ask requires paneId");
+      if (callId !== undefined && (typeof callId !== "string" || callId.length > 200)) {
+        throw new Error("answer_ask callId must be a tool call id");
       }
-      if (
-        selectedLabels !== undefined &&
-        (!Array.isArray(selectedLabels) ||
-          selectedLabels.length > 32 ||
-          selectedLabels.some((label) => typeof label !== "string" || label.length > MAX_ANSWER_LENGTH))
-      ) {
-        throw new Error("answer_question selectedLabels must be a bounded list of option labels");
+      // MAX_ASK_QUESTIONS bounds the round; the tool itself caps at 4, and a
+      // client claiming more is not describing an ask this bridge can deliver.
+      if (answers !== undefined && (!Array.isArray(answers) || answers.length > MAX_ASK_QUESTIONS)) {
+        throw new Error("answer_ask answers must be a bounded list");
       }
-      const safe = sanitizeAnswerText(text ?? "");
-      // The app sends intent — the question and what the user picked — and
-      // the backend turns it into keystrokes for its own questionnaire.
-      await answerQuestion(answerDeps(deps), {
-        paneId,
-        questionId: questionId ?? "",
-        text: safe,
-        selectedLabels: selectedLabels ?? [],
+      const parsed = (answers ?? []).map((answer) => {
+        if (!answer || typeof answer !== "object") throw new Error("answer_ask answer must be an object");
+        const { questionId, selectedLabels } = answer;
+        if (typeof questionId !== "string" || !questionId || questionId.length > 200) {
+          throw new Error("answer_ask answer needs a question card id");
+        }
+        if (
+          selectedLabels !== undefined &&
+          (!Array.isArray(selectedLabels) ||
+            selectedLabels.length > 32 ||
+            selectedLabels.some((label) => typeof label !== "string" || label.length > MAX_ANSWER_LENGTH))
+        ) {
+          throw new Error("answer_ask selectedLabels must be a bounded list of option labels");
+        }
+        return {
+          questionId,
+          text: sanitizeAnswerText(answer.text ?? ""),
+          selectedLabels: selectedLabels ?? [],
+        };
       });
-      return { type: "answered", paneId, text: safe };
+      // The app sends intent — which questions, what the user picked — and
+      // the backend turns the round into keystrokes for its own questionnaire.
+      await answerAsk(answerDeps(deps), {
+        paneId,
+        callId: callId ?? "",
+        answers: parsed,
+        text: sanitizeAnswerText(text ?? ""),
+      });
+      return { type: "answered", paneId, callId: callId ?? "" };
+    }
+    case "dismiss_ask": {
+      const { paneId } = command;
+      if (!paneId) throw new Error("dismiss_ask requires paneId");
+      await dismissAsk(answerDeps(deps), paneId);
+      return { type: "dismissed", paneId };
     }
     case "slash_command": {
       const { paneId, text } = command;

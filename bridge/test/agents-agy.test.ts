@@ -10,7 +10,7 @@ import {
   agyOwnsSessionPath,
   agyResolveSessionPath,
   agyResumeCommand,
-  agyAnswerQuestion,
+  agyAnswerAsk,
 } from "../src/agents/agy/index.js";
 import { parseAgyTranscript, extractUserPrompt } from "../src/agents/agy/transcript.js";
 import { readAgyModelsCatalog } from "../src/agents/agy/models.js";
@@ -167,6 +167,19 @@ describe("agy adapter", () => {
     });
   });
 
+  /** One open ask as transcript entries, so answer tests use real card ids. */
+  function askEntries(questions: unknown[]) {
+    return [
+      {
+        entryId: "step-1",
+        parentId: null,
+        timestamp: "2026-01-01T00:00:00.000Z",
+        role: "assistant",
+        content: [{ type: "toolCall", id: "q-call-1", name: "ask_question", arguments: { questions } }],
+      },
+    ] as any;
+  }
+
   describe("questions", () => {
     it("extracts ask_question tool calls and answers", () => {
       const entries = [
@@ -212,34 +225,49 @@ describe("agy adapter", () => {
       assert.equal(questions[0]?.answerText, "PostgreSQL");
     });
 
-    it("answers questions via herdr", async () => {
+    it("types a plain blocked prompt as one line", async () => {
       const port = fakeHerdr();
-      await agyAnswerQuestion(port, {
-        paneId: "p1",
-        question: null,
-        group: [],
-        progress: null,
-        text: "Option A\nNext",
-        selectedLabels: [],
-      });
+      await agyAnswerAsk(port, { paneId: "p1", group: [], answers: [], text: "Option A\nNext" });
       assert.deepEqual(port.sent, [
         { method: "paneSendText", params: { pane_id: "p1", text: "Option A Next" } },
         { method: "paneSendKeys", params: { pane_id: "p1", keys: ["Enter"] } },
       ]);
     });
 
-    it("delivers an option pick as the option label", async () => {
+    it("delivers a lone option pick as the bare option label", async () => {
       const port = fakeHerdr();
-      await agyAnswerQuestion(port, {
+      const [question] = extractAgyQuestions(askEntries([
+        { question: "Which?", header: "Pick", options: ["Option A", "Option B"], is_multi_select: true },
+      ]));
+      await agyAnswerAsk(port, {
         paneId: "p1",
-        question: null,
-        group: [],
-        progress: null,
+        group: [question!],
+        answers: [{ questionId: question!.id, text: "", selectedLabels: ["Option A", "Option B"] }],
         text: "",
-        selectedLabels: ["Option A", "Option B"],
       });
       assert.deepEqual(port.sent, [
         { method: "paneSendText", params: { pane_id: "p1", text: "Option A, Option B" } },
+        { method: "paneSendKeys", params: { pane_id: "p1", keys: ["Enter"] } },
+      ]);
+    });
+
+    it("labels a multi-question round so the agent can tell the answers apart", async () => {
+      const port = fakeHerdr();
+      const group = extractAgyQuestions(askEntries([
+        { question: "Which colour?", header: "Colour", options: ["Blue", "Red"] },
+        { question: "Which size?", header: "Size", options: ["Small", "Large"] },
+      ]));
+      await agyAnswerAsk(port, {
+        paneId: "p1",
+        group,
+        answers: [
+          { questionId: group[0]!.id, text: "", selectedLabels: ["Blue"] },
+          { questionId: group[1]!.id, text: "roomy", selectedLabels: [] },
+        ],
+        text: "",
+      });
+      assert.deepEqual(port.sent, [
+        { method: "paneSendText", params: { pane_id: "p1", text: "Colour: Blue; Size: roomy" } },
         { method: "paneSendKeys", params: { pane_id: "p1", keys: ["Enter"] } },
       ]);
     });

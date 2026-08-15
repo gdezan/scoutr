@@ -99,26 +99,43 @@ class BridgeClientWsTest {
         val (answer, answerListener) = echoServer(listOf("""{"type":"ack"}"""))
         server.enqueue(MockResponse().withWebSocketUpgrade(answerListener))
         runBlocking {
-            client.answerQuestion("w1:p1", questionId = "toolu_1#0", text = "", selectedLabels = listOf("Yes", "No"))
+            client.answerAsk(
+                "w1:p1",
+                callId = "toolu_1",
+                answers = listOf(
+                    AskAnswer("toolu_1#0", selectedLabels = listOf("Yes", "No")),
+                    AskAnswer("toolu_1#1", text = "something else"),
+                ),
+            )
         }
         val answerCommand = runBlocking { Json.parseToJsonElement(answer.await()).jsonObject }
-        assertEquals("answer_question", answerCommand["type"]!!.jsonPrimitive.content)
-        assertEquals("toolu_1#0", answerCommand["questionId"]!!.jsonPrimitive.content)
-        assertEquals("", answerCommand["text"]!!.jsonPrimitive.content)
+        assertEquals("answer_ask", answerCommand["type"]!!.jsonPrimitive.content)
+        assertEquals("toolu_1", answerCommand["callId"]!!.jsonPrimitive.content)
+        val answers = answerCommand["answers"]!!.jsonArray.map { it.jsonObject }
+        assertEquals(listOf("toolu_1#0", "toolu_1#1"), answers.map { it["questionId"]!!.jsonPrimitive.content })
         assertEquals(
             listOf("Yes", "No"),
-            answerCommand["selectedLabels"]!!.jsonArray.map { it.jsonPrimitive.content },
+            answers[0]["selectedLabels"]!!.jsonArray.map { it.jsonPrimitive.content },
         )
+        // Empty lists are omitted from the wire frame rather than sent as [].
+        assertEquals(null, answers[1]["selectedLabels"])
+        assertEquals("something else", answers[1]["text"]!!.jsonPrimitive.content)
 
-        // A plain-prompt answer names no question, and empty lists are omitted
-        // from the wire frame rather than sent as [].
+        // A plain-prompt answer names no ask at all.
         val (omitted, omittedListener) = echoServer(listOf("""{"type":"ack"}"""))
         server.enqueue(MockResponse().withWebSocketUpgrade(omittedListener))
-        runBlocking { client.answerQuestion("w1:p1", text = "yes") }
+        runBlocking { client.answerAsk("w1:p1", text = "yes") }
         val omittedCommand = runBlocking { Json.parseToJsonElement(omitted.await()).jsonObject }
         assertEquals("yes", omittedCommand["text"]!!.jsonPrimitive.content)
-        assertEquals(null, omittedCommand["questionId"])
-        assertEquals(null, omittedCommand["selectedLabels"])
+        assertEquals(null, omittedCommand["callId"])
+        assertEquals(null, omittedCommand["answers"])
+
+        val (dismiss, dismissListener) = echoServer(listOf("""{"type":"ack"}"""))
+        server.enqueue(MockResponse().withWebSocketUpgrade(dismissListener))
+        runBlocking { client.dismissAsk("w1:p1") }
+        val dismissCommand = runBlocking { Json.parseToJsonElement(dismiss.await()).jsonObject }
+        assertEquals("dismiss_ask", dismissCommand["type"]!!.jsonPrimitive.content)
+        assertEquals("w1:p1", dismissCommand["paneId"]!!.jsonPrimitive.content)
     }
 
     @Test

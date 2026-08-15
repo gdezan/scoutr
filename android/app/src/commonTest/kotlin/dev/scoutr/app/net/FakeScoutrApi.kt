@@ -193,20 +193,44 @@ class FakeScoutrApi : ScoutrApi {
             put("text", text)
         })
 
-    override suspend fun answerQuestion(
+    override suspend fun answerAsk(
         paneId: String,
-        questionId: String,
+        callId: String,
+        answers: List<AskAnswer>,
         text: String,
-        selectedLabels: List<String>,
-    ): WsFrame = send("answerQuestion", buildJsonObject {
-        put("type", "answer_question")
+    ): WsFrame = send("answerAsk", buildJsonObject {
+        put("type", "answer_ask")
         put("paneId", paneId)
-        if (questionId.isNotEmpty()) put("questionId", questionId)
-        put("text", text)
-        if (selectedLabels.isNotEmpty()) {
-            put("selectedLabels", kotlinx.serialization.json.JsonArray(selectedLabels.map { JsonPrimitive(it) }))
+        if (callId.isNotEmpty()) put("callId", callId)
+        if (answers.isNotEmpty()) {
+            put(
+                "answers",
+                kotlinx.serialization.json.JsonArray(
+                    answers.map { answer ->
+                        buildJsonObject {
+                            put("questionId", answer.questionId)
+                            put("text", answer.text)
+                            if (answer.selectedLabels.isNotEmpty()) {
+                                put(
+                                    "selectedLabels",
+                                    kotlinx.serialization.json.JsonArray(
+                                        answer.selectedLabels.map { JsonPrimitive(it) },
+                                    ),
+                                )
+                            }
+                        }
+                    },
+                ),
+            )
         }
+        put("text", text)
     })
+
+    override suspend fun dismissAsk(paneId: String): WsFrame =
+        send("dismissAsk", buildJsonObject {
+            put("type", "dismiss_ask")
+            put("paneId", paneId)
+        })
 
     private fun send(name: String, command: JsonObject): WsFrame {
         calls += ApiCall(name, mapOf("command" to command))

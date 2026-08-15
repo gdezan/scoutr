@@ -95,14 +95,18 @@ class ChatPendingMessageTest {
         )
     }
 
-    private fun stubSession(entries: List<SessionEntry> = emptyList(), answered: Boolean = false) {
+    private fun stubSession(
+        entries: List<SessionEntry> = emptyList(),
+        answered: Boolean = false,
+        withQuestion: Boolean = true,
+    ) {
         fake.sessionResult = Result.success(
             SessionReadResponse(
                 ok = true,
                 exists = true,
                 path = "/tmp/session.jsonl",
                 entries = entries,
-                questions = listOf(
+                questions = if (!withQuestion) emptyList() else listOf(
                     QuestionEntry(
                         id = "q1",
                         question = "Proceed?",
@@ -175,10 +179,13 @@ class ChatPendingMessageTest {
     }
 
     @Test
-    fun blockedSessionRoutesSlashCommandsBeforeQuestionAnswers() = runBlocking {
+    fun blockedSessionRoutesSlashCommandsBeforePromptAnswers() = runBlocking {
         agentStatus = "blocked"
         stubAgents()
-        stubSession()
+        // No card: the pane is blocked on a plain prompt (a permission dialog,
+        // say). A pane blocked on an ask never reaches the composer path at
+        // all — the card owns that answer and disables the composer.
+        stubSession(withQuestion = false)
         val viewModel = viewModel()
         waitUntil("cwd") { viewModel.ui.value.cwd == "/repo" }
         waitUntil("catalog") { viewModel.readyCommands().isNotEmpty() && commandsCwds().contains("/repo") }
@@ -190,10 +197,11 @@ class ChatPendingMessageTest {
         assertTrue(fake.sentCommands.single().toString().contains("\"text\":\"/compact\""))
         assertTrue(viewModel.ui.value.pendingMessages.isEmpty())
 
+        // Plain text at the same blocked prompt answers it directly.
         fake.sentCommands.clear()
         viewModel.send("Proceed")
-        waitUntil("question answer") { fake.sentCommands.isNotEmpty() }
-        assertTrue(fake.sentCommands.single().toString().contains("\"type\":\"answer_question\""))
+        waitUntil("prompt answer") { fake.sentCommands.isNotEmpty() }
+        assertTrue(fake.sentCommands.single().toString().contains("\"type\":\"answer_ask\""))
         assertTrue(fake.sentCommands.single().toString().contains("\"text\":\"Proceed\""))
     }
 

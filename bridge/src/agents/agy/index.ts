@@ -11,8 +11,7 @@ import { closeSessionPane } from "../../herdr/panes.js";
 import { shellQuote } from "../../shell.js";
 import type {
   AgentBackend,
-  AnswerProgress,
-  AnswerRequest,
+  AskRequest,
   ControlAction,
   ControlParams,
   LaunchParams,
@@ -87,17 +86,40 @@ export async function agyReadTranscript(path: string, opts?: TranscriptReadOpts)
 /**
  * agy answers as plain text at its prompt — it has no keyboard-navigated
  * questionnaire — so an option pick is delivered as the option label itself.
+ *
+ * A multi-question ask therefore has no tab strip to walk: the whole round is
+ * formatted as one prompt, one line per question, and sent once. That keeps
+ * "one submit, one delivery" true across all three backends, rather than
+ * dribbling each answer in as its own turn at agy's prompt.
  */
-export async function agyAnswerQuestion(
-  herdr: HerdrPort,
-  request: AnswerRequest,
-): Promise<AnswerProgress | null> {
-  const answer = request.text || request.selectedLabels.join(", ");
-  const singleLine = answer.replace(/[\r\n\u2028\u2029]+/g, " ");
+export async function agyAnswerAsk(herdr: HerdrPort, request: AskRequest): Promise<void> {
+  const { paneId, group, answers } = request;
+  const parts: string[] = [];
+  if (group.length === 0) {
+    parts.push(request.text);
+  } else {
+    for (const question of group) {
+      const answer = answers.find((candidate) => candidate.questionId === question.id);
+      if (!answer) throw new Error(`no answer for question ${question.id}`);
+      const value = answer.text || answer.selectedLabels.join(", ");
+      if (!value.trim()) throw new Error(`answer for ${question.id} is empty`);
+      // A lone question needs no labelling; a round does, or the agent cannot
+      // tell which answer belongs to which question.
+      parts.push(group.length === 1 ? value : `${question.header || question.question}: ${value}`);
+    }
+  }
+  const singleLine = parts.join("; ").replace(/[\r\n\u2028\u2029]+/g, " ");
   if (!singleLine.trim()) throw new Error("answer text is empty");
-  await herdr.paneSendText(request.paneId, singleLine);
-  await herdr.paneSendKeys(request.paneId, ["Enter"]);
-  return null;
+  await herdr.paneSendText(paneId, singleLine);
+  await herdr.paneSendKeys(paneId, ["Enter"]);
+}
+
+/**
+ * agy has no questionnaire to close, so escape here is its ordinary abort —
+ * it cancels the agent's turn, not just the question on screen.
+ */
+export async function agyDismissAsk(herdr: HerdrPort, paneId: string): Promise<void> {
+  await herdr.paneSendKeys(paneId, ["escape"]);
 }
 
 export async function agyControl(herdr: HerdrPort, params: ControlParams): Promise<void> {
@@ -156,7 +178,8 @@ export const agyBackend: AgentBackend = {
   resolveSessionPath: agyResolveSessionPath,
   readTranscript: agyReadTranscript,
   extractQuestions: (transcript) => extractAgyQuestions(transcript.entries),
-  answerQuestion: agyAnswerQuestion,
+  answerAsk: agyAnswerAsk,
+  dismissAsk: agyDismissAsk,
   control: agyControl,
   models: readAgyModelsCatalog,
   commands: (cwd?: string) => readAgyCommandsCatalog(cwd),

@@ -1,5 +1,6 @@
 package dev.scoutr.app.state
 
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dev.scoutr.app.data.SessionAction
@@ -11,6 +12,7 @@ import dev.scoutr.app.data.SessionEntry
 import dev.scoutr.app.data.SlashCommandInfo
 import dev.scoutr.app.data.entryText
 import dev.scoutr.app.net.PerformanceCounters
+import dev.scoutr.app.net.AskAnswer
 import dev.scoutr.app.net.ScoutrApi
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Deferred
@@ -129,29 +131,81 @@ fun sanitizeAnswerText(text: String): String {
  * as a lost tap. The card resolves to its answer bubble immediately instead,
  * and the transcript's own answer replaces it on the next poll.
  */
-data class LocalAnswer(val text: String, val labels: List<String>)
-
-/** Drop local answers whose question has landed answered, or is gone. */
-internal fun pruneLocalAnswers(
-    local: Map<String, LocalAnswer>,
-    questions: List<QuestionEntry>,
-): Map<String, LocalAnswer> {
-    if (local.isEmpty()) return local
-    val byId = questions.associateBy { it.id }
-    return local.filterKeys { id ->
-        val question = byId[id]
-        question == null || !question.answered
-    }
+/**
+ * One question's answer while the round is still being filled in.
+ *
+ * Options and text are mutually exclusive, because that is all the agents'
+ * questionnaires can express: "Type something" is the entry after the authored
+ * options, not a field beside them. Setting one side clears the other.
+ */
+data class DraftAnswer(val text: String = "", val labels: List<String> = emptyList()) {
+    val isAnswered: Boolean get() = labels.isNotEmpty() || text.isNotBlank()
 }
 
-/** A question card with the answer this device sent overlaid on it. */
-internal fun overlayLocalAnswer(question: QuestionEntry, local: LocalAnswer?): QuestionEntry {
-    if (local == null || question.answered) return question
-    return question.copy(
-        answered = true,
-        answerText = local.text.ifBlank { null },
-        selected = local.labels,
-    )
+/**
+ * A whole ask, half-filled. Nothing here has reached the agent: the round is
+ * buffered until the user submits it, which is what makes every answer
+ * editable right up to that moment (ADR 0011).
+ */
+data class AskDraft(
+    /** Question index the card is showing. */
+    val page: Int = 0,
+    val answers: Map<String, DraftAnswer> = emptyMap(),
+) {
+    fun answerFor(questionId: String): DraftAnswer = answers[questionId] ?: DraftAnswer()
+
+    /** True once every question of [group] has a pick or text: Submit's gate. */
+    fun isComplete(group: List<QuestionEntry>): Boolean =
+        group.isNotEmpty() && group.all { answerFor(it.id).isAnswered }
+}
+
+/** Drop drafts whose ask has landed answered, or has left the session. */
+internal fun pruneAskDrafts(
+    drafts: Map<String, AskDraft>,
+    questions: List<QuestionEntry>,
+): Map<String, AskDraft> {
+    if (drafts.isEmpty()) return drafts
+    val open = questions.filter { !it.answered }.mapTo(mutableSetOf()) { it.callId }
+    return drafts.filterKeys { it in open }
+}
+
+/** How long a submitted round waits before the card admits it is slow. */
+internal const val ASK_SLOW_SUBMIT_MS = 15_000L
+
+/** Gap between reconciliation reads while a submitted round is in flight. */
+internal const val ASK_RECONCILE_INTERVAL_MS = 750L
+
+internal const val ASK_ANSWERED_ELSEWHERE = "That question was answered elsewhere"
+
+private const val SAVED_ASK_DRAFTS = "ask_drafts"
+
+// Drafts are saved as one string, since SavedStateHandle carries bundle values
+// and a nested map is not one. Separators are control characters, which
+// sanitizeAnswerText already strips from anything a user can type, so no
+// answer can forge a record boundary.
+private const val RECORD = "\u001e"
+private const val UNIT = "\u001f"
+private const val LABEL = "\u0016"
+
+internal fun encodeAskDrafts(drafts: Map<String, AskDraft>): String =
+    drafts.entries.joinToString(RECORD) { (callId, draft) ->
+        val answers = draft.answers.entries.joinToString(UNIT) { (questionId, answer) ->
+            listOf(questionId, answer.text, answer.labels.joinToString(LABEL)).joinToString(LABEL + LABEL)
+        }
+        listOf(callId, draft.page.toString(), answers).joinToString(UNIT + UNIT)
+    }
+
+internal fun decodeAskDrafts(encoded: String): Map<String, AskDraft> {
+    if (encoded.isEmpty()) return emptyMap()
+    return encoded.split(RECORD).mapNotNull { record ->
+        val (callId, page, answers) = record.split(UNIT + UNIT).takeIf { it.size == 3 } ?: return@mapNotNull null
+        val decoded = answers.split(UNIT).filter { it.isNotEmpty() }.mapNotNull { entry ->
+            val (questionId, text, labels) = entry.split(LABEL + LABEL).takeIf { it.size == 3 }
+                ?: return@mapNotNull null
+            questionId to DraftAnswer(text, labels.split(LABEL).filter { it.isNotEmpty() })
+        }
+        callId to AskDraft(page = page.toIntOrNull() ?: 0, answers = decoded.toMap())
+    }.toMap()
 }
 
 internal fun dropConfirmedMessages(
@@ -211,10 +265,22 @@ data class ChatUiState(
     val pendingMessages: List<PendingUserMessage> = emptyList(),
     /** Structured ask_user_question cards derived from session events. */
     val questions: List<QuestionEntry> = emptyList(),
-    /** Question id currently sending an answer. */
-    val answeringQuestionId: String? = null,
-    /** Answers sent from this device that the transcript has not echoed yet. */
-    val localAnswers: Map<String, LocalAnswer> = emptyMap(),
+    /** Half-filled ask rounds, keyed by tool call id. Nothing here has been sent. */
+    val askDrafts: Map<String, AskDraft> = emptyMap(),
+    /** Tool call id of the ask whose round is in flight; null when none is. */
+    val submittingCallId: String? = null,
+    /**
+     * True once a submitted round has waited past [ASK_SLOW_SUBMIT_MS] without
+     * its toolResult landing. The card stays locked and the draft stays intact
+     * — this only replaces the "Sending…" label with something honest.
+     */
+    val submitIsSlow: Boolean = false,
+    /**
+     * Why a card vanished from under the user, if it did — an ask answered in
+     * the terminal or on another device takes its half-filled draft with it,
+     * and that should not be silent.
+     */
+    val askNotice: String? = null,
     val questionError: String? = null,
     val exists: Boolean = true,
     /** Transcript read lifecycle; the entries/questions themselves stay in separate fields (they are merged in place). */
@@ -273,13 +339,19 @@ data class ChatUiState(
         get() = capabilities == null || SessionAction.SetThinking.wire in capabilities
 
     /**
-     * The cards to render: [questions] with any answer this device has already
-     * sent overlaid, so a card resolves the moment it is answered instead of
-     * waiting for the whole ask to reach the transcript.
+     * The cards to render. There is no local overlay: a round is shown as
+     * delivered only once its toolResult reaches the transcript, so the card
+     * never claims an answer the agent may not have received.
      */
     val questionCards: List<QuestionEntry>
-        get() = if (localAnswers.isEmpty()) questions
-        else questions.map { overlayLocalAnswer(it, localAnswers[it.id]) }
+        get() = questions
+
+    /** The open asks, in ask order, each grouped by its tool call. */
+    val openAsks: List<List<QuestionEntry>>
+        get() = questions.filter { !it.answered }
+            .groupBy { it.callId }
+            .values
+            .toList()
 
     /**
      * True while a question card is still waiting for an answer. Answered
@@ -288,7 +360,7 @@ data class ChatUiState(
      * indicator defers to a card only while one is actually pending.
      */
     val hasPendingQuestion: Boolean
-        get() = questionCards.any { !it.answered }
+        get() = questions.any { !it.answered }
 }
 
 /**
@@ -306,10 +378,26 @@ class ChatViewModel(
     private val sessionPath: String?,
     agentStatus: String = "working",
     private val performanceCounters: PerformanceCounters = PerformanceCounters(),
+    private val savedState: SavedStateHandle = SavedStateHandle(),
 ) : ViewModel() {
 
-    private val _ui = MutableStateFlow(ChatUiState(agentStatus = agentStatus))
+    private val _ui = MutableStateFlow(
+        ChatUiState(agentStatus = agentStatus, askDrafts = readSavedDrafts()),
+    )
     val ui: StateFlow<ChatUiState> = _ui.asStateFlow()
+
+    /**
+     * Half-filled ask rounds survive process death, so a card the user was
+     * part-way through is still there after Android reclaims the app. Encoded
+     * as a flat string because [SavedStateHandle] carries only bundle values;
+     * the format is private to this pair of functions.
+     */
+    private fun persistDrafts() {
+        savedState[SAVED_ASK_DRAFTS] = encodeAskDrafts(_ui.value.askDrafts)
+    }
+
+    private fun readSavedDrafts(): Map<String, AskDraft> =
+        decodeAskDrafts(savedState.get<String>(SAVED_ASK_DRAFTS).orEmpty())
 
     private val poller = Poller(viewModelScope)
 
@@ -586,10 +674,25 @@ class ChatViewModel(
                     .filter { q -> q.answered }
                     .mapTo(mutableSetOf()) { q -> q.id }
                 val questions = mergeQuestions(it.questions, response.questions)
+                val drafts = pruneAskDrafts(it.askDrafts, questions)
+                val openCallIds = questions.filter { q -> !q.answered }.mapTo(mutableSetOf()) { q -> q.callId }
+                // The submitted round is done the moment its ask stops being
+                // open — the toolResult landed, so the card gives way to the
+                // answer bubble. This is the only thing that ends "Sending…".
+                val stillSubmitting = it.submittingCallId?.takeIf { callId -> callId in openCallIds }
+                // A draft that vanished without this device submitting it means
+                // the ask was answered (or cancelled) somewhere else. Saying so
+                // beats letting typed answers evaporate silently.
+                val lostDraft = it.askDrafts.keys.any { callId ->
+                    callId !in drafts && callId != it.submittingCallId
+                }
                 it.copy(
                     entries = mergeSessionEntries(it.entries, response.entries, incremental = response.since != null),
                     questions = questions,
-                    localAnswers = pruneLocalAnswers(it.localAnswers, questions),
+                    askDrafts = drafts,
+                    askNotice = if (lostDraft) ASK_ANSWERED_ELSEWHERE else it.askNotice,
+                    submittingCallId = stillSubmitting,
+                    submitIsSlow = it.submitIsSlow && stillSubmitting != null,
                     pendingMessages = dropConfirmedMessages(
                         it.pendingMessages,
                         response.entries,
@@ -746,54 +849,126 @@ class ChatViewModel(
         }
     }
 
+    /** Record a pick (or typed text) for one question. Nothing is sent yet. */
+    fun setAskAnswer(callId: String, questionId: String, answer: DraftAnswer) {
+        if (_ui.value.submittingCallId != null) return
+        _ui.update { state ->
+            val draft = state.askDrafts[callId] ?: AskDraft()
+            state.copy(
+                askDrafts = state.askDrafts + (callId to draft.copy(answers = draft.answers + (questionId to answer))),
+                questionError = null,
+            )
+        }
+        persistDrafts()
+    }
+
+    /** Move the card to another question of the same round. */
+    fun setAskPage(callId: String, page: Int) {
+        if (_ui.value.submittingCallId != null) return
+        _ui.update { state ->
+            val draft = state.askDrafts[callId] ?: AskDraft()
+            state.copy(askDrafts = state.askDrafts + (callId to draft.copy(page = page)))
+        }
+        persistDrafts()
+    }
+
+    fun clearAskNotice() {
+        _ui.update { it.copy(askNotice = null, questionError = null) }
+    }
+
     /**
-     * Answer a structured question card. The text is sanitized here (single
-     * line, no control chars, capped) and again on the bridge, which turns the
-     * card and the picked labels into keystrokes for the agent's own
-     * questionnaire — the app never speaks a TUI's key grammar.
+     * Submit a whole round. The app sends intent — which questions, what was
+     * picked — and the bridge drives the agent's questionnaire in one pass;
+     * the app never speaks a TUI's key grammar.
+     *
+     * The card stays locked in its sending state until the ask leaves the open
+     * set, which happens when the transcript's toolResult lands. Nothing is
+     * shown as delivered on the strength of the bridge's ack alone.
      */
-    fun answerQuestion(questionId: String, text: String, selectedLabels: List<String> = emptyList()) {
-        val safe = sanitizeAnswerText(text)
-        if (safe.isEmpty() && selectedLabels.isEmpty()) return
-        if (_ui.value.questionCards.none { it.id == questionId && !it.answered }) return
-        if (_ui.value.answeringQuestionId != null) return
-        _ui.update { it.copy(answeringQuestionId = questionId, questionError = null) }
+    fun submitAsk(callId: String) {
+        val state = _ui.value
+        if (state.submittingCallId != null) return
+        val group = state.questions.filter { it.callId == callId && !it.answered }
+        if (group.isEmpty()) return
+        val draft = state.askDrafts[callId] ?: AskDraft()
+        if (!draft.isComplete(group)) return
+        val answers = group.map { question ->
+            val answer = draft.answerFor(question.id)
+            AskAnswer(
+                questionId = question.id,
+                text = sanitizeAnswerText(answer.text),
+                selectedLabels = answer.labels,
+            )
+        }
+        _ui.update { it.copy(submittingCallId = callId, submitIsSlow = false, questionError = null) }
         viewModelScope.launch {
             try {
-                sendAnswer(questionId, safe, selectedLabels)
-                _ui.update { it.copy(answeringQuestionId = null) }
-                repeat(3) {
-                    refresh(RefreshSource.AnswerReconciliation)
-                    val now = _ui.value.questions.firstOrNull { it.id == questionId }
-                    if (now?.answered == true || now == null) return@launch
-                    delay(750)
-                }
+                bridge.answerAsk(paneId, callId, answers)
             } catch (c: CancellationException) {
                 throw c
             } catch (error: Exception) {
+                // A round is a sequence of keystrokes into a live TUI: a
+                // failure part-way leaves the questionnaire on an unknown tab,
+                // so the draft is kept but no retry is offered — replaying it
+                // could answer a different question than the user picked.
                 _ui.update {
                     it.copy(
-                        answeringQuestionId = null,
-                        questionError = error.message ?: "Answer failed to send",
+                        submittingCallId = null,
+                        submitIsSlow = false,
+                        questionError = error.message ?: "Answer failed to send — check the terminal",
                     )
                 }
+                return@launch
+            }
+            awaitAskResult(callId)
+        }
+    }
+
+    /**
+     * Watch for the submitted round's toolResult. Reconciliation polls are
+     * cheap and bounded; past [ASK_SLOW_SUBMIT_MS] the card says so, but it
+     * never unlocks on a timer — re-enabling it would risk answering an ask
+     * that did land, twice.
+     */
+    private suspend fun awaitAskResult(callId: String) {
+        val startedAt = System.currentTimeMillis()
+        while (_ui.value.submittingCallId == callId) {
+            refresh(RefreshSource.AnswerReconciliation)
+            if (_ui.value.submittingCallId != callId) return
+            if (!_ui.value.submitIsSlow && System.currentTimeMillis() - startedAt >= ASK_SLOW_SUBMIT_MS) {
+                _ui.update { it.copy(submitIsSlow = true) }
+            }
+            delay(ASK_RECONCILE_INTERVAL_MS)
+        }
+    }
+
+    /**
+     * Cancel the ask on screen, dropping the draft with it. On agy this is the
+     * ordinary abort — it has no questionnaire to close — so it ends the
+     * agent's turn rather than just the question.
+     */
+    fun dismissAsk(callId: String) {
+        if (_ui.value.submittingCallId != null) return
+        _ui.update { it.copy(askDrafts = it.askDrafts - callId, questionError = null) }
+        persistDrafts()
+        viewModelScope.launch {
+            try {
+                bridge.dismissAsk(paneId)
+                refresh(RefreshSource.AnswerReconciliation)
+            } catch (c: CancellationException) {
+                throw c
+            } catch (error: Exception) {
+                _ui.update { it.copy(questionError = error.message ?: "Could not dismiss the question") }
             }
         }
     }
 
     /**
-     * Deliver one answer to the bridge and record it locally, so the card
-     * resolves to its answer now rather than when the whole ask lands in the
-     * transcript. Throws on transport failure (callers handle retry UI), and
-     * nothing is recorded then — the card stays answerable.
+     * Answer a plain blocked prompt (a permission dialog, say) with typed
+     * text. There is no ask to batch, so the text goes straight through.
      */
-    private suspend fun sendAnswer(questionId: String, text: String, selectedLabels: List<String>) {
-        val safe = sanitizeAnswerText(text)
-        bridge.answerQuestion(paneId, questionId, safe, selectedLabels)
-        if (questionId.isEmpty()) return
-        _ui.update { state ->
-            state.copy(localAnswers = state.localAnswers + (questionId to LocalAnswer(safe, selectedLabels)))
-        }
+    private suspend fun sendPromptAnswer(text: String) {
+        bridge.answerAsk(paneId, text = sanitizeAnswerText(text))
     }
 
     fun retryPendingMessage(localId: String) {
@@ -830,13 +1005,12 @@ class ChatViewModel(
         viewModelScope.launch {
             val message = _ui.value.pendingMessages.firstOrNull { it.localId == localId } ?: return@launch
             try {
-                if (waitingForAnswer) {
-                    // The composer answers as a custom answer. When an
-                    // unanswered question is on screen, route through the
-                    // questionnaire so the text lands in the "Type something"
-                    // editor instead of pi dropping it and picking option 1.
-                    val pending = _ui.value.questionCards.firstOrNull { !it.answered }
-                    sendAnswer(pending?.id.orEmpty(), message.text, emptyList())
+                // A blocked pane with no card is waiting on a plain prompt (a
+                // permission dialog, say), and typed text answers it directly.
+                // A pane blocked on an ask never gets here: the composer is
+                // disabled while a card is open, so the card owns that answer.
+                if (waitingForAnswer && !_ui.value.hasPendingQuestion) {
+                    sendPromptAnswer(message.text)
                 } else bridge.steer(paneId, message.text)
 
                 // The bridge accepted it, so it is no longer queued — only

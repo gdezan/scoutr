@@ -27,34 +27,33 @@ export interface ControlParams {
   model?: string;
 }
 
-/**
- * Where an agent's questionnaire stands part-way through a multi-question ask.
- *
- * Both TUIs keep every question of one ask on screen as a tab strip and only
- * write the answers to the transcript when the whole ask is submitted, so the
- * in-flight state cannot be recovered from the session file — the bridge
- * carries it between answers instead (see `answers.ts`).
- */
-export interface AnswerProgress {
-  /** Question ids already answered in this ask. */
-  answered: string[];
-  /** Tab the questionnaire is showing now; index `n` is the submit tab. */
-  cursorTab: number;
-}
-
-/** One answer to deliver into a pane, in the agent's own questionnaire. */
-export interface AnswerRequest {
-  paneId: string;
-  /** The question being answered; null when the pane shows no questionnaire. */
-  question: QuestionEntry | null;
-  /** Every question of the same ask, in ask order; empty when question is null. */
-  group: QuestionEntry[];
-  /** Progress left by earlier answers to this ask. */
-  progress: AnswerProgress | null;
+/** One question's answer inside a batched ask. */
+export interface AskAnswer {
+  /** Card id of the question this answers; must name a question in the group. */
+  questionId: string;
   /** Free-text answer; "" when the user picked authored options. */
   text: string;
   /** Option labels the user picked, in the card's order. */
   selectedLabels: string[];
+}
+
+/**
+ * A whole ask, answered in one delivery.
+ *
+ * Neither TUI commits a questionnaire until its submit tab, so the bridge does
+ * not either: the app buffers the round and sends every answer at once, and the
+ * backend walks the tab strip start to finish in a single plan. That keeps the
+ * in-flight tab position a local variable inside one delivery instead of state
+ * the daemon has to carry between requests (see `answers.ts`, ADR 0011).
+ */
+export interface AskRequest {
+  paneId: string;
+  /** Every question of the ask, in ask order; empty when the pane is blocked on a plain prompt. */
+  group: QuestionEntry[];
+  /** One answer per question in `group`, in the same order. */
+  answers: AskAnswer[];
+  /** Free-text typed at a plain blocked prompt; "" when answering a questionnaire. */
+  text: string;
 }
 
 export interface ModelInfo {
@@ -110,12 +109,20 @@ export interface AgentBackend {
 
   extractQuestions(transcript: Transcript): QuestionEntry[];
   /**
-   * Deliver one answer into the pane. The backend owns its TUI's grammar —
-   * which keys move between questions, how an option is picked, how a custom
-   * answer is typed, how the ask is submitted — and returns the progress the
-   * next answer to the same ask starts from (null when there is none).
+   * Deliver a whole ask into the pane in one pass. The backend owns its TUI's
+   * grammar — which keys move between questions, how an option is picked, how
+   * a custom answer is typed, how the ask is submitted. It either lands the
+   * complete ask or throws; there is no partial-success return, because a
+   * half-walked tab strip is not a state any caller can resume from.
    */
-  answerQuestion(herdr: HerdrPort, request: AnswerRequest): Promise<AnswerProgress | null>;
+  answerAsk(herdr: HerdrPort, request: AskRequest): Promise<void>;
+
+  /**
+   * Cancel the questionnaire on screen without answering it. Sends whatever
+   * key the agent's TUI reads as "escape this prompt"; the pane is left at
+   * whatever the agent does next.
+   */
+  dismissAsk(herdr: HerdrPort, paneId: string): Promise<void>;
   control(herdr: HerdrPort, params: ControlParams): Promise<void>;
 
   /**

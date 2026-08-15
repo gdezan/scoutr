@@ -76,6 +76,7 @@ import dev.scoutr.app.state.SessionHistoryViewModel
 import dev.scoutr.app.state.UsageViewModel
 import dev.scoutr.app.state.ReviewViewModel
 import dev.scoutr.app.state.ReduceMotionStore
+import dev.scoutr.app.state.savedStateViewModelFactory
 import dev.scoutr.app.state.viewModelFactory
 import dev.scoutr.app.ui.screens.BoardScreen
 import dev.scoutr.app.ui.screens.NewSessionSheet
@@ -372,8 +373,17 @@ private fun ScoutrAppNav(
                 val sessionPath = backStackEntry.arguments?.getString("sessionPath")?.takeIf { it.isNotBlank() }
                 val agentStatus = backStackEntry.arguments?.getString("status") ?: "working"
                 val chatViewModel: ChatViewModel = viewModel(
-                    factory = viewModelFactory<ChatViewModel> { app ->
-                        ChatViewModel(app.container.bridge, paneId, sessionPath, agentStatus, app.container.performanceCounters)
+                    // Saved state, not just the view model scope: a half-filled
+                    // ask round has to survive process death, not only rotation.
+                    factory = savedStateViewModelFactory<ChatViewModel> { app, savedState ->
+                        ChatViewModel(
+                            app.container.bridge,
+                            paneId,
+                            sessionPath,
+                            agentStatus,
+                            app.container.performanceCounters,
+                            savedState,
+                        )
                     },
                     key = "chat_$paneId",
                 )

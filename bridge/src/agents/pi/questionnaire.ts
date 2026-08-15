@@ -1,5 +1,5 @@
 import type { QuestionEntry } from "../../questions.js";
-import type { AnswerProgress } from "../types.js";
+import type { AskAnswer } from "../types.js";
 
 /**
  * pi's ask_user_question TUI grammar.
@@ -15,74 +15,70 @@ import type { AnswerProgress } from "../types.js";
  * and the text is typed there, submitted by the trailing enter. On the last
  * question of a multi-question ask that lands on the review tab, which needs
  * one more enter to submit the whole ask.
+ *
+ * Because answering auto-advances, a plan that walks the questions in ask
+ * order from a freshly opened questionnaire never needs a `tab` key — which is
+ * why the ask travels as one batch (see `piAskPlan`).
  */
-export interface PiAnswerPlan {
-  /** Keys to send before any text. */
-  keys: string[];
-  /** Keys to send after the text; empty when the answer types nothing. */
-  trailingKeys: string[];
-  /** Whether the answer is typed into the "Type something" editor. */
-  custom: boolean;
-  progress: AnswerProgress;
+export interface PiStep {
+  kind: "key" | "text";
+  value: string;
 }
 
-export function piAnswerPlan(
-  question: QuestionEntry,
-  group: QuestionEntry[],
-  progress: AnswerProgress | null,
-  text: string,
-  selectedLabels: string[],
-): PiAnswerPlan {
-  const n = group.length;
-  const k = group.findIndex((candidate) => candidate.id === question.id);
-  const answered = [...new Set([...(progress?.answered ?? []), question.id])];
-  if (k < 0) {
-    return { keys: [], trailingKeys: [], custom: true, progress: { answered, cursorTab: 0 } };
-  }
-  const tabCount = n + 1; // question tabs plus the review tab
-  const currentTab = Math.min(progress?.cursorTab ?? 0, n);
-  let delta = k - currentTab;
-  if (delta < 0) delta += tabCount; // tab wraps around the review tab
-  const keys: string[] = [];
-  for (let i = 0; i < delta; i += 1) keys.push("tab");
+const key = (value: string): PiStep => ({ kind: "key", value });
+const text = (value: string): PiStep => ({ kind: "text", value });
 
-  const labels = selectedLabels.length > 0 ? selectedLabels : text ? [text] : [];
-  const indices = labels
+/**
+ * Keystrokes for a whole ask, answered in ask order from a freshly opened
+ * questionnaire (tab 0, first row focused). Every question must have an
+ * answer; the review tab will not submit an incomplete ask.
+ */
+export function piAskPlan(group: QuestionEntry[], answers: AskAnswer[]): PiStep[] {
+  const steps: PiStep[] = [];
+  for (const question of group) {
+    const answer = answers.find((candidate) => candidate.questionId === question.id);
+    if (!answer) throw new Error(`no answer for question ${question.id}`);
+    steps.push(...piQuestionSteps(question, answer));
+  }
+  // A lone question submits on its own answer; anything longer lands on the
+  // review tab, which needs one more enter.
+  if (group.length > 1) steps.push(key("enter"));
+  return steps;
+}
+
+/** Keystrokes that answer one question, with its tab focused and row 0 selected. */
+function piQuestionSteps(question: QuestionEntry, answer: AskAnswer): PiStep[] {
+  const steps: PiStep[] = [];
+  const indices = answer.selectedLabels
     .map((label) => question.options.findIndex((option) => option.label === label))
     .filter((index) => index >= 0);
-  const custom = question.options.length === 0 || indices.length === 0;
+  // Options and text are mutually exclusive: "Type something" is the entry
+  // after the authored options, so an answer is a pick or a typed one.
+  const custom = indices.length === 0;
 
   if (custom) {
+    if (!answer.text) throw new Error(`answer for ${question.id} has neither an option nor text`);
     // "Type something" is the first entry after the authored options.
-    for (let i = 0; i < question.options.length; i += 1) keys.push("down");
-    keys.push("enter");
-  } else if (question.multiSelect) {
-    let pos = 0;
-    for (const index of [...indices].sort((a, b) => a - b)) {
-      const step = index - pos;
-      for (let i = 0; i < Math.abs(step); i += 1) keys.push(step > 0 ? "down" : "up");
-      keys.push("space");
-      pos = index;
-    }
-    keys.push("enter");
-  } else {
-    for (let i = 0; i < (indices[0] ?? 0); i += 1) keys.push("down");
-    keys.push("enter");
+    for (let i = 0; i < question.options.length; i += 1) steps.push(key("down"));
+    steps.push(key("enter")); // open the editor
+    steps.push(text(answer.text));
+    steps.push(key("enter")); // submit the answer, advancing one tab
+    return steps;
   }
 
-  const last = n > 1 && k === n - 1;
-  const cursorTab = Math.min(k + 1, n);
-  if (custom) {
-    // The editor's enter submits the answer; on the last question of a
-    // multi-question ask that lands on the review tab, and a second enter
-    // submits the whole questionnaire.
-    return {
-      keys,
-      trailingKeys: last ? ["enter", "enter"] : ["enter"],
-      custom: true,
-      progress: { answered, cursorTab },
-    };
+  if (question.multiSelect) {
+    let position = 0;
+    for (const index of [...indices].sort((a, b) => a - b)) {
+      const step = index - position;
+      for (let i = 0; i < Math.abs(step); i += 1) steps.push(key(step > 0 ? "down" : "up"));
+      steps.push(key("space"));
+      position = index;
+    }
+    steps.push(key("enter"));
+    return steps;
   }
-  if (last) keys.push("enter"); // review-tab submit
-  return { keys, trailingKeys: [], custom: false, progress: { answered, cursorTab } };
+
+  for (let i = 0; i < (indices[0] ?? 0); i += 1) steps.push(key("down"));
+  steps.push(key("enter"));
+  return steps;
 }

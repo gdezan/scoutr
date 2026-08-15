@@ -335,6 +335,7 @@ class ChatListTest {
         )
         val answered = QuestionEntry(
             id = "call1#0",
+            callId = "call1",
             question = "Proceed?",
             header = "Confirm",
             options = emptyList(),
@@ -347,9 +348,9 @@ class ChatListTest {
         composeRule.setContent {
             ScoutrTheme { ChatList(entries = listOf(entry), questions = listOf(answered)) }
         }
-        composeRule.onNodeWithTag("question_answer_call1#0").assertIsDisplayed()
+        composeRule.onNodeWithTag("ask_answer_call1").assertIsDisplayed()
         composeRule.onNodeWithText("Yes").assertIsDisplayed()
-        composeRule.onNodeWithTag("question_card_call1#0").assertDoesNotExist()
+        composeRule.onNodeWithTag("ask_card_call1").assertDoesNotExist()
     }
 
 
@@ -889,14 +890,14 @@ class ChatListTest {
             androidx.compose.ui.test.hasText("last message"),
         )
         composeRule.onNodeWithText("last message").assertIsDisplayed()
-        composeRule.onNodeWithTag("question_answer_call1#0").assertIsNotDisplayed()
+        composeRule.onNodeWithTag("ask_answer_call1").assertIsNotDisplayed()
         // Scroll up to the ask: the answer bubble renders right below it in
         // transcript order, far above the tail.
         composeRule.onNodeWithTag("chat_list").performScrollToNode(
             androidx.compose.ui.test.hasText("message 0"),
         )
         composeRule.waitForIdle()
-        val bubble = composeRule.onNodeWithTag("question_answer_call1#0").getBoundsInRoot()
+        val bubble = composeRule.onNodeWithTag("ask_answer_call1").getBoundsInRoot()
         val askText = composeRule.onNodeWithText("Which fruit?").getBoundsInRoot()
         assertTrue("bubble below ask (bubble top ${bubble.top}, ask bottom ${askText.bottom})", bubble.top >= askText.bottom)
     }
@@ -922,7 +923,7 @@ class ChatListTest {
         composeRule.setContent {
             ScoutrTheme { ChatList(entries = listOf(askEntry), questions = listOf(pending)) }
         }
-        val card = composeRule.onNodeWithTag("question_card_call1#0").getBoundsInRoot()
+        val card = composeRule.onNodeWithTag("ask_card_call1").getBoundsInRoot()
         val askText = composeRule.onNodeWithText("Ask me which fruit").getBoundsInRoot()
         assertTrue("card below ask (card top ${card.top}, ask bottom ${askText.bottom})", card.top >= askText.bottom)
     }

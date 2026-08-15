@@ -13,8 +13,7 @@ import { shellQuote } from "../../shell.js";
 import type { QuestionEntry } from "../../questions.js";
 import type {
   AgentBackend,
-  AnswerProgress,
-  AnswerRequest,
+  AskRequest,
   ControlAction,
   ControlParams,
   LaunchParams,
@@ -23,7 +22,8 @@ import { parseClaudeTranscript } from "./transcript.js";
 import { claudeEffortArg, claudeModelArg, readClaudeModelsCatalog } from "./models.js";
 import { readClaudeCommandsCatalog } from "./commands.js";
 import { claudeQuestions } from "./questions.js";
-import { claudeAnswerPlan } from "./questionnaire.js";
+import { clearPendingAsk } from "./pending-asks.js";
+import { claudeAskPlan } from "./questionnaire.js";
 
 /** Claude config dir honors CLAUDECONFIGDIR (default ~/.claude), like the herdr hook. */
 export function claudeConfigDir(): string {
@@ -138,31 +138,64 @@ export function claudeExtractQuestions(transcript: Transcript): QuestionEntry[] 
 export const CLAUDE_STEP_DELAY_MS = 60;
 
 /**
- * Deliver one answer. With a question in hand the answer travels through the
- * AskUserQuestion questionnaire (see `questionnaire.ts`); without one the pane
+ * Deliver a whole ask. With questions in hand the answers travel through the
+ * AskUserQuestion questionnaire (see `questionnaire.ts`); without them the pane
  * is blocked on an ordinary prompt, so the text is typed and submitted.
+ *
+ * Steps are sent one at a time \u2014 batching them into a single chunk is misread
+ * by the TUI \u2014 so a throw part-way leaves the questionnaire on an unknown tab.
+ * That is deliberate and reported as-is: nothing here retries, because a replay
+ * from tab 0 would re-toggle checkboxes the first pass already set.
  */
-export async function claudeAnswerQuestion(
+export async function claudeAnswerAsk(
   herdr: HerdrPort,
-  request: AnswerRequest,
+  request: AskRequest,
   stepDelayMs = CLAUDE_STEP_DELAY_MS,
-): Promise<AnswerProgress | null> {
-  const { paneId, question, group, progress, text, selectedLabels } = request;
-  if (!question) {
+): Promise<void> {
+  const { paneId, group, answers, text } = request;
+  if (group.length === 0) {
     const singleLine = text.replace(/[\r\n\u2028\u2029]+/g, " ");
     if (!singleLine.trim()) throw new Error("answer text is empty");
     await herdr.paneSendText(paneId, singleLine);
     await herdr.paneSendKeys(paneId, ["Enter"]);
-    return null;
+    return;
   }
-  const plan = claudeAnswerPlan(question, group, progress, text, selectedLabels);
-  if (plan.steps.length === 0) throw new Error("answer has neither an option nor text");
-  for (const [index, step] of plan.steps.entries()) {
+  const steps = claudeAskPlan(group, answers);
+  for (const [index, step] of steps.entries()) {
     if (index > 0 && stepDelayMs > 0) await sleep(stepDelayMs);
     if (step.kind === "key") await herdr.paneSendKeys(paneId, [step.value]);
     else await herdr.paneSendText(paneId, step.value);
   }
-  return plan.progress;
+}
+
+/**
+ * Cancel the questionnaire on screen. Escape closes the ask in the TUI, but
+ * the card is served from the `PreToolUse` sidecar, which only `PostToolUse`
+ * clears — and a cancelled tool call never reaches `PostToolUse`. Left alone
+ * the sidecar outlives the ask and the card returns on the next poll, so the
+ * bridge clears the file it wrote (see `pending-asks.ts`).
+ */
+export async function claudeDismissAsk(herdr: HerdrPort, paneId: string): Promise<void> {
+  await herdr.paneSendKeys(paneId, ["escape"]);
+  const sessionId = await claudePaneSessionId(herdr, paneId);
+  if (sessionId) clearPendingAsk(sessionId);
+}
+
+/** Claude panes report `kind: "id"` — the session uuid the sidecar is keyed by. */
+async function claudePaneSessionId(herdr: HerdrPort, paneId: string): Promise<string> {
+  try {
+    const snapshot = await herdr.snapshot();
+    const pane = snapshot.panes.find((candidate) => candidate.pane_id === paneId);
+    const agent = snapshot.agents.find((candidate) => candidate.pane_id === paneId);
+    const session = pane?.agent_session ?? agent?.agent_session;
+    if (!session) return "";
+    if (session.kind === "id") return session.value;
+    // A path-kind reference still names the session: Claude's transcript file
+    // is `<session uuid>.jsonl`.
+    return session.value.replace(/\.jsonl$/, "").split(/[\\/]/).pop() ?? "";
+  } catch {
+    return ""; // no snapshot: the escape still landed, the sidecar ages out
+  }
 }
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -273,7 +306,8 @@ export const claudeBackend: AgentBackend = {
   resolveSessionPath: claudeResolveSessionPath,
   readTranscript: claudeReadTranscript,
   extractQuestions: claudeExtractQuestions,
-  answerQuestion: claudeAnswerQuestion,
+  answerAsk: claudeAnswerAsk,
+  dismissAsk: claudeDismissAsk,
   control: claudeControl,
   deliverInitialPrompt: claudeDeliverInitialPrompt,
   models: readClaudeModelsCatalog,

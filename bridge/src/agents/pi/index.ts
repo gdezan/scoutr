@@ -15,14 +15,13 @@ import { closeSessionPane, findPaneSessionPath, renameSessionPane } from "../../
 import { shellQuote } from "../../shell.js";
 import type {
   AgentBackend,
-  AnswerProgress,
-  AnswerRequest,
+  AskRequest,
   ControlAction,
   ControlParams,
   LaunchParams,
   ModelsCatalog,
 } from "../types.js";
-import { piAnswerPlan } from "./questionnaire.js";
+import { piAskPlan } from "./questionnaire.js";
 import { parsePiTranscript, writePiSessionTitle } from "./transcript.js";
 import { readModelsCatalog } from "./models.js";
 import { readCommandsCatalog } from "./commands.js";
@@ -104,31 +103,47 @@ export function piExtractQuestions(transcript: Transcript): QuestionEntry[] {
 }
 
 /**
- * Deliver one answer. With a question in hand the keys come from pi's
- * questionnaire grammar (see `questionnaire.ts`); without one the pane is
+ * Deliver a whole ask. With questions in hand the keys come from pi's
+ * questionnaire grammar (see `questionnaire.ts`); without them the pane is
  * blocked on something else (e.g. a permission prompt), so the text is typed
  * and submitted as-is.
  */
-export async function piAnswerQuestion(
-  herdr: HerdrPort,
-  request: AnswerRequest,
-): Promise<AnswerProgress | null> {
-  const safe = sanitizeAnswerText(request.text);
-  const { paneId, question, group, progress, selectedLabels } = request;
-  if (!question) {
+export async function piAnswerAsk(herdr: HerdrPort, request: AskRequest): Promise<void> {
+  const { paneId, group, answers } = request;
+  if (group.length === 0) {
+    const safe = sanitizeAnswerText(request.text);
     if (!safe) throw new Error("answer text is empty");
     await herdr.paneSendText(paneId, safe);
     await herdr.paneSendKeys(paneId, ["Enter"]);
-    return null;
+    return;
   }
-  const plan = piAnswerPlan(question, group, progress, safe, selectedLabels);
-  if (plan.custom && !safe) throw new Error("answer has neither an option nor text");
-  await herdr.paneSendKeys(paneId, plan.keys);
-  if (plan.custom) {
-    await herdr.paneSendText(paneId, safe);
-    await herdr.paneSendKeys(paneId, plan.trailingKeys);
+  const steps = piAskPlan(
+    group,
+    answers.map((answer) => ({ ...answer, text: sanitizeAnswerText(answer.text) })),
+  );
+  // Runs of keys go in one send; text is typed on its own. A throw part-way
+  // leaves the questionnaire mid-walk and is reported as-is — replaying from
+  // tab 0 would re-toggle the multi-select boxes the first pass already set.
+  let pending: string[] = [];
+  const flush = async () => {
+    if (pending.length === 0) return;
+    await herdr.paneSendKeys(paneId, pending);
+    pending = [];
+  };
+  for (const step of steps) {
+    if (step.kind === "key") {
+      pending.push(step.value);
+      continue;
+    }
+    await flush();
+    await herdr.paneSendText(paneId, step.value);
   }
-  return plan.progress;
+  await flush();
+}
+
+/** Cancel the questionnaire on screen; pi's TUI closes the ask on escape. */
+export async function piDismissAsk(herdr: HerdrPort, paneId: string): Promise<void> {
+  await herdr.paneSendKeys(paneId, ["escape"]);
 }
 
 export async function piControl(herdr: HerdrPort, params: ControlParams): Promise<void> {
@@ -229,7 +244,8 @@ export const piBackend: AgentBackend = {
   readTranscript: piReadTranscript,
   renameStoredSession: piRenameStoredSession,
   extractQuestions: piExtractQuestions,
-  answerQuestion: piAnswerQuestion,
+  answerAsk: piAnswerAsk,
+  dismissAsk: piDismissAsk,
   control: piControl,
   models: readModelsCatalog,
   commands: (cwd?: string) => readCommandsCatalog(cwd),

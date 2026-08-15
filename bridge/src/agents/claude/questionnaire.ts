@@ -1,5 +1,5 @@
 import type { QuestionEntry } from "../../questions.js";
-import type { AnswerProgress } from "../types.js";
+import type { AskAnswer } from "../types.js";
 
 /**
  * Claude Code's AskUserQuestion TUI grammar, mapped against 2.1.x live.
@@ -34,15 +34,15 @@ import type { AnswerProgress } from "../types.js";
  *    which submits the moment its option is picked.
  *  - Keys are delivered one at a time: a batched `down down space` arrives as
  *    one chunk and is misread (the space toggled the row the cursor had left).
+ *
+ * Because answering tab `k` lands on tab `k + 1`, a plan that answers every
+ * question in ask order starting from tab 0 never needs a single `Left` or
+ * `Right`: the questionnaire walks itself. That is the whole reason the ask is
+ * delivered as one batch — see `claudeAskPlan`.
  */
 export interface ClaudeAnswerStep {
   kind: "key" | "text";
   value: string;
-}
-
-export interface ClaudeAnswerPlan {
-  steps: ClaudeAnswerStep[];
-  progress: AnswerProgress;
 }
 
 const key = (value: string): ClaudeAnswerStep => ({ kind: "key", value });
@@ -53,66 +53,62 @@ export function claudeHasSubmitTab(group: QuestionEntry[]): boolean {
   return !(group.length === 1 && group[0]?.multiSelect !== true);
 }
 
-export function claudeAnswerPlan(
-  question: QuestionEntry,
-  group: QuestionEntry[],
-  progress: AnswerProgress | null,
-  answerText: string,
-  selectedLabels: string[],
-): ClaudeAnswerPlan {
-  const n = group.length;
-  const k = group.findIndex((candidate) => candidate.id === question.id);
-  const answered = [...new Set([...(progress?.answered ?? []), question.id])];
-  if (k < 0) {
-    return { steps: [], progress: { answered, cursorTab: progress?.cursorTab ?? 0 } };
-  }
-  const submitTab = claudeHasSubmitTab(group);
-  const lastTab = submitTab ? n : n - 1;
+/**
+ * Keystrokes for a whole ask, answered in ask order from a freshly opened
+ * questionnaire (tab 0, nothing picked).
+ *
+ * Every question must have an answer: the review tab will not submit an
+ * incomplete ask, and the app disables Submit until the round is complete, so
+ * a gap here is a programming error rather than a user state.
+ */
+export function claudeAskPlan(group: QuestionEntry[], answers: AskAnswer[]): ClaudeAnswerStep[] {
   const steps: ClaudeAnswerStep[] = [];
+  for (const question of group) {
+    const answer = answers.find((candidate) => candidate.questionId === question.id);
+    if (!answer) throw new Error(`no answer for question ${question.id}`);
+    steps.push(...claudeQuestionSteps(question, answer));
+  }
+  // Answering the last question lands on the review tab, so submitting is a
+  // single Enter — no walk, because the batch never left the strip's order.
+  if (claudeHasSubmitTab(group)) steps.push(key("Enter"));
+  return steps;
+}
 
-  // Walk the tab strip to this question. Tabs do not wrap, so the walk is
-  // signed and bounded by the strip.
-  const currentTab = Math.min(Math.max(progress?.cursorTab ?? 0, 0), lastTab);
-  const delta = k - currentTab;
-  for (let i = 0; i < Math.abs(delta); i += 1) steps.push(key(delta > 0 ? "Right" : "Left"));
-
-  const indices = selectedLabels
+/** Keystrokes that answer one question, with the cursor already on its tab. */
+function claudeQuestionSteps(question: QuestionEntry, answer: AskAnswer): ClaudeAnswerStep[] {
+  const steps: ClaudeAnswerStep[] = [];
+  const indices = answer.selectedLabels
     .map((label) => question.options.findIndex((option) => option.label === label))
     .filter((index) => index >= 0);
   const optionCount = question.options.length;
+  // Options and text are mutually exclusive: "Type something" is the entry
+  // after the authored options, not a field beside them, so an answer is
+  // either a pick or a typed one — never both.
   const custom = indices.length === 0;
+  const answerText = answer.text;
 
   if (question.multiSelect) {
-    for (const index of indices) steps.push(text(String(index + 1)));
-    if (custom && answerText) {
+    if (custom) {
+      if (!answerText) throw new Error(`answer for ${question.id} has neither an option nor text`);
       // No digit focuses the text field in multi-select (a digit only toggles
       // its checkbox), so the cursor walks down to it from the first row.
       for (let i = 0; i < optionCount; i += 1) steps.push(key("Down"));
       steps.push(text(answerText));
       steps.push(key("Down")); // out of the field, onto the Next/Submit row
     } else {
+      for (const index of indices) steps.push(text(String(index + 1)));
       // The cursor never left the first row, so the Next/Submit row is one
       // step past "Type something".
       for (let i = 0; i < optionCount + 1; i += 1) steps.push(key("Down"));
     }
     steps.push(key("Enter"));
   } else if (custom) {
-    if (!answerText) {
-      return { steps: [], progress: { answered: progress?.answered ?? [], cursorTab: currentTab } };
-    }
+    if (!answerText) throw new Error(`answer for ${question.id} has neither an option nor text`);
     steps.push(text(String(optionCount + 1))); // focus "Type something"
     steps.push(text(answerText));
     steps.push(key("Enter"));
   } else {
     steps.push(text(String((indices[0] ?? 0) + 1)));
   }
-
-  const cursorTab = Math.min(k + 1, lastTab);
-  // The ask is submitted from the review tab once every question is answered.
-  const complete = group.every((candidate) => answered.includes(candidate.id));
-  if (complete && submitTab) {
-    for (let i = 0; i < n - cursorTab; i += 1) steps.push(key("Right"));
-    steps.push(key("Enter"));
-  }
-  return { steps, progress: { answered, cursorTab } };
+  return steps;
 }

@@ -82,15 +82,26 @@ interface ScoutrApi {
     suspend fun steer(target: String, text: String): WsFrame
     suspend fun runSlashCommand(paneId: String, text: String): WsFrame
     /**
-     * Answer a question card. The app sends intent only — which card, which
+     * Answer a whole ask. The app sends intent only — which questions, which
      * option labels, what text — and the bridge drives the agent's own
-     * questionnaire. `questionId` is empty when the pane is blocked on a
-     * plain prompt rather than a question card.
+     * questionnaire, delivering the round in one pass. `callId` is empty when
+     * the pane is blocked on a plain prompt rather than a question card, and
+     * then `text` carries the answer on its own.
      */
-    suspend fun answerQuestion(
+    suspend fun answerAsk(
         paneId: String,
-        questionId: String = "",
+        callId: String = "",
+        answers: List<AskAnswer> = emptyList(),
         text: String = "",
-        selectedLabels: List<String> = emptyList(),
     ): WsFrame
+
+    /** Cancel the ask on screen without answering it. */
+    suspend fun dismissAsk(paneId: String): WsFrame
 }
+
+/** One question's answer inside a batched ask. */
+data class AskAnswer(
+    val questionId: String,
+    val text: String = "",
+    val selectedLabels: List<String> = emptyList(),
+)

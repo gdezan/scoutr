@@ -88,34 +88,32 @@ describe("WS command dispatch", () => {
     await assert.rejects(() => handleCommand({ type: "steer", target: "", text: "x" } as never, deps), /target and text/);
   });
 
-  test("answer_question types the sanitized answer then Enter", async () => {
+  test("answer_ask types the sanitized answer then Enter", async () => {
     const { herdr, deps } = makeDeps();
-    const result = await handleCommand({ type: "answer_question", paneId: "p1", text: "yes, do it" }, deps);
+    const result = await handleCommand({ type: "answer_ask", paneId: "p1", text: "yes, do it" }, deps);
     assert.equal(result.type, "answered");
-    assert.equal((result as { text: string }).text, "yes, do it");
     assert.deepEqual(herdr.sent, [
       { method: "paneSendText", params: { pane_id: "p1", text: "yes, do it" } },
       { method: "paneSendKeys", params: { pane_id: "p1", keys: ["Enter"] } },
     ]);
   });
 
-  test("answer_question strips control characters before sending", async () => {
+  test("answer_ask strips control characters before sending", async () => {
     const { herdr, deps } = makeDeps();
-    const result = await handleCommand({ type: "answer_question", paneId: "p1", text: "a\u0000b\u001bc" }, deps);
-    assert.equal((result as { text: string }).text, "abc");
+    await handleCommand({ type: "answer_ask", paneId: "p1", text: "a\u0000b\u001bc" }, deps);
     assert.equal((herdr.sent[0]?.params as { text: string }).text, "abc");
   });
 
-  test("answer_question rejects an unbounded selectedLabels list", async () => {
+  test("answer_ask rejects an unbounded selectedLabels list", async () => {
     const { deps } = makeDeps("pi");
     await assert.rejects(
       () =>
         handleCommand(
           {
-            type: "answer_question",
+            type: "answer_ask",
             paneId: "p1",
-            questionId: "call#0",
-            selectedLabels: new Array(33).fill("Yes"),
+            callId: "call",
+            answers: [{ questionId: "call#0", selectedLabels: new Array(33).fill("Yes") }],
           } as never,
           deps,
         ),
@@ -123,30 +121,47 @@ describe("WS command dispatch", () => {
     );
   });
 
-  test("answer_question rejects a questionId that is not a card id", async () => {
+  test("answer_ask rejects a callId that is not a tool call id", async () => {
     const { deps } = makeDeps("pi");
     await assert.rejects(
-      () => handleCommand({ type: "answer_question", paneId: "p1", questionId: "x".repeat(201) } as never, deps),
-      /must be a question card id/,
+      () => handleCommand({ type: "answer_ask", paneId: "p1", callId: "x".repeat(201) } as never, deps),
+      /must be a tool call id/,
     );
   });
 
-  test("answer_question rejects an empty answer that names no question", async () => {
+  test("answer_ask rejects a round longer than any ask can be", async () => {
+    const { deps } = makeDeps("pi");
+    const answers = new Array(9).fill({ questionId: "call#0", selectedLabels: ["Yes"] });
+    await assert.rejects(
+      () => handleCommand({ type: "answer_ask", paneId: "p1", callId: "call", answers } as never, deps),
+      /bounded list/,
+    );
+  });
+
+  test("answer_ask rejects an empty answer that names no ask", async () => {
     const { deps } = makeDeps("pi");
     await assert.rejects(
-      () => handleCommand({ type: "answer_question", paneId: "p1", text: "" } as never, deps),
-      /requires text or a question/,
+      () => handleCommand({ type: "answer_ask", paneId: "p1", text: "" } as never, deps),
+      /requires text or an ask/,
     );
   });
 
   test("unknown-agent answers require text (no questionnaire protocol to speak)", async () => {
     const { herdr, deps } = makeDeps();
     await assert.rejects(
-      () => handleCommand({ type: "answer_question", paneId: "p1", text: "" } as never, deps),
+      () => handleCommand({ type: "answer_ask", paneId: "p1", text: "" } as never, deps),
       /requires text for unknown agents/,
     );
     assert.deepEqual(herdr.sent, []);
   });
+
+  test("dismiss_ask escapes the questionnaire", async () => {
+    const { herdr, deps } = makeDeps("pi");
+    const result = await handleCommand({ type: "dismiss_ask", paneId: "p1" }, deps);
+    assert.equal(result.type, "dismissed");
+    assert.deepEqual(herdr.sent, [{ method: "paneSendKeys", params: { pane_id: "p1", keys: ["escape"] } }]);
+  });
+
   test("slash_command sends the validated command plus Enter", async () => {
     const { herdr, deps } = makeDeps();
     const result = await handleCommand({ type: "slash_command", paneId: "p1", text: "/compact" }, deps);
@@ -209,7 +224,7 @@ describe("WS command dispatch", () => {
 
   test("claude answers flatten multi-line text to one line then Enter", async () => {
     const { herdr, deps } = makeDeps("claude");
-    const result = await handleCommand({ type: "answer_question", paneId: "p1", text: "keep\nworking" }, deps);
+    const result = await handleCommand({ type: "answer_ask", paneId: "p1", text: "keep\nworking" }, deps);
     assert.equal(result.type, "answered");
     assert.deepEqual(herdr.sent, [
       { method: "paneSendText", params: { pane_id: "p1", text: "keep working" } },

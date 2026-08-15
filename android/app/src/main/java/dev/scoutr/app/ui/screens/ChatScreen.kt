@@ -67,6 +67,7 @@ import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import kotlinx.coroutines.delay
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -132,7 +133,8 @@ import dev.scoutr.app.data.entryText
 import dev.scoutr.app.ui.imeOrNavigationBarsPadding
 import dev.scoutr.app.ui.components.AssistantMarkdown
 import dev.scoutr.app.ui.components.PressTintSurface
-import dev.scoutr.app.ui.components.QuestionCard
+import dev.scoutr.app.ui.components.AskCard
+import dev.scoutr.app.ui.components.AskAnswerBubble
 import dev.scoutr.app.ui.components.WorkingIndicator
 import dev.scoutr.app.ui.components.WorkingIndicatorMode
 import dev.scoutr.app.ui.components.workingIndicatorMode
@@ -143,6 +145,8 @@ import dev.scoutr.app.ui.motion.ScoutrMotion
 import dev.scoutr.app.ui.motion.HapticEvent
 import dev.scoutr.app.ui.motion.rememberHaptic
 import dev.scoutr.app.ui.motion.useReduceMotion
+import dev.scoutr.app.state.AskDraft
+import dev.scoutr.app.state.DraftAnswer
 import dev.scoutr.app.state.Loadable
 import dev.scoutr.app.state.ChatUiState
 import dev.scoutr.app.state.ChatViewModel
@@ -291,7 +295,10 @@ fun ChatScreen(
                     ChatList(
                         entries = ui.entries,
                         questions = ui.questionCards,
-                        answeringQuestionId = ui.answeringQuestionId,
+                        askDrafts = ui.askDrafts,
+                        submittingCallId = ui.submittingCallId,
+                        submitIsSlow = ui.submitIsSlow,
+                        questionError = ui.questionError,
                         pendingMessages = ui.pendingMessages,
                         showThinking = showThinking,
                         expandTools = expandTools,
@@ -302,10 +309,13 @@ fun ChatScreen(
                         statusSinceMs = ui.statusSinceMs,
                         hasPendingQuestion = ui.hasPendingQuestion,
                         onRetryPending = viewModel::retryPendingMessage,
-                        onAnswerQuestion = { id, answer, labels ->
+                        onAskAnswer = viewModel::setAskAnswer,
+                        onAskPage = viewModel::setAskPage,
+                        onAskSubmit = { callId ->
                             haptic(HapticEvent.Confirm)
-                            viewModel.answerQuestion(id, answer, labels)
+                            viewModel.submitAsk(callId)
                         },
+                        onAskDismiss = viewModel::dismissAsk,
                         modifier = Modifier.fillMaxSize(),
                     )
                 }
@@ -322,11 +332,34 @@ fun ChatScreen(
                     modifier = Modifier.padding(horizontal = 16.dp),
                 )
             }
+            // An ask answered in the terminal (or on another device) takes any
+            // half-filled draft with it. The card is already gone by the time
+            // this shows, so the notice is the only trace the work existed.
+            val askNotice = ui.askNotice
+            if (askNotice != null) {
+                LaunchedEffect(askNotice) {
+                    delay(4_000)
+                    viewModel.clearAskNotice()
+                }
+                Text(
+                    askNotice,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(horizontal = 16.dp).testTag("ask_notice"),
+                )
+            }
             ChatComposer(
                 value = input,
                 onValueChange = { input = it },
-                placeholder = if (viewModel.waitingForAnswer) "Answer the question…" else "Steer the agent…",
-                enabled = !ui.sending,
+                // A card owns its own answers, so the composer steps aside
+                // while one is open rather than offering a second, silently
+                // different way to answer. Dismiss on the card is the way out.
+                placeholder = when {
+                    ui.hasPendingQuestion -> "Answer above, or dismiss the question"
+                    viewModel.waitingForAnswer -> "Answer the question…"
+                    else -> "Steer the agent…"
+                },
+                enabled = !ui.sending && !ui.hasPendingQuestion,
                 commands = ui.commands,
                 onRetryCommands = viewModel::retryCommands,
                 files = ui.files,
@@ -544,11 +577,19 @@ private fun ChatHeader(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             // Status is not a chip: the working bar and the ring already carry it,
-            // and §7a's rail is configuration only — agent, model, thinking.
+            // and §7a's rail is configuration only — agent, provider, model, thinking.
             if (capabilities != null) {
                 HeaderAgentChip(
                     agentKind = agentKind,
                     testTag = "chat_agent_config",
+                )
+            }
+            if (agentKind == "pi") {
+                HeaderConfigurationChip(
+                    label = "Provider",
+                    value = model?.substringBefore('/') ?: "…",
+                    onClick = onOpenConfiguration,
+                    testTag = "chat_provider_config",
                 )
             }
             HeaderConfigurationChip(
@@ -654,13 +695,19 @@ fun ChatList(
     toolOutputFontSizeSp: Float = AppearancePreferencesStore.DEFAULT_TOOL_OUTPUT_FONT_SIZE_SP,
     pendingMessages: List<PendingUserMessage> = emptyList(),
     questions: List<QuestionEntry> = emptyList(),
-    answeringQuestionId: String? = null,
+    askDrafts: Map<String, AskDraft> = emptyMap(),
+    submittingCallId: String? = null,
+    submitIsSlow: Boolean = false,
+    questionError: String? = null,
     starting: Boolean = false,
     agentStatus: String = "idle",
     statusSinceMs: Long? = null,
     hasPendingQuestion: Boolean = false,
     onRetryPending: (String) -> Unit = {},
-    onAnswerQuestion: (String, String, List<String>) -> Unit = { _, _, _ -> },
+    onAskAnswer: (callId: String, questionId: String, answer: DraftAnswer) -> Unit = { _, _, _ -> },
+    onAskPage: (callId: String, page: Int) -> Unit = { _, _ -> },
+    onAskSubmit: (callId: String) -> Unit = {},
+    onAskDismiss: (callId: String) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val listState = rememberLazyListState()
@@ -817,21 +864,29 @@ fun ChatList(
                         )
                     )
                     is ChatRow.Questions -> {
-                        val multiple = row.group.size > 1
-                        Column {
-                            row.group.forEachIndexed { index, question ->
-                                QuestionCard(
-                                    question = question,
-                                    sending = answeringQuestionId == question.id,
-                                    onAnswer = { answer, labels -> onAnswerQuestion(question.id, answer, labels) },
-                                    position = if (multiple) (index + 1) to row.group.size else null,
-                                    modifier = Modifier.animateItem(
-                                        fadeInSpec = ScoutrMotion.itemSpec(reduceMotion),
-                                        placementSpec = ScoutrMotion.itemPlacementSpec(reduceMotion),
-                                        fadeOutSpec = ScoutrMotion.itemSpec(reduceMotion),
-                                    ),
-                                )
-                            }
+                        val callId = row.group.first().callId
+                        val itemModifier = Modifier.animateItem(
+                            fadeInSpec = ScoutrMotion.itemSpec(reduceMotion),
+                            placementSpec = ScoutrMotion.itemPlacementSpec(reduceMotion),
+                            fadeOutSpec = ScoutrMotion.itemSpec(reduceMotion),
+                        )
+                        // One ask is one card and, once answered, one bubble —
+                        // never a stack of cards the user has to scroll.
+                        if (row.group.all { it.answered }) {
+                            AskAnswerBubble(row.group, itemModifier)
+                        } else {
+                            AskCard(
+                                group = row.group,
+                                draft = askDrafts[callId] ?: AskDraft(),
+                                submitting = submittingCallId == callId,
+                                submitIsSlow = submitIsSlow && submittingCallId == callId,
+                                error = questionError.takeIf { submittingCallId == null },
+                                onAnswer = { questionId, answer -> onAskAnswer(callId, questionId, answer) },
+                                onPage = { page -> onAskPage(callId, page) },
+                                onSubmit = { onAskSubmit(callId) },
+                                onDismiss = { onAskDismiss(callId) },
+                                modifier = itemModifier,
+                            )
                         }
                     }
                     is ChatRow.Pending -> PendingUserBubble(

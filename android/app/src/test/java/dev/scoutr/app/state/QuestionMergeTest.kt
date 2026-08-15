@@ -71,47 +71,74 @@ class QuestionMergeTest {
     }
 
     @Test
-    fun aLocallyAnsweredCardResolvesBeforeTheTranscriptCatchesUp() {
-        // An ask is written to the transcript only when all of its questions
-        // are submitted, so without the overlay the card a user just answered
-        // would keep offering its options — the tap would look lost.
-        val state = ChatUiState(
-            questions = listOf(question("a"), question("b")),
-            localAnswers = mapOf("a" to LocalAnswer("", listOf("Yes"))),
-        )
-        val answered = state.questionCards.first { it.id == "a" }
-        assertTrue(answered.answered)
-        assertEquals(listOf("Yes"), answered.selected)
-        assertEquals(null, answered.answerText)
-        assertEquals(false, state.questionCards.first { it.id == "b" }.answered)
-        // One card is still open, so the composer keeps answering the ask.
+    fun aCardStaysOpenUntilTheTranscriptRecordsTheAnswer() {
+        // Nothing is overlaid locally: the round is shown as delivered only
+        // once its toolResult lands, so the card never claims an answer the
+        // agent may not have received.
+        val state = ChatUiState(questions = listOf(question("a"), question("b")))
+        assertTrue(state.questionCards.none { it.answered })
         assertTrue(state.hasPendingQuestion)
     }
 
     @Test
-    fun aLocalFreeTextAnswerShowsAsTheAnswerText() {
+    fun openAsksGroupEveryQuestionOfOneCallIntoOneRound() {
         val state = ChatUiState(
-            questions = listOf(question("a")),
-            localAnswers = mapOf("a" to LocalAnswer("Something else", emptyList())),
+            questions = listOf(
+                question("a"),
+                question("b"),
+                question("c").copy(callId = "other"),
+            ),
         )
-        assertEquals("Something else", state.questionCards.single().answerText)
+        val rounds = state.openAsks
+        assertEquals(2, rounds.size)
+        assertEquals(listOf("a", "b"), rounds.first { it.size == 2 }.map { it.id })
+    }
+
+    @Test
+    fun anAnsweredAskLeavesNoPendingQuestion() {
+        val state = ChatUiState(questions = listOf(question("a", answered = true)))
         assertEquals(false, state.hasPendingQuestion)
+        assertTrue(state.openAsks.isEmpty())
     }
 
     @Test
-    fun theTranscriptAnswerWinsOverTheLocalOne() {
-        val state = ChatUiState(
-            questions = listOf(question("a", answered = true).copy(answerText = "Yes")),
-            localAnswers = mapOf("a" to LocalAnswer("stale", emptyList())),
+    fun aDraftIsCompleteOnlyWhenEveryQuestionHasAPickOrText() {
+        val group = listOf(question("a"), question("b"))
+        val partial = AskDraft(answers = mapOf("a" to DraftAnswer(labels = listOf("Yes"))))
+        // Submit stays disabled here: the review tab will not accept a gap.
+        assertEquals(false, partial.isComplete(group))
+        val full = AskDraft(
+            answers = mapOf(
+                "a" to DraftAnswer(labels = listOf("Yes")),
+                "b" to DraftAnswer(text = "something else"),
+            ),
         )
-        assertEquals("Yes", state.questionCards.single().answerText)
+        assertTrue(full.isComplete(group))
+        // Blank text is not an answer, however it got there.
+        assertEquals(false, full.copy(answers = full.answers + ("b" to DraftAnswer(text = "   "))).isComplete(group))
     }
 
     @Test
-    fun localAnswersAreDroppedOnceTheTranscriptRecordsThem() {
-        val local = mapOf("a" to LocalAnswer("Yes", emptyList()), "b" to LocalAnswer("No", emptyList()))
-        val pruned = pruneLocalAnswers(local, listOf(question("a", answered = true), question("b")))
-        assertEquals(setOf("b"), pruned.keys)
+    fun draftsAreDroppedOnceTheirAskIsAnswered() {
+        val drafts = mapOf("call" to AskDraft(), "gone" to AskDraft())
+        val pruned = pruneAskDrafts(drafts, listOf(question("a", answered = true)))
+        // Neither ask is open any more, so no draft survives to be re-shown.
+        assertTrue(pruned.isEmpty())
+    }
+
+    @Test
+    fun aDraftSurvivesTheRoundTripThroughSavedState() {
+        val drafts = mapOf(
+            "call" to AskDraft(
+                page = 1,
+                answers = mapOf(
+                    "a" to DraftAnswer(labels = listOf("Yes", "No")),
+                    "b" to DraftAnswer(text = "with, a comma"),
+                ),
+            ),
+        )
+        assertEquals(drafts, decodeAskDrafts(encodeAskDrafts(drafts)))
+        assertEquals(emptyMap<String, AskDraft>(), decodeAskDrafts(""))
     }
 
     @Test

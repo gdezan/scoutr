@@ -395,20 +395,39 @@ class BridgeClient(
     override suspend fun runSlashCommand(paneId: String, text: String): WsFrame =
         sendCommand(mapOf("type" to "slash_command", "paneId" to paneId, "text" to text))
 
-    override suspend fun answerQuestion(
+    override suspend fun answerAsk(
         paneId: String,
-        questionId: String,
+        callId: String,
+        answers: List<AskAnswer>,
         text: String,
-        selectedLabels: List<String>,
     ): WsFrame = sendCommandJson(
         buildJsonObject {
-            put("type", "answer_question")
+            put("type", "answer_ask")
             put("paneId", paneId)
-            if (questionId.isNotEmpty()) put("questionId", questionId)
-            put("text", text)
-            if (selectedLabels.isNotEmpty()) {
-                put("selectedLabels", JsonArray(selectedLabels.map { JsonPrimitive(it) }))
+            if (callId.isNotEmpty()) put("callId", callId)
+            if (answers.isNotEmpty()) {
+                put(
+                    "answers",
+                    JsonArray(
+                        answers.map { answer ->
+                            buildJsonObject {
+                                put("questionId", answer.questionId)
+                                put("text", answer.text)
+                                if (answer.selectedLabels.isNotEmpty()) {
+                                    put(
+                                        "selectedLabels",
+                                        JsonArray(answer.selectedLabels.map { JsonPrimitive(it) }),
+                                    )
+                                }
+                            }
+                        },
+                    ),
+                )
             }
+            put("text", text)
         },
     )
+
+    override suspend fun dismissAsk(paneId: String): WsFrame =
+        sendCommand(mapOf("type" to "dismiss_ask", "paneId" to paneId))
 }
