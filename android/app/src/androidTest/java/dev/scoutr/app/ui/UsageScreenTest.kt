@@ -102,6 +102,47 @@ class UsageScreenTest {
     }
 
     @Test
+    fun collapsesAFailedProviderToOneMutedLineButKeepsCachedBars() {
+        compose.setContent {
+            ScoutrTheme {
+                UsageContent(
+                    ui = UsageUiState(
+                        providers = Loadable.Ready(
+                            listOf(
+                                UsageSnapshot(
+                                    provider = "xai",
+                                    label = "xAI",
+                                    windows = emptyList(),
+                                    error = "xAI refresh token is no longer valid; run `pi /login` and select xAI",
+                                ),
+                                UsageSnapshot(
+                                    provider = "opencode-go",
+                                    label = "OpenCode Go",
+                                    windows = listOf(UsageWindow(label = "wk", usedPercent = 91.0)),
+                                    error = "OpenCode Go usage request returned 503",
+                                ),
+                            ),
+                        ),
+                    ),
+                    onRefresh = {},
+                    nowMillis = 0,
+                )
+            }
+        }
+
+        // Failed with nothing cached: muted line, no Retry, no bars.
+        compose.onNodeWithTag("usage_collapsed_error_xai").assertIsDisplayed()
+        compose.onNodeWithText("Usage unavailable").assertDoesNotExist()
+
+        // Failed but holding cached bars: still the full card with its retry affordance.
+        compose.onNodeWithTag("usage_collapsed_error_opencode-go").assertDoesNotExist()
+        compose.onNodeWithTag("usage_bar_opencode-go_wk").assertIsDisplayed()
+        compose.onNodeWithText("Showing last known usage. OpenCode Go usage request returned 503")
+            .assertIsDisplayed()
+        capture("usage-collapsed-error")
+    }
+
+    @Test
     fun exposesStableLoadingAndActionableErrorStates() {
         var retries = 0
         var ui by mutableStateOf(UsageUiState(providers = Loadable.Loading))

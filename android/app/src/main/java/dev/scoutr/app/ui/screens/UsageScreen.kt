@@ -142,9 +142,13 @@ private fun ProviderCard(provider: UsageSnapshot, nowMillis: Long, onRefresh: ()
         shape = RoundedCornerShape(4.dp),
         modifier = Modifier.fillMaxWidth().testTag("usage_${provider.provider}"),
     ) {
+        // A provider that failed with nothing cached has no bars to show, so it
+        // collapses to its name plus one muted line. Signed-out or unreachable
+        // providers then sit quietly instead of shouting over the ones that work.
+        val collapsed = provider.error != null && provider.windows.isEmpty()
         Column(
             Modifier.padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
+            verticalArrangement = Arrangement.spacedBy(if (collapsed) 6.dp else 14.dp),
         ) {
             Row(
                 Modifier.fillMaxWidth(),
@@ -170,46 +174,57 @@ private fun ProviderCard(provider: UsageSnapshot, nowMillis: Long, onRefresh: ()
                 }
             }
 
-            provider.error?.let { ProviderError(it, provider.windows.isNotEmpty(), onRefresh) }
-
-            if (provider.windows.isEmpty() && provider.error == null) {
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(
-                        text = "Usage unavailable",
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.onSurface,
-                    )
-                    Text(
-                        text = "This provider did not report a usage limit.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 3,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
+            if (collapsed) {
+                Text(
+                    text = provider.error.orEmpty(),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.testTag("usage_collapsed_error_${provider.provider}"),
+                )
             } else {
-                for (window in provider.windows) {
-                    key(window.label, window.currency, window.windowSeconds) {
-                        if (window.isBalance()) {
-                            BalanceRow(window)
-                        } else {
-                            UsageBar(window, provider.provider, nowMillis / 1_000)
+                provider.error?.let { ProviderError(it, provider.windows.isNotEmpty(), onRefresh) }
+
+                if (provider.windows.isEmpty()) {
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(
+                            text = "Usage unavailable",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
+                        Text(
+                            text = "This provider did not report a usage limit.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 3,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                } else {
+                    for (window in provider.windows) {
+                        key(window.label, window.currency, window.windowSeconds) {
+                            if (window.isBalance()) {
+                                BalanceRow(window)
+                            } else {
+                                UsageBar(window, provider.provider, nowMillis / 1_000)
+                            }
                         }
                     }
                 }
-            }
 
-            // DeepSeek is the only covered provider that bills by the UTC clock;
-            // amber is the warning tier, quiet gray the settled off-peak state.
-            if (provider.provider == "deepseek" && provider.windows.isNotEmpty()) {
-                val pricing = deepseekPricing(nowMillis / 1_000)
-                Text(
-                    text = pricing.label,
-                    style = ScoutrType.monoMeta,
-                    color = if (pricing.peak) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                // DeepSeek is the only covered provider that bills by the UTC clock;
+                // amber is the warning tier, quiet gray the settled off-peak state.
+                if (provider.provider == "deepseek" && provider.windows.isNotEmpty()) {
+                    val pricing = deepseekPricing(nowMillis / 1_000)
+                    Text(
+                        text = pricing.label,
+                        style = ScoutrType.monoMeta,
+                        color = if (pricing.peak) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
         }
     }

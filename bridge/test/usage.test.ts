@@ -79,9 +79,9 @@ test("Claude follows Codex in the usage provider registry", () => {
   assert.deepEqual(USAGE_PROVIDERS.map((provider) => provider.id), [
     "codex",
     "claude",
+    "opencode-go",
     "deepseek",
     "xai",
-    "opencode-go",
   ]);
 });
 

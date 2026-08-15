@@ -428,9 +428,9 @@ export interface UsageProvider {
 export const USAGE_PROVIDERS: UsageProvider[] = [
   { id: "codex", label: "Codex", fetch: fetchCodexUsage },
   { id: "claude", label: "Claude", fetch: () => fetchClaudeUsage() },
+  { id: "opencode-go", label: "OpenCode Go", fetch: fetchOpencodeGoUsage },
   { id: "deepseek", label: "DeepSeek", fetch: fetchDeepseekUsage },
   { id: "xai", label: "xAI", fetch: fetchXaiUsage },
-  { id: "opencode-go", label: "OpenCode Go", fetch: fetchOpencodeGoUsage },
 ];
 
 export interface UsageServiceOptions {
