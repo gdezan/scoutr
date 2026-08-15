@@ -1,5 +1,6 @@
 package dev.scoutr.app.state
 
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dev.scoutr.app.data.ConnectionStore
@@ -23,6 +24,7 @@ import dev.scoutr.app.net.TerminalTransport
 import dev.scoutr.app.net.TerminalTransportListener
 import dev.scoutr.app.net.TopologyFeed
 import dev.scoutr.app.terminal.RemoteTerminalSession
+import dev.scoutr.app.terminal.TerminalOutputFailure
 import dev.scoutr.app.terminal.TerminalOutputPump
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
@@ -307,8 +309,7 @@ class TerminalViewModel(
             val openedWith = socketGrid ?: return
             val paneId = _ui.value.paneId ?: return
             if (openedWith.first != cols || openedWith.second != rows) {
-                activeSocket?.release()
-                activeSocket = null
+                retireSocket()
                 openSocket(paneId)
             }
         }
@@ -548,7 +549,7 @@ class TerminalViewModel(
                 // schedules the emulator reset ahead of this generation's first batch, so the
                 // reset can never be reordered behind the output it must precede.
                 ref.output = outputPump.resetGeneration(
-                    onOverflow = { onOutputOverflow(ref) },
+                    onFailed = { failure -> onOutputFailure(ref, failure) },
                     prologue = {
                         session.resetForGeneration(message.cols, message.rows, NOMINAL_CELL_WIDTH, NOMINAL_CELL_HEIGHT)
                     },
@@ -616,13 +617,14 @@ class TerminalViewModel(
         }
 
     /**
-     * The output queue for this generation hit its bound: the emulator cannot keep up with a
-     * burst this large. Fail the generation loudly (the pump has already dropped its queue rather
-     * than deliver a hole) and rebuild through a fresh one, which replays the screen — the same
-     * recovery shape as the bridge's slow-client policy. Called on the transport thread.
+     * This generation's output could not be delivered — its queue hit the pending bound, or an
+     * append into the emulator threw. The pump has already retired the generation rather than
+     * deliver a hole; rebuild through a fresh one, which replays the screen, the same recovery
+     * shape as the bridge's slow-client policy. May be called on the transport or terminal thread.
      */
-    private fun onOutputOverflow(ref: SocketRef) {
+    private fun onOutputFailure(ref: SocketRef, failure: TerminalOutputFailure) {
         if (!isCurrent(ref)) return
+        Log.w(TAG, "terminal output generation retired: $failure")
         val frozen = (currentConnection as? TerminalConnectionState.Ready)?.generation
         activeSocket?.cancel()
         activeSocket = null
@@ -665,12 +667,33 @@ class TerminalViewModel(
         activeSocket = null
         reconnectJob?.cancel()
         feed?.stop()
+        logTerminalCounters()
         outputPump.close()
         terminalScope.cancel()
         if (ownsIo) (terminalIo as? kotlinx.coroutines.ExecutorCoroutineDispatcher)?.close()
     }
 
+    /**
+     * Dump the process-local terminal throughput counters when the route goes away — the read
+     * surface for performance experiments (`adb logcat -s ScoutrTerminal`). Scalars only: counts
+     * and sizes, never terminal content.
+     */
+    private fun logTerminalCounters() {
+        val terminal = performanceCounters?.snapshot()?.terminal ?: return
+        if (terminal.binaryMessages == 0L) return
+        Log.i(
+            TAG,
+            "terminal counters: wsMessages=${terminal.binaryMessages} wsBytes=${terminal.bytesReceived} " +
+                "batches=${terminal.outputBatches} batchBytes=${terminal.outputBytes} " +
+                "maxBatch=${terminal.maxBatchBytes} maxPending=${terminal.maxPendingBytes} " +
+                "appends=${terminal.emulatorAppends} screenUpdates=${terminal.screenUpdates} " +
+                "overflows=${terminal.queueOverflows}",
+        )
+    }
+
     companion object {
+        private const val TAG = "ScoutrTerminal"
+
         /** Plan "TerminalViewModel": ~10k transcript rows. */
         const val TRANSCRIPT_ROWS = 10_000
 

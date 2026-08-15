@@ -100,10 +100,9 @@ fun TerminalScreen(
     val writableRef = remember { mutableStateOf(false) }
     val fontSpRef = remember { mutableStateOf(TerminalPreferencesStore.ConnectionPreferences.DEFAULT_FONT_SIZE_SP) }
 
-    // Coalesces terminal repaints onto the UI thread: set while a repaint is
-    // posted, so a burst of output batches costs one posted Runnable.
-    val repaintPending = remember { AtomicBoolean(false) }
-    val repaintRef = remember { mutableStateOf<Runnable?>(null) }
+    // Owned by the current TerminalView instance; replaced whenever the
+    // AndroidView factory builds a new one.
+    val repainterRef = remember { mutableStateOf<TerminalRepainter?>(null) }
 
     // Re-read on every write to the shared store, so pinch, the strip, and the
     // Settings rows all land here without leaving the route.
@@ -266,24 +265,9 @@ fun TerminalScreen(
                             ),
                         )
                         view.attachSession(viewModel.session)
-                        // Screen updates arrive on the terminal dispatcher, but
-                        // refreshEmulator touches view state (scroll position,
-                        // scrollbars, invalidate), so it must run on the UI
-                        // thread. One posted repaint is kept in flight at a
-                        // time: a burst of batches coalesces into the next
-                        // frame's repaint instead of queueing one Runnable per
-                        // batch. refreshEmulator (rather than a bare
-                        // invalidate) re-fetches the emulator, which generation
-                        // resets replace (see
-                        // RemoteTerminalSession.resetForGeneration).
-                        val repaint = Runnable {
-                            repaintPending.set(false)
-                            view.refreshEmulator()
-                        }
-                        repaintRef.value = repaint
-                        viewModel.session.callbacks.onScreenUpdated = {
-                            if (repaintPending.compareAndSet(false, true)) view.post(repaint)
-                        }
+                        val repainter = TerminalRepainter(view)
+                        repainterRef.value = repainter
+                        viewModel.session.callbacks.onScreenUpdated = repainter::onScreenUpdated
                         viewRef = view
                         view
                     },
@@ -296,9 +280,8 @@ fun TerminalScreen(
                         // session outlives the route and would otherwise hold a
                         // detached view alive and repaint into it.
                         viewModel.session.callbacks.onScreenUpdated = {}
-                        repaintRef.value?.let { view.removeCallbacks(it) }
-                        repaintRef.value = null
-                        repaintPending.set(false)
+                        repainterRef.value?.release()
+                        repainterRef.value = null
                         if (viewRef === view) viewRef = null
                     },
                     modifier = Modifier.fillMaxSize(),
@@ -378,5 +361,42 @@ private fun TerminalBreadcrumb(
                 modifier = Modifier.size(18.dp),
             )
         }
+    }
+}
+
+/**
+ * Bridges terminal screen updates to one [TerminalView] instance.
+ *
+ * Updates arrive on the terminal dispatcher, but `refreshEmulator` touches view state (scroll
+ * position, scrollbars, invalidate), so the repaint is posted to the UI thread. Exactly one
+ * repaint is kept in flight: a burst of output batches coalesces into the next frame's repaint
+ * instead of queueing one Runnable per batch. `refreshEmulator`, rather than a bare invalidate,
+ * re-fetches the emulator that generation resets replace (see
+ * [dev.scoutr.app.terminal.RemoteTerminalSession.resetForGeneration]).
+ *
+ * The session outlives the route, so [release] both drops the queued repaint and latches the
+ * repainter off — a post that already escaped the release check must not repaint into a view the
+ * route has let go.
+ */
+private class TerminalRepainter(private val view: TerminalView) : Runnable {
+    private val pending = AtomicBoolean(false)
+
+    @Volatile private var released = false
+
+    /** Called from the terminal dispatcher. */
+    fun onScreenUpdated() {
+        if (released) return
+        if (pending.compareAndSet(false, true)) view.post(this)
+    }
+
+    /** Runs on the UI thread. Clears [pending] first so an update during the repaint re-posts. */
+    override fun run() {
+        pending.set(false)
+        if (!released) view.refreshEmulator()
+    }
+
+    fun release() {
+        released = true
+        view.removeCallbacks(this)
     }
 }

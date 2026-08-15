@@ -171,7 +171,7 @@ class TerminalOutputPumpTest {
         val counters = PerformanceCounters()
         val pump = pump(consumer, counters, maxPendingBytes = 4_096)
         var overflows = 0
-        val generation = pump.resetGeneration(onOverflow = { overflows++ })
+        val generation = pump.resetGeneration(onFailed = { overflows++ })
 
         val chunk = ByteArray(1_024)
         repeat(4) { assertTrue(generation.enqueue(chunk)) }
@@ -194,6 +194,51 @@ class TerminalOutputPumpTest {
         assertTrue(fresh.enqueue("recovered".toByteArray()))
         advanceUntilIdle()
         assertEquals("recovered", consumer.text())
+        pump.close()
+    }
+
+    @Test
+    fun aFailingBatchRetiresItsGenerationWithoutKillingTheConsumer() = runTest {
+        val delivered = mutableListOf<String>()
+        var failure: TerminalOutputFailure? = null
+        val pump = TerminalOutputPump(scope = CoroutineScope(coroutineContext)) { batch ->
+            val text = batch.toString(Charsets.UTF_8)
+            if (text.contains("boom")) throw IllegalStateException("emulator refused the batch")
+            delivered += text
+        }
+        val generation = pump.resetGeneration(onFailed = { failure = it })
+
+        generation.enqueue("boom".toByteArray())
+        advanceUntilIdle()
+        assertEquals(TerminalOutputFailure.DELIVERY_FAILED, failure)
+        // The dead generation accepts nothing more.
+        assertFalse(generation.enqueue("ignored".toByteArray()))
+
+        // The consumer survived: a fresh generation still delivers.
+        val fresh = pump.resetGeneration()
+        fresh.enqueue("still working".toByteArray())
+        advanceUntilIdle()
+        assertEquals(listOf("still working"), delivered)
+        pump.close()
+    }
+
+    @Test
+    fun aFloodOfTinyFramesTripsTheQueueDepthBoundBeforeTheByteBound() = runTest {
+        val consumer = Consumer()
+        var failure: TerminalOutputFailure? = null
+        val pump = TerminalOutputPump(
+            scope = CoroutineScope(coroutineContext),
+            // A byte bound this large could never be reached by one-byte frames; the depth bound
+            // is what keeps per-entry overhead finite.
+            maxPendingBytes = 64 * 1024 * 1024,
+            maxPendingChunks = 16,
+        ) { consumer.batches += it }
+        val generation = pump.resetGeneration(onFailed = { failure = it })
+
+        val single = ByteArray(1) { 'x'.code.toByte() }
+        repeat(16) { assertTrue(generation.enqueue(single)) }
+        assertFalse(generation.enqueue(single))
+        assertEquals(TerminalOutputFailure.QUEUE_OVERFLOW, failure)
         pump.close()
     }
 

@@ -1,6 +1,7 @@
 package dev.scoutr.app.terminal
 
 import dev.scoutr.app.net.PerformanceCounters
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
@@ -30,16 +31,18 @@ import kotlinx.coroutines.launch
  *    caller's `prologue` (the emulator reset) on the consumer thread before the first batch of the
  *    new generation, so the reset and the bytes it must precede cannot be reordered.
  *
- * Overflow is explicit, never silent: once a generation's pending bytes would exceed
- * [maxPendingBytes] the generation is failed through its `onOverflow` callback and its queue is
- * dropped, mirroring the bridge's slow-client policy (recover through a fresh generation, which
- * replays the screen) instead of quietly discarding output inside a live generation.
+ * Failure is explicit, never silent: when a generation's pending output exceeds its bounds, or
+ * delivering one of its batches throws, the generation is retired through its `onFailed` callback
+ * and its queue is dropped. That mirrors the bridge's slow-client policy — recover through a fresh
+ * generation, which replays the screen — instead of quietly discarding output inside a live
+ * generation or leaving the single consumer dead.
  */
 class TerminalOutputPump(
     scope: CoroutineScope,
     private val counters: PerformanceCounters? = null,
     private val maxBatchBytes: Int = MAX_BATCH_BYTES,
     private val maxPendingBytes: Int = MAX_PENDING_BYTES,
+    private val maxPendingChunks: Int = MAX_PENDING_CHUNKS,
     private val consume: (ByteArray) -> Unit,
 ) {
     /**
@@ -48,14 +51,14 @@ class TerminalOutputPump(
      * comparison the caller could forget.
      */
     inner class Generation internal constructor(
-        internal val onOverflow: () -> Unit,
+        internal val onFailed: (TerminalOutputFailure) -> Unit,
         internal var prologue: (() -> Unit)?,
     ) {
         /**
          * Offer transport bytes for this generation. Returns false when the generation is no
-         * longer live (superseded, overflowed, or the pump is closed) or when the offer overflowed
-         * the pending bound — in which case `onOverflow` has been invoked and this generation is
-         * dead. Safe to call from the transport callback thread.
+         * longer live (superseded, failed, or the pump is closed) or when the offer overflowed the
+         * pending bound — in which case `onFailed` has been invoked and this generation is dead.
+         * Safe to call from the transport callback thread.
          */
         fun enqueue(bytes: ByteArray): Boolean = enqueueFor(this, bytes)
     }
@@ -94,13 +97,17 @@ class TerminalOutputPump(
     /**
      * Replace the live generation: drop everything still queued for the previous one and install a
      * fresh handle. [prologue] runs on the consumer thread before the new generation's first batch
-     * (the emulator reset), [onOverflow] fails the generation when its queue is exhausted.
+     * (the emulator reset); [onFailed] retires the generation when its queue is exhausted or when
+     * delivering one of its batches threw.
      */
-    fun resetGeneration(onOverflow: () -> Unit = {}, prologue: (() -> Unit)? = null): Generation {
+    fun resetGeneration(
+        onFailed: (TerminalOutputFailure) -> Unit = {},
+        prologue: (() -> Unit)? = null,
+    ): Generation {
         val generation = synchronized(lock) {
             check(!closed) { "terminal output pump is closed" }
             clearQueueLocked()
-            Generation(onOverflow, prologue).also { current = it }
+            Generation(onFailed, prologue).also { current = it }
         }
         wake.trySend(Unit)
         return generation
@@ -138,7 +145,9 @@ class TerminalOutputPump(
         if (bytes.isEmpty()) return true
         val overflowed = synchronized(lock) {
             if (closed || current !== generation) return false
-            if (pendingBytes + bytes.size > maxPendingBytes) {
+            // Both bounds matter: bytes for ordinary frames, depth because a flood of tiny
+            // frames costs per-entry overhead the byte figure does not account for.
+            if (pendingBytes + bytes.size > maxPendingBytes || queue.size >= maxPendingChunks) {
                 // Explicit failure, never a silent drop: kill the generation here so no
                 // half-delivered prefix reaches the emulator, and let the owner rebuild.
                 current = null
@@ -153,11 +162,25 @@ class TerminalOutputPump(
         }
         if (overflowed) {
             counters?.terminalQueueOverflow()
-            generation.onOverflow()
+            generation.onFailed(TerminalOutputFailure.QUEUE_OVERFLOW)
             return false
         }
         wake.trySend(Unit)
         return true
+    }
+
+    /**
+     * Retire [generation] if it is still live and report why. Used for failures the owner must
+     * recover from with a fresh generation.
+     */
+    private fun failGeneration(generation: Generation, failure: TerminalOutputFailure) {
+        val live = synchronized(lock) {
+            if (current !== generation) return
+            current = null
+            clearQueueLocked()
+            true
+        }
+        if (live) generation.onFailed(failure)
     }
 
     /** Guarded by [lock]. */
@@ -169,19 +192,30 @@ class TerminalOutputPump(
 
     private fun drainAll() {
         while (true) {
-            when (val work = nextWork() ?: return) {
-                is Work.Prologue -> work.run()
-                is Work.Batch -> {
-                    counters?.terminalOutputBatch(work.bytes.size)
-                    consume(work.bytes)
+            val work = nextWork() ?: return
+            // Collapsing N launches into one consumer means one thrown batch would otherwise end
+            // terminal output for the ViewModel's lifetime. Contain it: retire the generation and
+            // let the owner rebuild, exactly like an overflow.
+            try {
+                when (work) {
+                    is Work.Prologue -> work.run()
+                    is Work.Batch -> {
+                        counters?.terminalOutputBatch(work.bytes.size)
+                        consume(work.bytes)
+                    }
                 }
+            } catch (error: Throwable) {
+                if (error is CancellationException) throw error
+                failGeneration(work.generation, TerminalOutputFailure.DELIVERY_FAILED)
             }
         }
     }
 
     private sealed interface Work {
-        class Prologue(val run: () -> Unit) : Work
-        class Batch(val bytes: ByteArray) : Work
+        val generation: Generation
+
+        class Prologue(override val generation: Generation, val run: () -> Unit) : Work
+        class Batch(override val generation: Generation, val bytes: ByteArray) : Work
     }
 
     /**
@@ -193,21 +227,38 @@ class TerminalOutputPump(
         val generation = current ?: return null
         generation.prologue?.let { prologue ->
             generation.prologue = null
-            return Work.Prologue(prologue)
+            return Work.Prologue(generation, prologue)
         }
         if (queue.isEmpty()) return null
 
-        // Collect (array, offset, length) slices until the cap or the queue runs out. A chunk
-        // larger than the cap is split across batches, keeping order exact.
+        val head = queue.first()
+        if (headOffset == 0 && queue.size == 1 && head.size <= maxBatchBytes) {
+            // One whole transport frame and nothing behind it — the interactive case. Hand over
+            // the array the socket already allocated instead of copying it.
+            queue.removeFirst()
+            pendingBytes -= head.size
+            return Work.Batch(generation, head)
+        }
+
+        // Otherwise size the batch first, then copy once into it. Sizing walks the queue without
+        // allocating anything per chunk; a chunk larger than the cap is split across batches,
+        // keeping order exact.
         var total = 0
-        val slices = ArrayList<Triple<ByteArray, Int, Int>>()
-        while (queue.isNotEmpty() && total < maxBatchBytes) {
-            val head = queue.first()
-            val available = head.size - headOffset
-            val take = minOf(available, maxBatchBytes - total)
-            slices.add(Triple(head, headOffset, take))
-            total += take
-            if (take == available) {
+        var skipped = headOffset
+        for (chunk in queue) {
+            total += minOf(chunk.size - skipped, maxBatchBytes - total)
+            skipped = 0
+            if (total >= maxBatchBytes) break
+        }
+
+        val batch = ByteArray(total)
+        var at = 0
+        while (at < total) {
+            val chunk = queue.first()
+            val take = minOf(chunk.size - headOffset, total - at)
+            System.arraycopy(chunk, headOffset, batch, at, take)
+            at += take
+            if (headOffset + take == chunk.size) {
                 queue.removeFirst()
                 headOffset = 0
             } else {
@@ -215,19 +266,7 @@ class TerminalOutputPump(
             }
         }
         pendingBytes -= total
-
-        val single = slices.singleOrNull()
-        if (single != null && single.second == 0 && single.third == single.first.size) {
-            // One whole transport frame: hand over the array the socket already allocated.
-            return Work.Batch(single.first)
-        }
-        val batch = ByteArray(total)
-        var at = 0
-        for ((array, offset, length) in slices) {
-            System.arraycopy(array, offset, batch, at, length)
-            at += length
-        }
-        return Work.Batch(batch)
+        return Work.Batch(generation, batch)
     }
 
     companion object {
@@ -248,5 +287,21 @@ class TerminalOutputPump(
          * slow-client policy — not this queue — is what a genuinely stalled consumer hits first.
          */
         const val MAX_PENDING_BYTES = 4 * 1024 * 1024
+
+        /**
+         * Maximum queued chunks for one generation. [MAX_PENDING_BYTES] bounds payload but not the
+         * per-entry overhead of the queue itself, so a flood of very small frames is bounded here
+         * instead. At realistic frame sizes the byte bound is always the one that trips first.
+         */
+        const val MAX_PENDING_CHUNKS = 8192
     }
+}
+
+/** Why a [TerminalOutputPump] generation was retired; both need a fresh generation to recover. */
+enum class TerminalOutputFailure {
+    /** Pending output exceeded the queue bounds: the emulator could not keep up with the burst. */
+    QUEUE_OVERFLOW,
+
+    /** Delivering a batch to the emulator threw. */
+    DELIVERY_FAILED,
 }
