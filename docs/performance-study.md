@@ -24,7 +24,8 @@ The most important findings are more specific:
 4. **Chat refresh is single-flight with a user-driven pull path; the remaining redundant work is queued.** Poll, post-action, and pull-to-refresh triggers share one coordinator that joins an in-flight read instead of duplicating it; a successful pull resets the next poll deadline; Chat scroll-to-end is owned by one cancellable job. Still queued: fetching the full enriched agent board to locate one pane, the empty-incremental transcript copy, and first-paint ordering.
 5. **The shared OkHttp client sends pings every 20 seconds on all WebSockets (and eligible HTTP/2 connections).** This may be justified for an active terminal, but it should be an explicit measured keepalive policy rather than a global default.
 6. **The bridge usage endpoint fetches four providers serially.** Four 10-second provider timeouts can exceed Android’s 30-second read timeout.
-7. **Many earlier suspected hotspots are already handled well.** HTTP calls propagate coroutine cancellation; one OkHttp client is reused; bridge transcript and board reads are memoized; terminal backpressure is bounded end to end; Compose lazy lists generally have stable keys; and the bridge owns one shared herdr feed.
+7. **Terminal output batching is implemented, and it measured as unnecessary on this transport.** The Android path no longer launches a coroutine per WebSocket frame; one consumer drains each burst into a single ≤64 KiB emulator append. But Herdr and the bridge already coalesce terminal output into periodic frames, so the measured WS-message-to-batch ratio was ~1.00 and appends/repaints did not fall. The change stands on correctness — an off-UI-thread `refreshEmulator` call is fixed, byte accounting is exact, pending output is bounded — not on a measured speedup.
+8. **Many earlier suspected hotspots are already handled well.** HTTP calls propagate coroutine cancellation; one OkHttp client is reused; bridge transcript and board reads are memoized; terminal backpressure is bounded end to end; Compose lazy lists generally have stable keys; and the bridge owns one shared herdr feed.
 
 ## Method and evidence standard
 
@@ -201,11 +202,33 @@ HTTP validators reduce payload and parsing, though not request wakeups. [RFC 911
 
 For an app-owned foreground subscription, ntfy recommends the NDJSON stream for most non-JavaScript clients and also supports WebSocket. That can remove 30-second finite polls while visible, but it does not solve Android background execution. [ntfy subscription API](https://docs.ntfy.sh/subscribe/api/)
 
-### P2 — terminal render batching, only if traces identify it
+### P2 — terminal render batching: implemented, and the hypothesis did not hold
 
-**Hypothesis:** every incoming terminal frame launches work on the terminal dispatcher and can trigger a full view refresh. Under ANSI-heavy output, dispatch/emulator/draw cost may dominate before network backpressure engages.
+**Original hypothesis:** every incoming terminal frame launches work on the terminal dispatcher and can trigger a full view refresh. Under ANSI-heavy output, dispatch/emulator/draw cost may dominate before network backpressure engages.
 
-Measure frame count, bytes/frame, dispatcher queue delay, emulator append duration, draw duration, frame misses, and bridge queue bytes. If dispatch overhead dominates, coalesce output within one display-frame budget without reordering bytes or delaying input/control frames. If draw dominates, optimize invalidation in the terminal view instead.
+**Implemented (2026-08-15):** `TerminalOutputPump` replaced the coroutine-per-WebSocket-frame path. Transport callbacks now enqueue and return; one long-lived consumer on `scoutr-terminal-io` drains everything already available into one contiguous batch, capped at 64 KiB, and each batch costs exactly one `TerminalEmulator.append` and one screen update. Batching emerges from draining — there is no timer and no artificial delay, so a lone keystroke echo is delivered on its own. A generation is a handle rather than a flag: only the handle installed by the last `resetGeneration` can enqueue, and installing one carries the emulator reset as its prologue, so the reset cannot be reordered behind the bytes it must precede. Pending output is bounded (4 MiB / 65536 chunks); exceeding it, or an append that throws, retires the generation explicitly and reconnects rather than dropping bytes silently, with repeated delivery failures inside a 60 s window settling into a non-retryable failure instead of a reconnect loop.
+
+**Why 64 KiB:** upstream Termux moved its terminal receive buffer from 4 KiB to 64 KiB in February 2026 because the smaller buffer caused serious lag in large-output workloads such as terminal multiplexers. That is the evidence for the starting value — it is not a Scoutr measurement, and on the workloads below the cap was never reached.
+
+**Measured (2026-08-15, `emulator-5554`, real bridge on port 8737, full path Herdr → bridge child adapter → `/ws/terminal` → pump → Termux emulator → TerminalView).** Counters via `adb logcat -s ScoutrTerminal`, cumulative per app process:
+
+| Workload (cumulative) | WS msgs | WS bytes | Batches | Batch bytes | Max batch | Max pending | Appends | Screen updates | Overflows | Delivery failures |
+|---|---|---|---|---|---|---|---|---|---|---|
+| Interactive + 20k lines + `top` + ANSI fixture | 148 | 268,310 | 148 | 268,310 | 51,907 | 51,907 | 148 | 150 | 0 | 0 |
+| \+ `seq 1 400000` | 161 | 328,927 | 161 | 328,927 | 51,911 | 51,911 | 161 | 164 | 0 | 0 |
+| \+ 400 small writes at ~100/s | 447 | 496,387 | 446 | 496,387 | 51,911 | 51,911 | 446 | 450 | 0 | 0 |
+
+**What the numbers say.** Batching did **not** reduce append or repaint count on any measured workload: the WS-message-to-batch ratio was 1.000, 1.000, and 1.004. Only one coalescing event occurred in the entire session. The reason is upstream of Android — Herdr and the bridge already deliver terminal output as periodic frames rather than raw pty writes, so the Android frame rate is low and each frame is already large (mean ~1.1 KB, max ~52 KB). `seq 1 400000` added just 13 WS messages. The premise that per-frame dispatch cost dominates is therefore **not supported** on this transport, and the 64 KiB cap was never reached (largest batch 51,911 bytes).
+
+What the counters do confirm is semantic correctness under the new path: `batch bytes == WS bytes` exactly in every dump (no byte lost or duplicated between socket and emulator), `appends == batches`, `screen updates == batches + one per generation`, and zero overflows or delivery failures across ~500 KB and four generations.
+
+**What the change is still worth,** stated without unmeasured claims: it removes one coroutine launch per WebSocket frame (447 launches avoided in the session above — a structural reduction, not a measured time saving); it fixes a real defect where `TerminalView.refreshEmulator()` — which mutates scroll position, wakes scrollbars, and invalidates — was called directly from `scoutr-terminal-io` instead of the UI thread, now a coalesced `view.post`; and it makes pending output bounded with explicit failure instead of unbounded queueing. No battery, latency, CPU, or memory improvement was measured, and none is claimed.
+
+**Runtime acceptance (same session):** typed input echoed promptly with no perceptible batching delay; 20,000 generated lines rendered with the tail exact and contiguous and the prompt returning; `top -d 0.2` redrew without corruption, keeping reverse-video, bold, and column alignment, and `q` reached the shell mid-redraw; a 200-iteration fixture of bold/underline/reverse/256-colour sequences rendered with no attribute bleed; leaving and re-entering the route produced a fresh generation whose replay reproduced the screen exactly with no stale bytes. Note that Herdr's frame model means the phone receives a compacted view of a fast producer's output, so "no missing lines" is verified for the delivered stream, not for every byte the pane ever wrote.
+
+**Remaining hotspot / next step:** none identified on the Android side by these counters. Bridge → Android WebSocket micro-batching stays deferred, and this data argues against it: the frame count is already low. If terminal rendering is revisited, measure draw/invalidate cost in `TerminalView` rather than dispatch, and do it on a physical device — these numbers are emulator numbers.
+
+**Not measured:** dispatcher queue delay, emulator append duration, draw duration, frame misses, and bridge queue bytes. A workload that genuinely saturates the socket (many frames per second reaching Android) was not reachable through Herdr's frame cadence, so the pump's coalescing path remains exercised only by unit tests.
 
 ### P2 — improve cache eviction only if churn appears
 
@@ -291,12 +314,13 @@ Report request/event counts, bytes, connection reuse, p50/p95/p99 freshness, rec
 2. **Implementation complete / emulator benchmark accepted / broader runtime acceptance pending:** add a minified benchmark target and basic cross-layer counters; record the emulator benchmark evidence and finish R8-sensitive runtime journeys on approved acceptance targets.
 3. **Complete implementation / pending runtime acceptance:** lifecycle-gate Usage polling; verify no `/api/usage` traffic after STOPPED.
 4. **Complete (2026-08-15):** make Chat refresh single-flight; coalesce polling, pull-to-refresh, resume, and post-action reconciliation. Runtime acceptance passed: `ChatListTest` (34 tests) green on the emulator, pull gesture evidence, and zero `/api/sessions` traffic after Chat reaches STOPPED.
-5. Shorten Chat first paint, remove the empty incremental-list copy, and replace the full-board status lookup.
-6. Parallelize usage providers.
-7. Separate and measure WebSocket ping/reconnect policy.
-8. Add adaptive cadence and validators/revisions to large unchanged HTTP resources.
-9. Benchmark an optional foreground invalidation stream against that optimized baseline.
-10. Add the app Baseline Profile after critical journeys and performance targets stabilize.
+5. **Complete (2026-08-15):** terminal output batching, bounded output queue, and terminal throughput counters. Emulator acceptance passed across interactive, bulk, TUI, ANSI-fragmentation, and reconnect scenarios; the counters show no reduction in emulator/repaint work, which is recorded as a negative result rather than a win. Physical-device acceptance remains outstanding.
+6. Shorten Chat first paint, remove the empty incremental-list copy, and replace the full-board status lookup.
+7. Parallelize usage providers.
+8. Separate and measure WebSocket ping/reconnect policy.
+9. Add adaptive cadence and validators/revisions to large unchanged HTTP resources.
+10. Benchmark an optional foreground invalidation stream against that optimized baseline.
+11. Add the app Baseline Profile after critical journeys and performance targets stabilize.
 
 After every implementation or verification step, update this sequence and the relevant item's status/evidence before committing.
 ## Changes not recommended now

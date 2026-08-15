@@ -40,10 +40,27 @@ queued terminal input or content across generations. Leaving the route permits
 a 30-second bridge grace window so returning to the same pane can resume its
 session. A new generation resets transport state before accepting bytes.
 
+Incoming output reaches the emulator only through `TerminalOutputPump`. Transport
+callbacks enqueue and return; one long-lived consumer on `scoutr-terminal-io`
+drains what is already available into a single batch of at most 64 KiB, so a
+batch costs one emulator append and one screen update regardless of how many
+WebSocket frames it came from. There is no render timer: a lone keystroke echo
+is delivered on its own. Screen updates reach `TerminalView` through a coalesced
+post to the UI thread, since repainting mutates view state.
+
+Pending output for one generation is bounded (4 MiB, or 65,536 queued frames).
+Exceeding it — or an emulator append that throws — retires that generation and
+reconnects, which replays the screen, rather than dropping bytes inside a live
+generation. Repeated delivery failures within a minute stop the retry and settle
+the route into a failure the pane menu can recover from.
+
 The terminal does not claim unmeasured performance guarantees. Queue bounds,
 slow-client handling, and the 10,000-row scrollback cap remain implementation
-limits until benchmark evidence changes them. Current runtime evidence covers
-the emulator; a physical-phone integration walk remains outstanding.
+limits until benchmark evidence changes them. Measured emulator counters for the
+batching path — including the finding that batching did not reduce emulator or
+repaint work, because Herdr already coalesces output into periodic frames — are
+recorded in `docs/performance-study.md`. Current runtime evidence covers the
+emulator; a physical-phone integration walk remains outstanding.
 
 ## Source of truth
 
