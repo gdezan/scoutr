@@ -201,7 +201,6 @@ fun ChatScreen(
             model = ui.model,
             thinkingLevel = ui.thinkingLevel,
             capabilities = ui.capabilities,
-            agentDisplayName = ui.agentDisplayName,
             agentKind = ui.agentKind,
             status = if (viewModel.waitingForAnswer) "needs you" else ui.agentStatus,
             showThinking = showThinking,
@@ -403,7 +402,6 @@ private fun ChatHeader(
     model: String?,
     thinkingLevel: String?,
     capabilities: List<String>?,
-    agentDisplayName: String?,
     agentKind: String?,
     status: String,
     showThinking: Boolean,
@@ -511,20 +509,10 @@ private fun ChatHeader(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             // Status is not a chip: the working bar and the ring already carry it,
-            // and §7a's rail is configuration only — thinking, agent, model.
-            if (capabilities == null || SessionAction.SetThinking.wire in capabilities) {
-                HeaderConfigurationChip(
-                    label = "Thinking",
-                    value = thinkingLevel ?: "…",
-                    onClick = onOpenConfiguration,
-                    testTag = "chat_thinking_config",
-                )
-            }
+            // and §7a's rail is configuration only — agent, model, thinking.
             if (capabilities != null) {
-                HeaderConfigurationChip(
-                    label = "Agent",
-                    value = agentDisplayName ?: capabilities?.let { "" } ?: "",
-                    onClick = null,
+                HeaderAgentChip(
+                    agentKind = agentKind,
                     testTag = "chat_agent_config",
                 )
             }
@@ -534,8 +522,33 @@ private fun ChatHeader(
                 onClick = onOpenConfiguration,
                 testTag = "chat_model_config",
             )
+            if (capabilities == null || SessionAction.SetThinking.wire in capabilities) {
+                HeaderConfigurationChip(
+                    label = "Thinking",
+                    value = thinkingLevel ?: "…",
+                    onClick = onOpenConfiguration,
+                    testTag = "chat_thinking_config",
+                )
+            }
         }
         HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f))
+    }
+}
+
+/**
+ * The agent slot in the chat header rail: icon only, no label or value text —
+ * the mark alone identifies the agent, so it stays quiet in the rail (§7a).
+ */
+@Composable
+private fun HeaderAgentChip(agentKind: String?, testTag: String) {
+    Surface(
+        shape = RoundedCornerShape(4.dp),
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        modifier = Modifier.testTag(testTag),
+    ) {
+        Box(Modifier.padding(horizontal = 10.dp, vertical = 6.dp)) {
+            AgentMark(agentKind, size = 14.dp)
+        }
     }
 }
 
