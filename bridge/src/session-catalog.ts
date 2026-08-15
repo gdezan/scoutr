@@ -179,7 +179,7 @@ export async function listSessionCatalog(options: ListSessionCatalogOptions = {}
       path: file.path,
       agentKind: parsed.agentKind,
       cwd: parsed.cwd,
-      title: active?.title?.trim().slice(0, MAX_SESSION_TITLE_LENGTH) || parsed.title,
+      title: parsed.title,
       preview: parsed.preview,
       createdAt: parsed.createdAt,
       updatedAt: file.mtimeMs,

@@ -88,6 +88,8 @@ export async function deriveAgentCardsWithDetail(
     // Stable shape: fields always present on cards with a session path,
     // values may be null (a live agent whose session file is missing/empty
     // — e.g. a just-launched session — must still produce well-typed cards).
+    const title = detail?.title?.trim();
+    if (title) card.title = title;
     card.model = detail?.model ?? null;
     card.latestActivity = detail?.latestActivity ? cleanActivity(detail.latestActivity) : null;
     card.latestActivityAtMs = detail?.latestActivityAtMs ?? null;

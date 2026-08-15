@@ -3,9 +3,8 @@ import { inspectSessionFile, entryText, type Transcript } from "./transcript.js"
 import { backendForSessionPath } from "./agents/registry.js";
 
 /**
- * Bounded per-agent board detail: the active model and the latest meaningful
- * transcript line. Reads through [readTranscript]'s tail mode so only the end
- * of each session file is touched, never the full transcript, and is memoized
+ * Bounded per-agent board detail: the session title, active model, and latest meaningful
+ * transcript line. Reads bounded head/tail windows and is memoized
  * by (path, mtime, size) so the 3s board poll does not re-read unchanged files.
  */
 
@@ -15,6 +14,8 @@ const MAX_ACTIVITY_LENGTH = 160;
 const MEMO_CAP = 128;
 
 export interface BoardDetail {
+  /** User-assigned session name, when the transcript has one. */
+  title: string | null;
   model: string | null;
   /** Latest meaningful line (user/agent text or tool call). */
   latestActivity: string;
@@ -25,7 +26,7 @@ export interface BoardDetail {
 export class BoardDetailCache {
   private readonly memo = new Map<string, { mtimeMs: number; size: number; detail: BoardDetail }>();
 
-  /** Read the bounded tail of [path]; unknown or unreadable files return null. */
+  /** Read bounded transcript windows for [path]; unknown or unreadable files return null. */
   async detailFor(path: string): Promise<BoardDetail | null> {
     const info = await inspectSessionFile(path);
     if (!info.exists) return null;
@@ -37,7 +38,8 @@ export class BoardDetailCache {
     if (!backend) return null;
     const transcript = await backend.readTranscript(path, { tail: TAIL_ENTRIES }).catch(() => null);
     if (!transcript) return null;
-    const detail = deriveBoardDetail(transcript, info.mtimeMs);
+    const metadata = await backend.readTranscript(path, { metadataOnly: true }).catch(() => null);
+    const detail = deriveBoardDetail(transcript, info.mtimeMs, metadata?.title);
     this.memo.set(path, { mtimeMs: info.mtimeMs, size: info.size, detail });
     if (this.memo.size > MEMO_CAP) {
       const oldest = this.memo.keys().next().value;
@@ -58,8 +60,12 @@ export class BoardDetailCache {
   }
 }
 
-/** Model + latest meaningful line from a transcript tail. */
-export function deriveBoardDetail(transcript: Transcript, mtimeMs: number): BoardDetail {
+/** Session title, model, and latest meaningful line from a transcript tail. */
+export function deriveBoardDetail(
+  transcript: Transcript,
+  mtimeMs: number,
+  title = transcript.title,
+): BoardDetail {
   for (const entry of [...transcript.entries].reverse()) {
     // entryText's own cap is well above MAX_ACTIVITY_LENGTH, so cleanActivity
     // is what actually bounds the card line.
@@ -67,6 +73,7 @@ export function deriveBoardDetail(transcript: Transcript, mtimeMs: number): Boar
     if (!isMeaningful(text)) continue;
     const at = Date.parse(entry.timestamp);
     return {
+      title,
       model: transcript.model,
       latestActivity: text,
       latestActivityAtMs: Number.isFinite(at) ? at : null,
@@ -74,7 +81,7 @@ export function deriveBoardDetail(transcript: Transcript, mtimeMs: number): Boar
   }
   // No meaningful entry in the window: fall back to the file mtime so cards
   // still show recency.
-  return { model: transcript.model, latestActivity: "", latestActivityAtMs: mtimeMs };
+  return { title, model: transcript.model, latestActivity: "", latestActivityAtMs: mtimeMs };
 }
 
 /** Skip control/streaming noise like bare "Enter" or single-char echoes. */
