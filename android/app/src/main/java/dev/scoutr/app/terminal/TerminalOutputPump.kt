@@ -205,10 +205,13 @@ class TerminalOutputPump(
                     }
                 }
             } catch (error: Throwable) {
-                // Cancellation is the pump shutting down. A VirtualMachineError must not become a
-                // reconnect: replaying the screen is the most allocation-heavy response available,
-                // which is the worst possible answer to an OutOfMemoryError.
-                if (error is CancellationException || error is VirtualMachineError) throw error
+                // Cancellation is the pump shutting down. OutOfMemoryError is rethrown, which
+                // crashes the process — deliberately: the recovery for a delivery failure is a
+                // reconnect that replays the whole screen, the most allocation-heavy thing
+                // available and the worst possible answer to having just run out of memory. Other
+                // errors, StackOverflowError included, are content-triggerable and recoverable
+                // through a fresh generation.
+                if (error is CancellationException || error is OutOfMemoryError) throw error
                 counters?.terminalDeliveryFailure()
                 failGeneration(work.generation, TerminalOutputFailure.DELIVERY_FAILED)
             }

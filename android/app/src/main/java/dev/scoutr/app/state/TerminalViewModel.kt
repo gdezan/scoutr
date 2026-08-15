@@ -1,5 +1,6 @@
 package dev.scoutr.app.state
 
+import android.os.SystemClock
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -115,13 +116,7 @@ class TerminalViewModel(
         outputPump = TerminalOutputPump(
             scope = terminalScope,
             counters = performanceCounters,
-        ) { batch ->
-            session.appendOutput(batch, 0, batch.size)
-            // Rendering a batch is the only proof the failure was transient. Resetting on `ready`
-            // instead would defeat the cap below: a deterministic failure reaches Ready every
-            // cycle, so the counter would never accumulate.
-            consecutiveDeliveryFailures = 0
-        }
+        ) { batch -> session.appendOutput(batch, 0, batch.size) }
         session.inputSink = { bytes -> forwardInput(bytes) }
         session.callbacks.onTitleChanged = { _ui.update { it.copy(title = session.getTitle()) } }
         session.callbacks.onBell = { _ui.update { it.copy(bellAt = it.bellAt + 1L) } }
@@ -136,10 +131,18 @@ class TerminalViewModel(
     private var reconnectAttempt = 0
 
     /**
-     * Consecutive generations retired by a delivery failure, cleared once a batch actually
-     * renders. Written from the terminal/transport threads that deliver output or report failure.
+     * Delivery failures inside the current [DELIVERY_FAILURE_WINDOW_MS] window, guarded by
+     * [deliveryFailureLock] because the terminal and transport threads both report failures.
+     *
+     * Counted per window rather than "consecutive since the last rendered batch": every
+     * generation starts by rendering the bridge's replay frame, and an oversized replay is split
+     * across batches, so any success-based reset would be cleared on every cycle and the cap
+     * below would never trip. A window also expires on its own, so failures hours apart cannot
+     * accumulate into a spurious permanent failure.
      */
-    @Volatile private var consecutiveDeliveryFailures = 0
+    private val deliveryFailureLock = Any()
+    private var deliveryFailureWindowStart = 0L
+    private var deliveryFailuresInWindow = 0
     private var feed: TopologyFeed? = null
 
     /** Last grid measured by the view (main thread); used for hello/resize/observer restart. */
@@ -640,28 +643,38 @@ class TerminalViewModel(
         val frozen = (currentConnection as? TerminalConnectionState.Ready)?.generation
         activeSocket?.cancel()
         activeSocket = null
-        if (failure == TerminalOutputFailure.DELIVERY_FAILED) {
-            // A delivery failure can be deterministic in the replayed content (an emulator or
-            // repaint defect on one escape sequence). Reconnecting replays the same bytes and
-            // fails at the same byte, and each cycle reaches Ready first, which resets the
-            // backoff — so retrying forever would be a tight loop. Give it a few chances, then
-            // stop and say so instead of hammering the pane.
-            if (++consecutiveDeliveryFailures > MAX_DELIVERY_FAILURES) {
-                consecutiveDeliveryFailures = 0
-                _ui.update {
-                    it.copy(
-                        connection = TerminalConnectionState.Failed(
-                            "terminal output could not be rendered",
-                            retryable = false,
-                        ),
-                    )
-                }
-                return
+        // A delivery failure can be deterministic in the pane's content (an emulator or repaint
+        // defect on one escape sequence). Reconnecting replays the same bytes and fails again,
+        // and each cycle reaches Ready first, which resets the backoff — so retrying forever
+        // would be a tight loop. Give it a few tries per window, then stop and say so instead of
+        // hammering the pane.
+        if (failure == TerminalOutputFailure.DELIVERY_FAILED && deliveryFailureExhausted()) {
+            _ui.update {
+                it.copy(
+                    connection = TerminalConnectionState.Failed(
+                        "terminal output could not be rendered — pick a pane from the menu to try again",
+                        retryable = false,
+                    ),
+                )
             }
-        } else {
-            consecutiveDeliveryFailures = 0
+            return
         }
         scheduleReconnect(frozen)
+    }
+
+    /** Record one delivery failure; true once the window's allowance is used up. */
+    private fun deliveryFailureExhausted(): Boolean = synchronized(deliveryFailureLock) {
+        val now = SystemClock.elapsedRealtime()
+        if (now - deliveryFailureWindowStart > DELIVERY_FAILURE_WINDOW_MS) {
+            deliveryFailureWindowStart = now
+            deliveryFailuresInWindow = 0
+        }
+        if (++deliveryFailuresInWindow > MAX_DELIVERY_FAILURES) {
+            deliveryFailuresInWindow = 0
+            deliveryFailureWindowStart = 0L
+            return true
+        }
+        return false
     }
 
     private fun isCurrent(ref: SocketRef): Boolean =
@@ -727,8 +740,11 @@ class TerminalViewModel(
     companion object {
         private const val TAG = "ScoutrTerminal"
 
-        /** Consecutive delivery failures tolerated before the route stops retrying. */
+        /** Delivery failures tolerated inside [DELIVERY_FAILURE_WINDOW_MS] before giving up. */
         const val MAX_DELIVERY_FAILURES = 3
+
+        /** Window the delivery-failure allowance applies to; it expires on its own. */
+        const val DELIVERY_FAILURE_WINDOW_MS = 60_000L
 
         /** Plan "TerminalViewModel": ~10k transcript rows. */
         const val TRANSCRIPT_ROWS = 10_000

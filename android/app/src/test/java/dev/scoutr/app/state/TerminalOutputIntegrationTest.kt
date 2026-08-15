@@ -202,18 +202,24 @@ class TerminalOutputIntegrationTest {
         val vm = vm()
         vm.start()
 
-        // A delivery failure that is deterministic in the replayed content would otherwise
-        // reconnect forever: every cycle reaches Ready, which resets the backoff.
+        // A delivery failure that is deterministic in the pane's content would otherwise reconnect
+        // forever: every cycle reaches Ready, which resets the backoff. Each cycle here renders a
+        // batch successfully first — the bridge's replay frame always does — so a cap that reset
+        // on a rendered batch would never trip.
         repeat(TerminalViewModel.MAX_DELIVERY_FAILURES + 1) {
             val socket = transport.lastSocket
             socket.ready(generation = 1L + it)
-            socket.bytes("boom".toByteArray())
-            // Make the append throw for this batch only.
+            socket.bytes("replay".toByteArray())
+            scheduler.advanceUntilIdle()
+
+            // Then the poison: make this append throw.
             vm.session.callbacks.onScreenUpdated = { throw IllegalStateException("render failed") }
+            socket.bytes("boom".toByteArray())
             scheduler.advanceUntilIdle()
             vm.session.callbacks.onScreenUpdated = {}
+
             org.robolectric.shadows.ShadowLooper.idleMainLooper(
-                10,
+                2,
                 java.util.concurrent.TimeUnit.SECONDS,
             )
         }
