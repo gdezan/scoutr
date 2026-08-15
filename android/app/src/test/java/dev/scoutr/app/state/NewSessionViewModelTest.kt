@@ -167,8 +167,8 @@ class NewSessionViewModelTest {
         viewModel.selectModel("openai-codex/gpt-5.4")
         assertTrue(viewModel.ui.value.canCreate)
 
-        // Claude has no catalog: no model needed, and creation carries the agent.
-        viewModel.selectAgent("claude")
+        // The catalogless backend needs no model, and creation carries the agent.
+        viewModel.selectAgent("legacy")
         runBlocking {
             repeat(100) {
                 org.robolectric.shadows.ShadowLooper.idleMainLooper()
@@ -177,7 +177,7 @@ class NewSessionViewModelTest {
             }
         }
         assertTrue(viewModel.ui.value.agentKinds.size == 2)
-        assertTrue(viewModel.ui.value.selectedAgent == "claude")
+        assertTrue(viewModel.ui.value.selectedAgent == "legacy")
         assertFalse(viewModel.ui.value.selectedAgentHasModelCatalog)
         assertNull(viewModel.ui.value.selectedModelKey)
         assertTrue(viewModel.ui.value.canCreate)
@@ -185,7 +185,7 @@ class NewSessionViewModelTest {
         viewModel.create()
         viewModel.waitForCreated()
         val create = fake.calls.last { it.name == "createSession" }.args
-        assertEquals("claude", create["agent"])
+        assertEquals("legacy", create["agent"])
         assertEquals("", create["model"])
     }
 
@@ -205,8 +205,8 @@ class NewSessionViewModelTest {
                         hasSlashCommands = true,
                     ),
                     AgentKindInfo(
-                        id = "claude",
-                        displayName = "Claude Code",
+                        id = "legacy",
+                        displayName = "Legacy agent",
                         capabilities = listOf("abort", "compact", "close", "set_model"),
                         hasModelCatalog = false,
                         hasSlashCommands = false,
@@ -217,7 +217,7 @@ class NewSessionViewModelTest {
         fake.onCall = { name, args ->
             if (name == "models") {
                 val agent = args["agent"] as String?
-                if (agent == "claude") {
+                if (agent == "legacy") {
                     Result.success(ModelsCatalogResponse(ok = true, catalog = ModelsCatalog(providers = emptyList())))
                 } else {
                     Result.success(

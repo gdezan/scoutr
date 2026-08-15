@@ -23,6 +23,8 @@ export interface ControlParams {
   paneId: string;
   action: ControlAction;
   text?: string;
+  /** Active model, when the session controller can resolve it for model-specific controls. */
+  model?: string;
 }
 
 /**

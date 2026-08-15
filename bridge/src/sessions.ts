@@ -1,5 +1,5 @@
 import type { HerdrPort } from "./herdr/port.js";
-import type { SessionSnapshot } from "./herdr/types.js";
+import type { PaneInfo, SessionSnapshot } from "./herdr/types.js";
 import { BridgeError } from "./errors.js";
 import { canonicalPath, resolveAllowedDir } from "./dirs.js";
 import type { Transcript } from "./transcript.js";
@@ -357,12 +357,16 @@ export async function controlSession(
     await herdr.paneSendKeys(paneId, ["escape"]);
     return;
   }
-  const backend = await backendForPane(herdr, paneId);
+  const context = await controlBackendContext(herdr, paneId);
+  const { backend } = context;
   if (!backend.capabilities.has(action)) {
     throw new SessionsError(`${backend.id} does not support ${action}`, 400);
   }
+  const controlParams = action === "set_thinking"
+    ? { ...params, model: await activePaneModel(context.pane, backend) }
+    : params;
   try {
-    await backend.control(herdr, params);
+    await backend.control(herdr, controlParams);
   } catch (error) {
     // Backends throw BridgeError with a deliberate status (e.g. 404 for a
     // vanished pane); everything else is a bad control request.
@@ -371,15 +375,34 @@ export async function controlSession(
   }
 }
 
-/** The registered backend that owns a live pane (by herdr's agent label). */
-async function backendForPane(herdr: HerdrPort, paneId: string): Promise<AgentBackend> {
+/** The registered backend and pane that own a live control target. */
+interface ControlBackendContext {
+  backend: AgentBackend;
+  pane: PaneInfo | null;
+}
+
+async function controlBackendContext(herdr: HerdrPort, paneId: string): Promise<ControlBackendContext> {
   try {
-    const backend = resolveBackendForPane(await herdr.snapshot(), paneId);
-    if (backend) return backend;
+    const snapshot = await herdr.snapshot();
+    const pane = snapshot.panes.find((candidate) => candidate.pane_id === paneId);
+    const backend = resolveBackendForPane(snapshot, paneId);
+    if (backend) return { backend, pane: pane ?? null };
   } catch {
     // fall through
   }
   throw new SessionsError("pane has no registered agent backend", 404);
+}
+
+/** Resolve Claude's active model so model-specific effort levels are enforced. */
+async function activePaneModel(pane: PaneInfo | null, backend: AgentBackend): Promise<string | undefined> {
+  if (backend.id !== "claude" || !pane?.agent_session) return undefined;
+  try {
+    const path = await backend.resolveSessionPath(pane.agent_session, pane.cwd ?? pane.foreground_cwd ?? undefined);
+    if (!path) return undefined;
+    return (await backend.readTranscript(path, { metadataOnly: true })).model ?? undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 export { shellQuote, findPaneWorkspace };

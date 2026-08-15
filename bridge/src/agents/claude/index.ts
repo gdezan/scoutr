@@ -37,7 +37,7 @@ export function claudeSessionRoot(): string {
 export function claudeLaunchCommand(params: LaunchParams): string {
   const parts = ["claude"];
   if (params.model) parts.push("--model", shellQuote(claudeModelArg(params.model)));
-  const effort = claudeEffortArg(params.thinkingLevel);
+  const effort = claudeEffortArg(params.thinkingLevel, params.model);
   if (effort) parts.push("--effort", shellQuote(effort));
   if (params.name) parts.push("--name", shellQuote(params.name));
   return parts.join(" ");
@@ -238,6 +238,12 @@ export async function claudeControl(herdr: HerdrPort, params: ControlParams): Pr
       await herdr.paneSendInput(paneId, `/model ${claudeModelArg(text)}`, ["Enter"]);
       return;
     }
+    case "set_thinking": {
+      const effort = claudeEffortArg(text, params.model);
+      if (!effort) throw new Error("valid effort level is required");
+      await herdr.paneSendInput(paneId, `/effort ${effort}`, ["Enter"]);
+      return;
+    }
     default: {
       const exhaustive: never = action as never;
       throw new Error(`unsupported control action for claude: ${String(exhaustive)}`);
@@ -250,6 +256,7 @@ export const CLAUDE_CAPABILITIES: ReadonlySet<ControlAction> = new Set([
   "compact",
   "close",
   "set_model",
+  "set_thinking",
 ]);
 
 export const claudeBackend: AgentBackend = {

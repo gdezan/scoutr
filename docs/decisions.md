@@ -168,14 +168,9 @@ Scoutr Android is always dark and uses green `#8DF08D` for live/AI-owned state, 
 - **Mono** remains restricted to code, data, paths, commands, model ids, and terminal output.
 
 
-## Session controls — v1 limits
+## Session controls
 
-- Abort (`escape`), Retry (re-send last user message via `agent.prompt`),
-  Compact and Fork (typed `/compact` `/fork` + Enter), Rename (workspace
-  label), Cycle thinking (`shift+tab`) are grounded in pi's documented TUI
-  commands (docs: keybindings.md — `escape` = app.interrupt, `shift+tab` =
-  app.thinking.cycle, `/compact`, `/fork`).
-- **Setting a specific thinking level** (e.g. "high") headlessly is a v1 limit:
-  only cycling via `shift+tab` works through a pane; a direct
-  `setThinkingLevel` would need pi's `--mode rpc` layer, which was retired.
-- Controls type into the live pane, so they act on pi's real TUI state.
+- Backend adapters own each agent's control grammar. The session-control surface includes Abort, Retry, Compact, Fork, Rename, and thinking-level selection; each backend advertises and implements only the controls it supports.
+- Pi's pane-native controls use its documented TUI grammar: Compact and Fork are typed `/compact` and `/fork` commands, and thinking levels cycle with `shift+tab` because Pi's interactive transport has no direct set-level command.
+- Claude Code sets a level with its interactive `/effort <level>` command; `low`, `medium`, and `high` are available on all cataloged models, while `xhigh` and `max` depend on the selected model.
+- Controls type into the live pane, so they act on the agent's real TUI state.

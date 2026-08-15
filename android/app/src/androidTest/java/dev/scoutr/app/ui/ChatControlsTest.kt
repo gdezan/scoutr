@@ -88,7 +88,7 @@ class ChatControlsTest {
                     path == "/api/models" ->
                         // Catalog-less backends get an empty catalog; the app
                         // must hide the model search instead of looping.
-                        if (request.requestUrl?.queryParameter("agent") == "claude")
+                        if (request.requestUrl?.queryParameter("agent") == "legacy")
                             """{"ok":true,"catalog":{"providers":[]}}"""
                         else
                             modelCatalogJson
@@ -426,20 +426,20 @@ class ChatControlsTest {
     }
     @Test
     fun configurationSheetHidesThinkingForBackendsWithoutTheCapability() {
-        agentCardJson = """{"ok":true,"agents":[{"paneId":"w1:p1","workspaceId":"w1","tabId":"t1","agent":"claude","agentKind":"claude","displayName":"Claude Code","capabilities":["abort","compact","close","set_model"],"status":"working","sessionPath":"/tmp/claude.jsonl"}]}"""
+        agentCardJson = """{"ok":true,"agents":[{"paneId":"w1:p1","workspaceId":"w1","tabId":"t1","agent":"legacy","agentKind":"legacy","displayName":"Legacy agent","capabilities":["abort","compact","close","set_model"],"status":"working","sessionPath":"/tmp/legacy.jsonl"}]}"""
         val store = ConnectionStore(InstrumentationRegistry.getInstrumentation().targetContext)
         store.save(server.url("/").toString().trimEnd('/'), "t", null, null)
         val bridge = BridgeClient(OkHttpClient.Builder().readTimeout(5, TimeUnit.SECONDS).build(), store)
         val vm = ChatViewModel(bridge, "w1:p1", null, "working")
 
         compose.setContent { ChatScreen(viewModel = vm, onBack = {}) }
-        compose.waitUntil(timeoutMillis = 10_000) { vm.ui.value.agentKind == "claude" }
+        compose.waitUntil(timeoutMillis = 10_000) { vm.ui.value.agentKind == "legacy" }
 
         // The header shows the backend identity, but no Thinking chip for an
         // agent without set_thinking.
         compose.onNodeWithTag("chat_agent_config").assertIsDisplayed()
-        // Label and value are one annotated string: "Agent Claude Code".
-        compose.onNodeWithText("Claude Code", substring = true).assertIsDisplayed()
+        // Label and value are one annotated string: "Agent Legacy agent".
+        compose.onNodeWithText("Legacy agent", substring = true).assertIsDisplayed()
         compose.onNodeWithTag("chat_thinking_config").assertDoesNotExist()
 
         // The conversation setup sheet skips the thinking section entirely.

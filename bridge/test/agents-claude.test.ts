@@ -85,6 +85,12 @@ describe("claude adapter", () => {
         "claude --model 'claude-opus-5' --effort 'xhigh'",
       );
     });
+    it("omits effort unsupported by the selected model", () => {
+      assert.equal(
+        claudeLaunchCommand({ model: "anthropic/claude-haiku-4-5-20251001", thinkingLevel: "xhigh" }),
+        "claude --model 'claude-haiku-4-5-20251001'",
+      );
+    });
     it("ignores a thinking level claude does not accept", () => {
       assert.equal(claudeLaunchCommand({ thinkingLevel: "off" }), "claude");
     });
@@ -148,6 +154,8 @@ describe("claude adapter", () => {
         assert.equal(model.provider, "anthropic");
         assert.ok(model.thinkingLevels.includes("high"));
       }
+      const haiku = provider.models.find((model) => model.id === "claude-haiku-4-5-20251001");
+      assert.deepEqual(haiku?.thinkingLevels, ["low", "medium", "high"]);
     });
   });
 
@@ -247,6 +255,31 @@ describe("claude adapter", () => {
       await claudeControl(herdr, { paneId: "p1", action: "set_model", text: "anthropic/claude-opus-5" });
       assert.equal(herdr.sent[0].params.text, "/model claude-opus-5");
     });
+    it("sets a thinking level with Claude's /effort grammar", async () => {
+      const herdr = fakeHerdr();
+      await claudeControl(herdr, { paneId: "p1", action: "set_thinking", text: "high" });
+      assert.deepEqual(herdr.sent[0], {
+        method: "paneSendInput",
+        params: { pane_id: "p1", text: "/effort high", keys: ["Enter"] },
+      });
+    });
+    it("rejects unsupported thinking levels", async () => {
+      const herdr = fakeHerdr();
+      await assert.rejects(
+        claudeControl(herdr, { paneId: "p1", action: "set_thinking", text: "off" }),
+        /valid effort level is required/,
+      );
+      assert.deepEqual(herdr.sent, []);
+      await assert.rejects(
+        claudeControl(herdr, {
+          paneId: "p1",
+          action: "set_thinking",
+          text: "xhigh",
+          model: "anthropic/claude-haiku-4-5-20251001",
+        }),
+      );
+    });
+
     it("retries the initial prompt until the pane shows it, then stops", async () => {
       // Simulates the live drop: prompts sent in claude's first ~2s vanish,
       // so delivery must verify the pane text and re-send with backoff.
@@ -317,12 +350,12 @@ describe("claude adapter", () => {
     });
     it("rejects verbs claude does not support", async () => {
       const herdr = fakeHerdr();
-      for (const action of ["set_thinking", "rename", "fork", "retry"] as const) {
+      for (const action of ["rename", "fork", "retry"] as const) {
         await assert.rejects(claudeControl(herdr, { paneId: "p1", action }), /unsupported control action for claude/);
       }
     });
     it("advertises only its real capabilities", () => {
-      assert.deepEqual([...claudeBackend.capabilities], ["abort", "compact", "close", "set_model"]);
+      assert.deepEqual([...claudeBackend.capabilities], ["abort", "compact", "close", "set_model", "set_thinking"]);
       assert.equal(claudeBackend.hasModelCatalog, true);
       assert.equal(claudeBackend.hasSlashCommands, true);
     });

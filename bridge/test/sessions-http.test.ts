@@ -259,7 +259,7 @@ describe("POST /api/sessions and /api/sessions/:paneId/control", () => {
   });
 
   it("control: rejects actions outside the backend's declared capabilities", async () => {
-    // claude declares abort/compact/close/set_model — fork is not among them.
+    // claude declares abort/compact/close/set_model/set_thinking — fork is not among them.
     await snapshot.setSnapshot({ ...(await snapshot.snapshot()), panes: [SNAPSHOT_PANE, CLAUDE_PANE] });
     sent.length = 0;
     const { status, data } = await post("/api/sessions/p-claude/control", { action: "fork" });
@@ -267,6 +267,15 @@ describe("POST /api/sessions and /api/sessions/:paneId/control", () => {
     assert.match(data.error, /claude does not support fork/);
     const controlCalls = sent.filter((call) => call.method !== "snapshot");
     assert.deepEqual(controlCalls, [], "a capability-rejected action must not reach herdr");
+  });
+  it("control: sets Claude thinking through /effort", async () => {
+    await snapshot.setSnapshot({ ...(await snapshot.snapshot()), panes: [SNAPSHOT_PANE, CLAUDE_PANE] });
+    sent.length = 0;
+    const { status } = await post("/api/sessions/p-claude/control", { action: "set_thinking", text: "high" });
+    assert.equal(status, 200);
+    assert.deepEqual(sent.filter((call) => call.method !== "snapshot"), [
+      { method: "paneSendInput", params: { pane_id: "p-claude", text: "/effort high", keys: ["Enter"] } },
+    ]);
   });
 
   it("control: missing action is rejected at the route", async () => {

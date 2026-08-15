@@ -13,6 +13,8 @@ export const CLAUDE_PROVIDER = "anthropic";
 
 /** Effort levels `claude --effort` accepts (verified against the installed CLI). */
 export const CLAUDE_EFFORT_LEVELS = ["low", "medium", "high", "xhigh", "max"];
+/** Haiku 4.5 supports only low, medium, and high effort. */
+export const CLAUDE_HAIKU_EFFORT_LEVELS = ["low", "medium", "high"];
 
 export const CLAUDE_MODELS: ModelInfo[] = [
   {
@@ -44,7 +46,7 @@ export const CLAUDE_MODELS: ModelInfo[] = [
     name: "Claude Haiku 4.5",
     provider: CLAUDE_PROVIDER,
     reasoning: true,
-    thinkingLevels: CLAUDE_EFFORT_LEVELS,
+    thinkingLevels: CLAUDE_HAIKU_EFFORT_LEVELS,
     contextWindow: 200_000,
   },
 ];
@@ -65,8 +67,17 @@ export function claudeModelArg(model: string): string {
   return trimmed.startsWith(prefix) ? trimmed.slice(prefix.length) : trimmed;
 }
 
-/** A level `claude --effort` understands, or null (the CLI warns and ignores unknown ones). */
-export function claudeEffortArg(level: string | undefined): string | null {
+/** Return the authored effort levels for a known Claude model; unknown models use the CLI-wide set. */
+function claudeModelEffortLevels(model: string | undefined): readonly string[] {
+  if (!model) return CLAUDE_EFFORT_LEVELS;
+  const normalized = claudeModelArg(model).trim().toLowerCase();
+  if (normalized === "haiku") return CLAUDE_HAIKU_EFFORT_LEVELS;
+  return CLAUDE_MODELS.find((candidate) => candidate.id.toLowerCase() === normalized)?.thinkingLevels ?? CLAUDE_EFFORT_LEVELS;
+}
+
+/** A level `claude --effort` understands for the selected model, or null when unsupported. */
+export function claudeEffortArg(level: string | undefined, model?: string): string | null {
   const trimmed = level?.trim().toLowerCase();
-  return trimmed && CLAUDE_EFFORT_LEVELS.includes(trimmed) ? trimmed : null;
+  const allowed = claudeModelEffortLevels(model);
+  return trimmed && allowed.includes(trimmed) ? trimmed : null;
 }
