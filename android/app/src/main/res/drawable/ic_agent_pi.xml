@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Pi's own "P+i" monogram, taken from earendil-works/pi-website's src/logo.svg. Pi's brand
+     carries no hue of its own (white on near-black is its only published treatment), so this
+     path is tinted with the theme's ink color at render time rather than a fixed brand color. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="800"
+    android:viewportHeight="800">
+    <path
+        android:fillColor="#000000"
+        android:fillType="evenOdd"
+        android:pathData="M165.29,165.29 H517.36 V400 H400 V517.36 H282.65 V634.72 H165.29 Z M282.65,282.65 V400 H400 V282.65 Z" />
+    <path
+        android:fillColor="#000000"
+        android:pathData="M517.36,400 H634.72 V634.72 H517.36 Z" />
+</vector>

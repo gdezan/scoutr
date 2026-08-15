@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Google's Gemini sparkle (Simple Icons "googlegemini", CC0). Antigravity has shipped no
+     standalone glyph of its own yet, only a wordmark, and agy's aliases (gemini,
+     antigravity_cli, antigravity) all name the model it runs on, so this stands in. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#8E75B2"
+        android:pathData="M11.04,19.32 Q12,21.51 12,24 12,21.51 12.93,19.32 13.89,17.13 15.51,15.51t3.81,-2.55Q21.51,12 24,12 21.51,12 19.32,11.07a12.3,12.3 0,0 1,-3.81,-2.58 12.3,12.3 0,0 1,-2.58,-3.81Q12,2.49 12,0q0,2.49 -0.96,4.68 -0.93,2.19 -2.55,3.81a12.3,12.3 0,0 1,-3.81,2.58Q2.49,12 0,12q2.49,0 4.68,0.96 2.19,0.93 3.81,2.55t2.55,3.81" />
+</vector>
