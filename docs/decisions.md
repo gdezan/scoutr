@@ -36,6 +36,33 @@ pi agents, as an alternative to Moshi's paid herdr integration.
   owns the emulator, local scrollback, and input UX. The current contract and
   evidence live in `docs/terminal.md`; ADRs retain historical decisions.
 
+## Versioning and in-app self-update (2026-08-15)
+
+- **Version identity** is one shared Node script, `scripts/version.mjs`, run at
+  Android build time (Gradle `Exec`) and at bridge runtime, so both sides always
+  agree. It anchors on the most recent tag, bumps from conventional commits
+  since it, and stamps version, `versionCode`, short commit, dirty flag, and
+  build time.
+- **Semantic versioning**: `feat` bumps minor; `fix` and every other subject
+  (including non-conventional prose and `docs`/`chore`/`test`/`refactor`) bump
+  patch; `feat!`/`fix!` or a `BREAKING CHANGE:` footer bump major. The strongest
+  bump since the tag wins, not a running tally.
+- **`versionCode`** = `major*1_000_000 + minor*1_000 + patch`, floored to 1
+  (Android requires `versionCode >= 1`). `versionName` is the semver string.
+- **Tags are manual.** The version script never creates tags; tagging `HEAD` is
+  the human "pin this release" step. Commit messages are conventional going
+  forward, with no commitlint tooling.
+- **Update signal stays commit-based**, with semver as display-only:
+  `updateAvailable = (host HEAD != installed commit) || hostDirty`. The app
+  sends its stamped commit/version/dirty to `GET /api/update/status`; the bridge
+  computes the host side and the flag.
+- **Install is app-only and fire-and-forget.** `POST /api/update/install`
+  (bearer + tailnet) resolves the physical device from `adb devices -l` —
+  single device wins, otherwise the app's `Build.MODEL` must uniquely match —
+  then spawns `scripts/install-app.sh --serial <resolved>` detached and returns
+  `202`. It never runs `make release`, because a bridge restart would kill the
+  request; `adb install -r` kills the app and `am start` relaunches it.
+
 ## Decisions learned from live E2E
 
 - **ntfy JSON bodies only parse when POSTed to the root path `/`** with `topic`

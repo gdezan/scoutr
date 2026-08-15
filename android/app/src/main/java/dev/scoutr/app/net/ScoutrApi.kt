@@ -23,6 +23,8 @@ import dev.scoutr.app.data.SnapshotResponse
 import dev.scoutr.app.data.TerminalHierarchyCommand
 import dev.scoutr.app.data.TerminalHierarchyResponse
 import dev.scoutr.app.data.UsageResponse
+import dev.scoutr.app.data.UpdateInstallResponse
+import dev.scoutr.app.data.UpdateStatusResponse
 import dev.scoutr.app.data.WsFrame
 import kotlinx.serialization.json.JsonObject
 
@@ -97,6 +99,12 @@ interface ScoutrApi {
 
     /** Cancel the ask on screen without answering it. */
     suspend fun dismissAsk(paneId: String): WsFrame
+
+    /** Host vs installed build identity; updateAvailable = commit differs or the host tree is dirty. */
+    suspend fun updateStatus(commit: String, version: String, dirty: Boolean): UpdateStatusResponse
+
+    /** Fire-and-forget app install; the bridge resolves the adb device and returns 202. */
+    suspend fun updateInstall(deviceModel: String): UpdateInstallResponse
 }
 
 /** One question's answer inside a batched ask. */

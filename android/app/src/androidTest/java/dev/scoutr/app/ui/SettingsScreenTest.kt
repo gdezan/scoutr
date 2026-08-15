@@ -18,6 +18,11 @@ import androidx.test.platform.app.InstrumentationRegistry
 import dev.scoutr.app.data.AppearancePreferencesStore
 import dev.scoutr.app.data.ConnectionStore
 import dev.scoutr.app.data.TerminalPreferencesStore
+import dev.scoutr.app.data.UpdateInstalled
+import dev.scoutr.app.data.UpdateIdentity
+import dev.scoutr.app.data.UpdateStatusResponse
+import dev.scoutr.app.net.FakeScoutrApi
+import dev.scoutr.app.net.ScoutrApi
 import dev.scoutr.app.ui.screens.SettingsScreen
 import dev.scoutr.app.ui.theme.ScoutrTheme
 import org.junit.Assert.assertEquals
@@ -28,7 +33,7 @@ import org.junit.Rule
 import org.junit.Test
 
 /**
- * Settings: the six sections, the durable stores behind them, and the
+ * Settings: the seven sections, the durable stores behind them, and the
  * Forget gate. The instrumented app keeps one preferences file across tests,
  * so every test clears what it asserts on. The page is one long scroll —
  * scroll to a row before touching it.
@@ -61,6 +66,7 @@ class SettingsScreenTest {
     private fun setSettings(
         saved: ConnectionStore.Saved? = this.saved,
         terminalPreferences: TerminalPreferencesStore = terminalStore(),
+        api: ScoutrApi = FakeScoutrApi(),
         onForget: () -> Unit = {},
         onMonitoringChanged: ((Boolean) -> Unit)? = {},
     ) {
@@ -70,6 +76,7 @@ class SettingsScreenTest {
                     onBack = {},
                     saved = saved,
                     terminalPreferences = terminalPreferences,
+                    api = api,
                     onForget = onForget,
                     onMonitoringChanged = onMonitoringChanged,
                 )
@@ -94,6 +101,8 @@ class SettingsScreenTest {
     @Test
     fun connectionCardShowsHostAndNtfyButNeverTheToken() {
         setSettings()
+        compose.onNodeWithTag("settings_connection_status").assertExists()
+        compose.onNodeWithText("Connected").assertExists()
         compose.onNodeWithTag("settings_host").assertTextEquals(saved.host)
         compose.onNodeWithTag("settings_ntfy")
             .assertTextEquals("${saved.ntfyUrl}\n${saved.ntfyTopic}")
@@ -158,6 +167,20 @@ class SettingsScreenTest {
     }
 
     @Test
+    fun reduceMotionSwitchIsOffByDefaultAndPersists() {
+        setSettings()
+        compose.onNodeWithTag("settings_reduce_motion")
+            .performScrollTo()
+            .assertIsOff()
+            .performClick()
+        compose.onNodeWithTag("settings_reduce_motion").assertIsOn()
+        assertTrue(AppearancePreferencesStore(context).reduceMotionEnabled)
+        compose.onNodeWithTag("settings_reduce_motion").performClick()
+        compose.onNodeWithTag("settings_reduce_motion").assertIsOff()
+        assertFalse(AppearancePreferencesStore(context).reduceMotionEnabled)
+    }
+
+    @Test
     fun typographySteppersPersistIndependentCodeSizes() {
         setSettings()
         val appearance = AppearancePreferencesStore(context)
@@ -216,5 +239,66 @@ class SettingsScreenTest {
         setSettings(saved = null)
         compose.onNodeWithTag("settings_font_value").assertDoesNotExist()
         compose.onNodeWithTag("settings_extra_keys").assertDoesNotExist()
+    }
+
+    private fun updateStatusResponse(available: Boolean) = UpdateStatusResponse(
+        ok = true,
+        host = UpdateIdentity(version = "0.2.0", versionCode = 2000, commit = "abc1234", dirty = false),
+        installed = UpdateInstalled(version = "0.1.0", commit = "def5678", dirty = false),
+        updateAvailable = available,
+    )
+
+    @Test
+    fun updateButtonAppearsWhenAnUpdateIsAvailable() {
+        val api = FakeScoutrApi()
+        api.updateStatusResult = Result.success(updateStatusResponse(available = true))
+        setSettings(api = api)
+        compose.onNodeWithTag("settings_update_status").performScrollTo().assertExists()
+        compose.onNodeWithText("Update available").assertExists()
+        compose.onNodeWithTag("settings_update_button").performScrollTo().assertExists().assertIsEnabled()
+    }
+
+    @Test
+    fun updateButtonAbsentWhenUpToDate() {
+        val api = FakeScoutrApi()
+        api.updateStatusResult = Result.success(updateStatusResponse(available = false))
+        setSettings(api = api)
+        compose.onNodeWithTag("settings_update_status").performScrollTo().assertExists()
+        compose.onNodeWithText("Up to date").assertExists()
+        compose.onNodeWithTag("settings_update_button").assertDoesNotExist()
+    }
+
+    @Test
+    fun updateConfirmRecordsTheInstallWithTheDeviceModel() {
+        val api = FakeScoutrApi()
+        api.updateStatusResult = Result.success(updateStatusResponse(available = true))
+        setSettings(api = api)
+
+        compose.onNodeWithTag("settings_update_button").performScrollTo().performClick()
+        compose.onNodeWithText("Update app?").assertExists()
+        compose.onNodeWithText("Install now").performClick()
+
+        val installCall = api.calls.firstOrNull { it.name == "updateInstall" }
+        assertTrue("install must be called once", installCall != null)
+        val model = installCall!!.args["deviceModel"] as String
+        assertTrue("device model must be non-blank", model.isNotBlank())
+    }
+
+    @Test
+    fun updateSectionNeverShowsTheDirtyFlag() {
+        val api = FakeScoutrApi()
+        api.updateStatusResult = Result.success(
+            updateStatusResponse(available = true).copy(
+                host = UpdateIdentity(
+                    version = "0.2.0",
+                    versionCode = 2000,
+                    commit = "abc1234",
+                    dirty = true,
+                ),
+            ),
+        )
+        setSettings(api = api)
+        compose.onNodeWithTag("settings_update_status").performScrollTo().assertExists()
+        compose.onNodeWithText("dirty", substring = true).assertDoesNotExist()
     }
 }

@@ -10,6 +10,7 @@ import { reviewRoutes } from "./review.js";
 import { attachmentRoutes } from "./attachments.js";
 import { sessionsRoutes } from "./sessions.js";
 import { terminalRoutes } from "./terminal.js";
+import { updateRoutes } from "./update.js";
 import { usageRoutes } from "./usage.js";
 
 /** Every HTTP route, grouped by feature (mirrors the src/ module layout). */
@@ -27,5 +28,6 @@ export function buildRoutes(): Route[] {
     ...filesRoutes,
     ...reviewRoutes,
     ...attachmentRoutes,
+    ...updateRoutes,
   ];
 }

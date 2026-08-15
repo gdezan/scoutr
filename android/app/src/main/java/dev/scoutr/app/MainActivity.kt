@@ -452,6 +452,7 @@ private fun ScoutrAppNav(
                     // without Settings holding a stale copy.
                     saved = remember { container.connectionStore.saved },
                     terminalPreferences = container.terminalPreferences,
+                    api = container.bridge,
                     onForget = {
                         // One user-visible step: the pairing teardown (and its
                         // ordering) belongs to the container; the activity-scoped

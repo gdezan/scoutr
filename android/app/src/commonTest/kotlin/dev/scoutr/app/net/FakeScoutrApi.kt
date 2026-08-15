@@ -23,6 +23,8 @@ import dev.scoutr.app.data.SnapshotResponse
 import dev.scoutr.app.data.TerminalHierarchyCommand
 import dev.scoutr.app.data.TerminalHierarchyResponse
 import dev.scoutr.app.data.UsageResponse
+import dev.scoutr.app.data.UpdateInstallResponse
+import dev.scoutr.app.data.UpdateStatusResponse
 import dev.scoutr.app.data.WsFrame
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.serialization.json.JsonObject
@@ -67,6 +69,8 @@ class FakeScoutrApi : ScoutrApi {
     var repoArtifactsResult: Result<RepoArtifactsResponse> = Result.success(RepoArtifactsResponse())
     var usageResult: Result<UsageResponse> = Result.success(UsageResponse())
     var uploadResult: Result<AttachmentResponse> = Result.success(AttachmentResponse())
+    var updateStatusResult: Result<UpdateStatusResponse> = Result.success(UpdateStatusResponse())
+    var updateInstallResult: Result<UpdateInstallResponse> = Result.success(UpdateInstallResponse())
     var terminalHierarchyResult: Result<TerminalHierarchyResponse> = Result.success(TerminalHierarchyResponse(ok = true))
 
     var wsResult: Result<WsFrame> = Result.success(WsFrame(type = "ack"))
@@ -231,6 +235,12 @@ class FakeScoutrApi : ScoutrApi {
             put("type", "dismiss_ask")
             put("paneId", paneId)
         })
+
+    override suspend fun updateStatus(commit: String, version: String, dirty: Boolean): UpdateStatusResponse =
+        record("updateStatus", mapOf("commit" to commit, "version" to version, "dirty" to dirty)) { updateStatusResult }
+
+    override suspend fun updateInstall(deviceModel: String): UpdateInstallResponse =
+        record("updateInstall", mapOf("deviceModel" to deviceModel)) { updateInstallResult }
 
     private fun send(name: String, command: JsonObject): WsFrame {
         calls += ApiCall(name, mapOf("command" to command))

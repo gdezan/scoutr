@@ -531,3 +531,36 @@ data class RepoArtifact(
     val size: Long = 0,
     val mtimeMs: Double = 0.0,
 )
+
+// ── Self-update DTOs (GET/POST /api/update/*) ─────────────────────────
+
+@Serializable
+data class UpdateStatusResponse(
+    val ok: Boolean = true,
+    val host: UpdateIdentity = UpdateIdentity(),
+    val installed: UpdateInstalled = UpdateInstalled(),
+    val updateAvailable: Boolean = false,
+)
+
+@Serializable
+data class UpdateIdentity(
+    val version: String = "",
+    val versionCode: Int = 0,
+    val commit: String = "",
+    val dirty: Boolean = false,
+    val buildTime: String = "",
+)
+
+@Serializable
+data class UpdateInstalled(
+    val version: String = "",
+    val commit: String = "",
+    val dirty: Boolean = false,
+)
+
+@Serializable
+data class UpdateInstallResponse(
+    val ok: Boolean = true,
+    val started: Boolean = false,
+    val serial: String? = null,
+)

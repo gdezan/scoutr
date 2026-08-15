@@ -3,6 +3,7 @@
 ## Git workflow
 
 - Work directly on `main` and commit there unless the user explicitly specifies another branch or workflow.
+- When committing, push the branch and its release tags together (`git push --follow-tags`) so a new `vX.Y.Z` tag always travels with the commit.
 
 ## Project map
 

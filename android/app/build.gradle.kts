@@ -1,10 +1,24 @@
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import java.io.ByteArrayOutputStream
+import java.util.Properties
 
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
+}
+
+// Version identity comes from the shared scripts/version.mjs — the same script
+// the bridge runs at runtime, so the APK and the host always agree. Run it once
+// at configuration time (no configuration-cache here) and read key=value props.
+val buildIdentity: Properties = Properties().apply {
+    val out = ByteArrayOutputStream()
+    exec {
+        commandLine("node", file("../../scripts/version.mjs").absolutePath, "--props")
+        standardOutput = out
+    }
+    load(String(out.toByteArray(), Charsets.UTF_8).byteInputStream())
 }
 
 android {
@@ -18,8 +32,13 @@ android {
         applicationId = "dev.scoutr.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = buildIdentity.getProperty("versionCode").toInt()
+        versionName = buildIdentity.getProperty("version")
+        buildConfigField("String", "VERSION_NAME", "\"${buildIdentity.getProperty("version")}\"")
+        buildConfigField("int", "VERSION_CODE", buildIdentity.getProperty("versionCode"))
+        buildConfigField("String", "GIT_COMMIT", "\"${buildIdentity.getProperty("commit")}\"")
+        buildConfigField("boolean", "GIT_DIRTY", buildIdentity.getProperty("dirty"))
+        buildConfigField("String", "BUILD_TIME", "\"${buildIdentity.getProperty("buildTime")}\"")
         // Zeroes animation scales before Espresso runs; see ScoutrTestRunner.
         testInstrumentationRunner = "dev.scoutr.app.ScoutrTestRunner"
     }
@@ -49,6 +68,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     // FakeScoutrApi lives in src/commonTest/kotlin, shared by the local

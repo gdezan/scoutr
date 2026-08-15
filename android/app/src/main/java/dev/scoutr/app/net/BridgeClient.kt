@@ -24,6 +24,8 @@ import dev.scoutr.app.data.SnapshotResponse
 import dev.scoutr.app.data.TerminalHierarchyCommand
 import dev.scoutr.app.data.TerminalHierarchyResponse
 import dev.scoutr.app.data.UsageResponse
+import dev.scoutr.app.data.UpdateInstallResponse
+import dev.scoutr.app.data.UpdateStatusResponse
 import dev.scoutr.app.data.WsFrame
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonPrimitive
@@ -430,4 +432,16 @@ class BridgeClient(
 
     override suspend fun dismissAsk(paneId: String): WsFrame =
         sendCommand(mapOf("type" to "dismiss_ask", "paneId" to paneId))
+
+    override suspend fun updateStatus(commit: String, version: String, dirty: Boolean): UpdateStatusResponse =
+        call("/api/update/status", query = mapOf("commit" to commit, "version" to version, "dirty" to dirty.toString())) {
+            json.decodeFromString(UpdateStatusResponse.serializer(), it)
+        }
+
+    override suspend fun updateInstall(deviceModel: String): UpdateInstallResponse =
+        call(
+            "/api/update/install",
+            body = buildJsonObject { put("deviceModel", JsonPrimitive(deviceModel)) }
+                .toString().toRequestBody("application/json".toMediaType()),
+        ) { json.decodeFromString(UpdateInstallResponse.serializer(), it) }
 }

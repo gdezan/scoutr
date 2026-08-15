@@ -21,6 +21,8 @@ export interface JsonBody {
   action?: string;
   text?: string;
   path?: string;
+  /** Build.MODEL from the app, for adb device disambiguation (update install). */
+  deviceModel?: string;
 }
 
 /** Everything the HTTP + WS layers need beyond the caller-provided wiring. */
