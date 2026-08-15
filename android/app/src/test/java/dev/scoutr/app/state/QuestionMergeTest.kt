@@ -11,7 +11,14 @@ class QuestionMergeTest {
         id: String,
         answered: Boolean = false,
         timestamp: String = "2026-08-10T10:00:00.000Z",
-    ) = QuestionEntry(id = id, question = "Q $id", answered = answered, timestamp = timestamp)
+        callId: String = "call",
+    ) = QuestionEntry(
+        id = id,
+        callId = callId,
+        question = "Q $id",
+        answered = answered,
+        timestamp = timestamp,
+    )
 
     @Test
     fun mergeAppendsNewQuestions() {
@@ -139,6 +146,56 @@ class QuestionMergeTest {
         )
         assertEquals(drafts, decodeAskDrafts(encodeAskDrafts(drafts)))
         assertEquals(emptyMap<String, AskDraft>(), decodeAskDrafts(""))
+    }
+
+    @Test
+    fun aDismissedAskStopsCountingAsPending() {
+        // The transcript keeps listing a dismissed ask as unanswered — nothing
+        // writes a cancelled question back as answered — so the app's own
+        // record of the dismissal is what unlocks the composer.
+        val state = ChatUiState(
+            questions = listOf(question("a"), question("b")),
+            dismissedCallIds = setOf("call"),
+        )
+        assertEquals(false, state.hasPendingQuestion)
+        assertTrue(state.openAsks.isEmpty())
+        assertTrue(state.questionCards.isEmpty())
+    }
+
+    @Test
+    fun dismissingOneAskLeavesAnotherOpen() {
+        val state = ChatUiState(
+            questions = listOf(question("a"), question("c").copy(callId = "other")),
+            dismissedCallIds = setOf("call"),
+        )
+        assertTrue(state.hasPendingQuestion)
+        assertEquals(listOf(listOf("c")), state.openAsks.map { round -> round.map { it.id } })
+    }
+
+    @Test
+    fun aDismissedAskThatTurnsOutAnsweredStillShowsItsBubble() {
+        // Dismiss and an answer in the terminal can cross. If the answer wins,
+        // the transcript's version is the truth and belongs on screen.
+        val state = ChatUiState(
+            questions = listOf(question("a", answered = true)),
+            dismissedCallIds = setOf("call"),
+        )
+        assertEquals(listOf("a"), state.questionCards.map { it.id })
+        assertEquals(false, state.hasPendingQuestion)
+    }
+
+    @Test
+    fun dismissalsAreForgottenOnceTheirAskCloses() {
+        // mergeQuestions upserts and never removes, so without pruning the set
+        // would grow for the life of the screen.
+        assertEquals(
+            emptySet<String>(),
+            pruneDismissedAsks(setOf("call"), listOf(question("a", answered = true))),
+        )
+        assertEquals(
+            setOf("call"),
+            pruneDismissedAsks(setOf("call", "stale"), listOf(question("a"))),
+        )
     }
 
     @Test

@@ -169,6 +169,20 @@ internal fun pruneAskDrafts(
     return drafts.filterKeys { it in open }
 }
 
+/**
+ * Forget dismissals whose ask is no longer open — it landed answered, or the
+ * transcript stopped carrying it. [mergeQuestions] upserts and never removes,
+ * so without this the set would grow for the life of the screen.
+ */
+internal fun pruneDismissedAsks(
+    dismissed: Set<String>,
+    questions: List<QuestionEntry>,
+): Set<String> {
+    if (dismissed.isEmpty()) return dismissed
+    val open = questions.filter { !it.answered }.mapTo(mutableSetOf()) { it.callId }
+    return dismissed.filterTo(mutableSetOf()) { it in open }
+}
+
 /** How long a submitted round waits before the card admits it is slow. */
 internal const val ASK_SLOW_SUBMIT_MS = 15_000L
 
@@ -177,7 +191,11 @@ internal const val ASK_RECONCILE_INTERVAL_MS = 750L
 
 internal const val ASK_ANSWERED_ELSEWHERE = "That question was answered elsewhere"
 
+internal const val ASK_DISMISS_FAILED =
+    "Dismissed here — the terminal may still be showing the question"
+
 private const val SAVED_ASK_DRAFTS = "ask_drafts"
+private const val SAVED_DISMISSED_ASKS = "dismissed_asks"
 
 // Drafts are saved as one string, since SavedStateHandle carries bundle values
 // and a nested map is not one. Separators are control characters, which
@@ -267,6 +285,14 @@ data class ChatUiState(
     val questions: List<QuestionEntry> = emptyList(),
     /** Half-filled ask rounds, keyed by tool call id. Nothing here has been sent. */
     val askDrafts: Map<String, AskDraft> = emptyMap(),
+    /**
+     * Asks this device has dismissed, by tool call id. They stay listed in
+     * [questions] as unanswered — a question cancelled in the terminal is never
+     * written back as answered, and a claude ask can outlive its pane in the
+     * sidecar — so the app has to remember its own decision or the card (and
+     * the composer lock that comes with it) would return on the next poll.
+     */
+    val dismissedCallIds: Set<String> = emptySet(),
     /** Tool call id of the ask whose round is in flight; null when none is. */
     val submittingCallId: String? = null,
     /**
@@ -341,14 +367,17 @@ data class ChatUiState(
     /**
      * The cards to render. There is no local overlay: a round is shown as
      * delivered only once its toolResult reaches the transcript, so the card
-     * never claims an answer the agent may not have received.
+     * never claims an answer the agent may not have received. A dismissed ask
+     * drops out entirely, but comes back as an answer bubble if it turns out to
+     * have been answered after all.
      */
     val questionCards: List<QuestionEntry>
-        get() = questions
+        get() = if (dismissedCallIds.isEmpty()) questions
+        else questions.filter { it.answered || it.callId !in dismissedCallIds }
 
     /** The open asks, in ask order, each grouped by its tool call. */
     val openAsks: List<List<QuestionEntry>>
-        get() = questions.filter { !it.answered }
+        get() = questions.filter { !it.answered && it.callId !in dismissedCallIds }
             .groupBy { it.callId }
             .values
             .toList()
@@ -357,10 +386,11 @@ data class ChatUiState(
      * True while a question card is still waiting for an answer. Answered
      * questions stay in [questions] for the rest of the session as answer
      * bubbles, so "any question at all" is not the same thing — the working
-     * indicator defers to a card only while one is actually pending.
+     * indicator defers to a card only while one is actually pending, and a
+     * dismissed one is not.
      */
     val hasPendingQuestion: Boolean
-        get() = questions.any { !it.answered }
+        get() = questions.any { !it.answered && it.callId !in dismissedCallIds }
 }
 
 /**
@@ -379,10 +409,16 @@ class ChatViewModel(
     agentStatus: String = "working",
     private val performanceCounters: PerformanceCounters = PerformanceCounters(),
     private val savedState: SavedStateHandle = SavedStateHandle(),
+    /** Wall clock for the submit-is-slow mark; overridden in tests. */
+    private val nowMs: () -> Long = { System.currentTimeMillis() },
 ) : ViewModel() {
 
     private val _ui = MutableStateFlow(
-        ChatUiState(agentStatus = agentStatus, askDrafts = readSavedDrafts()),
+        ChatUiState(
+            agentStatus = agentStatus,
+            askDrafts = readSavedDrafts(),
+            dismissedCallIds = readSavedDismissals(),
+        ),
     )
     val ui: StateFlow<ChatUiState> = _ui.asStateFlow()
 
@@ -398,6 +434,18 @@ class ChatViewModel(
 
     private fun readSavedDrafts(): Map<String, AskDraft> =
         decodeAskDrafts(savedState.get<String>(SAVED_ASK_DRAFTS).orEmpty())
+
+    /**
+     * Dismissals are saved for the same reason as drafts: the ask stays open in
+     * the transcript, so a dismissal the app forgot would lock the composer
+     * again the moment Android restored the screen.
+     */
+    private fun persistDismissals() {
+        savedState[SAVED_DISMISSED_ASKS] = _ui.value.dismissedCallIds.toTypedArray()
+    }
+
+    private fun readSavedDismissals(): Set<String> =
+        savedState.get<Array<String>>(SAVED_DISMISSED_ASKS)?.toSet().orEmpty()
 
     private val poller = Poller(viewModelScope)
 
@@ -690,6 +738,7 @@ class ChatViewModel(
                     entries = mergeSessionEntries(it.entries, response.entries, incremental = response.since != null),
                     questions = questions,
                     askDrafts = drafts,
+                    dismissedCallIds = pruneDismissedAsks(it.dismissedCallIds, questions),
                     askNotice = if (lostDraft) ASK_ANSWERED_ELSEWHERE else it.askNotice,
                     submittingCallId = stillSubmitting,
                     submitIsSlow = it.submitIsSlow && stillSubmitting != null,
@@ -931,11 +980,11 @@ class ChatViewModel(
      * that did land, twice.
      */
     private suspend fun awaitAskResult(callId: String) {
-        val startedAt = System.currentTimeMillis()
+        val startedAt = nowMs()
         while (_ui.value.submittingCallId == callId) {
             refresh(RefreshSource.AnswerReconciliation)
             if (_ui.value.submittingCallId != callId) return
-            if (!_ui.value.submitIsSlow && System.currentTimeMillis() - startedAt >= ASK_SLOW_SUBMIT_MS) {
+            if (!_ui.value.submitIsSlow && nowMs() - startedAt >= ASK_SLOW_SUBMIT_MS) {
                 _ui.update { it.copy(submitIsSlow = true) }
             }
             delay(ASK_RECONCILE_INTERVAL_MS)
@@ -946,11 +995,32 @@ class ChatViewModel(
      * Cancel the ask on screen, dropping the draft with it. On agy this is the
      * ordinary abort — it has no questionnaire to close — so it ends the
      * agent's turn rather than just the question.
+     *
+     * Dismissing is local first and unconditional: the card goes and the
+     * composer unlocks whatever the pane says. The app and the terminal do
+     * drift — a question answered or escaped in the terminal is never written
+     * back as answered, and claude's ask is served from a sidecar file — and
+     * when they do, this is the only way out of a card that can no longer be
+     * answered. Telling the bridge is best-effort on top of that.
      */
     fun dismissAsk(callId: String) {
-        if (_ui.value.submittingCallId != null) return
-        _ui.update { it.copy(askDrafts = it.askDrafts - callId, questionError = null) }
+        // Mid-flight keystrokes are the one thing worth waiting on, since the
+        // round may still land. Once the submit has gone quiet past
+        // [ASK_SLOW_SUBMIT_MS] that hope is thin enough to let the user out.
+        val state = _ui.value
+        if (state.submittingCallId != null && !(state.submittingCallId == callId && state.submitIsSlow)) return
+        _ui.update {
+            it.copy(
+                askDrafts = it.askDrafts - callId,
+                dismissedCallIds = it.dismissedCallIds + callId,
+                submittingCallId = it.submittingCallId?.takeIf { id -> id != callId },
+                submitIsSlow = if (it.submittingCallId == callId) false else it.submitIsSlow,
+                questionError = null,
+                askNotice = null,
+            )
+        }
         persistDrafts()
+        persistDismissals()
         viewModelScope.launch {
             try {
                 bridge.dismissAsk(paneId)
@@ -958,7 +1028,9 @@ class ChatViewModel(
             } catch (c: CancellationException) {
                 throw c
             } catch (error: Exception) {
-                _ui.update { it.copy(questionError = error.message ?: "Could not dismiss the question") }
+                // The card is already gone and stays gone — this only says the
+                // terminal may not have heard about it.
+                _ui.update { it.copy(askNotice = ASK_DISMISS_FAILED) }
             }
         }
     }

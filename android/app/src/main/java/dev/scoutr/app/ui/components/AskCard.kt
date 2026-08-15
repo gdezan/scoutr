@@ -114,7 +114,13 @@ fun AskCard(
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.error,
                         )
-                    } else {
+                    }
+                    // Dismiss is hidden only while the keystrokes are actually
+                    // in flight. Once the round has gone quiet it comes back:
+                    // a card that never resolves would otherwise hold the
+                    // composer shut for the rest of the session.
+                    if (!submitting || submitIsSlow) {
+                        if (submitIsSlow) Spacer(Modifier.width(8.dp))
                         TextButton(
                             onClick = onDismiss,
                             modifier = Modifier.testTag("ask_dismiss_$callId"),

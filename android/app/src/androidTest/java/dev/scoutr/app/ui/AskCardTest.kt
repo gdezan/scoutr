@@ -64,6 +64,7 @@ class AskCardTest {
     private fun setCard(
         group: List<QuestionEntry>,
         submitting: Boolean = false,
+        submitIsSlow: Boolean = false,
         onSubmit: () -> Unit = {},
         onDismiss: () -> Unit = {},
     ): () -> AskDraft {
@@ -74,7 +75,7 @@ class AskCardTest {
                     group = group,
                     draft = draft,
                     submitting = submitting,
-                    submitIsSlow = false,
+                    submitIsSlow = submitIsSlow,
                     error = null,
                     onAnswer = { id, answer -> draft = draft.copy(answers = draft.answers + (id to answer)) },
                     onPage = { page -> draft = draft.copy(page = page) },
@@ -211,5 +212,21 @@ class AskCardTest {
         compose.onNodeWithTag("ask_dismiss_call1").assertDoesNotExist()
         compose.onNodeWithText("Other repo").performClick()
         assertNull(draft().answers["q1"])
+    }
+
+    @Test
+    fun aStalledRoundOffersDismissAgain() {
+        // A round that never resolves would otherwise hold the composer shut
+        // for the rest of the session, so the way out comes back.
+        var dismissed = false
+        setCard(
+            listOf(question("q1", options = choiceOptions)),
+            submitting = true,
+            submitIsSlow = true,
+            onDismiss = { dismissed = true },
+        )
+        compose.onNodeWithText("No response yet").assertIsDisplayed()
+        compose.onNodeWithTag("ask_dismiss_call1").performClick()
+        assertTrue(dismissed)
     }
 }
