@@ -44,6 +44,26 @@ class PerformanceCounters {
         val pullsSucceeded: Long,
         val inFlightCancelled: Long,
     )
+    /**
+     * Terminal throughput and render work for one process. Content-free by construction: only
+     * counts and sizes, never pane ids, commands, or terminal bytes.
+     *
+     * The ratios worth reading are `binaryMessages / outputBatches` and
+     * `binaryMessages / screenUpdates` (did batching reduce downstream work?) and
+     * `bytesReceived / outputBatches` (how big did the batches get?).
+     */
+    data class TerminalThroughputSnapshot(
+        val binaryMessages: Long,
+        val bytesReceived: Long,
+        val outputBatches: Long,
+        val outputBytes: Long,
+        val maxBatchBytes: Long,
+        val maxPendingBytes: Long,
+        val queueOverflows: Long,
+        val emulatorAppends: Long,
+        val screenUpdates: Long,
+    )
+
     data class Snapshot(
         val activeHttpRequests: Int,
         val httpRequests: Long,
@@ -57,6 +77,7 @@ class PerformanceCounters {
         val feedSocket: SocketSnapshot,
         val terminalSocket: SocketSnapshot,
         val chatRefresh: ChatRefreshSnapshot,
+        val terminal: TerminalThroughputSnapshot,
     )
 
     internal class EndpointCounters {
@@ -116,6 +137,42 @@ class PerformanceCounters {
             inFlightCancelled.set(0)
         }
     }
+    internal class TerminalThroughputCounters {
+        val binaryMessages = AtomicLong()
+        val bytesReceived = AtomicLong()
+        val outputBatches = AtomicLong()
+        val outputBytes = AtomicLong()
+        val maxBatchBytes = AtomicLong()
+        val maxPendingBytes = AtomicLong()
+        val queueOverflows = AtomicLong()
+        val emulatorAppends = AtomicLong()
+        val screenUpdates = AtomicLong()
+
+        fun snapshot() = TerminalThroughputSnapshot(
+            binaryMessages = binaryMessages.get(),
+            bytesReceived = bytesReceived.get(),
+            outputBatches = outputBatches.get(),
+            outputBytes = outputBytes.get(),
+            maxBatchBytes = maxBatchBytes.get(),
+            maxPendingBytes = maxPendingBytes.get(),
+            queueOverflows = queueOverflows.get(),
+            emulatorAppends = emulatorAppends.get(),
+            screenUpdates = screenUpdates.get(),
+        )
+
+        fun reset() {
+            binaryMessages.set(0)
+            bytesReceived.set(0)
+            outputBatches.set(0)
+            outputBytes.set(0)
+            maxBatchBytes.set(0)
+            maxPendingBytes.set(0)
+            queueOverflows.set(0)
+            emulatorAppends.set(0)
+            screenUpdates.set(0)
+        }
+    }
+
     private val activeHttpRequests = AtomicInteger()
     private val httpRequests = AtomicLong()
     private val httpResponses = AtomicLong()
@@ -128,6 +185,7 @@ class PerformanceCounters {
     private val feedSocketCounters = SocketCounters(AtomicLong(), AtomicLong(), AtomicLong())
     private val terminalSocketCounters = SocketCounters(AtomicLong(), AtomicLong(), AtomicLong())
     private val chatRefreshCounters = ChatRefreshCounters()
+    private val terminalCounters = TerminalThroughputCounters()
 
     /** Begin one BridgeClient request; the returned handle is safe to settle once. */
     fun beginHttpRequest(path: String): HttpRequest? {
@@ -233,6 +291,41 @@ class PerformanceCounters {
         chatRefreshCounters.inFlightCancelled.incrementAndGet()
     }
 
+    /** One terminal WebSocket binary frame arrived (network input, before any batching). */
+    fun terminalBinaryMessage(bytes: Int) {
+        terminalCounters.binaryMessages.incrementAndGet()
+        terminalCounters.bytesReceived.addAndGet(bytes.toLong().coerceAtLeast(0))
+    }
+
+    /** The output pump handed one drained batch to the emulator. */
+    fun terminalOutputBatch(bytes: Int) {
+        val size = bytes.toLong().coerceAtLeast(0)
+        terminalCounters.outputBatches.incrementAndGet()
+        terminalCounters.outputBytes.addAndGet(size)
+        terminalCounters.maxBatchBytes.updateAndGet { maxOf(it, size) }
+    }
+
+    /** Pending output after an enqueue; only the high-water mark is kept. */
+    fun terminalPendingBytes(pending: Int) {
+        val size = pending.toLong().coerceAtLeast(0)
+        terminalCounters.maxPendingBytes.updateAndGet { maxOf(it, size) }
+    }
+
+    /** A generation was failed because its pending output exceeded the bound. */
+    fun terminalQueueOverflow() {
+        terminalCounters.queueOverflows.incrementAndGet()
+    }
+
+    /** One [dev.scoutr.app.terminal.RemoteTerminalSession] append into the emulator. */
+    fun terminalEmulatorAppend() {
+        terminalCounters.emulatorAppends.incrementAndGet()
+    }
+
+    /** One screen-update notification to the terminal view. */
+    fun terminalScreenUpdate() {
+        terminalCounters.screenUpdates.incrementAndGet()
+    }
+
     fun snapshot(): Snapshot = Snapshot(
         activeHttpRequests = activeHttpRequests.get(),
         httpRequests = httpRequests.get(),
@@ -246,6 +339,7 @@ class PerformanceCounters {
         feedSocket = feedSocketCounters.snapshot(),
         terminalSocket = terminalSocketCounters.snapshot(),
         chatRefresh = chatRefreshCounters.snapshot(),
+        terminal = terminalCounters.snapshot(),
     )
 
     /** Reset a completed experiment; active HTTP or WebSocket work must be settled first. */
@@ -267,6 +361,7 @@ class PerformanceCounters {
             counters.closed.set(0)
         }
         chatRefreshCounters.reset()
+        terminalCounters.reset()
     }
 
     companion object {
