@@ -131,6 +131,7 @@ fun SettingsScreen(
         }
 
         HapticsSection(appearance = appearance)
+        MotionSection(appearance = appearance)
     }
 }
 
@@ -616,6 +617,28 @@ private fun HapticsSection(appearance: AppearancePreferencesStore) {
                 appearance.hapticsEnabled = it
             },
             testTag = "settings_haptics",
+        )
+    }
+}
+
+/** App-level motion preference; Android's system Remove animations setting still takes precedence. */
+@Composable
+private fun MotionSection(appearance: AppearancePreferencesStore) {
+    var reduceMotion by remember { mutableStateOf(appearance.reduceMotionEnabled) }
+
+    SettingsSection(
+        label = "Motion",
+        footnote = "Android's system Remove animations setting still takes precedence.",
+    ) {
+        SettingsSwitchRow(
+            title = "Reduce motion",
+            subtitle = "Use static status indicators and skip decorative transitions.",
+            checked = reduceMotion,
+            onCheckedChange = {
+                reduceMotion = it
+                appearance.reduceMotionEnabled = it
+            },
+            testTag = "settings_reduce_motion",
         )
     }
 }

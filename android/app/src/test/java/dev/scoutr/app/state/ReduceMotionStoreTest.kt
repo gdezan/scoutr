@@ -1,6 +1,8 @@
 package dev.scoutr.app.state
 
+import android.content.Context
 import android.provider.Settings
+import dev.scoutr.app.data.AppearancePreferencesStore
 import dev.scoutr.app.ui.motion.ScoutrMotion
 import dev.scoutr.app.ui.motion.HapticEvent
 import dev.scoutr.app.ui.motion.toFeedbackType
@@ -8,6 +10,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
+import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -17,6 +20,13 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
 class ReduceMotionStoreTest {
+
+    @Before
+    fun clearAppearancePreferences() {
+        RuntimeEnvironment.getApplication()
+            .getSharedPreferences(AppearancePreferencesStore.FILE, Context.MODE_PRIVATE)
+            .edit().clear().commit()
+    }
 
     private fun setScale(scale: Float) {
         Settings.Global.putFloat(
@@ -31,6 +41,21 @@ class ReduceMotionStoreTest {
         setScale(0f)
         val store = ReduceMotionStore(RuntimeEnvironment.getApplication())
         try {
+            assertTrue(store.reduceMotion.value)
+        } finally {
+            store.close()
+        }
+    }
+
+    @Test
+    fun appPreferenceEnablesReduceMotion() {
+        setScale(1f)
+        val appearance = AppearancePreferencesStore(RuntimeEnvironment.getApplication())
+        val store = ReduceMotionStore(RuntimeEnvironment.getApplication())
+        try {
+            assertFalse(store.reduceMotion.value)
+            appearance.reduceMotionEnabled = true
+            org.robolectric.shadows.ShadowLooper.idleMainLooper()
             assertTrue(store.reduceMotion.value)
         } finally {
             store.close()

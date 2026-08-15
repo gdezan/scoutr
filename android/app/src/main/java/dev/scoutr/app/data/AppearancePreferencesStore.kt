@@ -6,7 +6,8 @@ import android.content.SharedPreferences
 /**
  * Device-global presentation preferences owned by Settings: the defaults a new
  * Chat visit starts from, adjustable machine-text sizes, and the single haptics
- * switch every semantic haptic is gated on.
+ * switch every semantic haptic is gated on, and the app-level reduce-motion
+ * switch.
  *
  * Deliberately not per-connection — these are how the user likes the app to
  * feel, so forgetting a pairing leaves them alone. Chat reads the defaults as
@@ -53,6 +54,12 @@ class AppearancePreferencesStore(context: Context) {
     var hapticsEnabled: Boolean
         get() = prefs.getBoolean(KEY_HAPTICS, DEFAULT_HAPTICS)
         set(value) = prefs.edit().putBoolean(KEY_HAPTICS, value).apply()
+
+    /** When on, collapses the app's decorative motion without changing Android's system setting. */
+    var reduceMotionEnabled: Boolean
+        get() = prefs.getBoolean(KEY_REDUCE_MOTION, DEFAULT_REDUCE_MOTION)
+        set(value) = prefs.edit().putBoolean(KEY_REDUCE_MOTION, value).apply()
+
     companion object {
         const val FILE = "scoutr_appearance"
 
@@ -67,6 +74,7 @@ class AppearancePreferencesStore(context: Context) {
         const val DEFAULT_SHOW_THINKING = true
         const val DEFAULT_EXPAND_TOOLS = false
         const val DEFAULT_HAPTICS = true
+        const val DEFAULT_REDUCE_MOTION = false
 
         private const val KEY_SHOW_THINKING = "showThinkingDefault"
         private const val KEY_EXPAND_TOOLS = "expandToolsDefault"
@@ -74,5 +82,6 @@ class AppearancePreferencesStore(context: Context) {
         private const val KEY_REVIEW_FONT_SIZE = "reviewFontSizeSp"
         private const val KEY_TOOL_OUTPUT_FONT_SIZE = "toolOutputFontSizeSp"
         private const val KEY_HAPTICS = "hapticsEnabled"
+        private const val KEY_REDUCE_MOTION = "reduceMotionEnabled"
     }
 }

@@ -38,6 +38,15 @@ class AppearancePreferencesStoreTest {
     }
 
     @Test
+    fun reduceMotionDefaultsOffAndPersists() {
+        assertFalse(store().reduceMotionEnabled)
+
+        store().reduceMotionEnabled = true
+
+        assertTrue(store().reduceMotionEnabled)
+    }
+
+    @Test
     fun values_round_trip_through_a_second_reader() {
         store().showThinkingDefault = false
         store().expandToolsDefault = true
