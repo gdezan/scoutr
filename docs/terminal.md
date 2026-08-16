@@ -1,5 +1,11 @@
 # Interactive terminal
 
+Attach restores pane history: the bridge prefetches the pane's existing
+scrollback (`herdr pane read --source recent`) and emits it, reflowed for the
+phone grid, before the screen replay frame, so the emulator transcript holds
+pre-attach output too. The prefetch is best-effort (byte cap + timeout, never
+rejects) and can delay attach by at most its timeout if a pane read stalls.
+
 Scoutr's terminal is a shipped, full-screen destination for interacting with one
 existing Herdr pane at a time. It replaces the former Live Output screen; there
 is no `pane.read` or read-only-output fallback.

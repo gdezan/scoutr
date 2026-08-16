@@ -294,6 +294,19 @@ describe("terminal websocket contract (offline)", () => {
     await client.waitClosed();
   });
 
+  test("pane history prefetch bytes are emitted between ready and the replay frame", async () => {
+    launcher.scrollbackBytes = Buffer.from("history-row\n", "utf8");
+    const client = await openClient();
+    await hello(client, { type: "hello", version: 1, paneId: "w1:p1", cols: 120, rows: 30, intent: "auto" });
+    await client.waitFor((m) => m.kind === "binary");
+    const wire = client.messages.map((m) =>
+      m.kind === "text" ? (JSON.parse(m.data.toString()) as { type: string }).type : m.data.toString("utf8"),
+    );
+    assert.deepEqual(wire, ["ready", "history-row\n", "\x1b[2Jreplay:control"]);
+    client.close();
+    await client.waitClosed();
+  });
+
   test("observer fallback on ownership conflict emits ready(observe) then ownership", async () => {
     launcher.controlFailure = "conflict";
     const client = await openClient();

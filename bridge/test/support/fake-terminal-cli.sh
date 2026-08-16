@@ -51,6 +51,18 @@ if [ "$1" = "status" ] && [ "$2" = "client" ]; then
   exit 0
 fi
 
+if [ "$1" = "pane" ] && [ "$2" = "read" ]; then
+  # Pane history prefetch (best-effort): scenarios script failure, slowness,
+  # and overflow; the default emits two plain history rows.
+  case "$SCENARIO" in
+    no-scrollback) exit 1 ;;
+    slow-scrollback) sleep 30; printf 'scrollback-slow\n' ;;
+    big-scrollback) head -c 8000000 /dev/zero | tr '\0' 'S' ;;
+    *) printf 'scrollback-row-1\r\nscrollback-row-2\r\n' ;;
+  esac
+  exit 0
+fi
+
 if [ "$1" = "terminal" ] && [ "$2" = "session" ]; then
   MODE="$3"
   if [ "${4:-}" = "--help" ]; then

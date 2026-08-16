@@ -45,6 +45,14 @@ export interface TerminalProcess {
    */
   readonly replayFrame: { bytes: Buffer; seq: number; full: boolean; width: number; height: number };
   /**
+   * Bounded pane-history prefetch (`herdr pane read --source recent`), started
+   * alongside the child so the snapshot is never newer than the replay frame.
+   * Resolves with the ANSI bytes to emit between `ready` and the replay frame,
+   * or an empty buffer when the prefetch failed or returned nothing. Never
+   * rejects: history is an enhancement, not a session requirement.
+   */
+  readonly scrollback: Promise<Buffer>;
+  /**
    * Send raw input bytes to a controller. Returns false when the process is
    * not writable (observer, released, exited) or its stdin queue is over the
    * bound; the caller decides the backpressure policy and never drops bytes

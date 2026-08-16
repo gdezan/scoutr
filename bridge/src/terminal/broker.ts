@@ -250,6 +250,21 @@ export class TerminalSessionBroker {
       void process.release().catch(() => {});
       return { ok: false, error: { code: "replaced", message: "superseded by a newer connection", retryable: true } };
     }
+    // Pane history prefetch (bounded, never rejects): settle it before the
+    // session exists so the bytes can be ordered between ready (reset) and
+    // the replay frame — history emitted after the replay would land below
+    // the screen. A stalled pane read can therefore delay open() by at most
+    // the prefetch timeout; normal reads settle in milliseconds. Live records
+    // stay buffered in the process meanwhile.
+    const scrollback = await process.scrollback;
+    if (this.closing) {
+      void process.release().catch(() => {});
+      return { ok: false, error: { code: "shutdown", message: "bridge is shutting down", retryable: false } };
+    }
+    if ((this.identitySeq.get(identity) ?? 0) !== seq) {
+      void process.release().catch(() => {});
+      return { ok: false, error: { code: "replaced", message: "superseded by a newer connection", retryable: true } };
+    }
 
     const generation = ++this.generationCounter;
     const session = new TerminalSessionImpl(
@@ -265,6 +280,11 @@ export class TerminalSessionBroker {
     this.sessions.set(identity, session);
     this.log(`hello pane=${hello.paneId} generation=${generation} mode=${mode} intent=${hello.intent}`);
     session.emit({ type: "ready", generation, paneId: hello.paneId, mode, cols: hello.cols, rows: hello.rows, reset: true });
+    if (scrollback.length > 0) {
+      // Pane history precedes the replay frame: the emulator appends it above
+      // the screen before the replay redraws, so it lands in the transcript.
+      session.emit({ type: "bytes", generation, bytes: scrollback });
+    }
     session.emit({ type: "bytes", generation, bytes: process.replayFrame.bytes });
     if (mode === "observe") {
       session.emit({ type: "ownership", generation, mode, canTakeover: true });

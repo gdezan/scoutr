@@ -48,6 +48,12 @@ export const TERMINAL_LIMITS = {
   releaseGraceMs: 2_000,
   /** Wait after SIGTERM before SIGKILL. */
   termGraceMs: 1_000,
+  /** Pane history prefetch: rows requested from `herdr pane read`. */
+  scrollbackLines: 10_000,
+  /** Pane history prefetch: byte cap; over it the child is killed and the collected prefix used. */
+  scrollbackMaxBytes: 4 * 1024 * 1024,
+  /** Pane history prefetch: total wait; over it the session starts without history. */
+  scrollbackTimeoutMs: 3_000,
 } as const;
 
 /**
@@ -164,6 +170,7 @@ export interface HerdrTerminalLauncherOptions {
   handshakeTimeoutMs?: number;
   releaseGraceMs?: number;
   termGraceMs?: number;
+  scrollbackTimeoutMs?: number;
 }
 
 const BASE64_RE = /^[A-Za-z0-9+/]*={0,2}$/;
@@ -237,6 +244,7 @@ export class HerdrTerminalLauncher implements TerminalLauncher {
       ...(options.handshakeTimeoutMs !== undefined ? { handshakeTimeoutMs: options.handshakeTimeoutMs } : {}),
       ...(options.releaseGraceMs !== undefined ? { releaseGraceMs: options.releaseGraceMs } : {}),
       ...(options.termGraceMs !== undefined ? { termGraceMs: options.termGraceMs } : {}),
+      ...(options.scrollbackTimeoutMs !== undefined ? { scrollbackTimeoutMs: options.scrollbackTimeoutMs } : {}),
     } as typeof TERMINAL_LIMITS;
   }
 
@@ -257,6 +265,102 @@ function spawnArgs(mode: TerminalMode, options: TerminalOpenOptions): string[] {
   if (options.takeover) args.push("--takeover");
   return args;
 }
+/**
+ * Best-effort pane history snapshot via `herdr pane read --source recent`.
+ * Started before the session child so the snapshot is never newer than the
+ * replay frame. Bounded by a byte cap and an overall timeout; every failure
+ * path resolves with an empty buffer — history is an enhancement, never a
+ * session requirement. Output is reflowed by compactScrollback for the phone
+ * grid before the broker emits it ahead of the replay frame.
+ */
+const SGR_AT_END = /\x1b\[([0-9;]*)m$/;
+const RESET_PARAMS = /^(0|00|)$/;
+
+function trimRowTail(row: string): string {
+  // Strip the row's trailing padding: spaces/tabs and any SGR sequences that
+  // only colored that padding (they alternate at the tail).
+  let out = row;
+  for (;;) {
+    const withoutPadding = out.replace(/[ \t]+$/, "");
+    const withoutSgr = withoutPadding.replace(SGR_AT_END, "");
+    if (withoutSgr === out) {
+      out = withoutPadding;
+      break;
+    }
+    out = withoutSgr;
+  }
+  // If the surviving row leaves a non-default SGR state active at its end
+  // (its visible content ends styled, e.g. `\x1b[31mtext` or `\x1b[1mbold`),
+  // restore default so the removed padding's styling cannot leak into the
+  // next row. The LAST SGR in the row (wherever it sits) is the end state.
+  const anySgr = /\x1b\[([0-9;]*)m/g;
+  let match: RegExpExecArray | null = null;
+  let lastParams: string | null = null;
+  while ((match = anySgr.exec(out)) !== null) lastParams = match[1] ?? null;
+  if (lastParams !== null && !RESET_PARAMS.test(lastParams)) return out + "\x1b[0m";
+  return out;
+}
+
+/**
+ * Reflow a `pane read --format ansi` dump for a narrower emulator grid.
+ *
+ * Pane rows are CRLF-terminated and space-padded to the pane's native width;
+ * on the phone's narrower grid that padding wraps into blank rows that waste
+ * transcript. Each row's trailing padding (and any SGR that only colored it)
+ * is removed here, so one pane row becomes one emulator row. Rows wider than
+ * the grid are left untouched and soft-wrap naturally. Processing is byte-safe
+ * (latin1 round-trip; only ASCII patterns are matched), so a truncated final
+ * row from a mid-chunk kill cannot corrupt the stream.
+ */
+export function compactScrollback(bytes: Buffer): Buffer {
+  const rows = bytes.toString("latin1").split(/\r\n|\n|\r/);
+  return Buffer.from(rows.map(trimRowTail).join("\r\n"), "latin1");
+}
+
+export function prefetchScrollback(
+  bin: string,
+  childEnv: NodeJS.ProcessEnv,
+  limits: typeof TERMINAL_LIMITS,
+  target: string,
+): Promise<Buffer> {
+  return new Promise<Buffer>((resolve) => {
+    const chunks: Buffer[] = [];
+    let total = 0;
+    let settled = false;
+    const finish = (bytes: Buffer): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(compactScrollback(bytes));
+    };
+    const child = spawn(
+      bin,
+      ["pane", "read", target, "--source", "recent", "--lines", String(limits.scrollbackLines), "--format", "ansi"],
+      { stdio: ["ignore", "pipe", "ignore"], env: childEnv },
+    );
+    const timer = setTimeout(() => {
+      child.kill("SIGKILL");
+      finish(Buffer.concat(chunks, total));
+    }, limits.scrollbackTimeoutMs);
+    timer.unref();
+    child.once("error", () => finish(Buffer.alloc(0)));
+    child.stdout?.on("data", (chunk: Buffer) => {
+      if (settled) return;
+      if (total + chunk.length > limits.scrollbackMaxBytes) {
+        // Over the byte cap: keep the prefix up to the cap and stop the child.
+        chunks.push(chunk.subarray(0, limits.scrollbackMaxBytes - total));
+        total = limits.scrollbackMaxBytes;
+        child.kill("SIGKILL");
+        finish(Buffer.concat(chunks, total));
+        return;
+      }
+      chunks.push(chunk);
+      total += chunk.length;
+    });
+    child.once("close", () => finish(Buffer.concat(chunks, total)));
+  });
+}
+
 
 export function openTerminalProcess(
   bin: string,
@@ -286,6 +390,9 @@ export function openTerminalProcess(
       reject(new TerminalBoundsError(`grid out of bounds: ${options.cols}x${options.rows}`));
       return;
     }
+    // History prefetch starts before the session child so its snapshot is
+    // never newer than the replay frame; both run concurrently.
+    const scrollback = prefetchScrollback(bin, childEnv, limits, options.target);
 
     const child = spawn(bin, spawnArgs(options.mode, options), {
       stdio: ["pipe", "pipe", "pipe"],
@@ -295,7 +402,7 @@ export function openTerminalProcess(
       detached: true,
     });
 
-    const processImpl = new HerdrTerminalProcess(child, options.mode, limits);
+    const processImpl = new HerdrTerminalProcess(child, options.mode, limits, scrollback);
     const onStartupFailure = (error: TerminalError): void => {
       if (settled) return;
       settled = true;
@@ -366,6 +473,7 @@ export function openTerminalProcess(
 
 class HerdrTerminalProcess implements TerminalProcess {
   readonly mode: TerminalMode;
+  readonly scrollback: Promise<Buffer>;
 
   private readonly child: ChildProcess;
   private readonly limits: typeof TERMINAL_LIMITS;
@@ -387,10 +495,11 @@ class HerdrTerminalProcess implements TerminalProcess {
   private buffered: TerminalRecord[] = [];
   private bufferedBytes = 0;
 
-  constructor(child: ChildProcess, mode: TerminalMode, limits: typeof TERMINAL_LIMITS) {
+  constructor(child: ChildProcess, mode: TerminalMode, limits: typeof TERMINAL_LIMITS, scrollback: Promise<Buffer>) {
     this.child = child;
     this.mode = mode;
     this.limits = limits;
+    this.scrollback = scrollback;
     this.stdoutLines = new NdjsonLineReader(limits.maxLineBytes);
     // Resolve on 'close', not 'exit': stderr data events complete before
     // 'close', so startup-failure messages can include the full stderr tail.

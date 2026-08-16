@@ -12,6 +12,7 @@ import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 
 import {
+  compactScrollback,
   HerdrTerminalLauncher,
   NdjsonLineReader,
   TERMINAL_LIMITS,
@@ -34,7 +35,7 @@ interface Env {
 
 function makeEnv(
   scenario: string,
-  overrides: { handshakeTimeoutMs?: number; releaseGraceMs?: number; termGraceMs?: number } = {},
+  overrides: { handshakeTimeoutMs?: number; releaseGraceMs?: number; termGraceMs?: number; scrollbackTimeoutMs?: number } = {},
 ): Env {
   const dir = mkdtempSync(join(tmpdir(), "scoutr-term-"));
   const argLog = join(dir, "args.log");
@@ -81,7 +82,7 @@ test("open spawns the exact CLI command and resolves on the replay frame", async
   const proc = await open(env, { cols: 120, rows: 30 });
   try {
     assert.equal(proc.mode, "control");
-    const args = readFileSync(env.argLog, "utf8").trim().split("\n").at(-1)!;
+    const args = readFileSync(env.argLog, "utf8").trim().split("\n").findLast((line) => line.startsWith("terminal session"))!;
     assert.equal(args, "terminal session control w1:p1 --cols 120 --rows 30");
     assert.ok(proc.replayFrame, "replay frame must be retained");
     assert.deepEqual(proc.replayFrame!.bytes, FRAME1);
@@ -98,11 +99,87 @@ test("takeover flag is forwarded last", async () => {
   const env = makeEnv("ok");
   const proc = await open(env, { takeover: true });
   try {
-    const args = readFileSync(env.argLog, "utf8").trim().split("\n").at(-1)!;
+    const args = readFileSync(env.argLog, "utf8").trim().split("\n").findLast((line) => line.startsWith("terminal session"))!;
     assert.equal(args, "terminal session control w1:p1 --cols 80 --rows 24 --takeover");
   } finally {
     await proc.release();
   }
+});
+
+test("pane history prefetch runs `pane read` and exposes the captured bytes", async () => {
+  const env = makeEnv("ok");
+  const proc = await open(env);
+  try {
+    const args = readFileSync(env.argLog, "utf8").trim().split("\n").find((line) => line.startsWith("pane read"))!;
+    assert.equal(args, "pane read w1:p1 --source recent --lines 10000 --format ansi");
+    const scrollback = await proc.scrollback;
+    assert.equal(scrollback.toString("utf8"), "scrollback-row-1\r\nscrollback-row-2\r\n");
+  } finally {
+    await proc.release();
+  }
+});
+
+test("a failed pane history prefetch resolves empty and the session still opens", async () => {
+  const env = makeEnv("no-scrollback");
+  const proc = await open(env);
+  try {
+    const scrollback = await proc.scrollback;
+    assert.equal(scrollback.length, 0);
+    assert.deepEqual(proc.replayFrame!.bytes, FRAME1);
+  } finally {
+    await proc.release();
+  }
+});
+
+test("oversized pane history is truncated at the byte cap", async () => {
+  const env = makeEnv("big-scrollback");
+  const proc = await open(env);
+  try {
+    const scrollback = await proc.scrollback;
+    assert.equal(scrollback.length, TERMINAL_LIMITS.scrollbackMaxBytes, "the prefix must fill the cap exactly");
+  } finally {
+    await proc.release();
+  }
+});
+
+test("a stalled pane history prefetch times out without delaying the session", async () => {
+  const env = makeEnv("slow-scrollback", { scrollbackTimeoutMs: 150 });
+  const proc = await open(env);
+  try {
+    const scrollback = await proc.scrollback;
+    assert.equal(scrollback.length, 0);
+    assert.deepEqual(proc.replayFrame!.bytes, FRAME1);
+  } finally {
+    await proc.release();
+  }
+});
+
+
+test("compactScrollback trims pane-width padding and normalizes row ends", () => {
+  const padded = Buffer.from(`alpha${" ".repeat(400)}\r\nbeta\r\n   \r\n`, "utf8");
+  assert.equal(compactScrollback(padded).toString("utf8"), "alpha\r\nbeta\r\n\r\n");
+});
+
+test("compactScrollback strips padding-only SGR but preserves resets of styled content", () => {
+  const rows = Buffer.from(
+    "\x1b[38;2;1;2;3mtext\x1b[0m   \r\n" + // reset protects styled text: kept
+      "plain\x1b[48;5;12m   \x1b[0m  \r\n" + // SGR only colored padding: stripped
+      "\x1b[31mred\x1b[0m\r\n" + // no padding at all: untouched
+      "\x1b[1mbold", // row ending styled: reset appended
+    "utf8",
+  );
+  assert.equal(
+    compactScrollback(rows).toString("utf8"),
+    "\x1b[38;2;1;2;3mtext\x1b[0m\r\nplain\r\n\x1b[31mred\x1b[0m\r\n\x1b[1mbold\x1b[0m",
+  );
+});
+
+test("compactScrollback leaves over-wide rows and non-ASCII bytes untouched", () => {
+  const wide = Buffer.from("x".repeat(200) + "\r\n", "utf8");
+  assert.equal(compactScrollback(wide).toString("utf8"), "x".repeat(200) + "\r\n");
+  // A truncated multibyte char must survive byte-exactly (latin1 round-trip).
+  const split = Buffer.from("caf\xc3\r\n", "latin1");
+  assert.deepEqual(compactScrollback(split), Buffer.from("caf\xc3\r\n", "latin1"));
 });
 
 test("fragmented records spanning multiple chunks parse", async () => {

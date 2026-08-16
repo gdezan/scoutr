@@ -25,6 +25,7 @@ import type {
 export class FakeTerminalProcess implements TerminalProcess {
   readonly mode: TerminalMode;
   readonly replayFrame: { bytes: Buffer; seq: number; full: boolean; width: number; height: number };
+  readonly scrollback: Promise<Buffer>;
   readonly grid: { cols: number; rows: number };
   readonly inputs: Buffer[] = [];
   readonly resizes: { cols: number; rows: number }[] = [];
@@ -37,9 +38,10 @@ export class FakeTerminalProcess implements TerminalProcess {
   private releaseWaiter: (() => void) | null = null;
   private readonly releasePromise: Promise<void>;
 
-  constructor(options: { mode: TerminalMode; cols: number; rows: number; replayBytes?: Buffer }) {
+  constructor(options: { mode: TerminalMode; cols: number; rows: number; replayBytes?: Buffer; scrollbackBytes?: Buffer }) {
     this.mode = options.mode;
     this.grid = { cols: options.cols, rows: options.rows };
+    this.scrollback = Promise.resolve(options.scrollbackBytes ?? Buffer.alloc(0));
     this.replayFrame = {
       bytes: options.replayBytes ?? Buffer.from(`\x1b[2Jreplay:${options.mode}`, "utf8"),
       seq: 1,
@@ -120,6 +122,8 @@ export class FakeTerminalLauncher implements TerminalLauncher {
   openGate: Promise<void> | null = null;
   readonly probeCalls: (string | undefined)[] = [];
   readonly opens: { options: TerminalOpenOptions; process: FakeTerminalProcess }[] = [];
+  /** Scrollback prefetch bytes handed to every opened process. */
+  scrollbackBytes: Buffer | null = null;
 
   async probe(target?: string): Promise<TerminalCapability> {
     this.probeCalls.push(target);
@@ -145,6 +149,7 @@ export class FakeTerminalLauncher implements TerminalLauncher {
       mode: options.mode,
       cols: options.cols,
       rows: options.rows,
+      scrollbackBytes: this.scrollbackBytes ?? Buffer.alloc(0),
     });
     this.opens.push({ options, process });
     return process;
