@@ -40,7 +40,10 @@ data class ReviewUiState(
     val lastRepoPath: String? = null,
 )
 /** Which side of a single file the per-file viewer shows. */
-enum class DiffViewMode { Diff, File }
+enum class DiffViewMode { Diff, File, Preview }
+
+/** Whether the selected file content, rather than diff hunks, should be loaded/rendered. */
+fun DiffViewMode.showsContent(): Boolean = this == DiffViewMode.File || this == DiffViewMode.Preview
 
 /**
  * Read-only git review: pick a repo from the bridge allow-list, read its
@@ -53,11 +56,12 @@ class ReviewViewModel(
     private val connectionStore: ConnectionStore,
     private val store: ReviewStore,
 ) : ViewModel() {
-    // Per-(repo, ref, kind, file) caches so flipping Diff/File or revisiting a
+    // Per-(repo, ref, kind, file) caches so flipping Diff/File/Preview or revisiting a
     // file inside one diff session never refetches. Bounded by bridge caps;
     // cleared whenever the repo or its data reloads.
     private val fileDiffCache = mutableMapOf<String, RepoFileDiffResponse>()
     private val fileContentCache = mutableMapOf<String, RepoFileResponse>()
+    private val fileContentLoads = mutableSetOf<String>()
     private val _ui = MutableStateFlow(ReviewUiState())
     val ui: StateFlow<ReviewUiState> = _ui.asStateFlow()
 
@@ -118,6 +122,7 @@ class ReviewViewModel(
             // New repository: previous per-file caches must never serve here.
             fileDiffCache.clear()
             fileContentCache.clear()
+            fileContentLoads.clear()
         }
         viewModelScope.launch {
             _ui.update { it.copy(overview = Loadable.Loading) }
@@ -200,7 +205,7 @@ class ReviewViewModel(
         }
         when (mode) {
             DiffViewMode.Diff -> loadFileDiff(path, ref, kind, file)
-            DiffViewMode.File -> loadFileContent(path, ref, kind, file)
+            DiffViewMode.File, DiffViewMode.Preview -> loadFileContent(path, ref, kind, file)
         }
     }
 
@@ -211,7 +216,7 @@ class ReviewViewModel(
         val ref = state.diffRef ?: return
         val file = state.selectedFile ?: return
         _ui.update { it.copy(viewMode = mode) }
-        if (mode == DiffViewMode.File && _ui.value.fileContent is Loadable.Idle) {
+        if (mode.showsContent() && _ui.value.fileContent !is Loadable.Ready) {
             loadFileContent(path, ref, state.diffKind, file)
         }
     }
@@ -264,15 +269,16 @@ class ReviewViewModel(
         val key = "$path|$ref|$kind|$file"
         fileContentCache[key]?.let {
             _ui.update { state ->
-                if (state.isCurrentFile(path, ref, kind, file) && state.viewMode == DiffViewMode.File) {
+                if (state.isCurrentFile(path, ref, kind, file) && state.viewMode.showsContent()) {
                     state.copy(fileContent = Loadable.Ready(it))
                 } else state
             }
             return
         }
+        if (!fileContentLoads.add(key)) return
         viewModelScope.launch {
             _ui.update { state ->
-                if (state.isCurrentFile(path, ref, kind, file) && state.viewMode == DiffViewMode.File) {
+                if (state.isCurrentFile(path, ref, kind, file) && state.viewMode.showsContent()) {
                     state.copy(fileContent = Loadable.Loading)
                 } else state
             }
@@ -280,7 +286,7 @@ class ReviewViewModel(
                 val result = bridge.repoFile(path, ref, kind, file)
                 fileContentCache[key] = result
                 _ui.update { state ->
-                    if (state.isCurrentFile(path, ref, kind, file) && state.viewMode == DiffViewMode.File) {
+                    if (state.isCurrentFile(path, ref, kind, file) && state.viewMode.showsContent()) {
                         state.copy(fileContent = Loadable.Ready(result))
                     } else state
                 }
@@ -288,10 +294,12 @@ class ReviewViewModel(
                 throw c
             } catch (error: Exception) {
                 _ui.update { state ->
-                    if (state.isCurrentFile(path, ref, kind, file) && state.viewMode == DiffViewMode.File) {
+                    if (state.isCurrentFile(path, ref, kind, file) && state.viewMode.showsContent()) {
                         state.copy(fileContent = Loadable.Failed(error.message ?: "File read failed", error.failureKind()))
                     } else state
                 }
+            } finally {
+                fileContentLoads.remove(key)
             }
         }
     }
@@ -307,6 +315,7 @@ class ReviewViewModel(
         // no longer trustworthy, so refetch on next open.
         fileDiffCache.clear()
         fileContentCache.clear()
+        fileContentLoads.clear()
         selectRepo(path)
     }
 

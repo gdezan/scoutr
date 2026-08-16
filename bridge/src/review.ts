@@ -1,8 +1,11 @@
 import { execFile, spawn } from "node:child_process";
-import { closeSync, openSync, readSync, readdirSync, realpathSync, statSync } from "node:fs";
+import { readdirSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve, sep } from "node:path";
 import { BridgeError } from "./errors.js";
+import { FILE_HEAD_MAX_BYTES, capUtf8, isBinaryBuffer, readFileHead } from "./file-head.js";
+
+export { capUtf8 };
 
 /**
  * Read-only git review API.
@@ -23,7 +26,7 @@ export const REVIEW_DIFF_MAX_LINES = 800;
 /** Per-commit message body cap in the overview log; the subject is separate. */
 export const REVIEW_LOG_BODY_MAX_BYTES = 2048;
 /** Full-file view cap: the final version of one file, read head-first. */
-export const REVIEW_FILE_MAX_BYTES = 256 * 1024;
+export const REVIEW_FILE_MAX_BYTES = FILE_HEAD_MAX_BYTES;
 export const REVIEW_STATUS_MAX_ENTRIES = 200;
 export const REVIEW_LOG_MAX = 50;
 export const REVIEW_COMMAND_TIMEOUT_MS = 8_000;
@@ -367,13 +370,6 @@ export async function reviewOverview(requestedPath: string, extraRoots: string[]
   };
 }
 
-export function capUtf8(text: string, maxBytes: number): { text: string; truncated: boolean } {
-  const bytes = Buffer.from(text, "utf8");
-  if (bytes.length <= maxBytes) return { text, truncated: false };
-  // Keep the HEAD (review diffs are newest-first); strip a trailing partial code point.
-  return { text: bytes.subarray(0, maxBytes).toString("utf8").replace(/\uFFFD$/, ""), truncated: true };
-}
-
 function capLines(text: string, maxLines: number): { text: string; truncated: boolean } {
   const lines = text.split("\n");
   if (lines.length <= maxLines) return { text, truncated: false };
@@ -544,37 +540,6 @@ export async function reviewFileContent(
   return readFileHead(target);
 }
 
-/** True when the buffer holds binary data (NUL in the first 8 KiB). */
-function isBinaryBuffer(data: Buffer): boolean {
-  const probe = Math.min(data.length, 8192);
-  for (let i = 0; i < probe; i++) {
-    if (data[i] === 0) return true;
-  }
-  return false;
-}
-
-/** Head-read of a working-tree file, capped and binary-probed. */
-function readFileHead(file: string): ReviewFileContentResult {
-  let size: number;
-  try {
-    const stat = statSync(file);
-    if (!stat.isFile()) return { content: "", truncated: false, binary: false, exists: false };
-    size = stat.size;
-  } catch {
-    return { content: "", truncated: false, binary: false, exists: false };
-  }
-  const fd = openSync(file, "r");
-  try {
-    const data = Buffer.alloc(Math.min(size, REVIEW_FILE_MAX_BYTES + 1));
-    const read = readSync(fd, data, 0, data.length, 0);
-    const bytes = data.subarray(0, read);
-    if (isBinaryBuffer(bytes)) return { content: "", truncated: false, binary: true, exists: true };
-    const capped = capUtf8(bytes.toString("utf8"), REVIEW_FILE_MAX_BYTES);
-    return { content: capped.text, truncated: capped.truncated, binary: false, exists: true };
-  } finally {
-    closeSync(fd);
-  }
-}
 
 /**
  * `git show <ref>:<path>` with streamed head-capping: the child is killed as

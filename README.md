@@ -330,6 +330,7 @@ today looks like: `adb pair 100.78.204.15:<port> <code>` then
 | `HERDR_SOCKET_PATH` | herdr Unix socket (else `~/.config/herdr/herdr.sock`) |
 | `SCOUTR_REPO_ROOTS` | allow-list of review roots (403 outside it; appears in the 403 message) |
 | `PI_CODING_AGENT_DIR` | pi agent dir for usage/models (else `~/.pi/agent`) |
+| `SCOUTR_ANTIGRAVITY_CLIENTS` | JSON array of Antigravity OAuth `{id, secret}` clients, kept outside the repository |
 | `CLAUDECONFIGDIR` | claude config dir (else `~/.claude`) |
 | `PI_CODING_AGENT_SESSION_DIR` | pi session dir for the catalog (else the agent dir's `sessions/`) |
 | `PI_BIN` | path to the pi script (else `~/.local/bin/pi`, mise paths, PATH) |

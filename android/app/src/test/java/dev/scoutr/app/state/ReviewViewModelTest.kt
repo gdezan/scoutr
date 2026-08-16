@@ -232,6 +232,11 @@ class ReviewViewModelTest {
         assertTrue("file content never loaded", contentSettled)
         assertEquals(DiffViewMode.File, viewModel.ui.value.viewMode)
 
+        viewModel.setViewMode(DiffViewMode.Preview)
+        assertTrue("preview content never loaded", waitFor { viewModel.ui.value.fileContent is Loadable.Ready })
+        assertEquals(DiffViewMode.Preview, viewModel.ui.value.viewMode)
+        assertEquals("Preview should reuse fetched file content", 1, fake.calls.count { it.name == "repoFile" })
+
         viewModel.closeFile()
         assertNull(viewModel.ui.value.selectedFile)
         assertEquals(DiffViewMode.Diff, viewModel.ui.value.viewMode)

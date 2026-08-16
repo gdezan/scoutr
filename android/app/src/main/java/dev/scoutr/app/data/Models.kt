@@ -500,6 +500,17 @@ data class RepoFileDiffResponse(
     val error: String? = null,
 )
 
+/** Working-tree file content returned by the active-agent workspace viewer. */
+@Serializable
+data class FileReadResponse(
+    val ok: Boolean = true,
+    val content: String = "",
+    val truncated: Boolean = false,
+    val binary: Boolean = false,
+    val exists: Boolean = true,
+    val error: String? = null,
+)
+
 @Serializable
 data class RepoFileResponse(
     val ok: Boolean = true,

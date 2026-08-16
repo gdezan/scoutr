@@ -9,6 +9,7 @@
  *   - xai: weekly credit usage via Grok CLI OAuth (access/refresh in auth.json).
  */
 
+import { fetchAntigravityUsage } from "./antigravity.js";
 import { fetchClaudeUsage } from "./claude.js";
 import {
   getCodexAuth,
@@ -21,6 +22,7 @@ import {
   type OAuthAuth,
 } from "./auth.js";
 import { isExpiring, requestTokenRefresh } from "./oauth.js";
+import { windowSecondsFor } from "./windows.js";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -219,10 +221,10 @@ async function fetchDeepseekUsage({ store }: UsageContext): Promise<UsageSnapsho
  * The Go plan's three spend caps, in the order the console shows them.
  * Zen (pay-as-you-go credits) has no equivalent endpoint — only Go reports usage.
  */
-const OPENCODE_GO_WINDOWS: Array<{ key: string; label: string; windowSeconds?: number }> = [
-  { key: "rolling", label: "5h", windowSeconds: 5 * 60 * 60 },
-  { key: "weekly", label: "wk", windowSeconds: 7 * 24 * 60 * 60 },
-  // Monthly rides the billing anchor, not a fixed span, so the duration is left open.
+const OPENCODE_GO_WINDOWS: Array<{ key: string; label: string }> = [
+  { key: "rolling", label: "5h" },
+  { key: "weekly", label: "wk" },
+  // Monthly rides the billing anchor, so its span comes from the reset date.
   { key: "monthly", label: "mo" },
 ];
 
@@ -235,17 +237,18 @@ export function parseOpencodeGoUsage(value: unknown): UsageSnapshot {
   const buckets = usage as Record<string, unknown>;
 
   const windows: UsageWindow[] = [];
-  for (const { key, label, windowSeconds } of OPENCODE_GO_WINDOWS) {
+  for (const { key, label } of OPENCODE_GO_WINDOWS) {
     const bucket = buckets[key];
     if (!bucket || typeof bucket !== "object" || Array.isArray(bucket)) continue;
     const record = bucket as Record<string, unknown>;
     const percent = finite(record.percent);
     if (percent === undefined) continue;
+    const resetAt = resetAtFromIso(record.resetsAt);
     windows.push({
       label,
       usedPercent: clampPercent(percent),
-      windowSeconds,
-      resetAt: resetAtFromIso(record.resetsAt),
+      windowSeconds: windowSecondsFor(label, resetAt),
+      resetAt,
     });
   }
 
@@ -429,6 +432,7 @@ export const USAGE_PROVIDERS: UsageProvider[] = [
   { id: "codex", label: "Codex", fetch: fetchCodexUsage },
   { id: "claude", label: "Claude", fetch: () => fetchClaudeUsage() },
   { id: "opencode-go", label: "OpenCode Go", fetch: fetchOpencodeGoUsage },
+  { id: "antigravity", label: "Antigravity", fetch: fetchAntigravityUsage },
   { id: "deepseek", label: "DeepSeek", fetch: fetchDeepseekUsage },
   { id: "xai", label: "xAI", fetch: fetchXaiUsage },
 ];

@@ -10,6 +10,7 @@ import dev.scoutr.app.data.ControlResponse
 import dev.scoutr.app.data.CreatedSessionResponse
 import dev.scoutr.app.data.DirListingResponse
 import dev.scoutr.app.data.FileListingResponse
+import dev.scoutr.app.data.FileReadResponse
 import dev.scoutr.app.data.HealthResponse
 import dev.scoutr.app.data.ModelsCatalogResponse
 import dev.scoutr.app.data.RepoArtifactsResponse
@@ -54,10 +55,13 @@ interface ScoutrApi {
     suspend fun commands(cwd: String? = null, agent: String? = null): CommandsCatalogResponse
     suspend fun agentKinds(): AgentKindsResponse
     suspend fun dirs(path: String? = null): DirListingResponse
-    suspend fun files(cwd: String): FileListingResponse
+    /** File listing for a session workspace; hidden mode is used by the file browser. */
+    suspend fun files(cwd: String, includeHidden: Boolean = false): FileListingResponse
     suspend fun repoOverview(path: String): RepoOverviewResponse
     suspend fun repoDiff(path: String, base: String = "HEAD", kind: String = "working"): RepoDiffResponse
     suspend fun repoFileDiff(path: String, base: String, kind: String, file: String): RepoFileDiffResponse
+    /** Working-tree file content under an active agent workspace. */
+    suspend fun file(path: String): FileReadResponse
     suspend fun repoFile(path: String, base: String, kind: String, file: String): RepoFileResponse
     suspend fun repoArtifacts(path: String): RepoArtifactsResponse
     suspend fun usage(): UsageResponse

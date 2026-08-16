@@ -1,7 +1,8 @@
 import { spawn } from "node:child_process";
-import { readdirSync, statSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { readdirSync, realpathSync, statSync } from "node:fs";
+import { dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { BridgeError } from "./errors.js";
+import { isMissingFileError, readFileHead } from "./file-head.js";
 
 /**
  * File listing for the chat composer's `@` mention completion.
@@ -23,10 +24,24 @@ export interface FileListing {
   truncated: boolean;
 }
 
+export interface FileRead {
+  content: string;
+  truncated: boolean;
+  binary: boolean;
+  exists: boolean;
+}
+
 export class FileListingError extends BridgeError {
   constructor(message: string) {
     super(message, 400);
     this.name = "FileListingError";
+  }
+}
+
+export class FileReadError extends BridgeError {
+  constructor(message: string, status: number) {
+    super(message, status);
+    this.name = "FileReadError";
   }
 }
 
@@ -44,11 +59,70 @@ const GIT_TIMEOUT_MS = 5_000;
 /** Enough for MAX_FILES paths of ordinary length; the cap kills git early. */
 const GIT_MAX_BYTES = 4 * 1024 * 1024;
 
-export async function listFiles(requested: string): Promise<FileListing> {
+export async function listFiles(requested: string, includeHidden = false): Promise<FileListing> {
   const path = resolveDir(requested);
+  if (includeHidden) return { path, ...walkFiles(path, true) };
+
   const tracked = await gitFiles(path);
   const { files, truncated } = tracked ?? walkFiles(path);
   return { path, files, truncated };
+}
+
+/**
+ * Read a file inside one of the already-authorized active-agent workspaces.
+ * Lexical containment is checked before realpath so outside paths do not reveal
+ * whether a file exists.
+ */
+export function readWorkspaceFile(requested: string, cwds: string[]): FileRead {
+  if (!requested || requested.length > 4096 || /[\u0000-\u001f\u007f]/.test(requested)) {
+    throw new FileReadError("invalid file path", 400);
+  }
+  if (!isAbsolute(requested)) throw new FileReadError("file path must be absolute", 400);
+
+  const lexicalTarget = resolve(requested);
+  if (!cwds.some((cwd) => isWithin(lexicalTarget, cwd))) {
+    throw new FileReadError("file is outside an active agent workspace", 403);
+  }
+
+  let target: string;
+  try {
+    target = realpathSync(lexicalTarget);
+  } catch (error) {
+    if (isMissingFileError(error)) return missingWorkspaceFile(lexicalTarget, cwds);
+    throw error;
+  }
+  if (!cwds.some((cwd) => isWithin(target, cwd))) {
+    throw new FileReadError("file resolves outside an active agent workspace", 403);
+  }
+  return readFileHead(target);
+}
+
+/** Check resolvable parents before reporting a missing path. */
+function missingWorkspaceFile(path: string, cwds: string[]): FileRead {
+  let ancestor = path;
+  while (true) {
+    try {
+      const resolved = realpathSync(ancestor);
+      if (!cwds.some((cwd) => isWithin(resolved, cwd))) {
+        throw new FileReadError("file resolves outside an active agent workspace", 403);
+      }
+      return emptyFileRead();
+    } catch (error) {
+      if (!isMissingFileError(error)) throw error;
+      const parent = dirname(ancestor);
+      if (parent === ancestor) return emptyFileRead();
+      ancestor = parent;
+    }
+  }
+}
+
+function emptyFileRead(): FileRead {
+  return { content: "", truncated: false, binary: false, exists: false };
+}
+
+function isWithin(target: string, root: string): boolean {
+  const normalizedRoot = resolve(root);
+  return target === normalizedRoot || target.startsWith(normalizedRoot.endsWith(sep) ? normalizedRoot : normalizedRoot + sep);
 }
 
 function resolveDir(requested: string): string {
@@ -129,12 +203,11 @@ function gitFiles(path: string): Promise<Collected | null> {
 }
 
 /**
- * Bounded recursive walk for directories that are not git repositories.
- * Hidden entries and [SKIP_DIRS] are skipped, depth is capped, and the whole
- * listing is capped at [MAX_FILES] so a pathological tree cannot hang the
- * request.
+ * Bounded recursive walk for directories that are not git repositories, or
+ * for the browser's hidden-inclusive mode. Hidden entries are skipped unless
+ * [includeHidden] is true; [SKIP_DIRS] is always skipped.
  */
-function walkFiles(root: string): Collected {
+function walkFiles(root: string, includeHidden = false): Collected {
   const files: string[] = [];
   // `truncated` reports an incomplete listing (path cap *or* depth cap);
   // `stopped` is the hard stop once no further file can be collected.
@@ -150,7 +223,7 @@ function walkFiles(root: string): Collected {
     }
     for (const entry of entries) {
       if (stopped) return;
-      if (entry.name.startsWith(".") || SKIP_DIRS.has(entry.name)) continue;
+      if ((!includeHidden && entry.name.startsWith(".")) || SKIP_DIRS.has(entry.name)) continue;
       const relativePath = prefix ? `${prefix}/${entry.name}` : entry.name;
       if (entry.isFile()) {
         if (files.length >= MAX_FILES) {

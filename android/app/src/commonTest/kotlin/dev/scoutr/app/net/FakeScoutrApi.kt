@@ -10,6 +10,7 @@ import dev.scoutr.app.data.ControlResponse
 import dev.scoutr.app.data.CreatedSessionResponse
 import dev.scoutr.app.data.DirListingResponse
 import dev.scoutr.app.data.FileListingResponse
+import dev.scoutr.app.data.FileReadResponse
 import dev.scoutr.app.data.HealthResponse
 import dev.scoutr.app.data.ModelsCatalogResponse
 import dev.scoutr.app.data.RepoArtifactsResponse
@@ -62,6 +63,7 @@ class FakeScoutrApi : ScoutrApi {
     var agentKindsResult: Result<AgentKindsResponse> = Result.success(AgentKindsResponse())
     var dirsResult: Result<DirListingResponse> = Result.success(DirListingResponse(ok = true))
     var filesResult: Result<FileListingResponse> = Result.success(FileListingResponse(ok = true))
+    var fileResult: Result<FileReadResponse> = Result.success(FileReadResponse())
     var repoOverviewResult: Result<RepoOverviewResponse> = Result.success(RepoOverviewResponse())
     var repoDiffResult: Result<RepoDiffResponse> = Result.success(RepoDiffResponse())
     var repoFileDiffResult: Result<RepoFileDiffResponse> = Result.success(RepoFileDiffResponse())
@@ -146,8 +148,11 @@ class FakeScoutrApi : ScoutrApi {
     override suspend fun dirs(path: String?): DirListingResponse =
         record("dirs", mapOf("path" to path)) { dirsResult }
 
-    override suspend fun files(cwd: String): FileListingResponse =
-        record("files", mapOf("cwd" to cwd)) { filesResult }
+    override suspend fun files(cwd: String, includeHidden: Boolean): FileListingResponse =
+        record("files", mapOf("cwd" to cwd, "includeHidden" to includeHidden)) { filesResult }
+
+    override suspend fun file(path: String): FileReadResponse =
+        record("file", mapOf("path" to path)) { fileResult }
 
     override suspend fun repoOverview(path: String): RepoOverviewResponse =
         record("repoOverview", mapOf("path" to path)) { repoOverviewResult }

@@ -260,6 +260,42 @@ describe("scoutr bridge HTTP/WS API (offline)", () => {
     }
   });
 
+  test("lists hidden files and reads only files inside an active workspace", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "scoutr-file-route-"));
+    await mkdir(join(workspace, ".config"));
+    await writeFile(join(workspace, ".config", "settings.json"), "{\"ok\":true}\n");
+    await writeFile(join(workspace, "notes.md"), "# Notes\n");
+    feed.setSnapshot(snapshotWithAgents([{ cwd: workspace, foreground_cwd: workspace }]));
+    try {
+      const hidden = await getJson(`/api/files?cwd=${encodeURIComponent(workspace)}&hidden=1`);
+      assert.equal(hidden.status, 200);
+      const listing = (hidden.body as { listing: { files: string[] } }).listing;
+      assert.deepEqual(listing.files, [".config/settings.json", "notes.md"]);
+
+      const file = await getJson(`/api/file?path=${encodeURIComponent(join(workspace, "notes.md"))}`);
+      assert.equal(file.status, 200);
+      assert.deepEqual(file.body, {
+        ok: true,
+        content: "# Notes\n",
+        truncated: false,
+        binary: false,
+        exists: true,
+      });
+
+      const missing = await getJson(`/api/file?path=${encodeURIComponent(join(workspace, "missing.md"))}`);
+      assert.equal(missing.status, 200);
+      assert.equal((missing.body as { exists: boolean }).exists, false);
+
+      const outside = await getJson("/api/file?path=%2Fetc%2Fpasswd");
+      assert.equal(outside.status, 403);
+      const relative = await getJson("/api/file?path=notes.md");
+      assert.equal(relative.status, 400);
+    } finally {
+      feed.setSnapshot(snapshotWithAgents([]));
+      await rm(workspace, { recursive: true, force: true });
+    }
+  });
+
   test("sessions requires an allowed path", async () => {
     const { status } = await getJson("/api/sessions?path=/etc/passwd");
     assert.equal(status, 403); // path guard rejects outside the allow-list

@@ -62,8 +62,10 @@ import dev.scoutr.app.data.RepoDiffFileStat
 import dev.scoutr.app.data.RepoOverviewResponse
 import dev.scoutr.app.state.DiffViewMode
 import dev.scoutr.app.state.Loadable
+import dev.scoutr.app.state.showsContent
 import dev.scoutr.app.state.ReviewUiState
 import dev.scoutr.app.state.ReviewViewModel
+import dev.scoutr.app.ui.components.AssistantMarkdown
 import dev.scoutr.app.ui.components.ReadableContentColumn
 import dev.scoutr.app.ui.components.ScoutrTextField
 import dev.scoutr.app.ui.nav.TabScaffold
@@ -577,12 +579,17 @@ private fun FileTile(
                     ViewToggleButton("File", ui.viewMode == DiffViewMode.File, "diff_view_file") {
                         onViewMode(DiffViewMode.File)
                     }
+                    if (isMarkdownFile(row.path)) {
+                        ViewToggleButton("Preview", ui.viewMode == DiffViewMode.Preview, "diff_view_preview") {
+                            onViewMode(DiffViewMode.Preview)
+                        }
+                    }
                 }
             }
             // The transcript surface stays on the canvas black, one step below
             // the tile it sits in (§9a).
             Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.background).padding(vertical = 10.dp)) {
-                if (row.untracked || ui.viewMode == DiffViewMode.File) {
+                if (row.untracked || ui.viewMode.showsContent()) {
                     FileContent(ui, row.path, wrapLines, reviewFontSizeSp)
                 } else {
                     FileDiffContent(ui, row.path, wrapLines, reviewFontSizeSp)
@@ -670,21 +677,33 @@ private fun FileContent(
                 !body.exists -> CenteredNote("File does not exist at ${ui.diffRef?.take(12)}", "diff_file_missing")
                 body.binary -> CenteredNote("Binary file", "diff_file_binary")
                 else -> {
-                    val language = languageForPath(selectedFile)
                     key(selectedFile) {
-                        CodeLines(
-                            body.content.split("\n"),
-                            language,
-                            wrapLines,
-                            horizontalPadding = 12.dp,
-                            style = ScoutrType.monoCode(reviewFontSizeSp),
-                        )
+                        if (ui.viewMode == DiffViewMode.Preview && isMarkdownFile(selectedFile)) {
+                            AssistantMarkdown(
+                                body.content,
+                                Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+                            )
+                        } else {
+                            val language = languageForPath(selectedFile)
+                            CodeLines(
+                                body.content.split("\n"),
+                                language,
+                                wrapLines,
+                                horizontalPadding = 12.dp,
+                                style = ScoutrType.monoCode(reviewFontSizeSp),
+                            )
+                        }
                     }
                     if (body.truncated) TruncatedNote("file truncated to 256 KiB")
                 }
             }
         }
     }
+}
+
+private fun isMarkdownFile(path: String): Boolean {
+    val name = path.substringAfterLast('/').lowercase()
+    return name.endsWith(".md") || name.endsWith(".markdown")
 }
 
 /**

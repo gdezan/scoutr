@@ -71,6 +71,8 @@ import dev.scoutr.app.data.AgentCard
 import dev.scoutr.app.state.BoardViewModel
 import dev.scoutr.app.state.NewSessionViewModel
 import dev.scoutr.app.state.ChatViewModel
+import dev.scoutr.app.state.FileBrowserViewModel
+import dev.scoutr.app.state.FileViewerViewModel
 import dev.scoutr.app.state.CommandPaletteViewModel
 import dev.scoutr.app.state.SessionHistoryViewModel
 import dev.scoutr.app.state.UsageViewModel
@@ -81,6 +83,8 @@ import dev.scoutr.app.state.viewModelFactory
 import dev.scoutr.app.ui.screens.BoardScreen
 import dev.scoutr.app.ui.screens.NewSessionSheet
 import dev.scoutr.app.ui.screens.ChatScreen
+import dev.scoutr.app.ui.screens.FileBrowserScreen
+import dev.scoutr.app.ui.screens.FileViewerScreen
 import dev.scoutr.app.ui.screens.CommandPalette
 import dev.scoutr.app.ui.screens.ConnectScreen
 import dev.scoutr.app.ui.screens.HistoryScreen
@@ -105,11 +109,22 @@ import dev.scoutr.app.ui.theme.ScoutrTheme
 private object Routes {
     const val CONNECT = "connect"
     const val CHAT = "chat/{paneId}?sessionPath={sessionPath}&status={status}"
+    const val FILE_BROWSER = "files?cwd={cwd}"
+    const val FILE_VIEWER = "file-viewer?cwd={cwd}&file={file}"
     const val SETTINGS = "settings"
     const val TERMINAL = "terminal?paneId={paneId}"
 
     fun chat(paneId: String, sessionPath: String?, status: String): String =
         "chat/$paneId?sessionPath=${sessionPath?.let { java.net.URLEncoder.encode(it, "UTF-8") } ?: ""}&status=$status"
+
+    fun fileBrowser(cwd: String): String =
+        "$FILE_BROWSER_BASE${java.net.URLEncoder.encode(cwd, "UTF-8")}"
+
+    fun fileViewer(cwd: String, file: String): String =
+        "$FILE_VIEWER_BASE${java.net.URLEncoder.encode(cwd, "UTF-8")}&file=${java.net.URLEncoder.encode(file, "UTF-8")}"
+
+    private const val FILE_BROWSER_BASE = "files?cwd="
+    private const val FILE_VIEWER_BASE = "file-viewer?cwd="
 
     /**
      * Full-screen terminal. A null [paneId] lets the ViewModel resolve the
@@ -391,6 +406,55 @@ private fun ScoutrAppNav(
                     viewModel = chatViewModel,
                     onBack = { navController.popBackStack() },
                     onOpenTerminal = { navController.navigate(Routes.terminal(paneId)) },
+                    onOpenFiles = { cwd -> navController.navigate(Routes.fileBrowser(cwd)) },
+                )
+            }
+            composable(
+                route = Routes.FILE_BROWSER,
+                arguments = listOf(
+                    androidx.navigation.navArgument("cwd") {
+                        type = androidx.navigation.NavType.StringType
+                        defaultValue = ""
+                    },
+                ),
+            ) { backStackEntry ->
+                val cwd = backStackEntry.arguments?.getString("cwd") ?: ""
+                val browserViewModel: FileBrowserViewModel = viewModel(
+                    factory = viewModelFactory<FileBrowserViewModel> { app ->
+                        FileBrowserViewModel(app.container.bridge, cwd)
+                    },
+                    key = "file_browser_$cwd",
+                )
+                FileBrowserScreen(
+                    viewModel = browserViewModel,
+                    onBack = { navController.popBackStack() },
+                    onOpenFile = { file -> navController.navigate(Routes.fileViewer(cwd, file)) },
+                )
+            }
+            composable(
+                route = Routes.FILE_VIEWER,
+                arguments = listOf(
+                    androidx.navigation.navArgument("cwd") {
+                        type = androidx.navigation.NavType.StringType
+                        defaultValue = ""
+                    },
+                    androidx.navigation.navArgument("file") {
+                        type = androidx.navigation.NavType.StringType
+                        defaultValue = ""
+                    },
+                ),
+            ) { backStackEntry ->
+                val cwd = backStackEntry.arguments?.getString("cwd") ?: ""
+                val file = backStackEntry.arguments?.getString("file") ?: ""
+                val viewerViewModel: FileViewerViewModel = viewModel(
+                    factory = viewModelFactory<FileViewerViewModel> { app ->
+                        FileViewerViewModel(app.container.bridge, cwd, file)
+                    },
+                    key = "file_viewer_$cwd/$file",
+                )
+                FileViewerScreen(
+                    viewModel = viewerViewModel,
+                    onBack = { navController.popBackStack() },
                 )
             }
             composable(Destination.Usage.route) {

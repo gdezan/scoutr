@@ -6,6 +6,8 @@ import assert from "node:assert/strict";
 import { getCodexAuth, getApiKeyAuth, getOAuthAuth, persistOAuthAuth } from "../src/usage/auth.js";
 import { isExpiring } from "../src/usage/oauth.js";
 import { fetchClaudeUsage, parseClaudeUsage } from "../src/usage/claude.js";
+import { parseAntigravityUsage } from "../src/usage/antigravity.js";
+import { calendarMonthSeconds } from "../src/usage/windows.js";
 import { parseOpencodeGoUsage, parseXaiUsage, USAGE_PROVIDERS, UsageService, type UsageProvider } from "../src/usage/providers.js";
 
 test("auth helpers extract codex, oauth, and api-key credentials", () => {
@@ -80,9 +82,76 @@ test("Claude follows Codex in the usage provider registry", () => {
     "codex",
     "claude",
     "opencode-go",
+    "antigravity",
     "deepseek",
     "xai",
   ]);
+});
+
+// Verbatim from a live retrieveUserQuotaSummary response.
+const ANTIGRAVITY_QUOTA = {
+  groups: [
+    {
+      buckets: [
+        {
+          bucketId: "gemini-weekly",
+          displayName: "Weekly Limit Remaining",
+          window: "weekly",
+          resetTime: "2026-08-20T22:38:28Z",
+          description: "You have used some of your weekly limit, it will fully refresh in 4 days, 17 hours.",
+          remainingFraction: 0.1273024,
+        },
+      ],
+      displayName: "Gemini Models",
+      description: "Models within this group: Gemini Flash, Gemini Pro",
+    },
+    {
+      buckets: [
+        {
+          bucketId: "3p-weekly",
+          displayName: "Weekly Limit Remaining",
+          window: "weekly",
+          resetTime: "2026-08-21T03:15:41Z",
+          remainingFraction: 0.456243,
+        },
+      ],
+      displayName: "Claude and GPT models",
+      description: "Models within this group: Claude Opus, Claude Sonnet, GPT-OSS",
+    },
+  ],
+};
+
+test("parseAntigravityUsage inverts remainingFraction into used percent per model group", () => {
+  const snapshot = parseAntigravityUsage(ANTIGRAVITY_QUOTA);
+  assert.equal(snapshot.provider, "antigravity");
+  assert.deepEqual(
+    snapshot.windows.map((window) => [window.label, Math.round(window.usedPercent ?? 0)]),
+    [
+      ["Gemini wk", 87],
+      ["Claude+GPT wk", 54],
+    ],
+  );
+  // The span comes from the bucket's `window`, so the meter can draw its guide.
+  assert.equal(snapshot.windows[0]?.windowSeconds, 7 * 24 * 60 * 60);
+  // resetTime is RFC3339; the app wants epoch seconds.
+  assert.equal(snapshot.windows[0]?.resetAt, Math.floor(Date.parse("2026-08-20T22:38:28Z") / 1000));
+});
+
+test("parseAntigravityUsage skips unusable buckets and rejects empty responses", () => {
+  const partial = parseAntigravityUsage({
+    groups: [
+      {
+        displayName: "Gemini Models",
+        buckets: [{ bucketId: "no-fraction", window: "weekly" }, { bucketId: "ok", remainingFraction: 0.25 }],
+      },
+      { displayName: "Broken", buckets: "not-an-array" },
+    ],
+  });
+  // The bucket without a fraction is dropped; the one without a window keeps its id.
+  assert.deepEqual(partial.windows.map((window) => window.label), ["Gemini ok"]);
+  assert.equal(partial.windows[0]?.usedPercent, 75);
+  assert.throws(() => parseAntigravityUsage({ groups: [] }), /no recognized windows/);
+  assert.throws(() => parseAntigravityUsage({ nope: 1 }), /no groups/);
 });
 
 test("parseOpencodeGoUsage maps the Go plan's three spend caps", () => {
@@ -101,10 +170,23 @@ test("parseOpencodeGoUsage maps the Go plan's three spend caps", () => {
     [
       { label: "5h", usedPercent: 25, windowSeconds: 5 * 60 * 60 },
       { label: "wk", usedPercent: 91, windowSeconds: 7 * 24 * 60 * 60 },
-      { label: "mo", usedPercent: 48, windowSeconds: undefined },
+      // Aug 9 -> Sep 9 is a 31-day month; the guide line needs the real span.
+      { label: "mo", usedPercent: 48, windowSeconds: 31 * 24 * 60 * 60 },
     ],
   );
   assert.equal(snapshot.windows[0]?.resetAt, Math.floor(Date.parse("2026-08-15T20:24:13.661Z") / 1000));
+});
+
+test("calendarMonthSeconds spans the real month ending at the reset", () => {
+  const at = (iso: string) => calendarMonthSeconds(Math.floor(Date.parse(iso) / 1000));
+  const days = (count: number) => count * 24 * 60 * 60;
+
+  assert.equal(at("2026-09-09T16:10:03Z"), days(31)); // August
+  assert.equal(at("2026-03-15T00:00:00Z"), days(28)); // February, common year
+  assert.equal(at("2024-03-15T00:00:00Z"), days(29)); // February, leap year
+  // An anchor past the length of the previous month clamps to its last day
+  // rather than overflowing forward, which would report a ~3 day month.
+  assert.equal(at("2026-03-31T00:00:00Z"), days(3) + days(28));
 });
 
 test("parseOpencodeGoUsage skips buckets without a percent and rejects empty responses", () => {

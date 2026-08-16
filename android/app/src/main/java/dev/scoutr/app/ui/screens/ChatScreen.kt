@@ -48,6 +48,7 @@ import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Terminal
+import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.FloatingActionButton
@@ -172,6 +173,7 @@ fun ChatScreen(
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
     onOpenTerminal: (() -> Unit)? = null,
+    onOpenFiles: ((String) -> Unit)? = null,
 ) {
     val ui by viewModel.ui.collectAsState()
 
@@ -220,7 +222,9 @@ fun ChatScreen(
             onToggleTools = { expandTools = !expandTools },
             onOpenConfiguration = { configurationOpen = true },
             onBack = onBack,
+            cwd = ui.cwd,
             onOpenTerminal = onOpenTerminal,
+            onOpenFiles = onOpenFiles,
             onControl = { action ->
                 when (action) {
                     SessionAction.Rename -> renameOpen = true
@@ -478,7 +482,9 @@ private fun ChatHeader(
     onToggleTools: () -> Unit,
     onOpenConfiguration: () -> Unit,
     onBack: () -> Unit,
+    cwd: String?,
     onOpenTerminal: (() -> Unit)?,
+    onOpenFiles: ((String) -> Unit)?,
     onControl: (SessionAction) -> Unit,
 ) {
     Column(Modifier.fillMaxWidth()) {
@@ -526,6 +532,14 @@ private fun ChatHeader(
                     tint = if (expandTools) MaterialTheme.colorScheme.primary
                     else MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+            }
+            if (onOpenFiles != null && !cwd.isNullOrBlank()) {
+                IconButton(
+                    onClick = { onOpenFiles(cwd) },
+                    modifier = Modifier.testTag("chat_open_files"),
+                ) {
+                    Icon(Icons.Default.FolderOpen, contentDescription = "Files")
+                }
             }
             var menuOpen by remember { mutableStateOf(false) }
             Box {

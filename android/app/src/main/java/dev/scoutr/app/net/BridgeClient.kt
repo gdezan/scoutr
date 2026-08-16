@@ -11,6 +11,7 @@ import dev.scoutr.app.data.ControlResponse
 import dev.scoutr.app.data.CreatedSessionResponse
 import dev.scoutr.app.data.DirListingResponse
 import dev.scoutr.app.data.FileListingResponse
+import dev.scoutr.app.data.FileReadResponse
 import dev.scoutr.app.data.HealthResponse
 import dev.scoutr.app.data.ModelsCatalogResponse
 import dev.scoutr.app.data.RepoArtifactsResponse
@@ -176,10 +177,19 @@ class BridgeClient(
             json.decodeFromString(DirListingResponse.serializer(), it)
         }
 
-    /** Mention candidates for the composer: the session cwd's files, one level of trust below /api/dirs. */
-    override suspend fun files(cwd: String): FileListingResponse =
-        call("/api/files", query = mapOf("cwd" to cwd)) {
+    /** Lists files in a workspace, including hidden and ignored files only in browser mode. */
+    override suspend fun files(cwd: String, includeHidden: Boolean): FileListingResponse =
+        call("/api/files", query = buildMap {
+            put("cwd", cwd)
+            if (includeHidden) put("hidden", "1")
+        }) {
             json.decodeFromString(FileListingResponse.serializer(), it)
+        }
+
+    /** Reads a working-tree file through the active-agent authorization surface. */
+    override suspend fun file(path: String): FileReadResponse =
+        call("/api/file", query = mapOf("path" to path)) {
+            json.decodeFromString(FileReadResponse.serializer(), it)
         }
 
     /** Read-only git overview (branch, status, recent log) for an allowed repo. */

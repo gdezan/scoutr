@@ -1,10 +1,10 @@
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { listFiles, FileListingError } from "../src/files.js";
+import { FileListingError, FileReadError, listFiles, readWorkspaceFile } from "../src/files.js";
 
 function git(cwd: string, ...args: string[]): void {
   execFileSync("git", ["-C", cwd, ...args], { stdio: "ignore" });
@@ -75,6 +75,12 @@ describe("listFiles", () => {
     assert.equal(listing.truncated, false);
   });
 
+  it("includes dot entries only in browser mode and still skips heavy dirs", async () => {
+    const listing = await listFiles(plain, true);
+    assert.deepEqual(listing.files, [".dotfile", ".hidden/secret.txt", "a/b/deep.txt", "top.txt"]);
+    assert.equal(listing.files.some((file) => file.startsWith("build/")), false);
+  });
+
   it("flags a walk that was cut off by the depth cap", async () => {
     const deep = mkdtempSync(join(tmpdir(), "scoutr-files-deep-"));
     try {
@@ -94,5 +100,83 @@ describe("listFiles", () => {
   it("rejects missing and non-directory paths", async () => {
     await assert.rejects(() => listFiles(join(plain, "nope")), FileListingError);
     await assert.rejects(() => listFiles(join(plain, "top.txt")), /not a directory/);
+  });
+});
+
+describe("readWorkspaceFile", () => {
+  let workspace: string;
+  let outside: string;
+
+  before(() => {
+    workspace = mkdtempSync(join(tmpdir(), "scoutr-file-read-"));
+    outside = mkdtempSync(join(tmpdir(), "scoutr-file-outside-"));
+    writeFileSync(join(workspace, "README.md"), "# Hello\n\nThis is a file.\n");
+    writeFileSync(join(workspace, "binary.dat"), Buffer.from([0x23, 0x00, 0x61]));
+    mkdirSync(join(outside, "nested"));
+    writeFileSync(join(outside, "secret.txt"), "do not expose");
+    symlinkSync(join(outside, "secret.txt"), join(workspace, "escape.txt"));
+    symlinkSync(join(outside, "nested"), join(workspace, "escape-dir"));
+  });
+
+  after(() => {
+    rmSync(workspace, { recursive: true, force: true });
+    rmSync(outside, { recursive: true, force: true });
+  });
+
+  it("reads an authorized regular file and reports missing files", () => {
+    assert.deepEqual(readWorkspaceFile(join(workspace, "README.md"), [workspace]), {
+      content: "# Hello\n\nThis is a file.\n",
+      truncated: false,
+      binary: false,
+      exists: true,
+    });
+    assert.equal(readWorkspaceFile(join(workspace, "missing.md"), [workspace]).exists, false);
+  });
+
+  it("rejects lexical and symlink escapes before returning file contents", () => {
+    assert.throws(() => readWorkspaceFile(join(outside, "secret.txt"), [workspace]), (error: unknown) => {
+      assert.ok(error instanceof FileReadError);
+      assert.equal(error.status, 403);
+      return true;
+    });
+    assert.throws(() => readWorkspaceFile(join(workspace, "escape.txt"), [workspace]), (error: unknown) => {
+      assert.ok(error instanceof FileReadError);
+      assert.equal(error.status, 403);
+      return true;
+    });
+    assert.throws(() => readWorkspaceFile(join(workspace, "escape-dir", "missing.md"), [workspace]), (error: unknown) => {
+      assert.ok(error instanceof FileReadError);
+      assert.equal(error.status, 403);
+      return true;
+    });
+  });
+
+  it("marks binary files without returning their contents", () => {
+    assert.deepEqual(readWorkspaceFile(join(workspace, "binary.dat"), [workspace]), {
+      content: "",
+      truncated: false,
+      binary: true,
+      exists: true,
+    });
+  });
+
+  it("returns non-files as missing and caps regular file heads", () => {
+    assert.equal(readWorkspaceFile(workspace, [workspace]).exists, false);
+    const large = join(workspace, "large.txt");
+    writeFileSync(large, "a".repeat(256 * 1024 + 17));
+    const result = readWorkspaceFile(large, [workspace]);
+    assert.equal(result.exists, true);
+    assert.equal(result.binary, false);
+    assert.equal(result.truncated, true);
+    assert.equal(Buffer.byteLength(result.content, "utf8"), 256 * 1024);
+  });
+
+  it("rejects invalid paths", () => {
+    assert.throws(() => readWorkspaceFile("relative.txt", [workspace]), (error: unknown) => {
+      assert.ok(error instanceof FileReadError);
+      assert.equal(error.status, 400);
+      return true;
+    });
+    assert.throws(() => readWorkspaceFile(join(workspace, "bad\u0000name"), [workspace]), FileReadError);
   });
 });
