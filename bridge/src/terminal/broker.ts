@@ -1,11 +1,11 @@
 /**
  * TerminalSessionBroker — one-source-of-truth owner of terminal streams.
  *
- * The server keeps one broker and hands it the authenticated bearer token
- * as the identity; the broker holds at most one active session per identity
- * (one generation at a time, ADR 0001). All terminal traffic — child
- * spawning, replacement, grace, teardown — flows through here, never
- * through the herdr socket port.
+ * The server keeps one broker and hands each connection a fresh per-connection
+ * identity (server.ts assigns a random UUID per upgrade); the broker holds at
+ * most one active session per identity (one generation at a time, ADR 0001).
+ * All terminal traffic — child spawning, replacement, grace, teardown — flows
+ * through here, never through the herdr socket port.
  *
  * Lifecycle rules pinned by the /ws/terminal design (protocol.ts):
  *   - hello validates paneId against the fresh snapshot and settles the
@@ -161,6 +161,14 @@ export class TerminalSessionBroker {
    * Accept a hello: validate, replace any existing stream for the identity,
    * open the child, and return a client whose first events are ready (with
    * reset:true) followed by the replay bytes — always in that order.
+   *
+   * Identities are per connection (server.ts hands each upgrade a fresh
+   * UUID): one device's session is never replaced by another device's
+   * attach. The exception is a pane whose existing session is in GRACE —
+   * its socket is dead, so a new connection claiming the pane takes over
+   * that ownership and regains control immediately; an ATTACHED session
+   * for the same pane is left alone and the spawn's ownership conflict
+   * falls back to observe.
    */
   async openClient(identity: string, hello: TerminalHello): Promise<TerminalHelloResult> {
     if (this.closing) {
@@ -201,6 +209,23 @@ export class TerminalSessionBroker {
       if ((this.identitySeq.get(identity) ?? 0) !== seq) {
         return { ok: false, error: { code: "replaced", message: "superseded by a newer connection", retryable: true } };
       }
+    }
+
+    // Grace sessions hold a pane whose socket is gone: a new connection
+    // claiming the pane (typically the same device reconnecting) replaces
+    // it instead of tripping the ownership conflict.
+    for (const candidate of [...this.sessions.values()]) {
+      if (candidate.identity === identity) continue;
+      if (candidate.paneId !== hello.paneId || candidate.phase !== "grace") continue;
+      candidate.endByBroker("replaced");
+      await candidate.released();
+      if (this.closing) {
+        return { ok: false, error: { code: "shutdown", message: "bridge is shutting down", retryable: false } };
+      }
+      if ((this.identitySeq.get(identity) ?? 0) !== seq) {
+        return { ok: false, error: { code: "replaced", message: "superseded by a newer connection", retryable: true } };
+      }
+      break;
     }
 
     let process: TerminalProcess;
@@ -316,6 +341,14 @@ export class TerminalSessionBroker {
     if (this.sessions.get(session.identity) === session) {
       this.sessions.delete(session.identity);
     }
+  }
+
+  /**
+   * The connection for an identity is gone: drop its hello sequence so
+   * per-connection identities never accumulate in identitySeq.
+   */
+  forgetHello(identity: string): void {
+    this.identitySeq.delete(identity);
   }
 
   private firstSnapshotPane(): string | null {

@@ -41,10 +41,14 @@ and must not be added to `HerdrPort`. Android's renderer and route live under
 
 ## Lifecycle and safety
 
-There is one active mobile terminal pane at a time, one mobile writer, and no
-queued terminal input or content across generations. Leaving the route permits
-a 30-second bridge grace window so returning to the same pane can resume its
-session. A new generation resets transport state before accepting bytes.
+There is one active terminal session per device connection (each WebSocket
+upgrade gets its own broker identity), one mobile writer, and no queued
+terminal input or content across generations. Devices attaching different
+panes coexist; a second device attaching an already-attached pane falls back
+to read-only observe with a takeover offer. Leaving the route permits a
+30-second bridge grace window so returning to the same pane can resume its
+session, and a reconnect during grace regains control immediately. A new
+generation resets transport state before accepting bytes.
 
 Incoming output reaches the emulator only through `TerminalOutputPump`. Transport
 callbacks enqueue and return; one long-lived consumer on `scoutr-terminal-io`

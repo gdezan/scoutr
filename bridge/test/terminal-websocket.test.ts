@@ -421,29 +421,26 @@ describe("terminal websocket contract (offline)", () => {
     launcher.openGate = null;
   });
 
-  test("same-token replacement: new socket supersedes the old one with closed(replaced)", async () => {
+  test("two devices on different panes: each attach survives the other (per-connection identities)", async () => {
     const clientA = await openClient();
     const readyA = await hello(clientA, { type: "hello", version: 1, paneId: "w1:p1", cols: 120, rows: 30, intent: "auto" });
-    const genA = readyA.generation as number;
     const procA = launcher.last()!;
+    const genA = readyA.generation as number;
 
+    // The second device attaches a different pane: no replacement occurs.
     const clientB = await openClient();
-    const readyB = await hello(clientB, { type: "hello", version: 1, paneId: "w1:p1", cols: 120, rows: 30, intent: "auto" });
+    const readyB = await hello(clientB, { type: "hello", version: 1, paneId: "w1:p2", cols: 120, rows: 30, intent: "auto" });
     assert.ok((readyB.generation as number) > genA);
 
-    // Old socket: closed(replaced), then the wire ends; no further frames.
-    const closedA = await clientA.waitForType("closed");
-    assert.equal(closedA.reason, "replaced");
-    await clientA.waitClosed();
-    const countAtClose = clientA.messages.length;
-
-    // A child event on the old process must not leak onto the closed socket.
-    procA.emitBytes(Buffer.from("stale"));
+    // Neither socket was replaced: no closed frame, both children held.
     await new Promise((resolve) => setTimeout(resolve, 60));
-    assert.equal(clientA.messages.length, countAtClose);
-    await waitUntil(() => procA.releasedFlag);
+    assert.equal(clientA.textTypes().includes("closed"), false);
+    assert.equal(clientB.textTypes().includes("closed"), false);
+    assert.equal(procA.releasedFlag, false);
 
+    clientA.close();
     clientB.close();
+    await clientA.waitClosed();
     await clientB.waitClosed();
   });
 
@@ -469,8 +466,9 @@ describe("terminal websocket contract (offline)", () => {
     clientA.close();
     await clientA.waitClosed();
 
-    // Reconnect while procA is still in grace: the session is replaced, the
-    // old child is released, and a fresh generation replays to the new socket.
+    // Reconnect while procA is still in grace: the dead socket's session is
+    // replaced by the new connection (same pane), the old child is released,
+    // and a fresh generation replays to the new socket.
     const clientB = await openClient();
     const ready = await hello(clientB, { type: "hello", version: 1, paneId: "w1:p1", cols: 120, rows: 30, intent: "auto" });
     assert.equal(launcher.opens.length, opensBefore + 2);
@@ -481,46 +479,54 @@ describe("terminal websocket contract (offline)", () => {
     await clientB.waitClosed();
   });
 
-  test("same-token hello for a different pane ends the old session", async () => {
+  test("second connection for an attached pane falls back to observe; the owner is untouched", async () => {
     const clientA = await openClient();
-    await hello(clientA, { type: "hello", version: 1, paneId: "w1:p1", cols: 120, rows: 30, intent: "auto" });
+    const readyA = await hello(clientA, { type: "hello", version: 1, paneId: "w1:p1", cols: 120, rows: 30, intent: "auto" });
+    assert.equal(readyA.mode, "control");
     const procA = launcher.last()!;
 
+    launcher.controlFailure = "conflict"; // herdr: pane already has a controller
     const clientB = await openClient();
-    const readyB = await hello(clientB, { type: "hello", version: 1, paneId: "w1:p2", cols: 120, rows: 30, intent: "auto" });
-    assert.equal(readyB.paneId, "w1:p2");
-    const closedA = await clientA.waitForType("closed");
-    assert.equal(closedA.reason, "replaced");
-    await clientA.waitClosed();
-    await waitUntil(() => procA.releasedFlag);
+    const readyB = await hello(clientB, { type: "hello", version: 1, paneId: "w1:p1", cols: 120, rows: 30, intent: "auto" });
+    assert.equal(readyB.mode, "observe");
+    const ownership = await clientB.waitForType("ownership");
+    assert.equal(ownership.canTakeover, true);
+
+    // The owner was not replaced by the observer's attach.
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    assert.equal(clientA.textTypes().includes("closed"), false);
+    assert.equal(procA.releasedFlag, false);
+
+    launcher.controlFailure = null;
+    clientA.close();
     clientB.close();
+    await clientA.waitClosed();
     await clientB.waitClosed();
   });
 
-  test("concurrent hellos: the later one wins, the earlier one is discarded", async () => {
-    const opensBefore = launcher.opens.length;
+  test("concurrent hellos from two connections settle independently", async () => {
     launcher.openGate = new Promise((resolve) => setTimeout(resolve, 120));
     const clientA = await openClient();
     const clientB = await openClient();
     clientA.send({ type: "hello", version: 1, paneId: "w1:p1", cols: 120, rows: 30, intent: "auto" });
-    clientB.send({ type: "hello", version: 1, paneId: "w1:p1", cols: 120, rows: 30, intent: "auto" });
+    clientB.send({ type: "hello", version: 1, paneId: "w1:p2", cols: 120, rows: 30, intent: "auto" });
 
+    const readyA = await clientA.waitForType("ready");
     const readyB = await clientB.waitForType("ready");
+    assert.equal(readyA.mode, "control");
     assert.equal(readyB.mode, "control");
-    const errorA = await clientA.waitForType("error");
-    assert.equal(errorA.code, "replaced");
-    assert.equal(errorA.retryable, true);
-    await clientA.waitClosed();
-    clientB.close();
-    await clientB.waitClosed();
+    assert.notEqual(readyA.generation, readyB.generation);
+    // Different identities: neither hello supersedes the other.
+    assert.equal(clientA.textTypes().includes("error"), false);
+    assert.equal(clientB.textTypes().includes("error"), false);
 
+    clientA.close();
+    clientB.close();
+    await clientA.waitClosed();
+    await clientB.waitClosed();
     launcher.openGate = null;
-    await waitUntil(() => launcher.opens.length === opensBefore + 2);
-    const first = launcher.opens[opensBefore]!;
-    const second = launcher.opens[opensBefore + 1]!;
-    assert.equal(first.process.releasedFlag, true);
-    assert.equal(second.process.releasedFlag, false);
   });
+
   test("startup failure maps to retryable startup_error", async () => {
     launcher.controlFailure = "spawn";
     const client = await openClient();

@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { createServer, type Server, type ServerResponse } from "node:http";
 import type { Duplex } from "node:stream";
 import { WebSocketServer, WebSocket } from "ws";
@@ -62,7 +63,7 @@ export function createScoutrServer(deps: ServerDeps, options: CreateServerOption
   const tracker = new StatusTracker();
   // Bounded per-agent model/latest-activity detail, memoized by file mtime.
   const boardDetail = new BoardDetailCache();
-  // One terminal stream per bearer identity, owned here (Slice 3).
+  // One terminal stream per connection, owned here (Slice 3).
   const terminalBroker = new TerminalSessionBroker({
     launcher: deps.terminal,
     feed,
@@ -230,7 +231,10 @@ export function createScoutrServer(deps: ServerDeps, options: CreateServerOption
     ws.once("error", closeMetrics);
     attachTerminalSocket(ws, {
       broker: terminalBroker,
-      identity: token,
+      // Each connection owns its own broker session. The bearer token is
+      // shared by every device, so using it as the identity would make one
+      // device's attach silently replace the other's (a reconnect ping-pong).
+      identity: randomUUID(),
       highWaterBytes: deps.terminalOptions?.highWaterBytes,
       lowWaterBytes: deps.terminalOptions?.lowWaterBytes,
       slowClientTimeoutMs: deps.terminalOptions?.slowClientTimeoutMs,

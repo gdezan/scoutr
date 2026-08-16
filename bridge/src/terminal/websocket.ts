@@ -66,7 +66,7 @@ export interface TerminalSocketLike {
 
 export interface TerminalConnectionOptions {
   broker: TerminalSessionBroker;
-  /** Bearer identity the upgrade was authenticated with. */
+  /** Per-connection broker identity (server.ts assigns a fresh UUID). */
   identity: string;
   highWaterBytes?: number;
   lowWaterBytes?: number;
@@ -373,6 +373,9 @@ export class TerminalConnection {
     this.clearTimers();
     if (this.ended) return;
     this.ended = true;
+    // The per-connection identity dies with its socket: drop the broker's
+    // hello sequence so identitySeq stays bounded by live connections.
+    this.broker.forgetHello(this.identity);
     // Socket lost without release: the broker keeps the child in grace.
     this.client?.close();
     this.unlisten?.();
