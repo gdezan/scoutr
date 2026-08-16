@@ -282,6 +282,23 @@ describe("scoutr bridge HTTP/WS API (offline)", () => {
         exists: true,
       });
 
+      const page = await getJson(`/api/file?path=${encodeURIComponent(join(workspace, "notes.md"))}&offset=0&limit=4`);
+      assert.equal(page.status, 200);
+      assert.deepEqual(page.body, {
+        ok: true,
+        content: "# No",
+        truncated: true,
+        binary: false,
+        exists: true,
+        offset: 0,
+        nextOffset: 4,
+        totalBytes: 8,
+      });
+      for (const parameter of ["offset=-1", "offset=1.5", "offset=9007199254740992", "limit=0", "limit=262145"]) {
+        const invalid = await getJson(`/api/file?path=${encodeURIComponent(join(workspace, "notes.md"))}&${parameter}`);
+        assert.equal(invalid.status, 400, parameter);
+      }
+
       const missing = await getJson(`/api/file?path=${encodeURIComponent(join(workspace, "missing.md"))}`);
       assert.equal(missing.status, 200);
       assert.equal((missing.body as { exists: boolean }).exists, false);

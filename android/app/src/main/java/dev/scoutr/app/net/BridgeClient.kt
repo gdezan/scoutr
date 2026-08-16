@@ -186,9 +186,9 @@ class BridgeClient(
             json.decodeFromString(FileListingResponse.serializer(), it)
         }
 
-    /** Reads a working-tree file through the active-agent authorization surface. */
-    override suspend fun file(path: String): FileReadResponse =
-        call("/api/file", query = mapOf("path" to path)) {
+    /** Reads a bounded page from a working-tree file through the active-agent authorization surface. */
+    override suspend fun file(path: String, offset: Long, limit: Int): FileReadResponse =
+        call("/api/file", query = mapOf("path" to path, "offset" to offset.toString(), "limit" to limit.toString())) {
             json.decodeFromString(FileReadResponse.serializer(), it)
         }
 

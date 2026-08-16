@@ -31,7 +31,7 @@ class FileViewerViewModel(
         refresh()
     }
 
-    /** Fetches the cwd-relative file using the absolute workspace path expected by the bridge. */
+    /** Fetches every bounded page for the cwd-relative file expected by the bridge. */
     fun refresh() {
         val state = _ui.value
         if (state.cwd.isBlank() || state.file.isBlank()) {
@@ -41,7 +41,7 @@ class FileViewerViewModel(
         viewModelScope.launch {
             _ui.update { it.copy(content = Loadable.Loading) }
             try {
-                val response = bridge.file(workspaceFilePath(state.cwd, state.file))
+                val response = readAllPages(workspaceFilePath(state.cwd, state.file))
                 if (!response.ok && response.error != null) {
                     _ui.update { it.copy(content = Loadable.Failed(response.error, FailureKind.Server)) }
                 } else {
@@ -53,6 +53,41 @@ class FileViewerViewModel(
                 _ui.update { it.copy(content = Loadable.Failed(error.message ?: "File read failed", error.failureKind())) }
             }
         }
+    }
+
+    private suspend fun readAllPages(path: String): FileReadResponse {
+        var page = bridge.file(path, offset = 0, limit = MAX_PAGE_BYTES)
+        if (!page.ok || !page.exists || page.binary) return page
+
+        val content = StringBuilder()
+        var contentBytes = 0
+        var offset = page.offset
+        while (true) {
+            content.append(page.content)
+            contentBytes += page.content.toByteArray(Charsets.UTF_8).size
+            val nextOffset = page.nextOffset
+            if (nextOffset == null || contentBytes >= MAX_DISPLAY_BYTES) {
+                return page.copy(
+                    content = content.toString(),
+                    offset = 0,
+                    nextOffset = null,
+                    truncated = page.truncated || nextOffset != null,
+                )
+            }
+            if (nextOffset <= offset) throw IllegalStateException("File page did not advance")
+            offset = nextOffset
+            page = bridge.file(
+                path,
+                offset = offset,
+                limit = minOf(MAX_PAGE_BYTES, MAX_DISPLAY_BYTES - contentBytes),
+            )
+            if (!page.ok || !page.exists || page.binary) return page
+        }
+    }
+
+    private companion object {
+        const val MAX_PAGE_BYTES = 256 * 1024
+        const val MAX_DISPLAY_BYTES = 4 * 1024 * 1024
     }
 }
 

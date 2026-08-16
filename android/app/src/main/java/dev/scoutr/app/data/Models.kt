@@ -508,6 +508,9 @@ data class FileReadResponse(
     val truncated: Boolean = false,
     val binary: Boolean = false,
     val exists: Boolean = true,
+    val offset: Long = 0,
+    val nextOffset: Long? = null,
+    val totalBytes: Long? = null,
     val error: String? = null,
 )
 

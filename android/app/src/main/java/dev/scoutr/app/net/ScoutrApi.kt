@@ -60,8 +60,8 @@ interface ScoutrApi {
     suspend fun repoOverview(path: String): RepoOverviewResponse
     suspend fun repoDiff(path: String, base: String = "HEAD", kind: String = "working"): RepoDiffResponse
     suspend fun repoFileDiff(path: String, base: String, kind: String, file: String): RepoFileDiffResponse
-    /** Working-tree file content under an active agent workspace. */
-    suspend fun file(path: String): FileReadResponse
+    /** Working-tree file content under an active agent workspace; pages are capped by the bridge. */
+    suspend fun file(path: String, offset: Long = 0, limit: Int = 256 * 1024): FileReadResponse
     suspend fun repoFile(path: String, base: String, kind: String, file: String): RepoFileResponse
     suspend fun repoArtifacts(path: String): RepoArtifactsResponse
     suspend fun usage(): UsageResponse

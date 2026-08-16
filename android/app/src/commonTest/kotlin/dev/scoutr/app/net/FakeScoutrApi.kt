@@ -64,6 +64,7 @@ class FakeScoutrApi : ScoutrApi {
     var dirsResult: Result<DirListingResponse> = Result.success(DirListingResponse(ok = true))
     var filesResult: Result<FileListingResponse> = Result.success(FileListingResponse(ok = true))
     var fileResult: Result<FileReadResponse> = Result.success(FileReadResponse())
+    val filePageResults = mutableMapOf<Long, Result<FileReadResponse>>()
     var repoOverviewResult: Result<RepoOverviewResponse> = Result.success(RepoOverviewResponse())
     var repoDiffResult: Result<RepoDiffResponse> = Result.success(RepoDiffResponse())
     var repoFileDiffResult: Result<RepoFileDiffResponse> = Result.success(RepoFileDiffResponse())
@@ -151,8 +152,10 @@ class FakeScoutrApi : ScoutrApi {
     override suspend fun files(cwd: String, includeHidden: Boolean): FileListingResponse =
         record("files", mapOf("cwd" to cwd, "includeHidden" to includeHidden)) { filesResult }
 
-    override suspend fun file(path: String): FileReadResponse =
-        record("file", mapOf("path" to path)) { fileResult }
+    override suspend fun file(path: String, offset: Long, limit: Int): FileReadResponse =
+        record("file", mapOf("path" to path, "offset" to offset, "limit" to limit)) {
+            filePageResults[offset] ?: fileResult
+        }
 
     override suspend fun repoOverview(path: String): RepoOverviewResponse =
         record("repoOverview", mapOf("path" to path)) { repoOverviewResult }

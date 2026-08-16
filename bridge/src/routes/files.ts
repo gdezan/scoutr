@@ -1,6 +1,7 @@
 import { canonicalPath } from "../dirs.js";
 import { BridgeError } from "../errors.js";
-import { listFiles, readWorkspaceFile } from "../files.js";
+import { FILE_HEAD_MAX_BYTES } from "../file-head.js";
+import { listFiles, readWorkspaceFile, type FileReadOptions } from "../files.js";
 import type { SessionSnapshot } from "../herdr/types.js";
 import { deriveAgentCards } from "./agents.js";
 import type { Route, RouteContext, RouteResult } from "./types.js";
@@ -42,9 +43,17 @@ async function files(ctx: RouteContext): Promise<RouteResult> {
 async function file(ctx: RouteContext): Promise<RouteResult> {
   const requested = ctx.query.get("path");
   if (!requested) return { status: 400, body: { ok: false, error: "missing path" } };
+  const offset = parsePageNumber(ctx.query.get("offset"));
+  const limit = parsePageLimit(ctx.query.get("limit"));
+  if (offset === -1 || limit === -1) {
+    return { status: 400, body: { ok: false, error: "invalid file page" } };
+  }
+  const options: FileReadOptions | undefined = offset === undefined && limit === undefined
+    ? undefined
+    : { offset: offset ?? 0, limit: limit ?? FILE_HEAD_MAX_BYTES };
   const cwds = activeAgentCwds(ctx.deps.feed.snapshot as SessionSnapshot | null);
   try {
-    return { status: 200, body: { ok: true, ...readWorkspaceFile(requested, cwds) } };
+    return { status: 200, body: { ok: true, ...readWorkspaceFile(requested, cwds, options) } };
   } catch (error) {
     const status = error instanceof BridgeError ? error.status : 500;
     return {
@@ -52,6 +61,18 @@ async function file(ctx: RouteContext): Promise<RouteResult> {
       body: { ok: false, error: error instanceof Error ? error.message : String(error) },
     };
   }
+}
+
+function parsePageNumber(value: string | null): number | undefined {
+  if (value === null) return undefined;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : -1;
+}
+
+function parsePageLimit(value: string | null): number | undefined {
+  if (value === null) return undefined;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed > 0 && parsed <= FILE_HEAD_MAX_BYTES ? parsed : -1;
 }
 
 function activeAgentCwds(snapshot: SessionSnapshot | null): string[] {

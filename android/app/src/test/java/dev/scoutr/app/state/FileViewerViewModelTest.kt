@@ -49,6 +49,49 @@ class FileViewerViewModelTest {
     }
 
     @Test
+    fun joinsAllFilePagesBeforePublishingContent() {
+        fake.filePageResults[0L] = Result.success(
+            FileReadResponse(content = "head", truncated = true, exists = true, offset = 0L, nextOffset = 4L, totalBytes = 8L),
+        )
+        fake.filePageResults[4L] = Result.success(
+            FileReadResponse(content = "tail", exists = true, offset = 4L, totalBytes = 8L),
+        )
+
+        val viewModel = FileViewerViewModel(fake, "/workspace", "notes.md")
+
+        assertTrue("paged file never loaded", waitFor { viewModel.ui.value.content is Loadable.Ready })
+        val body = (viewModel.ui.value.content as Loadable.Ready).value
+        assertEquals("headtail", body.content)
+        assertEquals(false, body.truncated)
+        assertEquals(2, fake.calls.count { it.name == "file" })
+    }
+    @Test
+    fun capsAccumulatedPagesBeforePublishingVeryLargeFiles() {
+        val pageBytes = 256 * 1024
+        val pageContent = "x".repeat(pageBytes)
+        repeat(16) { index ->
+            val offset = index.toLong() * pageBytes
+            fake.filePageResults[offset] = Result.success(
+                FileReadResponse(
+                    content = pageContent,
+                    exists = true,
+                    offset = offset,
+                    nextOffset = offset + pageBytes,
+                    truncated = true,
+                ),
+            )
+        }
+
+        val viewModel = FileViewerViewModel(fake, "/workspace", "large.md")
+
+        assertTrue("large file never loaded", waitFor { viewModel.ui.value.content is Loadable.Ready })
+        val body = (viewModel.ui.value.content as Loadable.Ready).value
+        assertEquals(4 * 1024 * 1024, body.content.toByteArray().size)
+        assertTrue(body.truncated)
+        assertEquals(16, fake.calls.count { it.name == "file" })
+    }
+
+    @Test
     fun exposesMissingAndBinaryResponsesAsReadyData() {
         fake.fileResult = Result.success(FileReadResponse(exists = false))
         val missing = FileViewerViewModel(fake, "/workspace", "missing.md")

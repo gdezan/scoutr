@@ -158,6 +158,10 @@ describe("readWorkspaceFile", () => {
       binary: true,
       exists: true,
     });
+    const paged = readWorkspaceFile(join(workspace, "binary.dat"), [workspace], { offset: 0, limit: 2 });
+    assert.equal(paged.binary, true);
+    assert.equal(paged.offset, 0);
+    assert.equal(paged.nextOffset, null);
   });
 
   it("returns non-files as missing and caps regular file heads", () => {
@@ -169,6 +173,29 @@ describe("readWorkspaceFile", () => {
     assert.equal(result.binary, false);
     assert.equal(result.truncated, true);
     assert.equal(Buffer.byteLength(result.content, "utf8"), 256 * 1024);
+
+    const page = readWorkspaceFile(large, [workspace], { offset: 256 * 1024, limit: 17 });
+    assert.equal(page.content, "a".repeat(17));
+    assert.equal(page.offset, 256 * 1024);
+    assert.equal(page.nextOffset, null);
+    assert.equal(page.totalBytes, 256 * 1024 + 17);
+    assert.equal(page.truncated, false);
+  });
+  it("keeps UTF-8 characters intact across page boundaries", () => {
+    const unicode = join(workspace, "unicode.txt");
+    const expected = "a".repeat(253) + "\uFFFD" + "🙂" + "z".repeat(257);
+    writeFileSync(unicode, expected);
+
+    const pages: string[] = [];
+    let offset = 0;
+    while (true) {
+      const page = readWorkspaceFile(unicode, [workspace], { offset, limit: 256 });
+      pages.push(page.content);
+      if (page.nextOffset === null) break;
+      offset = page.nextOffset;
+    }
+
+    assert.equal(pages.join(""), expected);
   });
 
   it("rejects invalid paths", () => {

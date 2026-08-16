@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { readdirSync, realpathSync, statSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { BridgeError } from "./errors.js";
-import { isMissingFileError, readFileHead } from "./file-head.js";
+import { isMissingFileError, readFileHead, readFilePage } from "./file-head.js";
 
 /**
  * File listing for the chat composer's `@` mention completion.
@@ -29,6 +29,15 @@ export interface FileRead {
   truncated: boolean;
   binary: boolean;
   exists: boolean;
+  /** Present when the caller requests a paged read. */
+  offset?: number;
+  nextOffset?: number | null;
+  totalBytes?: number;
+}
+
+export interface FileReadOptions {
+  offset?: number;
+  limit?: number;
 }
 
 export class FileListingError extends BridgeError {
@@ -71,9 +80,9 @@ export async function listFiles(requested: string, includeHidden = false): Promi
 /**
  * Read a file inside one of the already-authorized active-agent workspaces.
  * Lexical containment is checked before realpath so outside paths do not reveal
- * whether a file exists.
+ * whether a file exists. Paged reads keep each filesystem response bounded.
  */
-export function readWorkspaceFile(requested: string, cwds: string[]): FileRead {
+export function readWorkspaceFile(requested: string, cwds: string[], options?: FileReadOptions): FileRead {
   if (!requested || requested.length > 4096 || /[\u0000-\u001f\u007f]/.test(requested)) {
     throw new FileReadError("invalid file path", 400);
   }
@@ -88,17 +97,18 @@ export function readWorkspaceFile(requested: string, cwds: string[]): FileRead {
   try {
     target = realpathSync(lexicalTarget);
   } catch (error) {
-    if (isMissingFileError(error)) return missingWorkspaceFile(lexicalTarget, cwds);
+    if (isMissingFileError(error)) return missingWorkspaceFile(lexicalTarget, cwds, options);
     throw error;
   }
   if (!cwds.some((cwd) => isWithin(target, cwd))) {
     throw new FileReadError("file resolves outside an active agent workspace", 403);
   }
-  return readFileHead(target);
+  if (!options) return readFileHead(target);
+  return readFilePage(target, options.offset ?? 0, options.limit);
 }
 
 /** Check resolvable parents before reporting a missing path. */
-function missingWorkspaceFile(path: string, cwds: string[]): FileRead {
+function missingWorkspaceFile(path: string, cwds: string[], options?: FileReadOptions): FileRead {
   let ancestor = path;
   while (true) {
     try {
@@ -106,11 +116,11 @@ function missingWorkspaceFile(path: string, cwds: string[]): FileRead {
       if (!cwds.some((cwd) => isWithin(resolved, cwd))) {
         throw new FileReadError("file resolves outside an active agent workspace", 403);
       }
-      return emptyFileRead();
+      return options ? pagedEmptyFileRead(options.offset ?? 0) : emptyFileRead();
     } catch (error) {
       if (!isMissingFileError(error)) throw error;
       const parent = dirname(ancestor);
-      if (parent === ancestor) return emptyFileRead();
+      if (parent === ancestor) return options ? pagedEmptyFileRead(options.offset ?? 0) : emptyFileRead();
       ancestor = parent;
     }
   }
@@ -118,6 +128,10 @@ function missingWorkspaceFile(path: string, cwds: string[]): FileRead {
 
 function emptyFileRead(): FileRead {
   return { content: "", truncated: false, binary: false, exists: false };
+}
+
+function pagedEmptyFileRead(offset: number): FileRead {
+  return { ...emptyFileRead(), offset, nextOffset: null, totalBytes: 0 };
 }
 
 function isWithin(target: string, root: string): boolean {
