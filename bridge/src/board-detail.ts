@@ -39,7 +39,11 @@ export class BoardDetailCache {
     const transcript = await backend.readTranscript(path, { tail: TAIL_ENTRIES }).catch(() => null);
     if (!transcript) return null;
     const metadata = await backend.readTranscript(path, { metadataOnly: true }).catch(() => null);
-    const detail = deriveBoardDetail(transcript, info.mtimeMs, metadata?.title);
+    // The tail window alone misses a model recorded only near the top of a long
+    // session (pi writes one `model_change` at launch), which is why some cards
+    // showed no model at all. The metadata read spans both ends, so it answers
+    // when the tail cannot.
+    const detail = deriveBoardDetail(transcript, info.mtimeMs, metadata?.title, metadata?.model ?? null);
     this.memo.set(path, { mtimeMs: info.mtimeMs, size: info.size, detail });
     if (this.memo.size > MEMO_CAP) {
       const oldest = this.memo.keys().next().value;
@@ -65,7 +69,9 @@ export function deriveBoardDetail(
   transcript: Transcript,
   mtimeMs: number,
   title = transcript.title,
+  fallbackModel: string | null = null,
 ): BoardDetail {
+  const model = transcript.model ?? fallbackModel;
   for (const entry of [...transcript.entries].reverse()) {
     // entryText's own cap is well above MAX_ACTIVITY_LENGTH, so cleanActivity
     // is what actually bounds the card line.
@@ -74,14 +80,14 @@ export function deriveBoardDetail(
     const at = Date.parse(entry.timestamp);
     return {
       title,
-      model: transcript.model,
+      model,
       latestActivity: text,
       latestActivityAtMs: Number.isFinite(at) ? at : null,
     };
   }
   // No meaningful entry in the window: fall back to the file mtime so cards
   // still show recency.
-  return { title, model: transcript.model, latestActivity: "", latestActivityAtMs: mtimeMs };
+  return { title, model, latestActivity: "", latestActivityAtMs: mtimeMs };
 }
 
 /** Skip control/streaming noise like bare "Enter" or single-char echoes. */

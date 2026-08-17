@@ -40,4 +40,26 @@ class BoardFormatTest {
     fun timeInState_nullWhenUnknown() {
         assertNull(timeInState(null))
     }
+
+    @Test
+    fun agentDisplayTitle_dropsTheAgentNamePrefix() {
+        // The card draws pi's mark itself; the older `π - name` titles spelled it twice.
+        assertEquals("pi-workflow", agentDisplayTitle("π - pi-workflow"))
+        assertEquals("pi-workflow", agentDisplayTitle("π pi-workflow"))
+        assertEquals("scoutr", agentDisplayTitle("π: scoutr"))
+        // A status glyph still goes first, and both can appear together.
+        assertEquals("scoutr", agentDisplayTitle("◑ π — scoutr"))
+        assertEquals("π", agentDisplayTitle("π"))
+        assertEquals("πthon rewrite", agentDisplayTitle("πthon rewrite"))
+    }
+
+    @Test
+    fun projectFolderName_keepsOnlyTheProjectFolder() {
+        assertEquals("scoutr", projectFolderName("/home/gdezan/Dev/scoutr"))
+        assertEquals("scoutr", projectFolderName("/home/gdezan/Dev/scoutr/"))
+        assertEquals("~", projectFolderName("/home/gdezan"))
+        assertEquals("srv", projectFolderName("/srv"))
+        assertNull(projectFolderName(null))
+        assertNull(projectFolderName("  "))
+    }
 }

@@ -1,7 +1,7 @@
 package dev.scoutr.app.ui.screens
 
 import dev.scoutr.app.ui.agentDisplayTitle
-import dev.scoutr.app.ui.shortenHostPath
+import dev.scoutr.app.ui.projectFolderName
 import dev.scoutr.app.ui.theme.ScoutrType
 import android.widget.Toast
 
@@ -435,13 +435,16 @@ private fun AgentCardRow(
                             )
                         }
                         Spacer(Modifier.height(2.dp))
+                        // Machine facts: which project, on which model. The project
+                        // name is what the user recognises the card by, so it reads
+                        // above the transcript line's weight, not below it.
                         Text(
                             text = listOfNotNull(
-                                shortenHostPath(agent.cwd) ?: agent.workspaceId,
+                                projectFolderName(agent.cwd) ?: agent.workspaceId,
                                 agent.model?.let { shortModel(it) },
                             ).joinToString(" · "),
                             style = ScoutrType.monoMeta,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )

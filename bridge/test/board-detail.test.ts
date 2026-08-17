@@ -121,6 +121,19 @@ describe("BoardDetailCache", () => {
     assert.equal(cache.size, 0);
   });
 
+  it("keeps the model of a session that only records it at launch", async () => {
+    const path = join(dir, "long.jsonl");
+    // The model_change is at the very top, far outside the 64 KiB tail window,
+    // so only the metadata read (head + tail) can still see it.
+    const launch = sessionLine("model_change", { provider: "anthropic", modelId: "claude-opus-5" }, "2026-08-10T00:00:00Z");
+    const noise = Array.from({ length: 40 }, (_, i) =>
+      sessionLine("message", { message: { role: "user", content: `n${String(i).padStart(3, "0")}` + "x".repeat(2400) } }, "2026-08-10T00:10:00Z"),
+    ).join("\n");
+    await writeFile(path, `${launch}\n${noise}\n`);
+    const detail = await new BoardDetailCache().detailFor(path);
+    assert.equal(detail?.model, "anthropic/claude-opus-5");
+  });
+
   it("reads only the bounded tail of a large file", async () => {
     const path = join(dir, "big.jsonl");
     // 40 small lines of noise (about 100 KiB), then the meaningful marker at the end.

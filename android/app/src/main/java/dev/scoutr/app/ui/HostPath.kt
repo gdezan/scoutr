@@ -20,6 +20,21 @@ fun shortenHostPath(path: String?): String? {
     return trimmed
 }
 
+/**
+ * The last segment of a host path — the project/repo folder name.
+ *
+ * On a board card the path is a label, not a location: the user recognises the
+ * work by its project name, and the leading directories cost the width that the
+ * title and activity line need. The full path stays available through the card's
+ * "Copy path" action and the session header.
+ */
+fun projectFolderName(path: String?): String? {
+    val trimmed = shortenHostPath(path) ?: return null
+    val segment = trimmed.trimEnd('/').substringAfterLast('/')
+    // `/`, `~`, or a single-segment path is already its own name.
+    return segment.ifEmpty { trimmed }
+}
+
 /** `/home/<user>/`, `/Users/<user>/` (macOS), and `/root/` all collapse to `~`. */
 private val HOME_PREFIXES = listOf(
     Regex("""/(?:home|Users)/[^/]+/?"""),
