@@ -56,12 +56,26 @@ pi agents, as an alternative to Moshi's paid herdr integration.
   `updateAvailable = (host HEAD != installed commit) || hostDirty`. The app
   sends its stamped commit/version/dirty to `GET /api/update/status`; the bridge
   computes the host side and the flag.
-- **Install is app-only and fire-and-forget.** `POST /api/update/install`
-  (bearer + tailnet) resolves the physical device from `adb devices -l` —
-  single device wins, otherwise the app's `Build.MODEL` must uniquely match —
-  then spawns `scripts/install-app.sh --serial <resolved>` detached and returns
-  `202`. It never runs `make release`, because a bridge restart would kill the
-  request; `adb install -r` kills the app and `am start` relaunches it.
+- **The install pulls, so adb is not in the loop.** The bridge cannot reach the
+  phone, so every step is a phone-initiated request: `POST /api/update/apk/build`
+  starts `scripts/install-app.sh --build-only` on the host, `GET
+  /api/update/apk/status` is polled until the build leaves `building`, and
+  `GET /api/update/apk` streams the APK. The app checks the bytes against the
+  host's sha256 and commits them through Android's `PackageInstaller`. This
+  replaced an `adb devices -l` + `adb install -r` push, which only worked while
+  a USB cable or a live `adb pair` session existed.
+- **One build at a time, tracked by the bridge.** `ApkBuilder` is process-wide
+  (one checkout, one gradle) and a start during a running build returns that
+  build's id instead of queueing a second. A failed build refuses to serve the
+  stale APK still sitting in `app/build/outputs`.
+- **Install is app-only.** The build never runs `make release`, because a bridge
+  restart would kill the request mid-flight. Deploys stay a host-side
+  `make deploy-bridge`.
+- **The confirmation sheet is unavoidable.** Silent self-install needs
+  device-owner privileges Scoutr does not have, so an update ends in Android's
+  own prompt, and the user grants "install unknown apps" once beforehand. The
+  APK must also carry the host debug keystore's signature — building on a
+  second machine yields a different key and the commit fails.
 
 ## Decisions learned from live E2E
 

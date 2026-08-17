@@ -25,7 +25,8 @@ import dev.scoutr.app.data.SnapshotResponse
 import dev.scoutr.app.data.TerminalHierarchyCommand
 import dev.scoutr.app.data.TerminalHierarchyResponse
 import dev.scoutr.app.data.UsageResponse
-import dev.scoutr.app.data.UpdateInstallResponse
+import dev.scoutr.app.data.UpdateApkStatusResponse
+import dev.scoutr.app.data.UpdateBuildResponse
 import dev.scoutr.app.data.UpdateStatusResponse
 import dev.scoutr.app.data.WsFrame
 import kotlinx.serialization.Serializable
@@ -37,7 +38,10 @@ import kotlinx.serialization.json.put
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import okhttp3.Call
 import okhttp3.Callback
@@ -47,6 +51,7 @@ import okhttp3.Request
 import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
+import java.io.File
 import java.io.IOException
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.coroutines.resume
@@ -448,10 +453,53 @@ class BridgeClient(
             json.decodeFromString(UpdateStatusResponse.serializer(), it)
         }
 
-    override suspend fun updateInstall(deviceModel: String): UpdateInstallResponse =
-        call(
-            "/api/update/install",
-            body = buildJsonObject { put("deviceModel", JsonPrimitive(deviceModel)) }
-                .toString().toRequestBody("application/json".toMediaType()),
-        ) { json.decodeFromString(UpdateInstallResponse.serializer(), it) }
+    override suspend fun updateBuild(): UpdateBuildResponse =
+        call("/api/update/apk/build", body = EMPTY_JSON_BODY) {
+            json.decodeFromString(UpdateBuildResponse.serializer(), it)
+        }
+
+    override suspend fun updateApkStatus(): UpdateApkStatusResponse =
+        call("/api/update/apk/status") { json.decodeFromString(UpdateApkStatusResponse.serializer(), it) }
+
+    /**
+     * Streams the APK to disk rather than through [call], which buffers the
+     * whole body as a String — an APK is tens of megabytes and is binary.
+     * Runs on the IO dispatcher because OkHttp's blocking `execute` plus the
+     * copy loop must not sit on the caller's thread.
+     */
+    override suspend fun downloadApk(destination: File, onProgress: (Long, Long) -> Unit): Long =
+        withContext(Dispatchers.IO) {
+            val response = okHttp.newCall(request("/api/update/apk")).execute()
+            response.use {
+                val body = it.body ?: throw BridgeException(it.code, "empty APK response")
+                if (!it.isSuccessful) throw BridgeException(it.code, bridgeReason(it, body.string()))
+                val total = body.contentLength().coerceAtLeast(0L)
+                var written = 0L
+                body.byteStream().use { input ->
+                    destination.outputStream().use { output ->
+                        val buffer = ByteArray(DOWNLOAD_BUFFER_BYTES)
+                        while (true) {
+                            // The coroutine may be cancelled mid-download (the
+                            // user leaves Settings); stop copying rather than
+                            // finishing a file nobody will install.
+                            ensureActive()
+                            val read = input.read(buffer)
+                            if (read == -1) break
+                            output.write(buffer, 0, read)
+                            written += read
+                            onProgress(written, total)
+                        }
+                    }
+                }
+                if (total > 0 && written != total) {
+                    throw BridgeException(it.code, "APK download truncated at $written of $total bytes")
+                }
+                written
+            }
+        }
+
+    private companion object {
+        val EMPTY_JSON_BODY: RequestBody = "{}".toRequestBody("application/json".toMediaType())
+        const val DOWNLOAD_BUFFER_BYTES = 64 * 1024
+    }
 }

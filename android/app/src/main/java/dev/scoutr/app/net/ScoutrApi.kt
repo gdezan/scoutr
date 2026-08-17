@@ -24,10 +24,12 @@ import dev.scoutr.app.data.SnapshotResponse
 import dev.scoutr.app.data.TerminalHierarchyCommand
 import dev.scoutr.app.data.TerminalHierarchyResponse
 import dev.scoutr.app.data.UsageResponse
-import dev.scoutr.app.data.UpdateInstallResponse
+import dev.scoutr.app.data.UpdateApkStatusResponse
+import dev.scoutr.app.data.UpdateBuildResponse
 import dev.scoutr.app.data.UpdateStatusResponse
 import dev.scoutr.app.data.WsFrame
 import kotlinx.serialization.json.JsonObject
+import java.io.File
 
 /**
  * The typed bridge surface ViewModels consume. [BridgeClient] is the one
@@ -107,8 +109,21 @@ interface ScoutrApi {
     /** Host vs installed build identity; updateAvailable = commit differs or the host tree is dirty. */
     suspend fun updateStatus(commit: String, version: String, dirty: Boolean): UpdateStatusResponse
 
-    /** Fire-and-forget app install; the bridge resolves the adb device and returns 202. */
-    suspend fun updateInstall(deviceModel: String): UpdateInstallResponse
+    /**
+     * Starts a host-side APK build and returns immediately. A build already in
+     * flight is reused, so a double tap cannot queue a second gradle.
+     */
+    suspend fun updateBuild(): UpdateBuildResponse
+
+    /** Host identity plus the current build state; polled until it leaves "building". */
+    suspend fun updateApkStatus(): UpdateApkStatusResponse
+
+    /**
+     * Streams the built APK into [destination]. [onProgress] reports bytes
+     * written against the total from the response's content-length (0 when the
+     * bridge sent none). Returns the number of bytes written.
+     */
+    suspend fun downloadApk(destination: File, onProgress: (Long, Long) -> Unit = { _, _ -> }): Long
 }
 
 /** One question's answer inside a batched ask. */

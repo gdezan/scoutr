@@ -51,12 +51,16 @@ import dev.scoutr.app.ui.components.ConfirmDialog
 import dev.scoutr.app.ui.components.SectionLabel
 import dev.scoutr.app.ui.components.StatusRing
 import dev.scoutr.app.ui.components.StatusRingAnimation
-import android.os.Build
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.scoutr.app.BuildConfig
 import dev.scoutr.app.data.UpdateStatusResponse
 import dev.scoutr.app.net.ScoutrApi
+import dev.scoutr.app.update.ApkInstallOutcome
+import dev.scoutr.app.update.ApkInstaller
+import dev.scoutr.app.update.AppUpdater
+import dev.scoutr.app.update.UpdateProgress
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
@@ -219,18 +223,32 @@ private fun ConnectionSection(
 }
 
 /**
- * Host vs installed build identity, plus a fire-and-forget install trigger.
+ * Host vs installed build identity, plus the self-update trigger.
+ *
+ * The update pulls: the host builds an APK, this app downloads it over the
+ * tailnet and installs it through PackageInstaller. Nothing here needs adb, so
+ * an update works from anywhere on the tailnet — at the cost of one system
+ * confirmation sheet per install, which Android does not let an app skip.
+ *
  * The status ring and rows are display-only: the update signal stays
  * commit-based, so the semver shown here never gates the button. The host's
  * dirty flag still counts toward `updateAvailable` but is never shown.
  */
 @Composable
 private fun UpdateSection(api: ScoutrApi) {
+    val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var status by remember { mutableStateOf<UpdateStatusResponse?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     var confirming by remember { mutableStateOf(false) }
-    var installing by remember { mutableStateOf(false) }
+    var progress by remember { mutableStateOf<UpdateProgress?>(null) }
+    var canInstall by remember { mutableStateOf(ApkInstaller.canInstall(context)) }
+
+    // Returning from the "install unknown apps" screen carries no result, so
+    // re-read the permission rather than trusting the launcher's callback.
+    val grantInstallPermission = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) { canInstall = ApkInstaller.canInstall(context) }
 
     LaunchedEffect(Unit) {
         runCatching {
@@ -243,23 +261,38 @@ private fun UpdateSection(api: ScoutrApi) {
             .onFailure { error = it.message ?: "could not read host version" }
     }
 
+    // A failed install session reports back through the receiver long after the
+    // download coroutine finished, so the section listens for it separately.
+    val installOutcome by ApkInstaller.outcome.collectAsStateWithLifecycle()
+    LaunchedEffect(installOutcome) {
+        (installOutcome as? ApkInstallOutcome.Failed)?.let {
+            error = it.message
+            progress = null
+            ApkInstaller.clearOutcome()
+        }
+    }
+
     if (confirming) {
         ConfirmDialog(
             title = "Update app?",
-            text = "Build and install the latest version, then restart the app. " +
-                "This takes about a minute.",
-            confirmLabel = "Install now",
+            text = "The host builds the latest version, this phone downloads and installs it. " +
+                "Building takes about a minute. Keep this screen open until Android asks you " +
+                "to confirm the install.",
+            confirmLabel = "Update now",
             onConfirm = {
                 confirming = false
-                installing = true
+                error = null
                 scope.launch {
-                    runCatching { api.updateInstall(deviceModel = Build.MODEL) }
-                        .onFailure {
-                            installing = false
-                            error = it.message ?: "update failed"
-                        }
-                    // Success is silent: adb install -r kills this process and
-                    // the bridge relaunches it afterwards.
+                    val updater = AppUpdater(
+                        api = api,
+                        installer = ApkInstaller.forContext(context),
+                        cacheDir = context.cacheDir,
+                    )
+                    runCatching { updater.run { progress = it } }
+                        .onFailure { error = it.message ?: "update failed" }
+                    // The system sheet owns the flow from here; on success this
+                    // process is replaced, so there is nothing to reset.
+                    progress = null
                 }
             },
             onDismiss = { confirming = false },
@@ -268,17 +301,20 @@ private fun UpdateSection(api: ScoutrApi) {
 
     SettingsSection(
         "Update",
-        footnote = "Checks the host checkout for a newer build and reinstalls this app. " +
-            "Only the app is updated, never the bridge.",
+        footnote = "Checks the host checkout for a newer build, then downloads and installs it " +
+            "over the tailnet. Only the app is updated, never the bridge.",
     ) {
         val current = status
+        val stage = progress
         val statusLabel = when {
+            stage != null -> progressLabel(stage)
             error != null -> error!!
             current?.updateAvailable == true -> "Update available"
             current != null -> "Up to date"
             else -> "Checking…"
         }
         val statusColor = when {
+            stage != null -> MaterialTheme.colorScheme.onSurfaceVariant
             error != null -> MaterialTheme.colorScheme.error
             current?.updateAvailable == true -> MaterialTheme.colorScheme.tertiary
             else -> MaterialTheme.colorScheme.onSurfaceVariant
@@ -288,7 +324,10 @@ private fun UpdateSection(api: ScoutrApi) {
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.testTag("settings_update_status"),
             ) {
-                StatusRing(color = statusColor, animation = StatusRingAnimation.Static)
+                StatusRing(
+                    color = statusColor,
+                    animation = if (stage == null) StatusRingAnimation.Static else StatusRingAnimation.Live,
+                )
                 Spacer(Modifier.width(8.dp))
                 Text(
                     statusLabel,
@@ -317,15 +356,41 @@ private fun UpdateSection(api: ScoutrApi) {
         }
         if (current?.updateAvailable == true) {
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            // PackageInstaller refuses the session without the "install unknown
+            // apps" grant, so the one button routes to that screen first and
+            // becomes the real trigger once the user comes back.
             TextButton(
-                onClick = { confirming = true },
-                enabled = !installing,
+                onClick = {
+                    if (canInstall) {
+                        confirming = true
+                    } else {
+                        grantInstallPermission.launch(ApkInstaller.unknownSourcesSettings(context))
+                    }
+                },
+                enabled = stage == null,
                 modifier = Modifier.fillMaxWidth().testTag("settings_update_button"),
             ) {
-                Text(if (installing) "Installing… (~1 min)" else "Update app")
+                Text(
+                    when {
+                        stage != null -> progressLabel(stage)
+                        !canInstall -> "Allow installs, then update"
+                        else -> "Update app"
+                    },
+                )
             }
         }
     }
+}
+
+private fun progressLabel(progress: UpdateProgress): String = when (progress) {
+    is UpdateProgress.Building -> "Building on host… (~1 min)"
+    is UpdateProgress.Downloading ->
+        if (progress.total > 0) {
+            "Downloading… ${(progress.bytes * 100 / progress.total)}%"
+        } else {
+            "Downloading…"
+        }
+    is UpdateProgress.Installing -> "Installing…"
 }
 
 private fun installedIdentity(): String =

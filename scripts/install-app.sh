@@ -5,6 +5,11 @@
 #   scripts/install-app.sh                 # build, then install (prompts if needed)
 #   scripts/install-app.sh --serial X      # install on a specific device serial
 #   scripts/install-app.sh --no-build      # reuse the existing APK
+#   scripts/install-app.sh --build-only    # build the APK and stop (no adb)
+#
+# --build-only is what the bridge runs for the phone-pull update path: the app
+# downloads the APK over the tailnet and installs it itself, so no device needs
+# to be attached here.
 #
 # The serial is also read from $SCOUTR_SERIAL. With several devices connected
 # and no --serial, the script opens an arrow-key picker.
@@ -16,10 +21,12 @@ export PATH="$ANDROID_HOME/platform-tools:$PATH"
 
 SERIAL="${SCOUTR_SERIAL:-}"
 BUILD=1
+INSTALL=1
 while [ $# -gt 0 ]; do
   case "$1" in
     --serial) SERIAL="$2"; shift 2 ;;
     --no-build) BUILD=0; shift ;;
+    --build-only) INSTALL=0; shift ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
 done
@@ -31,6 +38,11 @@ if [ "$BUILD" = 1 ]; then
   ./gradlew assembleDebug >/dev/null
 fi
 [ -f "$APK" ] || { echo "no APK at $APK — run without --no-build" >&2; exit 1; }
+
+if [ "$INSTALL" = 0 ]; then
+  echo "== built $APK"
+  exit 0
+fi
 
 pick_device() {
   local tty_fd

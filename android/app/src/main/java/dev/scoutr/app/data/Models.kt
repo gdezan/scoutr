@@ -572,9 +572,38 @@ data class UpdateInstalled(
     val dirty: Boolean = false,
 )
 
+/**
+ * A host-side APK build. The phone starts one, polls [state] until it leaves
+ * "building", then downloads [apk] and installs it itself — no adb involved.
+ * [state] is one of idle / building / ready / failed.
+ */
 @Serializable
-data class UpdateInstallResponse(
+data class ApkBuild(
+    val state: String = "idle",
+    val buildId: Int = 0,
+    val error: String? = null,
+    val apk: ApkArtifact? = null,
+)
+
+/** The built file's size and hash, plus the identity gradle stamped into it. */
+@Serializable
+data class ApkArtifact(
+    val size: Long = 0,
+    val sha256: String = "",
+    val commit: String = "",
+    val version: String = "",
+    val versionCode: Int = 0,
+)
+
+@Serializable
+data class UpdateBuildResponse(
     val ok: Boolean = true,
-    val started: Boolean = false,
-    val serial: String? = null,
+    val build: ApkBuild = ApkBuild(),
+)
+
+@Serializable
+data class UpdateApkStatusResponse(
+    val ok: Boolean = true,
+    val host: UpdateIdentity = UpdateIdentity(),
+    val build: ApkBuild = ApkBuild(),
 )

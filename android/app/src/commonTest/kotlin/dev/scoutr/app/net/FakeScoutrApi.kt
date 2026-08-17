@@ -24,10 +24,12 @@ import dev.scoutr.app.data.SnapshotResponse
 import dev.scoutr.app.data.TerminalHierarchyCommand
 import dev.scoutr.app.data.TerminalHierarchyResponse
 import dev.scoutr.app.data.UsageResponse
-import dev.scoutr.app.data.UpdateInstallResponse
+import dev.scoutr.app.data.UpdateApkStatusResponse
+import dev.scoutr.app.data.UpdateBuildResponse
 import dev.scoutr.app.data.UpdateStatusResponse
 import dev.scoutr.app.data.WsFrame
 import kotlinx.coroutines.CompletableDeferred
+import java.io.File
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
@@ -73,7 +75,11 @@ class FakeScoutrApi : ScoutrApi {
     var usageResult: Result<UsageResponse> = Result.success(UsageResponse())
     var uploadResult: Result<AttachmentResponse> = Result.success(AttachmentResponse())
     var updateStatusResult: Result<UpdateStatusResponse> = Result.success(UpdateStatusResponse())
-    var updateInstallResult: Result<UpdateInstallResponse> = Result.success(UpdateInstallResponse())
+    var updateBuildResult: Result<UpdateBuildResponse> = Result.success(UpdateBuildResponse())
+    var updateApkStatusResult: Result<UpdateApkStatusResponse> = Result.success(UpdateApkStatusResponse())
+    /** Bytes the fake writes when [downloadApk] is called. */
+    var apkBytes: ByteArray = ByteArray(0)
+    var downloadApkFailure: Exception? = null
     var terminalHierarchyResult: Result<TerminalHierarchyResponse> = Result.success(TerminalHierarchyResponse(ok = true))
 
     var wsResult: Result<WsFrame> = Result.success(WsFrame(type = "ack"))
@@ -247,8 +253,20 @@ class FakeScoutrApi : ScoutrApi {
     override suspend fun updateStatus(commit: String, version: String, dirty: Boolean): UpdateStatusResponse =
         record("updateStatus", mapOf("commit" to commit, "version" to version, "dirty" to dirty)) { updateStatusResult }
 
-    override suspend fun updateInstall(deviceModel: String): UpdateInstallResponse =
-        record("updateInstall", mapOf("deviceModel" to deviceModel)) { updateInstallResult }
+    override suspend fun updateBuild(): UpdateBuildResponse =
+        record("updateBuild") { updateBuildResult }
+
+    override suspend fun updateApkStatus(): UpdateApkStatusResponse =
+        record("updateApkStatus") { updateApkStatusResult }
+
+    override suspend fun downloadApk(destination: File, onProgress: (Long, Long) -> Unit): Long {
+        calls += ApiCall("downloadApk", mapOf("destination" to destination.path))
+        downloadApkFailure?.let { throw it }
+        destination.parentFile?.mkdirs()
+        destination.writeBytes(apkBytes)
+        onProgress(apkBytes.size.toLong(), apkBytes.size.toLong())
+        return apkBytes.size.toLong()
+    }
 
     private fun send(name: String, command: JsonObject): WsFrame {
         calls += ApiCall(name, mapOf("command" to command))

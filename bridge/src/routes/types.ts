@@ -21,8 +21,6 @@ export interface JsonBody {
   action?: string;
   text?: string;
   path?: string;
-  /** Build.MODEL from the app, for adb device disambiguation (update install). */
-  deviceModel?: string;
 }
 
 /** Everything the HTTP + WS layers need beyond the caller-provided wiring. */
@@ -87,9 +85,24 @@ export interface DispatchRequest {
   contentType?: string;
 }
 
+/**
+ * A file streamed straight from disk instead of a JSON body — the APK the
+ * phone pulls is tens of megabytes, far past what base64 inside JSON can carry.
+ */
+export interface RouteFile {
+  path: string;
+  /** Stat'd by the route, so the response can carry a content-length. */
+  size: number;
+  contentType: string;
+  /** Suggested download name (content-disposition). */
+  filename: string;
+}
+
 export interface RouteResult {
   status: number;
   body: unknown;
+  /** When set, the server streams this file and ignores `body`. */
+  file?: RouteFile;
 }
 
 export interface Route {

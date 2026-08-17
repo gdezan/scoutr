@@ -18,6 +18,8 @@ import androidx.test.platform.app.InstrumentationRegistry
 import dev.scoutr.app.data.AppearancePreferencesStore
 import dev.scoutr.app.data.ConnectionStore
 import dev.scoutr.app.data.TerminalPreferencesStore
+import dev.scoutr.app.data.ApkBuild
+import dev.scoutr.app.data.UpdateApkStatusResponse
 import dev.scoutr.app.data.UpdateInstalled
 import dev.scoutr.app.data.UpdateIdentity
 import dev.scoutr.app.data.UpdateStatusResponse
@@ -268,20 +270,35 @@ class SettingsScreenTest {
         compose.onNodeWithTag("settings_update_button").assertDoesNotExist()
     }
 
+    /**
+     * The update button only offers the real flow once Android lets Scoutr
+     * install apps; without the app op it routes to Settings instead. Grant it
+     * through UiAutomation so the confirm path is deterministic here.
+     */
+    private fun allowUnknownSources() {
+        InstrumentationRegistry.getInstrumentation().uiAutomation.executeShellCommand(
+            "appops set dev.scoutr.app REQUEST_INSTALL_PACKAGES allow",
+        ).close()
+    }
+
     @Test
-    fun updateConfirmRecordsTheInstallWithTheDeviceModel() {
+    fun updateConfirmStartsAHostBuild() {
+        allowUnknownSources()
         val api = FakeScoutrApi()
         api.updateStatusResult = Result.success(updateStatusResponse(available = true))
+        // Leave the build in flight so the download and install never run: this
+        // test owns the trigger, not the whole update.
+        api.updateApkStatusResult = Result.success(
+            UpdateApkStatusResponse(build = ApkBuild(state = "building", buildId = 1)),
+        )
         setSettings(api = api)
 
         compose.onNodeWithTag("settings_update_button").performScrollTo().performClick()
         compose.onNodeWithText("Update app?").assertExists()
-        compose.onNodeWithText("Install now").performClick()
+        compose.onNodeWithText("Update now").performClick()
 
-        val installCall = api.calls.firstOrNull { it.name == "updateInstall" }
-        assertTrue("install must be called once", installCall != null)
-        val model = installCall!!.args["deviceModel"] as String
-        assertTrue("device model must be non-blank", model.isNotBlank())
+        compose.waitUntil(timeoutMillis = 5_000) { api.calls.any { it.name == "updateBuild" } }
+        assertTrue("the host build must be started", api.calls.any { it.name == "updateBuild" })
     }
 
     @Test

@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { createReadStream } from "node:fs";
 import { createServer, type Server, type ServerResponse } from "node:http";
 import type { Duplex } from "node:stream";
 import { WebSocketServer, WebSocket } from "ws";
@@ -9,7 +10,7 @@ import { BoardDetailCache } from "./board-detail.js";
 import { handleCommand, type CommandMessage } from "./commands.js";
 import { RouteTable, dispatchRoute, isAuthorized } from "./routes/dispatcher.js";
 import { buildRoutes } from "./routes/index.js";
-import type { RouteDeps, ServerDeps } from "./routes/types.js";
+import type { RouteDeps, RouteFile, ServerDeps } from "./routes/types.js";
 import { BridgeMetrics } from "./metrics.js";
 import { type SessionSnapshot } from "./herdr/types.js";
 import { TerminalSessionBroker } from "./terminal/broker.js";
@@ -49,6 +50,31 @@ function sendJson(response: ServerResponse, status: number, body: unknown): void
     "content-length": Buffer.byteLength(payload),
   });
   response.end(payload);
+}
+
+/**
+ * Streams a route's file straight from disk (the update APK is far too large
+ * to serialize through JSON). Headers go out before the first byte is read, so
+ * a mid-stream read error can only destroy the socket — the client sees a
+ * truncated body, which its content-length check catches.
+ */
+function sendFile(response: ServerResponse, file: RouteFile): Promise<void> {
+  return new Promise((resolve, reject) => {
+    response.writeHead(200, {
+      "content-type": file.contentType,
+      "content-length": file.size,
+      "content-disposition": `attachment; filename="${file.filename}"`,
+      "cache-control": "no-store",
+    });
+    const stream = createReadStream(file.path);
+    stream.on("error", (error) => {
+      response.destroy();
+      reject(error);
+    });
+    response.on("close", () => stream.destroy());
+    stream.pipe(response);
+    response.on("finish", () => resolve());
+  });
 }
 
 export function createScoutrServer(deps: ServerDeps, options: CreateServerOptions = {}): ScoutrServer {
@@ -119,9 +145,14 @@ export function createScoutrServer(deps: ServerDeps, options: CreateServerOption
         },
         routeDeps,
       );
-      const payload = JSON.stringify(result.body);
-      sendJson(response, result.status, result.body);
-      requestMetric.complete(result.status, Buffer.byteLength(payload));
+      if (result.file) {
+        await sendFile(response, result.file);
+        requestMetric.complete(result.status, result.file.size);
+      } else {
+        const payload = JSON.stringify(result.body);
+        sendJson(response, result.status, result.body);
+        requestMetric.complete(result.status, Buffer.byteLength(payload));
+      }
     } catch (error) {
       // A route must never crash the process: log, then answer 500 unless the
       // client already went away.

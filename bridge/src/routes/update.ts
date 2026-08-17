@@ -1,27 +1,33 @@
-import { execFile, spawn } from "node:child_process";
-import { homedir } from "node:os";
+import { execFile } from "node:child_process";
 import { join } from "node:path";
+import { ApkBuilder } from "../apk.js";
 import { BridgeError } from "../errors.js";
 import { gitRepoRoot } from "../review.js";
 import type { Route, RouteContext, RouteResult } from "./types.js";
 
 /**
- * Phone-triggered self-update. Two authenticated endpoints behind the existing
- * bearer token (the dispatcher enforces auth) plus the tailnet TLS front:
+ * Phone-triggered self-update, over the tailnet only — no adb, so no
+ * `adb pair` and no USB cable. Four authenticated endpoints behind the
+ * existing bearer token (the dispatcher enforces auth):
  *
  *   GET  /api/update/status?commit=…&version=…&dirty=…  -> host identity +
  *        updateAvailable, computed by the shared scripts/version.mjs.
- *   POST /api/update/install { deviceModel }             -> resolve the adb
- *        device and spawn scripts/install-app.sh detached (fire-and-forget).
+ *   POST /api/update/apk/build   -> start a host-side gradle build (202).
+ *   GET  /api/update/apk/status  -> host identity + build state, for polling.
+ *   GET  /api/update/apk         -> stream the built APK to the phone.
  *
- * App-only install: this runs install-app.sh, never `make release`, because a
- * bridge restart would kill the request mid-flight. Deploys stay a host-side
+ * The phone installs the downloaded bytes itself through PackageInstaller,
+ * which is why the build and the install are separate steps here: the bridge's
+ * job ends at "here are the bytes".
+ *
+ * App-only install: this builds the app, never the bridge, because a bridge
+ * restart would kill the request mid-flight. Deploys stay a host-side
  * `make deploy-bridge`.
  */
 
 const VERSION_SCRIPT = "scripts/version.mjs";
-const INSTALL_SCRIPT = "scripts/install-app.sh";
 const EXEC_TIMEOUT_MS = 10_000;
+const APK_CONTENT_TYPE = "application/vnd.android.package-archive";
 
 export interface HostIdentity {
   version: string;
@@ -31,12 +37,7 @@ export interface HostIdentity {
   buildTime: string;
 }
 
-interface ExecCapture {
-  stdout: string;
-  stderr: string;
-}
-
-function execCapture(cmd: string, args: string[]): Promise<ExecCapture> {
+function execCapture(cmd: string, args: string[]): Promise<string> {
   return new Promise((resolve, reject) => {
     execFile(
       cmd,
@@ -54,16 +55,10 @@ function execCapture(cmd: string, args: string[]): Promise<ExecCapture> {
           reject(new BridgeError(detail, 502));
           return;
         }
-        resolve({ stdout, stderr });
+        resolve(stdout);
       },
     );
   });
-}
-
-/** adb lives under the SDK, which is not on the bridge's minimal PATH. */
-function adbPath(): string {
-  const sdkRoot = process.env.ANDROID_HOME?.trim() || join(homedir(), "Android", "sdk");
-  return join(sdkRoot, "platform-tools", "adb");
 }
 
 async function checkoutRoot(): Promise<string> {
@@ -74,7 +69,7 @@ async function checkoutRoot(): Promise<string> {
 
 async function hostIdentity(): Promise<HostIdentity> {
   const root = await checkoutRoot();
-  const { stdout } = await execCapture(process.execPath, [join(root, VERSION_SCRIPT), "--json"]);
+  const stdout = await execCapture(process.execPath, [join(root, VERSION_SCRIPT), "--json"]);
   let parsed: unknown;
   try {
     parsed = JSON.parse(stdout);
@@ -91,91 +86,62 @@ async function hostIdentity(): Promise<HostIdentity> {
   };
 }
 
-interface AdbDevice {
-  serial: string;
-  model: string | null;
-}
-
-async function listPhysicalDevices(): Promise<AdbDevice[]> {
-  const { stdout } = await execCapture(adbPath(), ["devices", "-l"]);
-  const devices: AdbDevice[] = [];
-  for (const line of stdout.split("\n")) {
-    const fields = line.trim().split(/\s+/);
-    const serial = fields[0];
-    const state = fields[1];
-    if (!serial || state !== "device") continue;
-    if (serial.startsWith("emulator-")) continue;
-    const model = fields.slice(2).find((field) => field.startsWith("model:"))?.slice("model:".length) ?? null;
-    devices.push({ serial, model });
-  }
-  return devices;
-}
-
-export function normalizeModel(model: string): string {
-  return model.replace(/[^a-z0-9]/gi, "").toLowerCase();
-}
-
 /**
- * Pick "the current phone" without guessing: one physical device wins;
- * otherwise the app's Build.MODEL must uniquely match a device, else fail.
- * Pure (no adb I/O) so the disambiguation matrix is unit-testable.
+ * The routes, parameterized by the builder so tests can drive the state
+ * machine without spawning gradle. Production wires the process-wide builder.
  */
-export function pickDevice(devices: AdbDevice[], deviceModel: string | undefined): string {
-  if (devices.length === 0) throw new BridgeError("no physical device attached to adb", 409);
-  if (devices.length === 1) return devices[0]!.serial;
-  if (!deviceModel) {
-    throw new BridgeError(
-      `multiple physical devices attached (${devices.map((d) => d.serial).join(", ")}) and no device model was provided`,
-      409,
-    );
+export function createUpdateRoutes(builder: ApkBuilder): Route[] {
+  async function updateStatus(ctx: RouteContext): Promise<RouteResult> {
+    const host = await hostIdentity();
+    const installed = {
+      version: ctx.query.get("version")?.trim() ?? "",
+      commit: ctx.query.get("commit")?.trim() ?? "",
+      dirty: ctx.query.get("dirty")?.trim() === "true",
+    };
+    // Commit-based gating: semver is display-only. A dirty host tree also counts
+    // as "something new" because the app cannot represent uncommitted changes.
+    const updateAvailable = host.commit !== installed.commit || host.dirty;
+    return { status: 200, body: { ok: true, host, installed, updateAvailable } };
   }
-  const want = normalizeModel(deviceModel);
-  const matches = devices.filter((device) => device.model !== null && normalizeModel(device.model!) === want);
-  if (matches.length === 1) return matches[0]!.serial;
-  throw new BridgeError(
-    `cannot disambiguate device: ${devices.length} physical devices attached, none uniquely matches model ${deviceModel}`,
-    409,
-  );
+
+  async function apkBuild(): Promise<RouteResult> {
+    const root = await checkoutRoot();
+    const { commit, version, versionCode } = await hostIdentity();
+    builder.start(root, { commit, version, versionCode });
+    return { status: 202, body: { ok: true, build: builder.status } };
+  }
+
+  async function apkStatus(): Promise<RouteResult> {
+    return { status: 200, body: { ok: true, host: await hostIdentity(), build: builder.status } };
+  }
+
+  function apkDownload(): RouteResult {
+    const artifact = builder.readyArtifact();
+    if (artifact === null) {
+      const { state, error } = builder.status;
+      if (state === "building") throw new BridgeError("APK build still running", 409);
+      if (state === "failed") throw new BridgeError(error ?? "APK build failed", 409);
+      throw new BridgeError("no APK has been built yet", 409);
+    }
+    return {
+      status: 200,
+      body: null,
+      file: {
+        path: artifact.path,
+        size: artifact.size,
+        contentType: APK_CONTENT_TYPE,
+        filename: `scoutr-${artifact.version}.apk`,
+      },
+    };
+  }
+
+  return [
+    { method: "GET", path: "/api/update/status", handle: updateStatus },
+    { method: "POST", path: "/api/update/apk/build", handle: apkBuild },
+    { method: "GET", path: "/api/update/apk/status", handle: apkStatus },
+    { method: "GET", path: "/api/update/apk", handle: apkDownload },
+  ];
 }
 
-async function resolveDevice(deviceModel: string | undefined): Promise<string> {
-  return pickDevice(await listPhysicalDevices(), deviceModel);
-}
-
-async function startInstall(serial: string): Promise<void> {
-  const root = await checkoutRoot();
-  const child = spawn("bash", [join(root, INSTALL_SCRIPT), "--serial", serial], {
-    detached: true,
-    stdio: "ignore",
-    env: process.env,
-  });
-  // Fire-and-forget: adb install -r kills the app mid-install, so the request
-  // must complete before the install finishes. The script's own `am start`
-  // relaunches the app afterwards.
-  child.unref();
-}
-
-async function updateStatus(ctx: RouteContext): Promise<RouteResult> {
-  const host = await hostIdentity();
-  const installed = {
-    version: ctx.query.get("version")?.trim() ?? "",
-    commit: ctx.query.get("commit")?.trim() ?? "",
-    dirty: ctx.query.get("dirty")?.trim() === "true",
-  };
-  // Commit-based gating: semver is display-only. A dirty host tree also counts
-  // as "something new" because the app cannot represent uncommitted changes.
-  const updateAvailable = host.commit !== installed.commit || host.dirty;
-  return { status: 200, body: { ok: true, host, installed, updateAvailable } };
-}
-
-async function updateInstall(ctx: RouteContext): Promise<RouteResult> {
-  const deviceModel = ctx.body.deviceModel?.trim() || undefined;
-  const serial = await resolveDevice(deviceModel);
-  await startInstall(serial);
-  return { status: 202, body: { ok: true, started: true, serial } };
-}
-
-export const updateRoutes: Route[] = [
-  { method: "GET", path: "/api/update/status", handle: updateStatus },
-  { method: "POST", path: "/api/update/install", handle: updateInstall },
-];
+/** One builder per bridge process: one checkout, one gradle build at a time. */
+export const updateRoutes: Route[] = createUpdateRoutes(new ApkBuilder());

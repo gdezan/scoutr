@@ -312,8 +312,14 @@ Common workflows are also available via `make help`, including `make release`,
 `install-app.sh` installs to the only connected device automatically. With several
 ADB devices, it opens an arrow-key picker; use `--serial <serial>` (or
 `SCOUTR_SERIAL`) to select one explicitly. Install on the S24 over wireless adb
-today looks like: `adb pair 100.78.204.15:<port> <code>` then
-`scripts/install-app.sh`.
+looks like: `adb pair 100.78.204.15:<port> <code>` then `scripts/install-app.sh`.
+
+**Updating a phone does not need adb at all.** Settings → Update builds the APK
+on the host, downloads it over the tailnet, and installs it through Android's
+package installer — so a phone anywhere on the tailnet can update itself. The
+phone needs "install unknown apps" allowed for Scoutr once (the button offers
+that screen), and Android asks for confirmation on every install. adb stays the
+path for the first install on a fresh device, and for emulators.
 
 ---
 
