@@ -31,6 +31,7 @@ import dev.scoutr.app.data.AgentsResponse
 import dev.scoutr.app.data.ConnectionStore
 import dev.scoutr.app.state.BoardUiState
 import dev.scoutr.app.state.BoardViewModel
+import dev.scoutr.app.data.ScoutrApiCompatibility
 import dev.scoutr.app.net.FakeScoutrApi
 import dev.scoutr.app.ui.screens.BoardScreen
 import dev.scoutr.app.ui.theme.ScoutrTheme
@@ -243,6 +244,31 @@ class BoardScreenTest {
             }
         }
         compose.onNodeWithText("No agents running").assertIsDisplayed()
+    }
+
+    @Test
+    fun incompatibleBridgeShowsUpdateGuidanceAndSettingsAction() {
+        var openedSettings = false
+        compose.setContent {
+            ScoutrTheme {
+                BoardScreen(
+                    onResolveCompatibility = { openedSettings = true },
+                    viewModel = staticBoardViewModel(
+                        BoardUiState(
+                            apiCompatibility = ScoutrApiCompatibility.Incompatible(bridgeProtocol = 2),
+                        ),
+                    ),
+                )
+            }
+        }
+
+        compose.onNodeWithText("Scoutr app and bridge do not match").assertIsDisplayed()
+        compose.onNodeWithText("bridge protocol 2", substring = true).assertIsDisplayed()
+        compose.onNodeWithText("Disconnected from the bridge").assertDoesNotExist()
+        compose.onNodeWithText("No agents running").assertDoesNotExist()
+        compose.onNodeWithTag("board_compatibility_retry").assertIsDisplayed()
+        compose.onNodeWithTag("board_compatibility_settings").performClick()
+        assertTrue(openedSettings)
     }
 
     @Test

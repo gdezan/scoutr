@@ -158,7 +158,8 @@ pi agents, as an alternative to Moshi's paid herdr integration.
 
 - The bridge token (`scoutr_<18 random bytes>`) is stored in
   `~/.config/scoutr/config.json` (mode 0600) and on-device in
-  SharedPreferences; sent as Bearer or WS query param.
+  SharedPreferences. Current clients send it as a Bearer header; the bridge
+  still accepts a WebSocket query token from older APKs during migration.
 - ntfy topic (`scoutr_<12 random bytes>`) is a shared secret between bridge and
   app; the server listens on 127.0.0.1:8382, fronted by tailscale serve (no auth).
 - Never expose the herdr socket raw; never modify herdr-agent-state.ts /

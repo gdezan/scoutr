@@ -6,6 +6,9 @@ import dev.scoutr.app.data.SessionAction
 import dev.scoutr.app.data.AgentCard
 import dev.scoutr.app.data.BoardState
 import dev.scoutr.app.data.ConnectionStore
+import dev.scoutr.app.data.ScoutrApiCompatibility
+import dev.scoutr.app.data.classifyScoutrApiCompatibility
+import dev.scoutr.app.data.formatScoutrApiIncompatibility
 import dev.scoutr.app.net.ScoutrApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -19,6 +22,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.CancellationException
 import java.io.IOException
+import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
 
 data class BoardUiState(
@@ -27,6 +31,7 @@ data class BoardUiState(
     val isRefreshing: Boolean = false,
     val connected: Boolean = false,
     val error: String? = null,
+    val apiCompatibility: ScoutrApiCompatibility? = null,
 )
 
 class BoardViewModel(
@@ -35,12 +40,14 @@ class BoardViewModel(
     private val ntfyClient: dev.scoutr.app.net.NtfyClient? = null,
     private val onNtfyMessage: (dev.scoutr.app.data.NtfyMessage) -> Unit = {},
     initialState: BoardUiState = BoardUiState(),
+    private val pollInterval: Duration = 3.seconds,
 ) : ViewModel() {
 
     private val _ui = MutableStateFlow(initialState)
     val ui: StateFlow<BoardUiState> = _ui.asStateFlow()
 
     private val poller = Poller(viewModelScope)
+    private val connectionMutex = Mutex()
     private val loadMutex = Mutex()
     private var ntfyJob: Job? = null
 
@@ -54,32 +61,76 @@ class BoardViewModel(
 
     /** Connects to the stored (or newly saved) connection and starts the live board. */
     fun connect(host: String, token: String) {
-        if (host.isNotBlank() && token.isNotBlank()) {
-            connectionStore.save(host, token)
-        }
-        val saved = connectionStore.saved ?: run {
+        val hasCandidate = host.isNotBlank() && token.isNotBlank()
+        if (!hasCandidate && connectionStore.saved == null) {
             _ui.update { it.copy(error = "No connection configured") }
             return
         }
         viewModelScope.launch {
-            _ui.update { it.copy(loading = true, error = null) }
-            try {
-                val health = bridge.health()
+            probeConnection(
+                host = host.takeIf { hasCandidate },
+                token = token.takeIf { hasCandidate },
+                showLoading = _ui.value.apiCompatibility !is ScoutrApiCompatibility.Incompatible,
+            )
+        }
+    }
+
+    private suspend fun probeConnection(
+        host: String? = null,
+        token: String? = null,
+        showLoading: Boolean = false,
+    ) = connectionMutex.withLock {
+        if (showLoading) _ui.update { it.copy(loading = true, error = null) }
+        try {
+            val health = bridge.health(host, token)
+            val compatibility = classifyScoutrApiCompatibility(health.api)
+            if (compatibility is ScoutrApiCompatibility.Incompatible) {
+                stopPush()
                 _ui.update {
-                    it.copy(connected = health.ok && health.herdr?.connected == true, loading = false)
+                    it.copy(
+                        board = BoardState(),
+                        loading = false,
+                        connected = false,
+                        error = formatScoutrApiIncompatibility(compatibility),
+                        apiCompatibility = compatibility,
+                    )
                 }
-            } catch (c: CancellationException) {
-                throw c
-            } catch (e: Exception) {
-                _ui.update { it.copy(loading = false, connected = false, error = e.message ?: "connection failed") }
+                return@withLock
             }
-            // Restart the loops after a config change only while the board
-            // is visible: the board poll flips `connected` itself, so a transient
-            // probe failure self-heals once the bridge is reachable again,
-            // and a stop that raced this probe must not resurrect the loops.
+            val hadSavedConnection = connectionStore.saved != null
+            if (host != null && token != null) {
+                connectionStore.save(
+                    host = host,
+                    token = token,
+                    ntfyUrl = health.ntfy?.url,
+                    ntfyTopic = health.ntfy?.topic,
+                )
+            }
+            _ui.update {
+                it.copy(
+                    connected = health.ok && health.herdr?.connected == true,
+                    loading = false,
+                    error = null,
+                    apiCompatibility = ScoutrApiCompatibility.Compatible,
+                )
+            }
             if (lifecycleActive) {
-                lifecycleActive = false
-                startPolling()
+                if (!hadSavedConnection && connectionStore.saved != null) startLive()
+                startPush()
+                loadBoard()
+            }
+        } catch (c: CancellationException) {
+            throw c
+        } catch (e: Exception) {
+            _ui.update { current ->
+                val incompatible = current.apiCompatibility as? ScoutrApiCompatibility.Incompatible
+                current.copy(
+                    loading = false,
+                    connected = false,
+                    error = incompatible?.let(::formatScoutrApiIncompatibility)
+                        ?: e.message
+                        ?: "connection failed",
+                )
             }
         }
     }
@@ -93,15 +144,23 @@ class BoardViewModel(
     fun startPolling() {
         if (lifecycleActive) return
         lifecycleActive = true
-        startLive()
-        startPush()
+        if (connectionStore.saved != null) startLive()
+        if (_ui.value.apiCompatibility == ScoutrApiCompatibility.Compatible) startPush()
     }
 
     /** Stop both loops; in-flight one-shot actions are untouched. */
     fun stopPolling() {
         if (!lifecycleActive) return
         lifecycleActive = false
+        stopLiveLoops()
+    }
+
+    private fun stopLiveLoops() {
         poller.stop()
+        stopPush()
+    }
+
+    private fun stopPush() {
         ntfyJob?.cancel()
         ntfyJob = null
     }
@@ -121,7 +180,13 @@ class BoardViewModel(
         // Poll the bridge for the latest board state. A long-lived WebSocket
         // is deliberately avoided here: an abrupt server close can crash the
         // OkHttp reader, and the bridge already caches + re-snapshots anyway.
-        poller.start(3.seconds) { loadBoard() }
+        poller.start(pollInterval) {
+            if (_ui.value.apiCompatibility == ScoutrApiCompatibility.Compatible) {
+                loadBoard()
+            } else {
+                probeConnection()
+            }
+        }
     }
 
     /**
@@ -162,7 +227,7 @@ class BoardViewModel(
 
     /** Request an immediate board refresh and expose its progress to the pull gesture. */
     fun refreshBoard() {
-        if (_ui.value.isRefreshing) return
+        if (_ui.value.isRefreshing || _ui.value.apiCompatibility != ScoutrApiCompatibility.Compatible) return
         _ui.update { it.copy(isRefreshing = true) }
         viewModelScope.launch {
             try {
@@ -174,6 +239,7 @@ class BoardViewModel(
     }
 
     private suspend fun loadBoard() = loadMutex.withLock {
+        if (_ui.value.apiCompatibility != ScoutrApiCompatibility.Compatible) return@withLock
         try {
             val response = bridge.agents()
             _ui.update {
@@ -199,6 +265,15 @@ class BoardViewModel(
 
     /** Closes an agent's pane via the bridge control action (swipe-bar Close). */
     fun closeAgent(paneId: String) {
+        val incompatible = _ui.value.apiCompatibility as? ScoutrApiCompatibility.Incompatible
+        if (incompatible != null) {
+            reportError(formatScoutrApiIncompatibility(incompatible))
+            return
+        }
+        if (_ui.value.apiCompatibility != ScoutrApiCompatibility.Compatible) {
+            reportError("Checking bridge compatibility")
+            return
+        }
         viewModelScope.launch {
             try {
                 bridge.controlSession(paneId, SessionAction.Close)
@@ -209,8 +284,7 @@ class BoardViewModel(
     }
 
     override fun onCleared() {
-        poller.stop()
-        ntfyJob?.cancel()
+        stopLiveLoops()
         super.onCleared()
     }
 }

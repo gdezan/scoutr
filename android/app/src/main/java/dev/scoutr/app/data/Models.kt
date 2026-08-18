@@ -10,9 +10,17 @@ data class HealthResponse(
     val ok: Boolean,
     val service: String? = null,
     val version: String? = null,
+    val api: ScoutrApiInfo? = null,
     val herdr: HerdrInfo? = null,
     val terminal: TerminalCapabilityInfo? = null,
     val ntfy: NtfyInfo? = null,
+)
+
+/** Scoutr Android-to-bridge API metadata advertised by the health handshake. */
+@Serializable
+data class ScoutrApiInfo(
+    val protocol: Int? = null,
+    val features: List<String> = emptyList(),
 )
 
 /** The bridge's terminal capability cache entry (health surface). */

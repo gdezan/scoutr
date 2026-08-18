@@ -62,12 +62,12 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
-import androidx.compose.runtime.collectAsState
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import dev.scoutr.app.data.AgentCard
+import dev.scoutr.app.data.ScoutrApiCompatibility
 import dev.scoutr.app.state.BoardViewModel
 import dev.scoutr.app.state.NewSessionViewModel
 import dev.scoutr.app.state.ChatViewModel
@@ -197,6 +197,7 @@ private fun ScoutrAppNav(
         },
         key = "activity_board",
     )
+    val boardUi by boardViewModel.ui.collectAsState()
 
     val onTab = { route: String ->
 
@@ -209,12 +210,14 @@ private fun ScoutrAppNav(
     // A scoutr://chat/<paneId> deep link (notification tap) jumps straight to
     // the session once the nav graph is ready.
     val pendingDeepLink = deepLink.value
-    LaunchedEffect(pendingDeepLink) {
+    LaunchedEffect(pendingDeepLink, boardUi.apiCompatibility) {
         if (pendingDeepLink != null) {
-            if (container.connectionStore.saved != null) {
+            if (container.connectionStore.saved == null) {
+                deepLink.value = null
+            } else if (boardUi.apiCompatibility == ScoutrApiCompatibility.Compatible) {
                 navController.navigate(Routes.chat(pendingDeepLink.paneId, null, pendingDeepLink.status ?: "working"))
+                deepLink.value = null
             }
-            deepLink.value = null
         }
     }
 
@@ -247,7 +250,10 @@ private fun ScoutrAppNav(
             WindowInsetsSides.Horizontal + WindowInsetsSides.Top,
         ),
         bottomBar = {
-            if (currentRoute in Destination.routes) {
+            if (
+                currentRoute in Destination.routes &&
+                boardUi.apiCompatibility == ScoutrApiCompatibility.Compatible
+            ) {
                 ScoutrBottomBar(
                     currentRoute = currentRoute,
                     needsYouCount = rememberNeedsYouCount(boardViewModel),
@@ -304,15 +310,19 @@ private fun ScoutrAppNav(
                     // (§8b, §9c) — not a uniform action row on every tab.
                     title = "Board",
                     onSettings = openSettings,
-                    onTerminal = openTerminal,
+                    onTerminal = openTerminal.takeIf {
+                        boardUi.apiCompatibility == ScoutrApiCompatibility.Compatible
+                    },
                     showLockup = true,
                     floatingActionButton = {
-                        FloatingActionButton(
-                            onClick = { showNewSession = true },
-                            containerColor = MaterialTheme.colorScheme.primary,
-                            contentColor = MaterialTheme.colorScheme.onPrimary,
-                        ) {
-                            Icon(Icons.Default.Add, contentDescription = "New session")
+                        if (boardUi.apiCompatibility == ScoutrApiCompatibility.Compatible) {
+                            FloatingActionButton(
+                                onClick = { showNewSession = true },
+                                containerColor = MaterialTheme.colorScheme.primary,
+                                contentColor = MaterialTheme.colorScheme.onPrimary,
+                            ) {
+                                Icon(Icons.Default.Add, contentDescription = "New session")
+                            }
                         }
                     },
                 ) { innerBoard ->
@@ -328,6 +338,7 @@ private fun ScoutrAppNav(
                             }
                         },
                         onCloseAgent = { agent -> boardViewModel.closeAgent(agent.paneId) },
+                        onResolveCompatibility = openSettings,
                         viewModel = boardViewModel,
                         modifier = Modifier.padding(innerBoard),
                     )
@@ -668,4 +679,3 @@ private fun ScoutrTab(
         )
     }
 }
-

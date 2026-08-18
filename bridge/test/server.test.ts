@@ -72,6 +72,7 @@ describe("scoutr bridge HTTP/WS API (offline)", () => {
   let sessionRoot: string;
   let sessionPath: string;
   let configDir: string;
+  let herdr: ReturnType<typeof fakeHerdr>;
 
   before(async () => {
     // Uploads live next to the config; give the server a tmp config dir so
@@ -88,7 +89,7 @@ describe("scoutr bridge HTTP/WS API (offline)", () => {
       join(agentDir, "models-store.json"),
       JSON.stringify({ opencode: { models: [{ id: "test-model", name: "Test Model" }] } }),
     );
-    const herdr = fakeHerdr();
+    herdr = fakeHerdr();
     feed = fakeFeed();
     const usage = { all: async () => ({}) };
     sessionRoot = await mkdtemp(join(tmpdir(), "scoutr-server-catalog-"));
@@ -120,13 +121,38 @@ describe("scoutr bridge HTTP/WS API (offline)", () => {
     await server.close();
   });
 
-  test("health reports herdr connectivity through the fake", async () => {
+  test("health reports the Scoutr API protocol and herdr connectivity", async () => {
     const { status, body } = await getJson("/api/health");
     assert.equal(status, 200);
-    const health = body as { ok: boolean; herdr: { connected: boolean; version: string } };
+    const health = body as {
+      ok: boolean;
+      api: { protocol: number; features: string[] };
+      herdr: { connected: boolean; version: string };
+    };
     assert.equal(health.ok, true);
+    assert.deepEqual(health.api, {
+      protocol: 1,
+      features: ["terminal.v1", "asks.v2", "update.pull.v1"],
+    });
     assert.equal(health.herdr.connected, true);
     assert.equal(health.herdr.version, "test");
+  });
+
+  test("health still reports the Scoutr API protocol while herdr is disconnected", async () => {
+    herdr.failNext("ping", new Error("socket unavailable"));
+
+    const { status, body } = await getJson("/api/health");
+    const health = body as {
+      api: { protocol: number; features: string[] };
+      herdr: { connected: boolean };
+    };
+
+    assert.equal(status, 200);
+    assert.deepEqual(health.api, {
+      protocol: 1,
+      features: ["terminal.v1", "asks.v2", "update.pull.v1"],
+    });
+    assert.equal(health.herdr.connected, false);
   });
 
   test("snapshot is 503 until the feed has one, then returns it", async () => {

@@ -32,6 +32,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.border
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.WifiOff
+import androidx.compose.material.icons.outlined.WarningAmber
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Code
 import androidx.compose.material.icons.outlined.ContentCopy
@@ -74,6 +75,8 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.scoutr.app.data.AgentCard
 import dev.scoutr.app.data.AgentStatus
+import dev.scoutr.app.data.ScoutrApiCompatibility
+import dev.scoutr.app.data.formatScoutrApiIncompatibility
 import dev.scoutr.app.state.BoardViewModel
 import dev.scoutr.app.state.viewModelFactory
 import dev.scoutr.app.ui.components.AgentMark
@@ -104,6 +107,7 @@ fun BoardScreen(
     modifier: Modifier = Modifier,
     onReviewAgent: (AgentCard) -> Unit = {},
     onCloseAgent: (AgentCard) -> Unit = {},
+    onResolveCompatibility: () -> Unit = {},
 ) {
     val ui by viewModel.ui.collectAsState()
 
@@ -170,27 +174,94 @@ fun BoardScreen(
                 // large font scales.
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 96.dp),
             ) {
-                if (!ui.connected) {
+                val incompatible = ui.apiCompatibility as? ScoutrApiCompatibility.Incompatible
+                if (incompatible != null) {
+                    item {
+                        CompatibilityBanner(
+                            message = formatScoutrApiIncompatibility(incompatible),
+                            onRetry = { viewModel.connect("", "") },
+                            onOpenSettings = onResolveCompatibility,
+                        )
+                    }
+                } else if (!ui.connected) {
                     item { DisconnectedBanner(error = ui.error, onRetry = { viewModel.connect("", "") }) }
                 }
 
-                if (ui.board.total == 0) {
-                    item {
-                        Box(
-                            Modifier.fillMaxWidth().padding(vertical = 80.dp),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Text("No agents running", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (incompatible == null) {
+                    if (ui.board.total == 0) {
+                        item {
+                            Box(
+                                Modifier.fillMaxWidth().padding(vertical = 80.dp),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text("No agents running", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
                         }
+                    } else {
+                        boardSection("Needs you", ui.board.needsYou, onOpenAgent, reduceMotion, onReviewAgent, { pendingClose = it })
+                        boardSection("Working", ui.board.working, onOpenAgent, reduceMotion, onReviewAgent, { pendingClose = it })
+                        boardSection("Done", ui.board.done, onOpenAgent, reduceMotion, onReviewAgent, { pendingClose = it })
+                        boardSection("Idle", ui.board.idle, onOpenAgent, reduceMotion, onReviewAgent, { pendingClose = it })
+                        boardSection("Other", ui.board.unknown, onOpenAgent, reduceMotion, onReviewAgent, { pendingClose = it })
                     }
-                } else {
-                    boardSection("Needs you", ui.board.needsYou, onOpenAgent, reduceMotion, onReviewAgent, { pendingClose = it })
-                    boardSection("Working", ui.board.working, onOpenAgent, reduceMotion, onReviewAgent, { pendingClose = it })
-                    boardSection("Done", ui.board.done, onOpenAgent, reduceMotion, onReviewAgent, { pendingClose = it })
-                    boardSection("Idle", ui.board.idle, onOpenAgent, reduceMotion, onReviewAgent, { pendingClose = it })
-                    boardSection("Other", ui.board.unknown, onOpenAgent, reduceMotion, onReviewAgent, { pendingClose = it })
                 }
                 item { Spacer(Modifier.height(24.dp)) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CompatibilityBanner(
+    message: String,
+    onRetry: () -> Unit,
+    onOpenSettings: () -> Unit,
+) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.surfaceContainer, RoundedCornerShape(8.dp))
+            .border(1.dp, MaterialTheme.colorScheme.tertiary, RoundedCornerShape(8.dp))
+            .padding(12.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
+        Icon(
+            Icons.Outlined.WarningAmber,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.tertiary,
+        )
+        Spacer(Modifier.width(10.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                "Scoutr app and bridge do not match",
+                color = MaterialTheme.colorScheme.onSurface,
+                fontWeight = FontWeight.Bold,
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                message,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodySmall,
+            )
+            Row {
+                Text(
+                    "Retry",
+                    color = MaterialTheme.colorScheme.tertiary,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier
+                        .testTag("board_compatibility_retry")
+                        .clickable(onClick = onRetry)
+                        .padding(top = 8.dp, end = 16.dp, bottom = 2.dp),
+                )
+                Text(
+                    "Open Settings",
+                    color = MaterialTheme.colorScheme.tertiary,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier
+                        .testTag("board_compatibility_settings")
+                        .clickable(onClick = onOpenSettings)
+                        .padding(top = 8.dp, end = 8.dp, bottom = 2.dp),
+                )
             }
         }
     }

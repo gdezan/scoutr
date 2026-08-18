@@ -29,6 +29,19 @@ subscriptions.
 
 Verified against herdr 0.8.0 (protocol 19) and pi (node 26 / mise).
 
+### Scoutr API compatibility
+
+The Android-to-bridge contract has its own integer protocol, separate from the
+app version and Herdr's protocol. `/api/health` advertises the bridge protocol
+and additive feature names. The app accepts only its declared supported range;
+a missing or out-of-range protocol blocks feature traffic without deleting the
+saved pairing, so deploying a matching bridge and retrying can recover it.
+
+Additive optional response fields and informational feature names stay on the
+current protocol. Removing or renaming required fields, changing required
+semantics, or requiring a new command/response behavior bumps the integer in
+`bridge/src/api-protocol.ts` and the Android supported range together.
+
 ---
 
 ## 1. Host prerequisites
@@ -116,7 +129,7 @@ Verify:
 curl -s http://127.0.0.1:8737/api/health                    # -> {"ok":false,"error":"unauthorized"} (auth works)
 TOKEN=$(python3 -c "import json;print(json.load(open('$HOME/.config/scoutr/config.json'))['token'])")
 curl -s -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8737/api/health
-# {"ok":true,"service":"scoutr-bridge","herdr":{"connected":true,"version":"0.8.0","protocol":19},...}
+# {"ok":true,"service":"scoutr-bridge","api":{"protocol":1,"features":[...]},"herdr":{"connected":true,...},...}
 ```
 
 ### Claude question cards (one time)

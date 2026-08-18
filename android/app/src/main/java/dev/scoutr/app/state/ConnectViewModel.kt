@@ -3,6 +3,9 @@ package dev.scoutr.app.state
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dev.scoutr.app.data.ConnectionStore
+import dev.scoutr.app.data.ScoutrApiCompatibility
+import dev.scoutr.app.data.classifyScoutrApiCompatibility
+import dev.scoutr.app.data.formatScoutrApiIncompatibility
 import dev.scoutr.app.net.ScoutrApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -35,6 +38,14 @@ class ConnectViewModel(
             try {
                 // Probe with the form values before persisting anything.
                 val health = bridge.health(host = host, token = token)
+                val compatibility = classifyScoutrApiCompatibility(health.api)
+                if (compatibility is ScoutrApiCompatibility.Incompatible) {
+                    _state.value = Loadable.Failed(
+                        formatScoutrApiIncompatibility(compatibility),
+                        FailureKind.Server,
+                    )
+                    return@launch
+                }
                 if (health.ok && health.herdr?.connected == true) {
                     connectionStore.save(
                         host = host,

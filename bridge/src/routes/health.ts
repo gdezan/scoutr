@@ -1,4 +1,5 @@
 import type { SessionSnapshot } from "../herdr/types.js";
+import { SCOUTR_API_FEATURES, SCOUTR_API_PROTOCOL } from "../api-protocol.js";
 import type { Route, RouteContext, RouteResult } from "./types.js";
 
 export const healthRoutes: Route[] = [
@@ -25,6 +26,7 @@ async function health(ctx: RouteContext): Promise<RouteResult> {
       ok: true,
       service: "scoutr-bridge",
       version: "0.1.0",
+      api: { protocol: SCOUTR_API_PROTOCOL, features: [...SCOUTR_API_FEATURES] },
       herdr: { connected: herdrConnected, version: herdrVersion, protocol: herdrProtocol },
       terminal: { capability: terminalBroker.capability() },
       ntfy: config.ntfyUrl && config.ntfyTopic ? { url: config.ntfyUrl, topic: config.ntfyTopic } : undefined,

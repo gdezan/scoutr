@@ -12,6 +12,7 @@ import dev.scoutr.app.data.DirListingResponse
 import dev.scoutr.app.data.FileListingResponse
 import dev.scoutr.app.data.FileReadResponse
 import dev.scoutr.app.data.HealthResponse
+import dev.scoutr.app.data.ScoutrApiInfo
 import dev.scoutr.app.data.ModelsCatalogResponse
 import dev.scoutr.app.data.RepoArtifactsResponse
 import dev.scoutr.app.data.RepoDiffResponse
@@ -53,7 +54,9 @@ class FakeScoutrApi : ScoutrApi {
     val calls = mutableListOf<ApiCall>()
     val sentCommands = mutableListOf<JsonObject>()
 
-    var healthResult: Result<HealthResponse> = Result.success(HealthResponse(ok = true))
+    var healthResult: Result<HealthResponse> = Result.success(
+        HealthResponse(ok = true, api = ScoutrApiInfo(protocol = 1)),
+    )
     var agentsResult: Result<AgentsResponse> = Result.success(AgentsResponse())
     var sessionResult: Result<SessionReadResponse> = Result.success(SessionReadResponse())
     var sessionCatalogResult: Result<SessionCatalogResponse> = Result.success(SessionCatalogResponse(ok = true))

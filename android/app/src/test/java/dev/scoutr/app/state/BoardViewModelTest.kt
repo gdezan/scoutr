@@ -4,6 +4,10 @@ import android.os.Looper
 import dev.scoutr.app.data.CatalogAction
 import dev.scoutr.app.data.SessionAction
 import dev.scoutr.app.data.ConnectionStore
+import dev.scoutr.app.data.HealthResponse
+import dev.scoutr.app.data.HerdrInfo
+import dev.scoutr.app.data.ScoutrApiCompatibility
+import dev.scoutr.app.data.ScoutrApiInfo
 import dev.scoutr.app.net.BridgeException
 import dev.scoutr.app.net.FakeScoutrApi
 import kotlinx.coroutines.CompletableDeferred
@@ -17,6 +21,8 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
+import java.io.IOException
+import kotlin.time.Duration.Companion.milliseconds
 
 /** Board swipe-bar Close: posts the control action and surfaces failures. */
 @RunWith(RobolectricTestRunner::class)
@@ -37,7 +43,10 @@ class BoardViewModelTest {
         viewModel = BoardViewModel(
             bridge = fake,
             connectionStore = connectionStore,
-            initialState = BoardUiState(connected = true),
+            initialState = BoardUiState(
+                connected = true,
+                apiCompatibility = ScoutrApiCompatibility.Compatible,
+            ),
         )
         connectionStore.save("http://test-bridge", "test-token")
     }
@@ -134,6 +143,100 @@ class BoardViewModelTest {
         shadowOf(Looper.getMainLooper()).idle()
         assertEquals(BoardUiState(), viewModel.ui.value)
         assertEquals(1, fake.calls.count { it.name == "agents" })
+    }
+
+    @Test
+    fun incompatibleSavedPairingIsRetainedAndFeaturePollingIsGated() {
+        val store = ConnectionStore(RuntimeEnvironment.getApplication()).also {
+            it.clear()
+            it.save("https://saved-bridge.test", "saved-token")
+        }
+        fake.healthResult = Result.success(
+            HealthResponse(
+                ok = true,
+                api = ScoutrApiInfo(protocol = 2),
+                herdr = HerdrInfo(connected = true),
+            ),
+        )
+
+        val incompatibleViewModel = BoardViewModel(fake, store)
+        incompatibleViewModel.startPolling()
+        waitUntil { incompatibleViewModel.ui.value.apiCompatibility is ScoutrApiCompatibility.Incompatible }
+
+        assertEquals("https://saved-bridge.test", store.saved?.host)
+        assertTrue(!incompatibleViewModel.ui.value.connected)
+        assertTrue(incompatibleViewModel.ui.value.error!!.contains("bridge protocol 2"))
+        assertEquals(0, fake.calls.count { it.name == "agents" })
+
+        incompatibleViewModel.refreshBoard()
+        shadowOf(Looper.getMainLooper()).idle()
+        assertEquals("manual refresh must stay gated", 0, fake.calls.count { it.name == "agents" })
+        incompatibleViewModel.stopPolling()
+    }
+
+    @Test
+    fun supportedHealthRetryClearsIncompatibilityAndRestartsPolling() {
+        val store = ConnectionStore(RuntimeEnvironment.getApplication()).also {
+            it.clear()
+            it.save("https://saved-bridge.test", "saved-token")
+        }
+        fake.healthResult = Result.success(
+            HealthResponse(ok = true, api = ScoutrApiInfo(protocol = 2), herdr = HerdrInfo(connected = true)),
+        )
+        val recoveringViewModel = BoardViewModel(fake, store)
+        recoveringViewModel.startPolling()
+        waitUntil { recoveringViewModel.ui.value.apiCompatibility is ScoutrApiCompatibility.Incompatible }
+
+        fake.healthResult = Result.success(
+            HealthResponse(ok = true, api = ScoutrApiInfo(protocol = 1), herdr = HerdrInfo(connected = true)),
+        )
+        recoveringViewModel.connect("", "")
+
+        waitUntil {
+            recoveringViewModel.ui.value.apiCompatibility == ScoutrApiCompatibility.Compatible &&
+                fake.calls.any { it.name == "agents" }
+        }
+        assertTrue(recoveringViewModel.ui.value.connected)
+        recoveringViewModel.stopPolling()
+    }
+
+    @Test
+    fun transientInitialHealthFailureRetriesTheHandshakeBeforeFeaturePolling() {
+        val store = ConnectionStore(RuntimeEnvironment.getApplication()).also {
+            it.clear()
+            it.save("https://saved-bridge.test", "saved-token")
+        }
+        var healthCalls = 0
+        fake.onCall = { name, _ ->
+            if (name == "health") {
+                healthCalls += 1
+                if (healthCalls == 1) {
+                    Result.failure<HealthResponse>(IOException("temporarily offline"))
+                } else {
+                    Result.success(
+                        HealthResponse(
+                            ok = true,
+                            api = ScoutrApiInfo(protocol = 1),
+                            herdr = HerdrInfo(connected = true),
+                        ),
+                    )
+                }
+            } else {
+                null
+            }
+        }
+
+        val selfHealingViewModel = BoardViewModel(fake, store, pollInterval = 10.milliseconds)
+        selfHealingViewModel.startPolling()
+
+        waitUntil {
+            healthCalls >= 2 &&
+                selfHealingViewModel.ui.value.apiCompatibility == ScoutrApiCompatibility.Compatible &&
+                fake.calls.any { it.name == "agents" }
+        }
+        val firstAgentsCall = fake.calls.indexOfFirst { it.name == "agents" }
+        assertTrue(fake.calls.take(firstAgentsCall).count { it.name == "health" } >= 2)
+        selfHealingViewModel.stopPolling()
     }
 
     private fun waitUntil(condition: () -> Boolean) {
