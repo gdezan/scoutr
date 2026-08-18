@@ -41,11 +41,11 @@ class AppUpdaterTest {
         ),
     )
 
-    /** Records the file the updater would have committed to the device. */
+    /** Records the bytes the updater hands to the device installer. */
     private class RecordingInstaller : ApkInstall {
-        var installed: File? = null
+        var installedBytes: ByteArray? = null
         override suspend fun install(apk: File) {
-            installed = apk
+            installedBytes = apk.readBytes()
         }
     }
 
@@ -66,9 +66,8 @@ class AppUpdaterTest {
 
         updater(api, installer).run { stages += it }
 
-        val installed = installer.installed
-        assertTrue("the installer must receive the downloaded APK", installed != null)
-        assertArrayEqualsBytes(bytes, installed!!.readBytes())
+        assertTrue("the installer must receive the downloaded APK", installer.installedBytes != null)
+        assertArrayEqualsBytes(bytes, installer.installedBytes!!)
         assertEquals(listOf("updateBuild", "updateApkStatus", "downloadApk"), api.calls.map { it.name })
         assertTrue("must report a building stage", stages.any { it is UpdateProgress.Building })
         assertTrue("must report an installing stage", stages.last() is UpdateProgress.Installing)
@@ -85,7 +84,7 @@ class AppUpdaterTest {
 
         assertTrue("must fail with an IOException", failure is IOException)
         assertTrue("must name the checksum", failure!!.message!!.contains("checksum"))
-        assertNull("nothing may be installed", installer.installed)
+        assertNull("nothing may be installed", installer.installedBytes)
         assertTrue("the bad download must be deleted", File(cache.root, "update/scoutr-update.apk").exists().not())
     }
 
@@ -100,7 +99,7 @@ class AppUpdaterTest {
         val failure = runCatching { updater(api, installer).run {} }.exceptionOrNull()
 
         assertEquals("compileDebugKotlin FAILED", failure?.message)
-        assertNull(installer.installed)
+        assertNull(installer.installedBytes)
     }
 
     @Test
@@ -126,7 +125,7 @@ class AppUpdaterTest {
         updater(api, installer).run {}
 
         assertEquals("must poll until the build is ready", 3, polls)
-        assertTrue(installer.installed != null)
+        assertTrue(installer.installedBytes != null)
     }
 
     @Test
@@ -147,7 +146,7 @@ class AppUpdaterTest {
 
         assertTrue("must fail with an IOException", failure is IOException)
         assertTrue("must mention the timeout", failure!!.message!!.contains("did not finish"))
-        assertNull(installer.installed)
+        assertNull(installer.installedBytes)
     }
 
     private fun assertArrayEqualsBytes(expected: ByteArray, actual: ByteArray) {
