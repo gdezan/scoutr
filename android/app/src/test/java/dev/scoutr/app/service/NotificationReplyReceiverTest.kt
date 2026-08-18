@@ -14,13 +14,10 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.OkHttpClient
-import okhttp3.WebSocket
-import okhttp3.WebSocketListener
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import org.junit.After
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -37,10 +34,10 @@ import java.util.concurrent.TimeUnit
 
 /**
  * Pins the notification-shade reply chain end to end: a reply intent must
- * reach the bridge's steer WS carrying the pane id and trimmed text, and a
+ * reach the bridge's steer route carrying the pane id and trimmed text, and a
  * broken bridge must surface as a logcat warning instead of being silently
- * swallowed. The transport is a short-lived WS (steer is a WS verb), which is
- * why the server asserts on the upgraded frame — not an HTTP POST.
+ * swallowed. The receiver knows nothing about the transport — it calls
+ * ScoutrApi.steer, which is one ordinary POST.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
@@ -122,34 +119,26 @@ class NotificationReplyReceiverTest {
 
     @Test
     fun reply_routesTrimmedTextToTheSteerEndpoint() {
-        val captured = CompletableDeferred<String>()
-        server.enqueue(
-            MockResponse().withWebSocketUpgrade(object : WebSocketListener() {
-                override fun onMessage(webSocket: WebSocket, text: String) {
-                    if (!captured.isCompleted) captured.complete(text)
-                    webSocket.send("""{"type":"ack"}""")
-                    webSocket.close(1000, "test done")
-                }
-            }),
-        )
+        server.enqueue(MockResponse().setResponseCode(200).setBody("""{"ok":true}"""))
 
         val receiver = NotificationReplyReceiver()
+        val signal = CompletableDeferred<android.content.BroadcastReceiver.PendingResult>()
+        NotificationReplyReceiver.pendingResultSignal = signal
         dispatch(receiver, replyIntent("w1:p1", "  fix it now  "))
+        val result = runBlocking { withTimeout(5_000) { signal.await() } }
+        Shadows.shadowOf(result).future.get(5, TimeUnit.SECONDS)
 
-        val frame = runBlocking {
-            Json.parseToJsonElement(withTimeout(5_000) { captured.await() }).jsonObject
-        }
-        assertEquals("steer", frame["type"]!!.jsonPrimitive.content)
-        assertEquals("w1:p1", frame["target"]!!.jsonPrimitive.content)
-        assertEquals("fix it now", frame["text"]!!.jsonPrimitive.content)
-        val upgrade = server.takeRequest()
-        assertEquals("/ws", upgrade.path)
-        assertEquals("Bearer test-token", upgrade.getHeader("Authorization"))
+        val request = server.takeRequest(5, TimeUnit.SECONDS)!!
+        assertEquals("POST", request.method)
+        assertEquals("/api/sessions/w1%3Ap1/steer", request.path)
+        assertEquals("Bearer test-token", request.getHeader("Authorization"))
+        val body = Json.parseToJsonElement(request.body.readUtf8()).jsonObject
+        assertEquals("fix it now", body["text"]!!.jsonPrimitive.content)
     }
 
     @Test
     fun reply_brokenBridgeLogsWarningInsteadOfSwallowing() {
-        server.enqueue(MockResponse().setResponseCode(500)) // WS upgrade fails
+        server.enqueue(MockResponse().setResponseCode(500).setBody("""{"ok":false,"error":"herdr is down"}"""))
 
         val receiver = NotificationReplyReceiver()
         val signal = CompletableDeferred<android.content.BroadcastReceiver.PendingResult>()

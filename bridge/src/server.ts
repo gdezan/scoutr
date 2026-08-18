@@ -7,7 +7,7 @@ import { HerdrEventFeed, type FeedMessage } from "./herdr/feed.js";
 import { StatusTracker } from "./status.js";
 import { BoardDetailCache } from "./board-detail.js";
 
-import { handleCommand, type CommandMessage } from "./commands.js";
+import { handleLegacyWsCommand, type CommandMessage } from "./commands.js";
 import { RouteTable, dispatchRoute, isAuthorized } from "./routes/dispatcher.js";
 import { buildRoutes } from "./routes/index.js";
 import type { RouteDeps, RouteFile, ServerDeps } from "./routes/types.js";
@@ -23,7 +23,9 @@ import { attachTerminalSocket } from "./terminal/websocket.js";
  *   - Listens on 127.0.0.1:PORT in plain HTTP; `tailscale serve` terminates
  *     TLS and fronts it on the tailnet. All requests carry the bearer token.
  *   - GET endpoints are read-only (health, snapshot, transcript, usage).
- *   - The /ws endpoint streams feed events and accepts steering commands.
+ *   - The /ws endpoint streams feed events. One-shot session commands are
+ *     HTTP routes (`commands.http.v1`); /ws still answers the legacy command
+ *     frames for installed APKs built before that feature existed.
  *   - Routes live in bridge/src/routes/, one module per feature; this file
  *     wires each request into the route dispatcher (auth, body parsing,
  *     404, and error mapping all live there) and serializes the result.
@@ -294,6 +296,11 @@ export function createScoutrServer(deps: ServerDeps, options: CreateServerOption
 
     feed.onMessage(handleFeed);
 
+    // Inbound frames are `subscribe`/`ping` — the live feed vocabulary — plus
+    // the legacy one-shot mutation frames kept for APKs installed before
+    // `commands.http.v1`. Current app builds send mutations to the HTTP
+    // routes in routes/session-commands.ts and never open a socket for one;
+    // no new mutation verb belongs here.
     ws.on("message", (data) => {
       void (async () => {
         let command: CommandMessage;
@@ -304,13 +311,22 @@ export function createScoutrServer(deps: ServerDeps, options: CreateServerOption
           return;
         }
         try {
-          // Subscribe filters are per-connection state: merge the requested
-          // kinds into the connection's set before the (ack-only) command
-          // handler runs, so the feed forwarder below drops other kinds.
-          if (command.type === "subscribe" && Array.isArray(command.filter)) {
-            for (const kind of command.filter) filters.add(kind);
+          // The live feed vocabulary is answered here, so nothing but a legacy
+          // mutation frame ever reaches the compatibility adapter.
+          if (command.type === "ping") {
+            ws.send(JSON.stringify({ type: "pong", ts: Math.round(Date.now()) }));
+            return;
           }
-          const result = await handleCommand(command, deps);
+          if (command.type === "subscribe") {
+            // Subscribe filters are per-connection state: merge the requested
+            // kinds into this connection's set so the feed forwarder above
+            // drops every other kind.
+            const requested = Array.isArray(command.filter) ? command.filter : [];
+            for (const kind of requested) filters.add(kind);
+            ws.send(JSON.stringify({ type: "subscribed", filters: requested }));
+            return;
+          }
+          const result = await handleLegacyWsCommand(command, deps);
           ws.send(JSON.stringify(result));
         } catch (error) {
           ws.send(JSON.stringify({ type: "error", error: error instanceof Error ? error.message : String(error) }));

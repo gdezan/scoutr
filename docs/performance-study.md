@@ -42,7 +42,7 @@ Scoutr is a self-hosted native Android console for supervising herdr panes and p
 |---|---|---|---|
 | Pairing and health | `ConnectScreen`, `ConnectViewModel`, `ConnectionStore` | `/api/health`, `pairing.ts`, `config.ts` | Demand-driven HTTP |
 | Agent board and badge | `BoardScreen`, activity-scoped `BoardViewModel` | `/api/agents`, `routes/agents.ts`, `BoardDetailCache`, `StatusTracker` | 3 s HTTP polling while Board is STARTED; pull refresh |
-| Chat, questions, steering | `ChatScreen`, `ChatViewModel` | `/api/sessions?since=`, `/ws` commands, `commands.ts`, agent adapters | 2.5 s HTTP incremental polling while Chat is STARTED; pull-to-refresh for an immediate user refresh; user actions on demand |
+| Chat, questions, steering | `ChatScreen`, `ChatViewModel` | `/api/sessions?since=`, `/api/sessions/:paneId/...` command routes, `commands.ts`, agent adapters | 2.5 s HTTP incremental polling while Chat is STARTED; pull-to-refresh for an immediate user refresh; user actions on demand |
 | New sessions | `NewSessionSheet`, `NewSessionViewModel` | `POST /api/sessions`, `sessions.ts` | Demand-driven |
 | Session history | `HistoryScreen`, `SessionHistoryViewModel`, local pin/archive store | `/api/session-catalog`, `session-catalog.ts` | 8 s polling while History is STARTED; mutations on demand |
 | Provider usage | `UsageScreen`, `UsageViewModel` | `/api/usage`, `usage/providers.ts` | 10 s polling only while Usage is STARTED; bridge provider cache TTL 60 s |

@@ -6,6 +6,7 @@ import dev.scoutr.app.data.SessionAction
 import dev.scoutr.app.data.ConnectionStore
 import dev.scoutr.app.data.HealthResponse
 import dev.scoutr.app.data.HerdrInfo
+import dev.scoutr.app.data.REQUIRED_SCOUTR_API_FEATURES
 import dev.scoutr.app.data.ScoutrApiCompatibility
 import dev.scoutr.app.data.ScoutrApiInfo
 import dev.scoutr.app.net.BridgeException
@@ -188,7 +189,11 @@ class BoardViewModelTest {
         waitUntil { recoveringViewModel.ui.value.apiCompatibility is ScoutrApiCompatibility.Incompatible }
 
         fake.healthResult = Result.success(
-            HealthResponse(ok = true, api = ScoutrApiInfo(protocol = 2), herdr = HerdrInfo(connected = true)),
+            HealthResponse(
+                ok = true,
+                api = ScoutrApiInfo(protocol = 2, features = REQUIRED_SCOUTR_API_FEATURES),
+                herdr = HerdrInfo(connected = true),
+            ),
         )
         recoveringViewModel.connect("", "")
 
@@ -216,7 +221,7 @@ class BoardViewModelTest {
                     Result.success(
                         HealthResponse(
                             ok = true,
-                            api = ScoutrApiInfo(protocol = 2),
+                            api = ScoutrApiInfo(protocol = 2, features = REQUIRED_SCOUTR_API_FEATURES),
                             herdr = HerdrInfo(connected = true),
                         ),
                     )

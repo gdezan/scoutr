@@ -4,6 +4,7 @@ import type { HerdrPort } from "./herdr/port.js";
 import type { SessionSnapshot } from "./herdr/types.js";
 import type { QuestionEntry } from "./questions.js";
 import { sanitizeAnswerText } from "./questions.js";
+import { CommandError } from "./errors.js";
 
 /**
  * Answering an ask, end to end.
@@ -42,31 +43,33 @@ export async function answerAsk(deps: AnswerDeps, command: AnswerCommand): Promi
   if (!backend) {
     // Unknown agent: no questionnaire grammar to speak, so the answer is
     // typed at whatever prompt the pane is showing.
-    if (!text) throw new Error("answer_ask requires text for unknown agents");
+    if (!text) throw new CommandError("answer_ask requires text for unknown agents");
     await deps.herdr.paneSendText(paneId, text);
     await deps.herdr.paneSendKeys(paneId, ["Enter"]);
     return;
   }
 
   if (!callId) {
-    if (!text) throw new Error("answer_ask requires text or an ask");
+    if (!text) throw new CommandError("answer_ask requires text or an ask");
     await backend.answerAsk(deps.herdr, { paneId, group: [], answers: [], text });
     return;
   }
 
   const questions = await deps.readQuestions(backend, paneId);
   const group = questions.filter((candidate) => candidate.callId === callId);
-  if (group.length === 0) throw new Error(`no open ask ${callId} in this session`);
-  if (group.some((question) => question.answered)) throw new Error("ask is already answered");
+  // The ask went away (answered or escaped in the terminal) between the app
+  // showing the card and this request: a conflict with live state, not bad input.
+  if (group.length === 0) throw new CommandError(`no open ask ${callId} in this session`, 409);
+  if (group.some((question) => question.answered)) throw new CommandError("ask is already answered", 409);
 
   // The submit tab will not accept an incomplete round, so a missing answer is
   // rejected here rather than discovered as a stuck questionnaire.
   const answers = group.map((question) => {
     const answer = command.answers.find((candidate) => candidate.questionId === question.id);
-    if (!answer) throw new Error(`missing an answer for question ${question.id}`);
+    if (!answer) throw new CommandError(`missing an answer for question ${question.id}`);
     const safe = sanitizeAnswerText(answer.text);
     if (!safe && answer.selectedLabels.length === 0) {
-      throw new Error(`answer for ${question.id} has neither an option nor text`);
+      throw new CommandError(`answer for ${question.id} has neither an option nor text`);
     }
     return { questionId: question.id, text: safe, selectedLabels: answer.selectedLabels };
   });

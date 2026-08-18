@@ -5,6 +5,7 @@ import dev.scoutr.app.data.SessionAction
 import dev.scoutr.app.data.AgentKindsResponse
 import dev.scoutr.app.data.AgentsResponse
 import dev.scoutr.app.data.AttachmentResponse
+import dev.scoutr.app.data.CommandResponse
 import dev.scoutr.app.data.CommandsCatalogResponse
 import dev.scoutr.app.data.ControlResponse
 import dev.scoutr.app.data.CreatedSessionResponse
@@ -28,8 +29,6 @@ import dev.scoutr.app.data.UsageResponse
 import dev.scoutr.app.data.UpdateApkStatusResponse
 import dev.scoutr.app.data.UpdateBuildResponse
 import dev.scoutr.app.data.UpdateStatusResponse
-import dev.scoutr.app.data.WsFrame
-import kotlinx.serialization.json.JsonObject
 import java.io.File
 
 /**
@@ -85,11 +84,14 @@ interface ScoutrApi {
      */
     suspend fun snapshot(): SnapshotResponse
 
-    /** Opens a short-lived WS, sends one command, and waits for the first ack frame. */
-    suspend fun sendCommand(command: Map<String, String>): WsFrame
-    suspend fun sendCommandJson(command: JsonObject): WsFrame
-    suspend fun steer(target: String, text: String): WsFrame
-    suspend fun runSlashCommand(paneId: String, text: String): WsFrame
+    /**
+     * One-shot session commands. Each is an authenticated HTTP POST under
+     * `/api/sessions/...` (`commands.http.v1`); callers see ordinary
+     * BridgeException statuses and ordinary coroutine cancellation, and never
+     * need to know how the command reaches the pane.
+     */
+    suspend fun steer(target: String, text: String): CommandResponse
+    suspend fun runSlashCommand(paneId: String, text: String): CommandResponse
     /**
      * Answer a whole ask. The app sends intent only — which questions, which
      * option labels, what text — and the bridge drives the agent's own
@@ -102,10 +104,10 @@ interface ScoutrApi {
         callId: String = "",
         answers: List<AskAnswer> = emptyList(),
         text: String = "",
-    ): WsFrame
+    ): CommandResponse
 
     /** Cancel the ask on screen without answering it. */
-    suspend fun dismissAsk(paneId: String): WsFrame
+    suspend fun dismissAsk(paneId: String): CommandResponse
 
     /** Host vs installed build identity; updateAvailable = commit differs or the host tree is dirty. */
     suspend fun updateStatus(commit: String, version: String, dirty: Boolean): UpdateStatusResponse

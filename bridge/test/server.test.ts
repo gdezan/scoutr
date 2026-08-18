@@ -132,7 +132,7 @@ describe("scoutr bridge HTTP/WS API (offline)", () => {
     assert.equal(health.ok, true);
     assert.deepEqual(health.api, {
       protocol: 2,
-      features: ["terminal.v1", "asks.v2", "update.pull.v1", "session-model.v3"],
+      features: ["terminal.v1", "asks.v2", "update.pull.v1", "session-model.v3", "commands.http.v1"],
     });
     assert.equal(health.herdr.connected, true);
     assert.equal(health.herdr.version, "test");
@@ -150,7 +150,7 @@ describe("scoutr bridge HTTP/WS API (offline)", () => {
     assert.equal(status, 200);
     assert.deepEqual(health.api, {
       protocol: 2,
-      features: ["terminal.v1", "asks.v2", "update.pull.v1", "session-model.v3"],
+      features: ["terminal.v1", "asks.v2", "update.pull.v1", "session-model.v3", "commands.http.v1"],
     });
     assert.equal(health.herdr.connected, false);
   });

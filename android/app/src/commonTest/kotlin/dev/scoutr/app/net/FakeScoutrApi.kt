@@ -12,6 +12,7 @@ import dev.scoutr.app.data.DirListingResponse
 import dev.scoutr.app.data.FileListingResponse
 import dev.scoutr.app.data.FileReadResponse
 import dev.scoutr.app.data.HealthResponse
+import dev.scoutr.app.data.REQUIRED_SCOUTR_API_FEATURES
 import dev.scoutr.app.data.ScoutrApiInfo
 import dev.scoutr.app.data.ModelsCatalogResponse
 import dev.scoutr.app.data.RepoArtifactsResponse
@@ -29,7 +30,7 @@ import dev.scoutr.app.data.UsageResponse
 import dev.scoutr.app.data.UpdateApkStatusResponse
 import dev.scoutr.app.data.UpdateBuildResponse
 import dev.scoutr.app.data.UpdateStatusResponse
-import dev.scoutr.app.data.WsFrame
+import dev.scoutr.app.data.CommandResponse
 import kotlinx.coroutines.CompletableDeferred
 import java.io.File
 import kotlinx.serialization.json.JsonObject
@@ -43,9 +44,10 @@ data class ApiCall(val name: String, val args: Map<String, Any?> = emptyMap())
 /**
  * In-memory [ScoutrApi] for tests (unit and instrumented, via the
  * commonTest source set). Every HTTP method records itself in [calls] and
- * returns its configured [Result], defaulting to an empty success. The WS
- * surface records each sent command into [sentCommands] and returns
- * [wsResult], or throws [wsFailure] when set.
+ * returns its configured [Result], defaulting to an empty success. The one-shot
+ * session commands record the intent they were called with into
+ * [sentCommands] and return [commandResult], or throw [commandFailure] when
+ * set.
  *
  * Deliberately a plain data holder: it carries no logic of its own, so it
  * cannot drift from BridgeClient's behaviour — the real transport stays
@@ -56,7 +58,7 @@ class FakeScoutrApi : ScoutrApi {
     val sentCommands = mutableListOf<JsonObject>()
 
     var healthResult: Result<HealthResponse> = Result.success(
-        HealthResponse(ok = true, api = ScoutrApiInfo(protocol = 2)),
+        HealthResponse(ok = true, api = ScoutrApiInfo(protocol = 2, features = REQUIRED_SCOUTR_API_FEATURES)),
     )
     var agentsResult: Result<AgentsResponse> = Result.success(AgentsResponse())
     var sessionResult: Result<SessionReadResponse> = Result.success(SessionReadResponse())
@@ -86,8 +88,8 @@ class FakeScoutrApi : ScoutrApi {
     var downloadApkFailure: Exception? = null
     var terminalHierarchyResult: Result<TerminalHierarchyResponse> = Result.success(TerminalHierarchyResponse(ok = true))
 
-    var wsResult: Result<WsFrame> = Result.success(WsFrame(type = "ack"))
-    var wsFailure: Exception? = null
+    var commandResult: Result<CommandResponse> = Result.success(CommandResponse(ok = true))
+    var commandFailure: Exception? = null
 
     /**
      * Optional per-method delays (ms) applied before returning, so tests can
@@ -194,21 +196,14 @@ class FakeScoutrApi : ScoutrApi {
 
     override suspend fun snapshot(): SnapshotResponse = record("snapshot") { snapshotResult }
 
-    override suspend fun sendCommand(command: Map<String, String>): WsFrame {
-        val json = buildJsonObject { for ((k, v) in command) put(k, JsonPrimitive(v)) }
-        return send("sendCommand", json)
-    }
-
-    override suspend fun sendCommandJson(command: JsonObject): WsFrame = send("sendCommandJson", command)
-
-    override suspend fun steer(target: String, text: String): WsFrame =
+    override suspend fun steer(target: String, text: String): CommandResponse =
         send("steer", buildJsonObject {
             put("type", "steer")
             put("target", target)
             put("text", text)
         })
 
-    override suspend fun runSlashCommand(paneId: String, text: String): WsFrame =
+    override suspend fun runSlashCommand(paneId: String, text: String): CommandResponse =
         send("runSlashCommand", buildJsonObject {
             put("type", "slash_command")
             put("paneId", paneId)
@@ -220,7 +215,7 @@ class FakeScoutrApi : ScoutrApi {
         callId: String,
         answers: List<AskAnswer>,
         text: String,
-    ): WsFrame = send("answerAsk", buildJsonObject {
+    ): CommandResponse = send("answerAsk", buildJsonObject {
         put("type", "answer_ask")
         put("paneId", paneId)
         if (callId.isNotEmpty()) put("callId", callId)
@@ -248,7 +243,7 @@ class FakeScoutrApi : ScoutrApi {
         put("text", text)
     })
 
-    override suspend fun dismissAsk(paneId: String): WsFrame =
+    override suspend fun dismissAsk(paneId: String): CommandResponse =
         send("dismissAsk", buildJsonObject {
             put("type", "dismiss_ask")
             put("paneId", paneId)
@@ -272,11 +267,16 @@ class FakeScoutrApi : ScoutrApi {
         return apkBytes.size.toLong()
     }
 
-    private fun send(name: String, command: JsonObject): WsFrame {
+    /**
+     * Records one command's intent. The recorded object is this fake's own
+     * fixture shape, not a wire frame — the real request shape is pinned by
+     * BridgeClientCommandTest.
+     */
+    private fun send(name: String, command: JsonObject): CommandResponse {
         calls += ApiCall(name, mapOf("command" to command))
         sentCommands += command
-        wsFailure?.let { throw it }
-        return wsResult.getOrThrow()
+        commandFailure?.let { throw it }
+        return commandResult.getOrThrow()
     }
 
     private suspend fun <T> record(name: String, args: Map<String, Any?> = emptyMap(), result: () -> Result<T>): T {

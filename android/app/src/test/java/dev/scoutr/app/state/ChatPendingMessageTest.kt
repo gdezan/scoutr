@@ -157,18 +157,18 @@ class ChatPendingMessageTest {
     fun failedSendStaysVisibleAndCanBeRetried() = runBlocking {
         stubAgents()
         stubSession()
-        fake.wsFailure = java.io.IOException("websocket rejected")
+        fake.commandFailure = java.io.IOException("bridge rejected the steer")
         val viewModel = viewModel()
         viewModel.send("Fix it")
 
         waitUntil { viewModel.ui.value.pendingMessages.singleOrNull()?.state == MessageDeliveryState.FAILED }
         val failed = viewModel.ui.value.pendingMessages.single()
 
-        fake.wsFailure = null
+        fake.commandFailure = null
         viewModel.retryPendingMessage(failed.localId)
         // Retry puts it back in flight; it may already have been accepted.
         assertTrue(viewModel.ui.value.pendingMessages.single().state != MessageDeliveryState.FAILED)
-        // The agent records the message only once the retried WS send lands;
+        // The agent records the message only once the retried send lands;
         // the pending bubble confirms once the transcript shows the entry.
         stubSession(
             entries = listOf(

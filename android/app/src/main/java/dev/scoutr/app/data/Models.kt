@@ -137,30 +137,6 @@ data class NtfyMessage(
     val click: String? = null,
 )
 
-// ── Bridge WS DTOs ────────────────────────────────────────────────────
-
-/** Top-level frames the bridge sends on /ws: {"type":"feed"|"pong"|..., "payload":...} */
-@Serializable
-data class WsFrame(
-    val type: String,
-    val payload: FeedMessage? = null,
-    val ts: Double? = null,  // tolerant: bridge may emit fractional millis
-    val target: String? = null,
-    val paneId: String? = null,
-    val text: String? = null,
-    val error: String? = null,
-)
-
-/** A herdr feed message forwarded by the bridge (event or snapshot). */
-@Serializable
-data class FeedMessage(
-    val type: String? = null, // "snapshot" for snapshots
-    val kind: String? = null, // event kind, e.g. "pane_agent_status_changed"
-    val data: JsonObject? = null,
-    val snapshot: JsonObject? = null,
-    val resync: Boolean? = null,
-)
-
 @Serializable
 data class SessionReadResponse(
     val ok: Boolean = true,
@@ -457,6 +433,19 @@ data class SessionCatalogItem(
     val active: Boolean get() = session.active
     val status: String get() = session.status
 }
+
+/**
+ * Reply to a one-shot session command (steer, slash command, ask answer,
+ * dismiss): the bridge answers `{ ok: true, ... }` and failures arrive as a
+ * non-2xx BridgeException, so callers rarely read anything but `ok`.
+ */
+@Serializable
+data class CommandResponse(
+    val ok: Boolean = true,
+    val paneId: String? = null,
+    val callId: String? = null,
+    val text: String? = null,
+)
 
 @Serializable
 data class ControlResponse(

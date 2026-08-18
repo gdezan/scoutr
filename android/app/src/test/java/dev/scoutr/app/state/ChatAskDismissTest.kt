@@ -133,7 +133,7 @@ class ChatAskDismissTest {
     @Test
     fun aDismissTheBridgeRejectsStillClearsTheCard() {
         val vm = startedViewModel()
-        fake.wsFailure = IOException("pane is gone")
+        fake.commandFailure = IOException("pane is gone")
 
         vm.dismissAsk("call1")
         pumpUntil("the failure surfaced") { vm.ui.value.askNotice != null }

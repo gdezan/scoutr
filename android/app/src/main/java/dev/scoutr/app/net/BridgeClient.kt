@@ -6,6 +6,7 @@ import dev.scoutr.app.data.AgentKindsResponse
 import dev.scoutr.app.data.AgentsResponse
 import dev.scoutr.app.data.AttachmentResponse
 import dev.scoutr.app.data.ConnectionStore
+import dev.scoutr.app.data.CommandResponse
 import dev.scoutr.app.data.CommandsCatalogResponse
 import dev.scoutr.app.data.ControlResponse
 import dev.scoutr.app.data.CreatedSessionResponse
@@ -29,7 +30,6 @@ import dev.scoutr.app.data.UsageResponse
 import dev.scoutr.app.data.UpdateApkStatusResponse
 import dev.scoutr.app.data.UpdateBuildResponse
 import dev.scoutr.app.data.UpdateStatusResponse
-import dev.scoutr.app.data.WsFrame
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.JsonArray
@@ -42,7 +42,6 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.suspendCancellableCoroutine
-import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import okhttp3.Call
@@ -51,11 +50,8 @@ import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
-import okhttp3.WebSocket
-import okhttp3.WebSocketListener
 import java.io.File
 import java.io.IOException
-import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
@@ -68,12 +64,15 @@ import kotlin.coroutines.resumeWithException
 class BridgeException(val status: Int, reason: String) : IOException("bridge $status: $reason")
 
 /**
- * Typed client for the scoutr bridge HTTP + WebSocket API. The one
- * production [ScoutrApi] implementation.
+ * Typed HTTP client for the scoutr bridge API. The one production [ScoutrApi]
+ * implementation; every call here is a plain request/response, including the
+ * one-shot session commands. Streaming lives in its own clients
+ * ([TopologyFeedClient] for the herdr feed, [TerminalSocketClient] for
+ * /ws/terminal).
  *
  * Base URL is built from the stored connection (e.g. https://artemis.tail…ts.net:8737).
- * Every request carries the pairing token as a Bearer header, including WebSocket
- * upgrades. Pairing tokens never appear in URLs created by this client.
+ * Every request carries the pairing token as a Bearer header. Pairing tokens
+ * never appear in URLs created by this client.
  */
 class BridgeClient(
     private val okHttp: OkHttpClient,
@@ -357,124 +356,74 @@ class BridgeClient(
         call("/api/usage") { json.decodeFromString(UsageResponse.serializer(), it) }
 
     /**
-     * Opens a short-lived WS, sends one command, and waits for the first ack frame.
-     * Used for steering / answering questions where the app needs confirmation.
+     * Percent-encodes one path segment, the way the bridge's `decodeURIComponent`
+     * expects: pane ids carry a `:` and ids are not guaranteed URL-safe.
      */
-    override suspend fun sendCommand(command: Map<String, String>): WsFrame = sendCommandJson(
-        buildJsonObject { for ((k, v) in command) put(k, JsonPrimitive(v)) },
-    )
+    private fun segment(value: String): String =
+        java.net.URLEncoder.encode(value, "UTF-8").replace("+", "%20")
 
-    /** Sends one structured command and bounds the wait for its non-feed reply. */
-    override suspend fun sendCommandJson(command: JsonObject): WsFrame =
-        withTimeoutOrNull(COMMAND_ACK_TIMEOUT_MS) { exchangeCommand(command) }
-            ?: throw IOException("Bridge command timed out after $COMMAND_ACK_TIMEOUT_MS ms")
-
-    private suspend fun exchangeCommand(command: JsonObject): WsFrame = suspendCancellableCoroutine { continuation ->
-        val saved = connectionStore.saved
-        if (saved == null) {
-            continuation.resumeWithException(IOException("no connection configured"))
-            return@suspendCancellableCoroutine
-        }
-        val base = saved.host.trimEnd('/')
-        val wsUrl = base.replaceFirst("https://", "wss://").replaceFirst("http://", "ws://") + "/ws"
-        val payload = json.encodeToString(command)
-        val settled = AtomicBoolean(false)
-
-        val listener = object : WebSocketListener() {
-            override fun onOpen(webSocket: WebSocket, response: Response) {
-                webSocket.send(payload)
-            }
-
-            override fun onMessage(webSocket: WebSocket, text: String) {
-                try {
-                    val frame = json.decodeFromString(WsFrame.serializer(), text)
-                    if (frame.type == "feed") return
-                    if (settled.compareAndSet(false, true)) {
-                        if (frame.type == "error") continuation.resumeWithException(IOException(frame.error ?: "Bridge command failed"))
-                        else continuation.resume(frame)
-                        webSocket.close(1000, null)
-                    }
-                } catch (_: Exception) {
-                    // Ignore malformed frames and keep waiting for the ack.
-                }
-            }
-
-            override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                if (settled.compareAndSet(false, true)) continuation.resumeWithException(t)
-            }
-
-            override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
-                failForEarlyClose(code, reason)
-                webSocket.close(code, reason)
-            }
-
-            override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-                failForEarlyClose(code, reason)
-            }
-
-            private fun failForEarlyClose(code: Int, reason: String) {
-                if (settled.compareAndSet(false, true)) {
-                    continuation.resumeWithException(
-                        IOException("Bridge command socket closed before reply: code=$code reason=$reason"),
-                    )
-                }
-            }
+    /**
+     * One-shot session commands (`commands.http.v1`): an ordinary
+     * authenticated POST per command, so cancellation cancels the OkHttp call
+     * and a rejection arrives as BridgeException(status, bridge reason) — 400
+     * for input the bridge will not accept, 409 for an ask that no longer
+     * matches the pane. There is no WebSocket path here and no fallback to
+     * one: a bridge without the feature is refused at the health handshake
+     * (see ScoutrApiProtocol) rather than served over the legacy frames.
+     */
+    private suspend fun command(path: String, body: JsonObject): CommandResponse =
+        call(path, body = body.toString().toRequestBody("application/json".toMediaType())) {
+            json.decodeFromString(CommandResponse.serializer(), it)
         }
 
-        val ws = okHttp.newWebSocket(
-            Request.Builder()
-                .url(wsUrl)
-                .header("Authorization", "Bearer ${saved.token}")
-                .build(),
-            listener,
-        )
-        continuation.invokeOnCancellation {
-            settled.set(true)
-            ws.cancel()
-        }
-    }
+    override suspend fun steer(target: String, text: String): CommandResponse =
+        command("/api/sessions/${segment(target)}/steer", buildJsonObject { put("text", JsonPrimitive(text)) })
 
-    override suspend fun steer(target: String, text: String): WsFrame =
-        sendCommand(mapOf("type" to "steer", "target" to target, "text" to text))
-
-    override suspend fun runSlashCommand(paneId: String, text: String): WsFrame =
-        sendCommand(mapOf("type" to "slash_command", "paneId" to paneId, "text" to text))
+    override suspend fun runSlashCommand(paneId: String, text: String): CommandResponse =
+        command("/api/sessions/${segment(paneId)}/slash-command", buildJsonObject { put("text", JsonPrimitive(text)) })
 
     override suspend fun answerAsk(
         paneId: String,
         callId: String,
         answers: List<AskAnswer>,
         text: String,
-    ): WsFrame = sendCommandJson(
-        buildJsonObject {
-            put("type", "answer_ask")
-            put("paneId", paneId)
-            if (callId.isNotEmpty()) put("callId", callId)
-            if (answers.isNotEmpty()) {
-                put(
-                    "answers",
-                    JsonArray(
-                        answers.map { answer ->
-                            buildJsonObject {
-                                put("questionId", answer.questionId)
-                                put("text", answer.text)
-                                if (answer.selectedLabels.isNotEmpty()) {
-                                    put(
-                                        "selectedLabels",
-                                        JsonArray(answer.selectedLabels.map { JsonPrimitive(it) }),
-                                    )
+    ): CommandResponse {
+        // A plain blocked prompt names no ask, so it gets the ask-less route
+        // rather than an empty path segment.
+        val path = if (callId.isEmpty()) {
+            "/api/sessions/${segment(paneId)}/asks/answer"
+        } else {
+            "/api/sessions/${segment(paneId)}/asks/${segment(callId)}/answer"
+        }
+        return command(
+            path,
+            buildJsonObject {
+                if (answers.isNotEmpty()) {
+                    put(
+                        "answers",
+                        JsonArray(
+                            answers.map { answer ->
+                                buildJsonObject {
+                                    put("questionId", answer.questionId)
+                                    put("text", answer.text)
+                                    if (answer.selectedLabels.isNotEmpty()) {
+                                        put(
+                                            "selectedLabels",
+                                            JsonArray(answer.selectedLabels.map { JsonPrimitive(it) }),
+                                        )
+                                    }
                                 }
-                            }
-                        },
-                    ),
-                )
-            }
-            put("text", text)
-        },
-    )
+                            },
+                        ),
+                    )
+                }
+                put("text", text)
+            },
+        )
+    }
 
-    override suspend fun dismissAsk(paneId: String): WsFrame =
-        sendCommand(mapOf("type" to "dismiss_ask", "paneId" to paneId))
+    override suspend fun dismissAsk(paneId: String): CommandResponse =
+        command("/api/sessions/${segment(paneId)}/asks/dismiss", buildJsonObject { })
 
     override suspend fun updateStatus(commit: String, version: String, dirty: Boolean): UpdateStatusResponse =
         call("/api/update/status", query = mapOf("commit" to commit, "version" to version, "dirty" to dirty.toString())) {
@@ -527,7 +476,6 @@ class BridgeClient(
         }
 
     private companion object {
-        const val COMMAND_ACK_TIMEOUT_MS = 5_000L
         val EMPTY_JSON_BODY: RequestBody = "{}".toRequestBody("application/json".toMediaType())
         const val DOWNLOAD_BUFFER_BYTES = 64 * 1024
     }

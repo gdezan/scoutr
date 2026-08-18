@@ -5,6 +5,7 @@ import dev.scoutr.app.data.ConnectionStore
 import dev.scoutr.app.data.HealthResponse
 import dev.scoutr.app.data.HerdrInfo
 import dev.scoutr.app.data.NtfyInfo
+import dev.scoutr.app.data.REQUIRED_SCOUTR_API_FEATURES
 import dev.scoutr.app.data.ScoutrApiInfo
 import dev.scoutr.app.net.FakeScoutrApi
 import org.junit.Assert.assertEquals
@@ -73,7 +74,7 @@ class ConnectViewModelTest {
         fake.healthResult = Result.success(
             HealthResponse(
                 ok = true,
-                api = ScoutrApiInfo(protocol = 2),
+                api = ScoutrApiInfo(protocol = 2, features = REQUIRED_SCOUTR_API_FEATURES),
                 herdr = HerdrInfo(connected = true, version = "0.8.0", protocol = 19),
                 ntfy = NtfyInfo(url = "https://bridge.test/ntfy", topic = "topic"),
             ),
