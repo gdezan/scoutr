@@ -7,6 +7,7 @@ import dev.scoutr.app.data.SessionAction
 import dev.scoutr.app.data.CatalogAction
 import dev.scoutr.app.data.ConnectionStore
 import dev.scoutr.app.data.SessionCatalogItem
+import dev.scoutr.app.data.SessionKey
 import dev.scoutr.app.net.ScoutrApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -22,8 +23,8 @@ data class PaletteResult(
     val kind: PaletteResultKind,
     val title: String,
     val subtitle: String,
-    val paneId: String? = null,
-    val sessionPath: String? = null,
+    val sessionKey: SessionKey? = null,
+    val livePaneId: String? = null,
     /** Raw agent status for running agents ("working", "blocked", …). */
     val agentStatus: String? = null,
 )
@@ -43,7 +44,7 @@ data class PaletteUiState(
      */
     val searchGeneration: Int = 0,
     /** Session path currently being resumed (busy state). */
-    val busyPath: String? = null,
+    val busySessionKey: SessionKey? = null,
     /** Pane id currently being controlled (abort/close). */
     val busyPaneId: String? = null,
 )
@@ -101,7 +102,7 @@ class CommandPaletteViewModel(
         val generation = ++queryGeneration
         _ui.update { it.copy(loading = true, error = null) }
         try {
-            val agents = bridge.agents().agents.filter { matches(it.title, it.cwd, it.paneId, query = query) }
+            val agents = bridge.agents().agents.filter { matches(it.title, it.cwd, it.live?.paneId, query = query) }
             val sessions = bridge.sessionCatalog(query = query, limit = 30).sessions
             if (queryGeneration != generation) return
             _ui.update {
@@ -144,16 +145,16 @@ class CommandPaletteViewModel(
         onNavigate()
     }
 
-    fun resume(path: String) {
+    fun resume(key: SessionKey) {
         viewModelScope.launch {
-            _ui.update { it.copy(busyPath = path, error = null) }
+            _ui.update { it.copy(busySessionKey = key, error = null) }
             try {
-                bridge.sessionCatalogAction(CatalogAction.Resume, path)
-                _ui.update { it.copy(busyPath = null) }
+                bridge.sessionCatalogAction(CatalogAction.Resume, key)
+                _ui.update { it.copy(busySessionKey = null) }
             } catch (c: CancellationException) {
                 throw c
             } catch (error: Exception) {
-                _ui.update { it.copy(busyPath = null, error = error.message ?: "Resume failed") }
+                _ui.update { it.copy(busySessionKey = null, error = error.message ?: "Resume failed") }
             }
         }
     }
@@ -174,13 +175,13 @@ class CommandPaletteViewModel(
         }
     }
 
-    private fun agentResults(agents: List<dev.scoutr.app.data.AgentCard>) = agents.map { agent ->
+    private fun agentResults(agents: List<dev.scoutr.app.data.SessionDescriptor>) = agents.map { agent ->
         PaletteResult(
             kind = PaletteResultKind.Agent,
-            title = agent.title?.takeIf { it.isNotBlank() } ?: agent.agent,
-            subtitle = agent.cwd ?: agent.workspaceId,
-            paneId = agent.paneId,
-            sessionPath = agent.sessionPath,
+            title = agent.title.takeIf { it.isNotBlank() } ?: agent.agentKind,
+            subtitle = agent.cwd ?: agent.live?.workspaceId.orEmpty(),
+            sessionKey = agent.key,
+            livePaneId = agent.live?.paneId,
             agentStatus = agent.status,
         )
     }
@@ -190,8 +191,8 @@ class CommandPaletteViewModel(
             kind = PaletteResultKind.Session,
             title = session.title,
             subtitle = session.cwd,
-            paneId = session.paneId,
-            sessionPath = session.path,
+            sessionKey = session.key,
+            livePaneId = session.live?.paneId,
         )
     }
 

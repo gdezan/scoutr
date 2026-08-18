@@ -4,7 +4,7 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { deriveAgentCards } from "../src/routes/agents.js";
+import { deriveSessionDescriptors } from "../src/routes/agents.js";
 import { sessionWorkspaceRoots } from "../src/routes/review.js";
 import { snapshotPaths } from "../src/server.js";
 import type { AgentInfo, SessionSnapshot } from "../src/herdr/types.js";
@@ -37,36 +37,41 @@ function snapshotWithAgents(agents: Partial<AgentInfo>[]): SessionSnapshot {
   };
 }
 
-describe("deriveAgentCards", () => {
-  test("maps each agent to a card with status, blocked, and session path", () => {
+describe("deriveSessionDescriptors", () => {
+  test("maps each agent to a canonical descriptor and live attachment", async () => {
+    process.env.PI_CODING_AGENT_SESSION_DIR = "/sessions";
     const snapshot = snapshotWithAgents([
       { agent_status: "blocked", cwd: "/a", terminal_title: "pi: fix bug", terminal_title_stripped: "fix bug", agent_session: { kind: "path", value: "/sessions/abc.jsonl" } },
       { agent_status: "done" },
     ]);
-    const cards = deriveAgentCards(snapshot);
+    const cards = await deriveSessionDescriptors(snapshot);
     assert.equal(cards.length, 2);
     assert.deepEqual(cards[0], {
-      paneId: "p1",
-      workspaceId: "ws1",
-      tabId: "t1",
-      agent: "pi",
+      key: { agentKind: "pi", path: "/sessions/abc.jsonl" },
       agentKind: "pi",
-    displayName: "Pi",
-      capabilities: ["abort", "retry", "compact", "fork", "rename", "close", "set_model", "set_thinking"],
-      status: "blocked",
-      cwd: "/a",
+      displayName: "Pi",
       title: "pi: fix bug",
-      terminalTitle: "fix bug",
-      blocked: true,
-      sessionPath: "/sessions/abc.jsonl",
+      cwd: "/a",
+      model: null,
+      thinkingLevel: null,
+      capabilities: ["abort", "retry", "compact", "fork", "rename", "close", "set_model", "set_thinking"],
+      updatedAtMs: null,
+      latestActivity: null,
+      live: {
+        paneId: "p1",
+        workspaceId: "ws1",
+        tabId: "t1",
+        status: "blocked",
+        statusSinceMs: null,
+      },
     });
-    assert.equal(cards[1]?.status, "done");
-    assert.equal(cards[1]?.blocked, false);
+    assert.equal(cards[1]?.live?.status, "done");
+    assert.equal(cards[1]?.key, null);
   });
 
-  test("reports statusSinceMs from the statusSince callback", () => {
-    const cards = deriveAgentCards(snapshotWithAgents([{}]), () => 1234);
-    assert.equal(cards[0]?.statusSinceMs, 1234);
+  test("reports statusSinceMs only inside the live attachment", async () => {
+    const cards = await deriveSessionDescriptors(snapshotWithAgents([{}]), () => 1234);
+    assert.equal(cards[0]?.live?.statusSinceMs, 1234);
   });
 });
 

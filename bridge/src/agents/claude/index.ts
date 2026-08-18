@@ -88,7 +88,7 @@ export function claudeProjectDir(cwd: string): string {
  * matched against `~/.claude/projects/<project>/<uuid>.jsonl` filenames. When
  * the file does not exist yet (fresh session, transcript written lazily on
  * the first exchange), the deterministic path is derived from the pane's cwd
- * so live cards still carry a sessionPath.
+ * so the live descriptor can converge on its canonical session key.
  */
 export async function claudeResolveSessionPath(ref: AgentSessionInfo, cwd?: string): Promise<string | null> {
   if (ref.kind === "path") return ref.value;

@@ -79,19 +79,20 @@ describe("session catalog", () => {
         path: older,
         paneId: "pane-1",
         workspaceId: "workspace-1",
+        tabId: "tab-1",
         status: "working",
         title: "Live build investigation",
       }],
     });
 
-    assert.deepEqual(result.sessions.map((session) => session.id), ["session-new", "session-old"]);
-    assert.equal(result.sessions[0]?.title, "Release review");
-    assert.equal(result.sessions[0]?.status, "completed");
-    assert.equal(result.sessions[1]?.title, "Live build investigation");
-    assert.equal(result.sessions[1]?.active, true);
-    assert.equal(result.sessions[1]?.paneId, "pane-1");
-    assert.equal(result.sessions[1]?.model, "openai/gpt-5");
-    assert.equal(result.sessions[1]?.preview, "Investigate the flaky build");
+    assert.deepEqual(result.sessions.map((entry) => entry.session.key?.path.split("/").pop()), ["newer.jsonl", "older.jsonl"]);
+    assert.equal(result.sessions[0]?.session.title, "Release review");
+    assert.equal(result.sessions[0]?.session.live, null);
+    assert.equal(result.sessions[1]?.session.title, "Live build investigation");
+    assert.equal(result.sessions[1]?.session.live?.paneId, "pane-1");
+    assert.equal(result.sessions[1]?.session.live?.tabId, "tab-1");
+    assert.equal(result.sessions[1]?.session.model, "openai/gpt-5");
+    assert.equal(result.sessions[1]?.session.latestActivity, "Investigate the flaky build");
   });
 
   it("searches bounded metadata and reports result truncation", async () => {
@@ -112,7 +113,7 @@ describe("session catalog", () => {
     );
 
     const search = await listSessionCatalog({ roots: [root], query: "ANDROID", limit: 10 });
-    assert.deepEqual(search.sessions.map((session) => session.id), ["one"]);
+    assert.deepEqual(search.sessions.map((entry) => entry.session.key?.path.split("/").pop()), ["one.jsonl"]);
 
     const limited = await listSessionCatalog({ roots: [root], query: "navigation", limit: 1 });
     assert.equal(limited.sessions.length, 1);
@@ -149,7 +150,7 @@ describe("session catalog", () => {
 
     await renameStoredSession(path, "Release follow-up");
     const renamed = await listSessionCatalog({ roots: [root] });
-    assert.equal(renamed.sessions[0]?.title, "Release follow-up");
+    assert.equal(renamed.sessions[0]?.session.title, "Release follow-up");
 
     await deleteStoredSession(path);
     const deleted = await listSessionCatalog({ roots: [root] });
@@ -188,7 +189,7 @@ describe("session catalog", () => {
 
     const catalog = await listSessionCatalog({ roots: [piRoot, join(claudeRoot, "projects")], limit: 200 });
     assert.equal(
-      catalog.sessions.some((sess) => sess.path.endsWith("7d012817-0fb3-4810-9172-f26710238ead.jsonl")),
+      catalog.sessions.some((entry) => entry.session.key?.path.endsWith("7d012817-0fb3-4810-9172-f26710238ead.jsonl")),
       true,
       "claude root must be scanned despite the saturated pi store",
     );
@@ -232,7 +233,7 @@ describe("session catalog", () => {
     await utimes(freshFile, new Date(), new Date());
 
     const catalog = await listSessionCatalog({ roots: [piRoot, projects], limit: 10 });
-    assert.equal(catalog.sessions[0]?.id, "today", "the newest session must survive the scan budget");
+    assert.equal(catalog.sessions[0]?.session.key?.path, freshFile, "the newest session must survive the scan budget");
   });
 
   it("rejects invalid limits and queries", async () => {
@@ -253,7 +254,7 @@ describe("session catalog", () => {
     await symlink(join(root, "project", "ghost.jsonl"), join(root, "project", "dangling.jsonl"));
 
     const result = await listSessionCatalog({ roots: [root] });
-    assert.deepEqual(result.sessions.map((s) => s.id), ["good"], "a bad entry must not fail the whole listing");
+    assert.deepEqual(result.sessions.map((entry) => entry.session.title), ["good"], "a bad entry must not fail the whole listing");
   });
 
   it("skips an unreadable subdirectory instead of failing the listing", async (t) => {
@@ -274,7 +275,7 @@ describe("session catalog", () => {
     await chmod(locked, 0o000);
     try {
       const result = await listSessionCatalog({ roots: [root] });
-      assert.deepEqual(result.sessions.map((s) => s.id), ["good"], "the locked directory must be skipped");
+      assert.deepEqual(result.sessions.map((entry) => entry.session.title), ["good"], "the locked directory must be skipped");
     } finally {
       await chmod(locked, 0o755);
     }
@@ -302,7 +303,10 @@ describe("session catalog", () => {
       "2026-01-03T00:00:00.000Z",
     );
     const third = await listSessionCatalog({ roots: [root] });
-    assert.deepEqual(third.sessions.map((s) => s.id), ["two", "one"]);
+    assert.deepEqual(
+      third.sessions.map((entry) => entry.session.key?.path.split("/").pop()),
+      ["two.jsonl", "one.jsonl"],
+    );
   });
 
   it("discovers AGY sessions stored under brain/<conv-id>/.system_generated/logs/", async () => {
@@ -324,8 +328,8 @@ describe("session catalog", () => {
 
     const result = await listSessionCatalog({ roots: [join(agyBrainRoot, "brain")] });
     assert.equal(result.sessions.length, 1);
-    assert.equal(result.sessions[0]?.id, "conv-999");
-    assert.equal(result.sessions[0]?.agentKind, "agy");
-    assert.equal(result.sessions[0]?.preview, "Fix bug in AGY");
+    assert.equal(result.sessions[0]?.session.key?.agentKind, "agy");
+    assert.equal(result.sessions[0]?.session.key?.path, transcriptPath);
+    assert.equal(result.sessions[0]?.session.latestActivity, "Fix bug in AGY");
   });
 });

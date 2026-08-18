@@ -43,28 +43,27 @@ class SessionHistoryViewModelTest {
                 ok = true,
                 truncated = false,
                 sessions = listOf(
-                    SessionCatalogItem(
-                        id = "abc",
-                        path = "/root/sessions/abc.jsonl",
+                    dev.scoutr.app.data.catalogSessionFixture(
+                        key = dev.scoutr.app.data.SessionKey("pi", "/root/sessions/abc.jsonl"),
                         title = "Fix billing bug",
                         cwd = "/repo/a",
                         model = "openai-codex/gpt-5.4",
-                        updatedAt = System.currentTimeMillis().toDouble(),
-                        preview = "User asked to fix the billing math",
-                        active = true,
-                        paneId = "pane1",
-                        workspaceId = "ws1",
-                        status = "blocked",
+                        updatedAtMs = System.currentTimeMillis().toDouble(),
+                        latestActivity = "User asked to fix the billing math",
+                        live = dev.scoutr.app.data.SessionLiveAttachment(
+                            paneId = "pane1",
+                            workspaceId = "ws1",
+                            tabId = "t1",
+                            status = "blocked",
+                        ),
                     ),
-                    SessionCatalogItem(
-                        id = "def",
-                        path = "/root/sessions/def.jsonl",
+                    dev.scoutr.app.data.catalogSessionFixture(
+                        key = dev.scoutr.app.data.SessionKey("claude", "/root/sessions/def.jsonl"),
                         title = "Docs refresh",
                         cwd = "/repo/b",
                         model = "anthropic/claude-sonnet-4-6",
-                        updatedAt = (System.currentTimeMillis() - 3_600_000).toDouble(),
-                        preview = "Update the README",
-                        active = false,
+                        updatedAtMs = (System.currentTimeMillis() - 3_600_000).toDouble(),
+                        latestActivity = "Update the README",
                     ),
                 ),
             ),
@@ -79,7 +78,7 @@ class SessionHistoryViewModelTest {
 
     @Test
     fun loadsCatalogWithPinAndArchiveFlags() = runBlocking {
-        store.pinned.add("/root/sessions/abc.jsonl")
+        store.pinned.add(dev.scoutr.app.data.SessionKey("pi", "/root/sessions/abc.jsonl"))
         val connection = savedConnection()
         val viewModel = SessionHistoryViewModel(fake, connection, store)
         viewModel.waitForLoaded()
@@ -107,14 +106,30 @@ class SessionHistoryViewModelTest {
     }
 
     @Test
-    fun resumeReturnsPaneToOpen() = runBlocking {
+    fun resumeReturnsTheOriginalCanonicalKey() = runBlocking {
         val viewModel = SessionHistoryViewModel(fake, savedConnection(), store)
         viewModel.waitForLoaded()
 
         val resumed = viewModel.resume(viewModel.ui.value.items[0])
         assertNotNull(resumed)
-        assertEquals("pane9", resumed!!.paneId)
-        assertNull(viewModel.ui.value.busyPath)
+        assertEquals(dev.scoutr.app.data.SessionKey("pi", "/root/sessions/abc.jsonl"), resumed!!.key)
+        assertNull(resumed.bootstrapPaneId)
+        assertNull(viewModel.ui.value.busySessionKey)
+    }
+
+    @Test
+    fun forkUsesFreshPaneBootstrapInsteadOfReusingTheOriginalKey() = runBlocking {
+        val viewModel = SessionHistoryViewModel(fake, savedConnection(), store)
+        viewModel.waitForLoaded()
+
+        val forked = viewModel.fork(viewModel.ui.value.items[0])
+
+        assertNotNull(forked)
+        assertNull(forked!!.key)
+        assertEquals("pane9", forked.bootstrapPaneId)
+        val action = fake.calls.last { it.name == "sessionCatalogAction" }
+        assertEquals(CatalogAction.Fork, action.args["action"])
+        assertEquals(dev.scoutr.app.data.SessionKey("pi", "/root/sessions/abc.jsonl"), action.args["key"])
     }
 
     @Test
@@ -124,7 +139,7 @@ class SessionHistoryViewModelTest {
 
         val ok = viewModel.rename(viewModel.ui.value.items[0], "New title")
         assertTrue(ok)
-        assertNull(viewModel.ui.value.busyPath)
+        assertNull(viewModel.ui.value.busySessionKey)
         val rename = fake.calls.last { it.name == "sessionCatalogAction" }
         assertEquals(CatalogAction.Rename, rename.args["action"])
         assertEquals("New title", rename.args["text"])
@@ -132,15 +147,16 @@ class SessionHistoryViewModelTest {
 
     @Test
     fun deleteClearsLocalFlagsOnSuccess() = runBlocking {
-        store.pinned.add("/root/sessions/def.jsonl")
-        store.archived.add("/root/sessions/def.jsonl")
+        val key = dev.scoutr.app.data.SessionKey("claude", "/root/sessions/def.jsonl")
+        store.pinned.add(key)
+        store.archived.add(key)
         val viewModel = SessionHistoryViewModel(fake, savedConnection(), store)
         viewModel.waitForLoaded()
 
         val ok = viewModel.delete(viewModel.ui.value.items[1])
         assertTrue(ok)
-        assertFalse(store.pinned.contains("/root/sessions/def.jsonl"))
-        assertFalse(store.archived.contains("/root/sessions/def.jsonl"))
+        assertFalse(store.pinned.contains(key))
+        assertFalse(store.archived.contains(key))
     }
 
     @Test
@@ -185,16 +201,16 @@ class SessionHistoryViewModelTest {
 
 /** In-memory catalog store for tests. */
 class RecordingSessionCatalogStore : SessionCatalogStore {
-    val pinned = mutableSetOf<String>()
-    val archived = mutableSetOf<String>()
+    val pinned = mutableSetOf<dev.scoutr.app.data.SessionKey>()
+    val archived = mutableSetOf<dev.scoutr.app.data.SessionKey>()
 
-    override fun pinnedPaths(): Set<String> = pinned.toSet()
-    override fun archivedPaths(): Set<String> = archived.toSet()
-    override fun setPinned(path: String, pinned: Boolean) {
-        if (pinned) this.pinned.add(path) else this.pinned.remove(path)
+    override fun pinnedKeys(catalogKeys: Collection<dev.scoutr.app.data.SessionKey>) = pinned.toSet()
+    override fun archivedKeys(catalogKeys: Collection<dev.scoutr.app.data.SessionKey>) = archived.toSet()
+    override fun setPinned(key: dev.scoutr.app.data.SessionKey, pinned: Boolean) {
+        if (pinned) this.pinned.add(key) else this.pinned.remove(key)
     }
 
-    override fun setArchived(path: String, archived: Boolean) {
-        if (archived) this.archived.add(path) else this.archived.remove(path)
+    override fun setArchived(key: dev.scoutr.app.data.SessionKey, archived: Boolean) {
+        if (archived) this.archived.add(key) else this.archived.remove(key)
     }
 }

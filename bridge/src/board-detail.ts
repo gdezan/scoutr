@@ -17,6 +17,7 @@ export interface BoardDetail {
   /** User-assigned session name, when the transcript has one. */
   title: string | null;
   model: string | null;
+  thinkingLevel: string | null;
   /** Latest meaningful line (user/agent text or tool call). */
   latestActivity: string;
   /** Epoch ms of the entry that produced [latestActivity]. */
@@ -43,7 +44,13 @@ export class BoardDetailCache {
     // session (pi writes one `model_change` at launch), which is why some cards
     // showed no model at all. The metadata read spans both ends, so it answers
     // when the tail cannot.
-    const detail = deriveBoardDetail(transcript, info.mtimeMs, metadata?.title, metadata?.model ?? null);
+    const detail = deriveBoardDetail(
+      transcript,
+      info.mtimeMs,
+      metadata?.title,
+      metadata?.model ?? null,
+      metadata?.thinkingLevel ?? null,
+    );
     this.memo.set(path, { mtimeMs: info.mtimeMs, size: info.size, detail });
     if (this.memo.size > MEMO_CAP) {
       const oldest = this.memo.keys().next().value;
@@ -70,8 +77,10 @@ export function deriveBoardDetail(
   mtimeMs: number,
   title = transcript.title,
   fallbackModel: string | null = null,
+  fallbackThinkingLevel: string | null = null,
 ): BoardDetail {
   const model = transcript.model ?? fallbackModel;
+  const thinkingLevel = transcript.thinkingLevel ?? fallbackThinkingLevel;
   for (const entry of [...transcript.entries].reverse()) {
     // entryText's own cap is well above MAX_ACTIVITY_LENGTH, so cleanActivity
     // is what actually bounds the card line.
@@ -81,13 +90,14 @@ export function deriveBoardDetail(
     return {
       title,
       model,
+      thinkingLevel,
       latestActivity: text,
       latestActivityAtMs: Number.isFinite(at) ? at : null,
     };
   }
   // No meaningful entry in the window: fall back to the file mtime so cards
   // still show recency.
-  return { title, model, latestActivity: "", latestActivityAtMs: mtimeMs };
+  return { title, model, thinkingLevel, latestActivity: "", latestActivityAtMs: mtimeMs };
 }
 
 /** Skip control/streaming noise like bare "Enter" or single-char echoes. */
@@ -102,4 +112,3 @@ export function cleanActivity(text: string, limit = MAX_ACTIVITY_LENGTH): string
   const cleaned = text.replace(/\s+/g, " ").trim();
   return cleaned.length > limit ? `${cleaned.slice(0, limit - 1)}…` : cleaned;
 }
-

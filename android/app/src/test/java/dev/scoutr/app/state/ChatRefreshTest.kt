@@ -1,6 +1,6 @@
 package dev.scoutr.app.state
 
-import dev.scoutr.app.data.AgentCard
+import dev.scoutr.app.data.SessionDescriptor
 import dev.scoutr.app.data.AgentsResponse
 import dev.scoutr.app.data.ContentBlock
 import dev.scoutr.app.data.SessionEntry
@@ -43,14 +43,14 @@ class ChatRefreshTest {
         fake.agentsResult = Result.success(
             AgentsResponse(
                 agents = listOf(
-                    AgentCard(
+                    dev.scoutr.app.data.liveSessionFixture(
                         paneId = "w1:p1",
                         workspaceId = "w1",
                         tabId = "w1:t1",
-                        agent = "pi",
+                        agentKind = "pi",
                         status = "working",
                         cwd = "/repo",
-                        sessionPath = "/repo/sessions/s.jsonl",
+                        key = dev.scoutr.app.data.SessionKey("pi", "/repo/sessions/s.jsonl"),
                     ),
                 ),
             ),
@@ -59,7 +59,7 @@ class ChatRefreshTest {
     }
 
     private fun newViewModel(): ChatViewModel =
-        ChatViewModel(fake, "w1:p1", "/repo/sessions/s.jsonl", "working", counters)
+        ChatViewModel(fake, dev.scoutr.app.data.SessionKey("pi", "/repo/sessions/s.jsonl"), "w1:p1", "working", counters)
 
     private fun sessionReads(): Int = fake.calls.count { it.name == "session" }
     private fun agentReads(): Int = fake.calls.count { it.name == "agents" }

@@ -4,6 +4,7 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dev.scoutr.app.data.SessionAction
+import dev.scoutr.app.data.SessionKey
 import dev.scoutr.app.data.ModelInfo
 import dev.scoutr.app.data.QuestionEntry
 import dev.scoutr.app.data.ModelProvider
@@ -320,6 +321,10 @@ data class ChatUiState(
      * and clears on success, failure, or lifecycle cancellation.
      */
     val isRefreshing: Boolean = false,
+    /** Durable transcript identity; null only while a fresh launch is bootstrapping. */
+    val sessionKey: SessionKey? = null,
+    /** Current Herdr attachment; null when the canonical session is not live. */
+    val livePaneId: String? = null,
     /** Agent status from the last /api/agents poll ("working", "blocked", …). */
     val agentStatus: String = "working",
     /**
@@ -404,8 +409,8 @@ data class ChatUiState(
  */
 class ChatViewModel(
     private val bridge: ScoutrApi,
-    val paneId: String,
-    private val sessionPath: String?,
+    initialKey: SessionKey?,
+    bootstrapPaneId: String?,
     agentStatus: String = "working",
     private val performanceCounters: PerformanceCounters = PerformanceCounters(),
     private val savedState: SavedStateHandle = SavedStateHandle(),
@@ -416,6 +421,9 @@ class ChatViewModel(
     private val _ui = MutableStateFlow(
         ChatUiState(
             agentStatus = agentStatus,
+            sessionKey = initialKey,
+            livePaneId = bootstrapPaneId,
+            agentKind = initialKey?.agentKind,
             askDrafts = readSavedDrafts(),
             dismissedCallIds = readSavedDismissals(),
         ),
@@ -455,13 +463,17 @@ class ChatViewModel(
      * [inFlightRefresh], so concurrent triggers await the same read instead
      * of launching duplicate /api/agents + /api/sessions calls. stopPolling()
      * cancels the in-flight read; the pane's own lifecycle (STARTED/STOPPED)
-     * is the stale-result guard — paneId never changes for this instance.
+     * is the stale-result guard — the canonical key never changes for this instance.
      */
     private val refreshGate = Mutex()
     private var inFlightRefresh: Deferred<Boolean>? = null
 
-    /** Resolved transcript path; a fresh session's card may not report it yet. */
-    private var resolvedPath: String? = sessionPath
+    /** Durable identity after bootstrap convergence; never derived from a pane id. */
+    private var canonicalKey: SessionKey? = initialKey
+    private val bootstrapPaneId: String? = bootstrapPaneId
+
+    /** Current pane for presentation only; mutations use [livePaneIdOrThrow]. */
+    val paneId: String get() = _ui.value.livePaneId.orEmpty()
 
     private var nextMessageId = 0L
     private var commandRequestGeneration = 0L
@@ -503,7 +515,7 @@ class ChatViewModel(
     /**
      * Model catalog for the session's backend. The backend id comes from the
      * agents poll, so this no-ops until the card lands; the single-flight
-     * read re-invokes it after syncStatusAndPath() and whenever the kind
+     * read re-invokes it after syncStatusAndKey() and whenever the kind
      * changes.
      */
     suspend fun refreshConfiguration() {
@@ -703,12 +715,12 @@ class ChatViewModel(
      */
     private suspend fun readAndMerge(): Boolean {
         return try {
-            val path = syncStatusAndPath()
+            val key = syncStatusAndKey()
             refreshConfiguration()
             if (_ui.value.commands !is Loadable.Ready || System.currentTimeMillis() - lastCommandRefreshAt >= COMMAND_REFRESH_MS) {
                 refreshCommands(_ui.value.cwd)
             }
-            if (path == null) {
+            if (key == null) {
                 // No transcript path yet (fresh backend session: claude writes
                 // its JSONL only after the first exchange). That is a pending
                 // state, not an error — the composer still steers the agent
@@ -716,7 +728,7 @@ class ChatViewModel(
                 _ui.update { it.copy(transcript = Loadable.Ready(Unit), exists = false) }
                 return true
             }
-            val response = bridge.session(path, since = _ui.value.entries.lastOrNull()?.entryId)
+            val response = bridge.session(key, since = _ui.value.entries.lastOrNull()?.entryId)
             _ui.update {
                 val previouslyAnswered = it.questions
                     .filter { q -> q.answered }
@@ -763,47 +775,62 @@ class ChatViewModel(
         }
     }
 
-    /** Refresh the agent's status and session path from the board. */
-    private suspend fun syncStatusAndPath(): String? {
+    /** Resolve the current live attachment by canonical key, or by the isolated bootstrap pane. */
+    private suspend fun syncStatusAndKey(): SessionKey? {
         try {
             val agents = bridge.agents()
-            val card = agents.agents.firstOrNull { it.paneId == paneId }
-            if (card != null) {
-                resolvedPath = card.sessionPath?.takeIf { it.isNotBlank() } ?: resolvedPath
-                val cwd = card.cwd?.takeIf(String::isNotBlank)
+            val descriptor = canonicalKey?.let { key ->
+                agents.agents.firstOrNull { it.key == key }
+            } ?: agents.agents.firstOrNull { it.live?.paneId == bootstrapPaneId }
+            if (descriptor != null) {
+                if (canonicalKey == null && descriptor.key != null) canonicalKey = descriptor.key
+                val cwd = descriptor.cwd?.takeIf(String::isNotBlank)
                 val cwdChanged = cwd != _ui.value.cwd
                 _ui.update {
                     it.copy(
-                        agentStatus = card.status,
+                        sessionKey = canonicalKey,
+                        livePaneId = descriptor.live?.paneId,
+                        agentStatus = descriptor.status,
                         // An unstamped card keeps the previous stamp only while
                         // the status itself is unchanged; across a transition a
                         // stale stamp would time the wrong state, so drop it and
                         // let the indicator render without a timer.
-                        statusSinceMs = card.statusSinceMs?.toLong()
-                            ?: it.statusSinceMs.takeIf { _ -> card.status == it.agentStatus },
-                        agentKind = card.agentKind.takeIf(String::isNotBlank) ?: it.agentKind,
-                        agentDisplayName = card.displayName?.takeIf(String::isNotBlank)
-                            ?: card.agentKind?.takeIf(String::isNotBlank)
+                        statusSinceMs = descriptor.statusSinceMs?.toLong()
+                            ?: it.statusSinceMs.takeIf { _ -> descriptor.status == it.agentStatus },
+                        agentKind = descriptor.agentKind.takeIf(String::isNotBlank) ?: it.agentKind,
+                        agentDisplayName = descriptor.displayName.takeIf(String::isNotBlank)
+                            ?: descriptor.agentKind.takeIf(String::isNotBlank)
                             ?: it.agentDisplayName,
-                        capabilities = card.capabilities ?: it.capabilities,
+                        capabilities = descriptor.capabilities,
                         cwd = cwd,
-                        sessionTitle = card.title?.takeIf(String::isNotBlank)
+                        sessionTitle = descriptor.title.takeIf(String::isNotBlank)
                             ?: cwd?.substringAfterLast('/')?.takeIf(String::isNotBlank)
                             ?: it.sessionTitle,
+                        model = descriptor.model ?: it.model,
+                        thinkingLevel = descriptor.thinkingLevel ?: it.thinkingLevel,
                     )
                 }
                 if (cwdChanged) refreshCommands(cwd)
-            } else if (_ui.value.cwd != null) {
-                _ui.update { it.copy(cwd = null) }
-                refreshCommands(null)
+            } else {
+                _ui.update {
+                    it.copy(
+                        livePaneId = null,
+                        agentStatus = if (canonicalKey != null) "done" else it.agentStatus,
+                        statusSinceMs = null,
+                        commands = Loadable.Ready(emptyList()),
+                    )
+                }
             }
             } catch (c: CancellationException) {
                 throw c
             } catch (_: Exception) {
             // bridge unreachable; keep the current state
         }
-        return resolvedPath
+        return canonicalKey
     }
+
+    private fun livePaneIdOrThrow(): String =
+        _ui.value.livePaneId ?: throw IllegalStateException("This session is no longer live")
 
     /** Run a lifecycle action or select an explicit model/thinking level. */
     fun control(action: SessionAction, text: String? = null, onSuccess: () -> Unit = {}) {
@@ -828,7 +855,7 @@ class ChatViewModel(
                 )
             }
             try {
-                bridge.controlSession(paneId, action, text)
+                bridge.controlSession(livePaneIdOrThrow(), action, text)
                 _ui.update {
                     it.copy(
                         sending = false,
@@ -952,7 +979,7 @@ class ChatViewModel(
         _ui.update { it.copy(submittingCallId = callId, submitIsSlow = false, questionError = null) }
         viewModelScope.launch {
             try {
-                bridge.answerAsk(paneId, callId, answers)
+                bridge.answerAsk(livePaneIdOrThrow(), callId, answers)
             } catch (c: CancellationException) {
                 throw c
             } catch (error: Exception) {
@@ -1023,7 +1050,7 @@ class ChatViewModel(
         persistDismissals()
         viewModelScope.launch {
             try {
-                bridge.dismissAsk(paneId)
+                bridge.dismissAsk(livePaneIdOrThrow())
                 refresh(RefreshSource.AnswerReconciliation)
             } catch (c: CancellationException) {
                 throw c
@@ -1040,7 +1067,7 @@ class ChatViewModel(
      * text. There is no ask to batch, so the text goes straight through.
      */
     private suspend fun sendPromptAnswer(text: String) {
-        bridge.answerAsk(paneId, text = sanitizeAnswerText(text))
+        bridge.answerAsk(livePaneIdOrThrow(), text = sanitizeAnswerText(text))
     }
 
     fun retryPendingMessage(localId: String) {
@@ -1061,7 +1088,7 @@ class ChatViewModel(
         viewModelScope.launch {
             _ui.update { it.copy(sending = true, sendError = null) }
             try {
-                bridge.runSlashCommand(paneId, text)
+                bridge.runSlashCommand(livePaneIdOrThrow(), text)
                 _ui.update { it.copy(sending = false) }
                 delay(500)
                 refresh(RefreshSource.SlashCommandCompletion)
@@ -1083,7 +1110,7 @@ class ChatViewModel(
                 // disabled while a card is open, so the card owns that answer.
                 if (waitingForAnswer && !_ui.value.hasPendingQuestion) {
                     sendPromptAnswer(message.text)
-                } else bridge.steer(paneId, message.text)
+                } else bridge.steer(livePaneIdOrThrow(), message.text)
 
                 // The bridge accepted it, so it is no longer queued — only
                 // waiting for the transcript to echo it back.

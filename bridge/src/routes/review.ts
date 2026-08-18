@@ -126,7 +126,9 @@ async function computeReviewRoots(ctx: RouteContext): Promise<string[]> {
   let catalogCwds: string[] = [];
   try {
     const catalog = await listSessionCatalog({ roots: sessionCatalogRoots(), active: [] });
-    catalogCwds = catalog.sessions.map((s) => s.cwd).filter((cwd): cwd is string => Boolean(cwd));
+    catalogCwds = catalog.sessions
+      .map((entry) => entry.session.cwd)
+      .filter((cwd): cwd is string => Boolean(cwd));
   } catch {
     // A catalog failure must not take down review; live roots still apply.
   }

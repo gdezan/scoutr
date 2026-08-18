@@ -1,6 +1,6 @@
 package dev.scoutr.app.state
 
-import dev.scoutr.app.data.AgentCard
+import dev.scoutr.app.data.SessionDescriptor
 import dev.scoutr.app.data.AgentsResponse
 import dev.scoutr.app.net.FakeScoutrApi
 import dev.scoutr.app.state.Loadable
@@ -35,14 +35,14 @@ class ChatStatusTest {
         fake.agentsResult = Result.success(
             AgentsResponse(
                 agents = listOf(
-                    AgentCard(
+                    dev.scoutr.app.data.liveSessionFixture(
                         paneId = "w1:p1",
                         workspaceId = "w1",
                         tabId = "w1:t1",
-                        agent = "pi",
+                        agentKind = "pi",
                         status = status,
                         cwd = "/home/gdezan/Dev/agents-mobile",
-                        sessionPath = "/home/gdezan/.pi/agent/sessions/s/s.jsonl",
+                        key = dev.scoutr.app.data.SessionKey("pi", "/home/gdezan/.pi/agent/sessions/s/s.jsonl"),
                         statusSinceMs = statusSinceMs?.toDouble(),
                     ),
                 ),
@@ -69,7 +69,7 @@ class ChatStatusTest {
         // board poll lands (the real client's network hop provided that gap).
         val gate = kotlinx.coroutines.CompletableDeferred<Unit>()
         fake.gates["agents"] = gate
-        val vm = ChatViewModel(fake, "w1:p1", null, "working")
+        val vm = ChatViewModel(fake, null, "w1:p1", "working")
 
         // the nav-arg status applies until the first board poll lands
         assertFalse(vm.waitingForAnswer)
@@ -86,7 +86,7 @@ class ChatStatusTest {
         // has to survive the poll into state rather than being re-derived
         // locally (a local clock restarts at 0s on every reconnect).
         stubAgents("working", statusSinceMs = 1_700_000_000_000L)
-        val vm = ChatViewModel(fake, "w1:p1", null, "working")
+        val vm = ChatViewModel(fake, null, "w1:p1", "working")
 
         vm.awaitRefreshSettled()
         assertEquals(1_700_000_000_000L, vm.ui.value.statusSinceMs)
@@ -95,7 +95,7 @@ class ChatStatusTest {
     @Test
     fun unstampedCardLeavesTheTimerUnset() {
         stubAgents("working")
-        val vm = ChatViewModel(fake, "w1:p1", null, "working")
+        val vm = ChatViewModel(fake, null, "w1:p1", "working")
 
         vm.awaitRefreshSettled()
         // No fabricated "0s": the indicator renders its label alone.
@@ -105,7 +105,7 @@ class ChatStatusTest {
     @Test
     fun statusKeepsWorkingWhenTheBoardSaysWorking() {
         stubAgents("working")
-        val vm = ChatViewModel(fake, "w1:p1", null, "working")
+        val vm = ChatViewModel(fake, null, "w1:p1", "working")
 
         vm.awaitRefreshSettled()
         assertFalse(vm.waitingForAnswer)

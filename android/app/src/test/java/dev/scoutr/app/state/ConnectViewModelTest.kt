@@ -38,7 +38,7 @@ class ConnectViewModelTest {
         fake.healthResult = Result.success(
             HealthResponse(
                 ok = true,
-                api = ScoutrApiInfo(protocol = 2),
+                api = ScoutrApiInfo(protocol = 3),
                 herdr = HerdrInfo(connected = true),
             ),
         )
@@ -48,8 +48,8 @@ class ConnectViewModelTest {
 
         val failed = viewModel.state.value as Loadable.Failed
         assertEquals(FailureKind.Server, failed.kind)
-        assertTrue(failed.reason.contains("bridge protocol 2"))
-        assertTrue(failed.reason.contains("app supports protocol 1"))
+        assertTrue(failed.reason.contains("bridge protocol 3"))
+        assertTrue(failed.reason.contains("app supports protocol 2"))
         assertNull(store.saved)
     }
 
@@ -73,7 +73,7 @@ class ConnectViewModelTest {
         fake.healthResult = Result.success(
             HealthResponse(
                 ok = true,
-                api = ScoutrApiInfo(protocol = 1),
+                api = ScoutrApiInfo(protocol = 2),
                 herdr = HerdrInfo(connected = true, version = "0.8.0", protocol = 19),
                 ntfy = NtfyInfo(url = "https://bridge.test/ntfy", topic = "topic"),
             ),

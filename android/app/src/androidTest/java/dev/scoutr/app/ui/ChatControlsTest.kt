@@ -60,6 +60,16 @@ class ChatControlsTest {
     /** Serve entries with a thinking block + tool call so the header toggles have an observable effect. */
     @Volatile private var richEntries = false
 
+    private fun agentResponse(
+        agentKind: String = "pi",
+        displayName: String = "Pi",
+        sessionPath: String = "/tmp/session.jsonl",
+        capabilities: List<String> = listOf("abort", "retry", "compact", "fork", "rename", "close"),
+    ): String {
+        val encodedCapabilities = capabilities.joinToString(prefix = "[", postfix = "]") { "\"$it\"" }
+        return """{"ok":true,"agents":[{"key":{"agentKind":"$agentKind","path":"$sessionPath"},"agentKind":"$agentKind","displayName":"$displayName","title":"$displayName","capabilities":$encodedCapabilities,"live":{"paneId":"w1:p1","workspaceId":"w1","tabId":"t1","status":"$agentStatus"}}]}"""
+    }
+
     @Before
     fun setUp() {
         // Chat's header toggles are seeded from this device-global store, which
@@ -95,7 +105,7 @@ class ChatControlsTest {
                                 ?: """{"ok":true,"catalog":{"providers":[{"name":"openai-codex","models":[{"id":"gpt-5.4","name":"GPT-5.4","provider":"openai-codex","reasoning":true,"thinkingLevels":["off","low","high"],"contextWindow":200000},{"id":"gpt-5.3","name":"GPT-5.3","provider":"openai-codex","reasoning":true,"thinkingLevels":["off","low","high"],"contextWindow":128000},{"id":"gpt-5.2","name":"GPT-5.2","provider":"openai-codex","reasoning":true,"thinkingLevels":["off","low","high"],"contextWindow":128000},{"id":"gpt-5.1","name":"GPT-5.1","provider":"openai-codex","reasoning":true,"thinkingLevels":["off","low","high"],"contextWindow":128000},{"id":"gpt-5","name":"GPT-5","provider":"openai-codex","reasoning":true,"thinkingLevels":["off","low","high"],"contextWindow":128000}]},{"name":"anthropic","models":[{"id":"claude-sonnet-4.6","name":"Claude Sonnet 4.6","provider":"anthropic","reasoning":true,"thinkingLevels":["low","high"],"contextWindow":200000}]}]}}"""
                     path == "/api/agents" ->
                         agentCardJson
-                            ?: """{"ok":true,"agents":[{"paneId":"w1:p1","workspaceId":"w1","tabId":"t1","agent":"pi","status":"$agentStatus","sessionPath":"/tmp/session.jsonl"}]}"""
+                            ?: agentResponse()
                     path == "/api/sessions/w1:p1/control" -> {
                         controlBodies += request.body.readUtf8()
                         """{"ok":true}"""
@@ -137,7 +147,7 @@ class ChatControlsTest {
         val store = ConnectionStore(InstrumentationRegistry.getInstrumentation().targetContext)
         store.save(server.url("/").toString().trimEnd('/'), "t", null, null)
         val bridge = BridgeClient(OkHttpClient.Builder().readTimeout(5, TimeUnit.SECONDS).build(), store)
-        val vm = ChatViewModel(bridge, "w1:p1", null, "working")
+        val vm = ChatViewModel(bridge, null, "w1:p1", "working")
 
         compose.setContent {
             ChatScreen(viewModel = vm, onBack = {})
@@ -170,7 +180,7 @@ class ChatControlsTest {
         val store = ConnectionStore(InstrumentationRegistry.getInstrumentation().targetContext)
         store.save(server.url("/").toString().trimEnd('/'), "t", null, null)
         val bridge = BridgeClient(OkHttpClient.Builder().readTimeout(5, TimeUnit.SECONDS).build(), store)
-        val vm = ChatViewModel(bridge, "w1:p1", null, "working")
+        val vm = ChatViewModel(bridge, null, "w1:p1", "working")
 
         compose.setContent { ChatScreen(viewModel = vm, onBack = {}) }
         compose.waitUntil(timeoutMillis = 10_000) {
@@ -188,8 +198,7 @@ class ChatControlsTest {
             emptyList<String>() to emptyList(),
         )
         rows.forEach { (capabilities, present) ->
-            agentCardJson =
-                """{"ok":true,"agents":[{"paneId":"w1:p1","workspaceId":"w1","tabId":"t1","agent":"pi","agentKind":"pi","displayName":"Pi","capabilities":${capabilities.joinToString(prefix = "[", postfix = "]") { "\"$it\"" }},"status":"working","sessionPath":"/tmp/pi.jsonl"}]}"""
+            agentCardJson = agentResponse(sessionPath = "/tmp/pi.jsonl", capabilities = capabilities)
             // The VM polls every 2.5s; the next poll picks the new card up.
             compose.waitUntil(timeoutMillis = 10_000) { vm.ui.value.capabilities == capabilities }
 
@@ -219,7 +228,7 @@ class ChatControlsTest {
         val store = ConnectionStore(InstrumentationRegistry.getInstrumentation().targetContext)
         store.save(server.url("/").toString().trimEnd('/'), "t", null, null)
         val bridge = BridgeClient(OkHttpClient.Builder().readTimeout(5, TimeUnit.SECONDS).build(), store)
-        val vm = ChatViewModel(bridge, "w1:p1", null, "working")
+        val vm = ChatViewModel(bridge, null, "w1:p1", "working")
 
         compose.setContent {
             ChatScreen(viewModel = vm, onBack = {})
@@ -288,7 +297,7 @@ class ChatControlsTest {
         val store = ConnectionStore(InstrumentationRegistry.getInstrumentation().targetContext)
         store.save(server.url("/").toString().trimEnd('/'), "t", null, null)
         val bridge = BridgeClient(OkHttpClient.Builder().readTimeout(5, TimeUnit.SECONDS).build(), store)
-        val vm = ChatViewModel(bridge, "w1:p1", null, "working")
+        val vm = ChatViewModel(bridge, null, "w1:p1", "working")
 
         compose.setContent { ChatScreen(viewModel = vm, onBack = {}) }
 
@@ -311,7 +320,7 @@ class ChatControlsTest {
         val store = ConnectionStore(InstrumentationRegistry.getInstrumentation().targetContext)
         store.save(server.url("/").toString().trimEnd('/'), "t", null, null)
         val bridge = BridgeClient(OkHttpClient.Builder().readTimeout(5, TimeUnit.SECONDS).build(), store)
-        val vm = ChatViewModel(bridge, "w1:p1", null, "working")
+        val vm = ChatViewModel(bridge, null, "w1:p1", "working")
         val backCalls = AtomicInteger()
 
         compose.setContent { ChatScreen(viewModel = vm, onBack = { backCalls.incrementAndGet() }) }
@@ -335,7 +344,7 @@ class ChatControlsTest {
         val store = ConnectionStore(InstrumentationRegistry.getInstrumentation().targetContext)
         store.save(server.url("/").toString().trimEnd('/'), "t", null, null)
         val bridge = BridgeClient(OkHttpClient.Builder().readTimeout(5, TimeUnit.SECONDS).build(), store)
-        val vm = ChatViewModel(bridge, "w1:p1", null, "working")
+        val vm = ChatViewModel(bridge, null, "w1:p1", "working")
 
         compose.setContent { ChatScreen(viewModel = vm, onBack = {}) }
         compose.waitUntil(timeoutMillis = 10_000) {
@@ -358,7 +367,7 @@ class ChatControlsTest {
         val store = ConnectionStore(InstrumentationRegistry.getInstrumentation().targetContext)
         store.save(server.url("/").toString().trimEnd('/'), "t", null, null)
         val bridge = BridgeClient(OkHttpClient.Builder().readTimeout(5, TimeUnit.SECONDS).build(), store)
-        val vm = ChatViewModel(bridge, "w1:p1", null, "working")
+        val vm = ChatViewModel(bridge, null, "w1:p1", "working")
         compose.setContent { ChatScreen(viewModel = vm, onBack = {}) }
         compose.waitUntil(timeoutMillis = 10_000) { vm.ui.value.model != null }
         // pi sessions carry a provider/id model; the rail shows the provider
@@ -399,7 +408,7 @@ class ChatControlsTest {
         val store = ConnectionStore(InstrumentationRegistry.getInstrumentation().targetContext)
         store.save(server.url("/").toString().trimEnd('/'), "t", null, null)
         val bridge = BridgeClient(OkHttpClient.Builder().readTimeout(5, TimeUnit.SECONDS).build(), store)
-        val vm = ChatViewModel(bridge, "w1:p1", null, "working")
+        val vm = ChatViewModel(bridge, null, "w1:p1", "working")
         compose.setContent { ChatScreen(viewModel = vm, onBack = {}) }
         compose.waitUntil(10_000) { (vm.ui.value.configuration as? Loadable.Ready)?.value?.isNotEmpty() == true }
 
@@ -430,11 +439,16 @@ class ChatControlsTest {
     }
     @Test
     fun configurationSheetHidesThinkingForBackendsWithoutTheCapability() {
-        agentCardJson = """{"ok":true,"agents":[{"paneId":"w1:p1","workspaceId":"w1","tabId":"t1","agent":"legacy","agentKind":"legacy","displayName":"Legacy agent","capabilities":["abort","compact","close","set_model"],"status":"working","sessionPath":"/tmp/legacy.jsonl"}]}"""
+        agentCardJson = agentResponse(
+            agentKind = "legacy",
+            displayName = "Legacy agent",
+            sessionPath = "/tmp/legacy.jsonl",
+            capabilities = listOf("abort", "compact", "close", "set_model"),
+        )
         val store = ConnectionStore(InstrumentationRegistry.getInstrumentation().targetContext)
         store.save(server.url("/").toString().trimEnd('/'), "t", null, null)
         val bridge = BridgeClient(OkHttpClient.Builder().readTimeout(5, TimeUnit.SECONDS).build(), store)
-        val vm = ChatViewModel(bridge, "w1:p1", null, "working")
+        val vm = ChatViewModel(bridge, null, "w1:p1", "working")
 
         compose.setContent { ChatScreen(viewModel = vm, onBack = {}) }
         compose.waitUntil(timeoutMillis = 10_000) { vm.ui.value.agentKind == "legacy" }

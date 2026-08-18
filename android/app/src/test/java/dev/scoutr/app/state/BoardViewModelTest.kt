@@ -154,7 +154,7 @@ class BoardViewModelTest {
         fake.healthResult = Result.success(
             HealthResponse(
                 ok = true,
-                api = ScoutrApiInfo(protocol = 2),
+                api = ScoutrApiInfo(protocol = 3),
                 herdr = HerdrInfo(connected = true),
             ),
         )
@@ -165,7 +165,7 @@ class BoardViewModelTest {
 
         assertEquals("https://saved-bridge.test", store.saved?.host)
         assertTrue(!incompatibleViewModel.ui.value.connected)
-        assertTrue(incompatibleViewModel.ui.value.error!!.contains("bridge protocol 2"))
+        assertTrue(incompatibleViewModel.ui.value.error!!.contains("bridge protocol 3"))
         assertEquals(0, fake.calls.count { it.name == "agents" })
 
         incompatibleViewModel.refreshBoard()
@@ -181,14 +181,14 @@ class BoardViewModelTest {
             it.save("https://saved-bridge.test", "saved-token")
         }
         fake.healthResult = Result.success(
-            HealthResponse(ok = true, api = ScoutrApiInfo(protocol = 2), herdr = HerdrInfo(connected = true)),
+            HealthResponse(ok = true, api = ScoutrApiInfo(protocol = 3), herdr = HerdrInfo(connected = true)),
         )
         val recoveringViewModel = BoardViewModel(fake, store)
         recoveringViewModel.startPolling()
         waitUntil { recoveringViewModel.ui.value.apiCompatibility is ScoutrApiCompatibility.Incompatible }
 
         fake.healthResult = Result.success(
-            HealthResponse(ok = true, api = ScoutrApiInfo(protocol = 1), herdr = HerdrInfo(connected = true)),
+            HealthResponse(ok = true, api = ScoutrApiInfo(protocol = 2), herdr = HerdrInfo(connected = true)),
         )
         recoveringViewModel.connect("", "")
 
@@ -216,7 +216,7 @@ class BoardViewModelTest {
                     Result.success(
                         HealthResponse(
                             ok = true,
-                            api = ScoutrApiInfo(protocol = 1),
+                            api = ScoutrApiInfo(protocol = 2),
                             herdr = HerdrInfo(connected = true),
                         ),
                     )

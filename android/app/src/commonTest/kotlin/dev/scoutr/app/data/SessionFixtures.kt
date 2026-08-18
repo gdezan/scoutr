@@ -1,0 +1,61 @@
+package dev.scoutr.app.data
+
+/** Concise canonical session fixtures shared by JVM and instrumentation tests. */
+fun liveSessionFixture(
+    paneId: String,
+    workspaceId: String,
+    tabId: String,
+    agentKind: String = "pi",
+    status: String = "working",
+    key: SessionKey? = null,
+    cwd: String? = null,
+    title: String = agentKind,
+    displayName: String = agentKind,
+    capabilities: List<String> = emptyList(),
+    statusSinceMs: Double? = null,
+    model: String? = null,
+    latestActivity: String? = null,
+    updatedAtMs: Double? = null,
+): SessionDescriptor = SessionDescriptor(
+    key = key,
+    agentKind = agentKind,
+    displayName = displayName,
+    title = title,
+    cwd = cwd,
+    model = model,
+    capabilities = capabilities,
+    updatedAtMs = updatedAtMs,
+    latestActivity = latestActivity,
+    live = SessionLiveAttachment(
+        paneId = paneId,
+        workspaceId = workspaceId,
+        tabId = tabId,
+        status = status,
+        statusSinceMs = statusSinceMs,
+    ),
+)
+
+fun catalogSessionFixture(
+    key: SessionKey,
+    title: String,
+    cwd: String,
+    updatedAtMs: Double,
+    model: String? = null,
+    latestActivity: String? = null,
+    live: SessionLiveAttachment? = null,
+    createdAtMs: Double = 0.0,
+): SessionCatalogItem = SessionCatalogItem(
+    session = SessionDescriptor(
+        key = key,
+        agentKind = key.agentKind,
+        displayName = key.agentKind,
+        title = title,
+        cwd = cwd,
+        model = model,
+        capabilities = emptyList(),
+        updatedAtMs = updatedAtMs,
+        latestActivity = latestActivity,
+        live = live,
+    ),
+    createdAtMs = createdAtMs,
+)

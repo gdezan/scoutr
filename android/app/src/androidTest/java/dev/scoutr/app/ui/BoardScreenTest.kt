@@ -25,7 +25,7 @@ import android.content.ClipboardManager
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.unit.dp
-import dev.scoutr.app.data.AgentCard
+import dev.scoutr.app.data.SessionDescriptor
 import dev.scoutr.app.data.BoardState
 import dev.scoutr.app.data.AgentsResponse
 import dev.scoutr.app.data.ConnectionStore
@@ -133,19 +133,19 @@ class BoardScreenTest {
         cwd: String,
         model: String?,
         activity: String?,
-    ) = AgentCard(
+    ) = dev.scoutr.app.data.liveSessionFixture(
         paneId = paneId,
         workspaceId = "ws_$paneId",
         tabId = "tab_$paneId",
-        agent = "pi",
+        agentKind = "pi",
         status = "blocked",
         cwd = cwd,
         title = title,
-        sessionPath = "/sessions/$paneId.jsonl",
+        key = dev.scoutr.app.data.SessionKey("pi", "/sessions/$paneId.jsonl"),
         statusSinceMs = (System.currentTimeMillis() - 90_000).toDouble(),
         model = model,
         latestActivity = activity,
-        latestActivityAtMs = (System.currentTimeMillis() - 30_000).toDouble(),
+        updatedAtMs = (System.currentTimeMillis() - 30_000).toDouble(),
     )
 
     private fun workingAgent(
@@ -154,7 +154,9 @@ class BoardScreenTest {
         cwd: String,
         model: String?,
         activity: String?,
-    ) = blockedAgent(paneId, title, cwd, model, activity).copy(status = "working")
+    ) = blockedAgent(paneId, title, cwd, model, activity).let { descriptor ->
+        descriptor.copy(live = descriptor.live?.copy(status = "working"))
+    }
 
     @Test
     fun cardsShowPhaseSectionModelActivityAndTime() {
@@ -192,7 +194,7 @@ class BoardScreenTest {
             ScoutrTheme {
                 BoardScreen(
                     onReviewAgent = { reviewed = true },
-                    onCloseAgent = { closed = it.paneId },
+                    onCloseAgent = { closed = it.live?.paneId },
                     viewModel = staticBoardViewModel(
                         BoardUiState(
                             board = BoardState.group(listOf(blockedAgent("p1", "Fix billing bug", "/repo/a", "openai-codex/gpt-5.4", "Found it"))),
@@ -278,7 +280,7 @@ class BoardScreenTest {
         compose.setContent {
             ScoutrTheme {
                 BoardScreen(
-                    onOpenAgent = { opened = it.paneId },
+                    onOpenAgent = { opened = it.live?.paneId },
                     onReviewAgent = { reviewedCwd = it.cwd },
                     viewModel = staticBoardViewModel(
                         BoardUiState(
@@ -303,7 +305,7 @@ class BoardScreenTest {
         compose.setContent {
             ScoutrTheme {
                 BoardScreen(
-                    onOpenAgent = { opened = it.paneId },
+                    onOpenAgent = { opened = it.live?.paneId },
                     viewModel = staticBoardViewModel(
                         BoardUiState(
                             board = BoardState.group(listOf(blockedAgent("p1", "Fix billing bug", "/repo/a", "openai-codex/gpt-5.4", "Found it"))),
@@ -330,7 +332,7 @@ class BoardScreenTest {
         compose.setContent {
             ScoutrTheme {
                 BoardScreen(
-                    onCloseAgent = { closed = it.paneId },
+                    onCloseAgent = { closed = it.live?.paneId },
                     viewModel = staticBoardViewModel(
                         BoardUiState(
                             board = BoardState.group(listOf(blockedAgent("p1", "Fix billing bug", "/repo/a", "openai-codex/gpt-5.4", "Found it"))),
@@ -358,7 +360,7 @@ class BoardScreenTest {
         compose.setContent {
             ScoutrTheme {
                 BoardScreen(
-                    onCloseAgent = { closed = it.paneId },
+                    onCloseAgent = { closed = it.live?.paneId },
                     viewModel = staticBoardViewModel(
                         BoardUiState(
                             board = BoardState.group(listOf(blockedAgent("p1", "Fix billing bug", "/repo/a", "openai-codex/gpt-5.4", "Found it"))),

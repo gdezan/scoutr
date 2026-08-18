@@ -9,6 +9,7 @@ import type { TerminalLauncher } from "../terminal/types.js";
 import type { TerminalSessionBroker } from "../terminal/broker.js";
 import type { TerminalConnectionOptions } from "../terminal/websocket.js";
 import type { BridgeMetrics } from "../metrics.js";
+import type { SessionKey } from "../session-model.js";
 
 /** JSON body of a POST request, after parsing and object validation. */
 export interface JsonBody {
@@ -21,6 +22,7 @@ export interface JsonBody {
   action?: string;
   text?: string;
   path?: string;
+  key?: SessionKey;
 }
 
 /** Everything the HTTP + WS layers need beyond the caller-provided wiring. */

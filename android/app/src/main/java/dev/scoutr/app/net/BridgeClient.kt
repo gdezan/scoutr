@@ -20,6 +20,7 @@ import dev.scoutr.app.data.RepoFileDiffResponse
 import dev.scoutr.app.data.RepoFileResponse
 import dev.scoutr.app.data.RepoOverviewResponse
 import dev.scoutr.app.data.SessionCatalogResponse
+import dev.scoutr.app.data.SessionKey
 import dev.scoutr.app.data.SessionReadResponse
 import dev.scoutr.app.data.SnapshotResponse
 import dev.scoutr.app.data.TerminalHierarchyCommand
@@ -276,12 +277,12 @@ class BridgeClient(
     /** Resume/fork/rename/delete a stored session. Resume returns pane+workspace ids. */
     override suspend fun sessionCatalogAction(
         action: CatalogAction,
-        path: String,
+        key: SessionKey,
         text: String?,
     ): CreatedSessionResponse = call(
         "/api/session-catalog/${action.wire}",
         body = buildJsonObject {
-            put("path", JsonPrimitive(path))
+            put("key", json.encodeToJsonElement(SessionKey.serializer(), key))
             if (text != null) put("text", JsonPrimitive(text))
         }.toString().toRequestBody("application/json".toMediaType()),
     ) { json.decodeFromString(CreatedSessionResponse.serializer(), it) }
@@ -345,9 +346,10 @@ class BridgeClient(
     override suspend fun agents(): AgentsResponse =
         call("/api/agents") { json.decodeFromString(AgentsResponse.serializer(), it) }
 
-    override suspend fun session(path: String, since: String?): SessionReadResponse =
+    override suspend fun session(key: SessionKey, since: String?): SessionReadResponse =
         call("/api/sessions", query = buildMap {
-            put("path", path)
+            put("agentKind", key.agentKind)
+            put("path", key.path)
             if (since != null) put("since", since)
         }) { json.decodeFromString(SessionReadResponse.serializer(), it) }
 

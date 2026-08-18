@@ -8,11 +8,11 @@ import org.junit.Test
 
 class ModelsTest {
 
-    private fun card(status: String, paneId: String = "w1:p1") = AgentCard(
+    private fun card(status: String, paneId: String = "w1:p1") = dev.scoutr.app.data.liveSessionFixture(
         paneId = paneId,
         workspaceId = "w1",
         tabId = "w1:t1",
-        agent = "pi",
+        agentKind = "pi",
         status = status,
         cwd = "/tmp/x",
     )
@@ -34,7 +34,7 @@ class ModelsTest {
         assertEquals(1, board.idle.size)
         assertEquals(1, board.unknown.size)
         assertEquals(5, board.total)
-        assertEquals("a", board.needsYou[0].paneId)
+        assertEquals("a", board.needsYou[0].live?.paneId)
     }
 
     @Test
@@ -71,35 +71,34 @@ class ModelsTest {
     }
     @Test
     fun `session catalog item decodes from the bridge shape`() {
-        // Regression: the DTO once expected `sessionId` while the bridge sends
-        // `id`, so every catalog response silently failed to decode and the
-        // Sessions screen stayed empty. Pin the real wire shape.
         val json = """
-            {"id":"019f-abc","path":"/home/u/.pi/agent/sessions/--tmp--/x.jsonl",
-             "cwd":"/tmp","title":"Reply with a demo",
-             "preview":"Reply with a demo","createdAt":1786392951904,
-             "updatedAt":1786392956741.0754,"model":"opencode-go/deepseek-v4-flash",
-             "active":false,"paneId":null,"workspaceId":null,"status":"completed"}
+            {"session":{"key":{"agentKind":"pi","path":"/home/u/.pi/agent/sessions/--tmp--/x.jsonl"},
+             "agentKind":"pi","displayName":"Pi","title":"Reply with a demo","cwd":"/tmp",
+             "model":"opencode-go/deepseek-v4-flash","thinkingLevel":null,"capabilities":[],
+             "updatedAtMs":1786392956741.0754,"latestActivity":"Reply with a demo","live":null},
+             "createdAtMs":1786392951904}
         """.trimIndent()
         val item = Json.decodeFromString(SessionCatalogItem.serializer(), json)
-        assertEquals("019f-abc", item.id)
+        assertEquals("x", item.id)
         assertEquals("/tmp", item.cwd)
         assertFalse(item.active)
-        assertEquals("completed", item.status)
+        assertEquals("done", item.status)
     }
 
     @Test
     fun `session catalog response decodes a full payload`() {
         val json = """
             {"ok":true,"truncated":false,"sessions":[
-              {"id":"a","path":"/p/a.jsonl","cwd":"/a","title":"t","preview":"",
-               "createdAt":1,"updatedAt":2.5,"model":null,"active":true,
-               "paneId":"w1:p1","workspaceId":"w1","status":"working"}
+              {"session":{"key":{"agentKind":"pi","path":"/p/a.jsonl"},"agentKind":"pi",
+               "displayName":"Pi","title":"t","cwd":"/a","model":null,"thinkingLevel":null,
+               "capabilities":[],"updatedAtMs":2.5,"latestActivity":null,
+               "live":{"paneId":"w1:p1","workspaceId":"w1","tabId":"w1:t1","status":"working","statusSinceMs":null}},
+               "createdAtMs":1}
             ]}
         """.trimIndent()
         val response = Json.decodeFromString(SessionCatalogResponse.serializer(), json)
         assertEquals(1, response.sessions.size)
         assertTrue(response.sessions[0].active)
-        assertEquals("w1:p1", response.sessions[0].paneId)
+        assertEquals("w1:p1", response.sessions[0].session.live?.paneId)
     }
 }

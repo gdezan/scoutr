@@ -7,6 +7,7 @@ import dev.scoutr.app.data.CatalogAction
 import dev.scoutr.app.data.ConnectionStore
 import dev.scoutr.app.data.SessionCatalogItem
 import dev.scoutr.app.data.SessionCatalogStore
+import dev.scoutr.app.data.SessionKey
 import dev.scoutr.app.net.ScoutrApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -37,15 +38,16 @@ data class HistoryUiState(
     val connected: Boolean = false,
     val error: String? = null,
     val truncated: Boolean = false,
-    /** Path currently running a catalog mutation (row shows progress). */
-    val busyPath: String? = null,
+    /** Canonical session currently running a catalog mutation (row shows progress). */
+    val busySessionKey: SessionKey? = null,
     /** Human label of the mutation in flight, e.g. "Deleting…". */
     val busyLabel: String? = null,
 )
 
 /** Result of a resume/fork: enough to open the chat route. */
 data class ResumedSession(
-    val paneId: String,
+    val key: SessionKey? = null,
+    val bootstrapPaneId: String? = null,
     val workspaceId: String? = null,
 )
 
@@ -100,15 +102,16 @@ class SessionHistoryViewModel(
         _ui.update { it.copy(loading = true, error = null) }
         try {
             val response = bridge.sessionCatalog(query = query.ifBlank { null }, limit = 200)
-            val pinned = store.pinnedPaths()
-            val archived = store.archivedPaths()
+            val catalogKeys = response.sessions.map { it.key }
+            val pinned = store.pinnedKeys(catalogKeys)
+            val archived = store.archivedKeys(catalogKeys)
             _ui.update {
                 it.copy(
                     items = response.sessions.map { session ->
                         HistoryItem(
                             session = session,
-                            pinned = session.path in pinned,
-                            archived = session.path in archived,
+                            pinned = session.key in pinned,
+                            archived = session.key in archived,
                         )
                     },
                     loading = false,
@@ -127,23 +130,23 @@ class SessionHistoryViewModel(
     }
 
     fun togglePin(item: HistoryItem) {
-        store.setPinned(item.session.path, !item.pinned)
-        refreshFlags(item.session.path)
+        store.setPinned(item.session.key, !item.pinned)
+        refreshFlags()
     }
 
     fun toggleArchive(item: HistoryItem) {
-        store.setArchived(item.session.path, !item.archived)
-        refreshFlags(item.session.path)
+        store.setArchived(item.session.key, !item.archived)
+        refreshFlags()
     }
 
-    private fun refreshFlags(path: String) {
-        val pinned = store.pinnedPaths()
-        val archived = store.archivedPaths()
+    private fun refreshFlags() {
+        val catalogKeys = _ui.value.items.map { it.session.key }
+        val pinned = store.pinnedKeys(catalogKeys)
+        val archived = store.archivedKeys(catalogKeys)
         _ui.update { state ->
             state.copy(
                 items = state.items.map {
-                    if (it.session.path == path) it.copy(pinned = it.session.path in pinned, archived = it.session.path in archived)
-                    else it
+                    it.copy(pinned = it.session.key in pinned, archived = it.session.key in archived)
                 },
             )
         }
@@ -153,9 +156,9 @@ class SessionHistoryViewModel(
     suspend fun resume(item: HistoryItem): ResumedSession? {
         setBusy(item, "Resuming…")
         return try {
-            val response = bridge.sessionCatalogAction(CatalogAction.Resume, item.session.path)
+            val response = bridge.sessionCatalogAction(CatalogAction.Resume, item.session.key)
             if (response.ok && response.paneId != null) {
-                ResumedSession(response.paneId, response.workspaceId)
+                ResumedSession(key = item.session.key, workspaceId = response.workspaceId)
             } else null
         } catch (c: CancellationException) {
             throw c
@@ -170,9 +173,9 @@ class SessionHistoryViewModel(
     suspend fun fork(item: HistoryItem): ResumedSession? {
         setBusy(item, "Forking…")
         return try {
-            val response = bridge.sessionCatalogAction(CatalogAction.Fork, item.session.path)
+            val response = bridge.sessionCatalogAction(CatalogAction.Fork, item.session.key)
             if (response.ok && response.paneId != null) {
-                ResumedSession(response.paneId, response.workspaceId)
+                ResumedSession(bootstrapPaneId = response.paneId, workspaceId = response.workspaceId)
             } else null
         } catch (c: CancellationException) {
             throw c
@@ -187,7 +190,7 @@ class SessionHistoryViewModel(
     suspend fun rename(item: HistoryItem, newName: String): Boolean {
         setBusy(item, "Renaming…")
         return try {
-            val response = bridge.sessionCatalogAction(CatalogAction.Rename, item.session.path, text = newName)
+            val response = bridge.sessionCatalogAction(CatalogAction.Rename, item.session.key, text = newName)
             response.ok
         } catch (c: CancellationException) {
             throw c
@@ -203,7 +206,7 @@ class SessionHistoryViewModel(
     suspend fun close(item: HistoryItem): Boolean {
         setBusy(item, "Closing…")
         return try {
-            val paneId = item.session.paneId
+            val paneId = item.session.live?.paneId
             if (paneId == null) {
                 reportError("Session has no live pane to close")
                 return false
@@ -223,10 +226,10 @@ class SessionHistoryViewModel(
     suspend fun delete(item: HistoryItem): Boolean {
         setBusy(item, "Deleting…")
         return try {
-            val response = bridge.sessionCatalogAction(CatalogAction.Delete, item.session.path)
+            val response = bridge.sessionCatalogAction(CatalogAction.Delete, item.session.key)
             if (response.ok) {
-                store.setPinned(item.session.path, false)
-                store.setArchived(item.session.path, false)
+                store.setPinned(item.session.key, false)
+                store.setArchived(item.session.key, false)
             }
             response.ok
         } catch (c: CancellationException) {
@@ -240,11 +243,11 @@ class SessionHistoryViewModel(
     }
 
     private fun setBusy(item: HistoryItem, label: String) {
-        _ui.update { it.copy(busyPath = item.session.path, busyLabel = label) }
+        _ui.update { it.copy(busySessionKey = item.session.key, busyLabel = label) }
     }
 
     private fun clearBusy() {
-        _ui.update { it.copy(busyPath = null, busyLabel = null) }
+        _ui.update { it.copy(busySessionKey = null, busyLabel = null) }
     }
 
     private fun reportError(e: Exception) {

@@ -2,37 +2,52 @@ package dev.scoutr.app.data
 
 import android.content.Context
 
-/**
- * On-device session catalog preferences: pinned and archived session paths.
- *
- * The bridge catalog stays read-only; pinning only lifts a session into the
- * Pinned view, and archiving only hides it from the main views (the stored
- * session file is untouched — destructive delete stays an explicit action).
- */
+/** On-device pin/archive membership, keyed by canonical backend-qualified session identity. */
 interface SessionCatalogStore {
-    fun pinnedPaths(): Set<String>
-    fun archivedPaths(): Set<String>
-    fun setPinned(path: String, pinned: Boolean)
-    fun setArchived(path: String, archived: Boolean)
+    fun pinnedKeys(catalogKeys: Collection<SessionKey>): Set<SessionKey>
+    fun archivedKeys(catalogKeys: Collection<SessionKey>): Set<SessionKey>
+    fun setPinned(key: SessionKey, pinned: Boolean)
+    fun setArchived(key: SessionKey, archived: Boolean)
 }
 
 class SharedPreferencesSessionCatalogStore(context: Context) : SessionCatalogStore {
     private val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
-    override fun pinnedPaths(): Set<String> = prefs.getStringSet(KEY_PINNED, emptySet()) ?: emptySet()
+    override fun pinnedKeys(catalogKeys: Collection<SessionKey>): Set<SessionKey> =
+        readAndMigrate(KEY_PINNED, catalogKeys)
 
-    override fun archivedPaths(): Set<String> = prefs.getStringSet(KEY_ARCHIVED, emptySet()) ?: emptySet()
+    override fun archivedKeys(catalogKeys: Collection<SessionKey>): Set<SessionKey> =
+        readAndMigrate(KEY_ARCHIVED, catalogKeys)
 
-    override fun setPinned(path: String, pinned: Boolean) {
-        prefs.edit().putStringSet(KEY_PINNED, mutate(pinnedPaths(), path, pinned)).apply()
+    override fun setPinned(key: SessionKey, pinned: Boolean) = mutate(KEY_PINNED, key, pinned)
+
+    override fun setArchived(key: SessionKey, archived: Boolean) = mutate(KEY_ARCHIVED, key, archived)
+
+    /**
+     * Legacy entries are raw paths in the same preference set. Replace one
+     * only when exactly one catalog key owns that path; unresolved or
+     * ambiguous entries remain available for a later catalog refresh.
+     */
+    private fun readAndMigrate(preference: String, catalogKeys: Collection<SessionKey>): Set<SessionKey> {
+        val stored = prefs.getStringSet(preference, emptySet()).orEmpty().toMutableSet()
+        var changed = false
+        for (legacyPath in stored.filter { decodeSessionKey(it) == null }) {
+            val matches = catalogKeys.filter { it.path == legacyPath }.distinct()
+            if (matches.size != 1) continue
+            stored.remove(legacyPath)
+            stored.add(matches.single().encode())
+            changed = true
+        }
+        if (changed) prefs.edit().putStringSet(preference, stored).apply()
+        return stored.mapNotNullTo(mutableSetOf(), ::decodeSessionKey)
     }
 
-    override fun setArchived(path: String, archived: Boolean) {
-        prefs.edit().putStringSet(KEY_ARCHIVED, mutate(archivedPaths(), path, archived)).apply()
+    private fun mutate(preference: String, key: SessionKey, add: Boolean) {
+        val current = prefs.getStringSet(preference, emptySet()).orEmpty()
+        val encoded = key.encode()
+        val updated = if (add) current + encoded else current - encoded
+        prefs.edit().putStringSet(preference, updated.toSet()).apply()
     }
-
-    private fun mutate(current: Set<String>, path: String, add: Boolean): Set<String> =
-        (if (add) current + path else current - path).toSet()
 
     private companion object {
         const val PREFS_NAME = "scoutr_session_catalog"

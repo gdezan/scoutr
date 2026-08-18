@@ -59,7 +59,7 @@ data class HerdrInfo(
 @Serializable
 data class AgentsResponse(
     val ok: Boolean = true,
-    val agents: List<AgentCard> = emptyList(),
+    val agents: List<SessionDescriptor> = emptyList(),
 )
 
 /** Registry of available agent backends (GET /api/agents/kinds). */
@@ -82,36 +82,41 @@ data class AgentKindInfo(
     val supportsThinking: Boolean get() = "set_thinking" in capabilities
 }
 
+/** Durable identity for one backend-owned coding-agent transcript. */
 @Serializable
-data class AgentCard(
+data class SessionKey(
+    val agentKind: String,
+    val path: String,
+)
+
+/** Ephemeral Herdr attachment for a session that is currently running. */
+@Serializable
+data class SessionLiveAttachment(
     val paneId: String,
     val workspaceId: String,
     val tabId: String,
-    val agent: String,
-    /** Registry backend id (same as `agent` for known backends). */
-    val agentKind: String = agent,
-    /** Human-readable backend name (e.g. "Claude Code"). Null when unknown. */
-    val displayName: String? = null,
-    /**
-     * Control actions the backend supports; the app gates its menus on this.
-     * Null when the bridge omitted it (older bridge or unknown agent).
-     */
-    val capabilities: List<String>? = null,
     val status: String,
-    val cwd: String? = null,
-    val title: String? = null,
-    val terminalTitle: String? = null,
-    val sessionPath: String? = null,
-    /** Epoch ms when the agent entered its current status (bridge-stamped). */
     val statusSinceMs: Double? = null,
-    /** Active model from the session file (bounded tail read). */
+)
+
+/** The one session model shared by Board, history, palette, and Chat. */
+@Serializable
+data class SessionDescriptor(
+    val key: SessionKey? = null,
+    val agentKind: String,
+    val displayName: String,
+    val title: String,
+    val cwd: String? = null,
     val model: String? = null,
-    /** Latest meaningful transcript line (bounded). */
+    val thinkingLevel: String? = null,
+    val capabilities: List<String> = emptyList(),
+    val updatedAtMs: Double? = null,
     val latestActivity: String? = null,
-    /** Epoch ms of the latest activity record. */
-    val latestActivityAtMs: Double? = null,
+    val live: SessionLiveAttachment? = null,
 ) {
-    /** Derived: blocked agents are the ones that need the user. */
+    val status: String get() = live?.status ?: "done"
+    val statusSinceMs: Double? get() = live?.statusSinceMs
+    val active: Boolean get() = live != null
     val blocked: Boolean get() = status == "blocked"
 }
 
@@ -310,17 +315,19 @@ enum class AgentStatus(val wireName: String) {
 }
 
 data class BoardState(
-    val needsYou: List<AgentCard> = emptyList(),
-    val working: List<AgentCard> = emptyList(),
-    val done: List<AgentCard> = emptyList(),
-    val idle: List<AgentCard> = emptyList(),
-    val unknown: List<AgentCard> = emptyList(),
+    val needsYou: List<SessionDescriptor> = emptyList(),
+    val working: List<SessionDescriptor> = emptyList(),
+    val done: List<SessionDescriptor> = emptyList(),
+    val idle: List<SessionDescriptor> = emptyList(),
+    val unknown: List<SessionDescriptor> = emptyList(),
 ) {
     val total: Int get() = needsYou.size + working.size + done.size + idle.size + unknown.size
+    val sessions: List<SessionDescriptor>
+        get() = needsYou + working + done + idle + unknown
 
     companion object {
-        fun group(cards: List<AgentCard>): BoardState {
-            val buckets = mutableMapOf<AgentStatus, MutableList<AgentCard>>()
+        fun group(cards: List<SessionDescriptor>): BoardState {
+            val buckets = mutableMapOf<AgentStatus, MutableList<SessionDescriptor>>()
             for (card in cards) {
                 buckets.getOrPut(AgentStatus.fromWire(card.status), ::mutableListOf).add(card)
             }
@@ -432,20 +439,24 @@ data class SessionCatalogResponse(
 
 @Serializable
 data class SessionCatalogItem(
-    val id: String,
-    val path: String,
-    val agentKind: String = "pi",
-    val cwd: String,
-    val title: String,
-    val preview: String = "",
-    val createdAt: Double = 0.0,
-    val updatedAt: Double,
-    val model: String? = null,
-    val active: Boolean = false,
-    val paneId: String? = null,
-    val workspaceId: String? = null,
-    val status: String? = null,
-)
+    val session: SessionDescriptor,
+    val createdAtMs: Double = 0.0,
+) {
+    val key: SessionKey get() = requireNotNull(session.key) { "Catalog session is missing its canonical key" }
+    /** Presentation/list key only; durable identity remains [key]. */
+    val id: String get() = key.path.substringAfterLast('/').removeSuffix(".jsonl")
+    val path: String get() = key.path
+    val agentKind: String get() = session.agentKind
+    val cwd: String get() = session.cwd.orEmpty()
+    val title: String get() = session.title
+    val preview: String get() = session.latestActivity.orEmpty()
+    val createdAt: Double get() = createdAtMs
+    val updatedAt: Double get() = session.updatedAtMs ?: 0.0
+    val model: String? get() = session.model
+    val live: SessionLiveAttachment? get() = session.live
+    val active: Boolean get() = session.active
+    val status: String get() = session.status
+}
 
 @Serializable
 data class ControlResponse(

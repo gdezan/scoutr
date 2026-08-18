@@ -81,11 +81,11 @@ describe("scoutr bridge live herdr integration", { skip }, () => {
   test("agents derives cards from the snapshot", async () => {
     const { status, body } = await getJson("/api/agents");
     assert.equal(status, 200);
-    const cards = (body as { agents: { paneId: string; status: string }[] }).agents;
+    const cards = (body as { agents: { live: { paneId: string; status: string } }[] }).agents;
     assert.ok(Array.isArray(cards));
     for (const card of cards) {
-      assert.ok(card.paneId.startsWith("w"));
-      assert.ok(["working", "blocked", "idle", "done", "unknown"].includes(card.status));
+      assert.ok(card.live.paneId.startsWith("w"));
+      assert.ok(["working", "blocked", "idle", "done", "unknown"].includes(card.live.status));
     }
   });
 
@@ -93,21 +93,20 @@ describe("scoutr bridge live herdr integration", { skip }, () => {
     const { status, body } = await getJson("/api/agents");
     assert.equal(status, 200);
     const cards = (body as { agents: Array<{
-      paneId: string;
-      sessionPath?: string;
-      model?: string | null;
-      latestActivity?: string;
-      latestActivityAtMs?: number | null;
+      key: { path: string } | null;
+      model: string | null;
+      latestActivity: string | null;
+      updatedAtMs: number | null;
     }> }).agents;
     for (const card of cards) {
-      if (!card.sessionPath) continue;
+      if (!card.key) continue;
       // Fields are always present on cards with a session path (values may be null).
       assert.ok("model" in card);
       assert.ok("latestActivity" in card);
       if (typeof card.latestActivity === "string") {
         assert.ok(card.latestActivity.length <= 160);
       }
-      assert.ok("latestActivityAtMs" in card);
+      assert.ok("updatedAtMs" in card);
     }
   });
 

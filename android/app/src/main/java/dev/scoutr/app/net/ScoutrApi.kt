@@ -19,6 +19,7 @@ import dev.scoutr.app.data.RepoFileDiffResponse
 import dev.scoutr.app.data.RepoFileResponse
 import dev.scoutr.app.data.RepoOverviewResponse
 import dev.scoutr.app.data.SessionCatalogResponse
+import dev.scoutr.app.data.SessionKey
 import dev.scoutr.app.data.SessionReadResponse
 import dev.scoutr.app.data.SnapshotResponse
 import dev.scoutr.app.data.TerminalHierarchyCommand
@@ -41,9 +42,9 @@ interface ScoutrApi {
 
     suspend fun health(host: String? = null, token: String? = null): HealthResponse
     suspend fun agents(): AgentsResponse
-    suspend fun session(path: String, since: String? = null): SessionReadResponse
+    suspend fun session(key: SessionKey, since: String? = null): SessionReadResponse
     suspend fun sessionCatalog(query: String? = null, limit: Int? = null): SessionCatalogResponse
-    suspend fun sessionCatalogAction(action: CatalogAction, path: String, text: String? = null): CreatedSessionResponse
+    suspend fun sessionCatalogAction(action: CatalogAction, key: SessionKey, text: String? = null): CreatedSessionResponse
     suspend fun createSession(
         cwd: String,
         model: String,

@@ -1,12 +1,13 @@
 package dev.scoutr.app.state
 
-import dev.scoutr.app.data.AgentCard
+import dev.scoutr.app.data.SessionDescriptor
 import dev.scoutr.app.data.AgentsResponse
 import dev.scoutr.app.data.CatalogAction
 import dev.scoutr.app.data.SessionAction
 import dev.scoutr.app.data.ConnectionStore
 import dev.scoutr.app.data.SessionCatalogItem
 import dev.scoutr.app.data.SessionCatalogResponse
+import dev.scoutr.app.data.SessionKey
 import dev.scoutr.app.net.FakeScoutrApi
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
@@ -33,26 +34,26 @@ class CommandPaletteViewModelTest {
         fake.agentsResult = Result.success(
             AgentsResponse(
                 agents = listOf(
-                    AgentCard(
+                    dev.scoutr.app.data.liveSessionFixture(
                         paneId = "pane1",
                         workspaceId = "ws1",
                         tabId = "t1",
-                        agent = "pi",
+                        agentKind = "pi",
                         status = "blocked",
                         cwd = "/repo/a",
                         title = "Fix billing bug",
-                        sessionPath = "/root/sessions/abc.jsonl",
+                        key = dev.scoutr.app.data.SessionKey("pi", "/root/sessions/abc.jsonl"),
                         statusSinceMs = (System.currentTimeMillis() - 90_000).toDouble(),
                     ),
-                    AgentCard(
+                    dev.scoutr.app.data.liveSessionFixture(
                         paneId = "pane2",
                         workspaceId = "ws2",
                         tabId = "t2",
-                        agent = "pi",
+                        agentKind = "pi",
                         status = "working",
                         cwd = "/repo/b",
                         title = "Docs refresh",
-                        sessionPath = "/root/sessions/def.jsonl",
+                        key = dev.scoutr.app.data.SessionKey("pi", "/root/sessions/def.jsonl"),
                         statusSinceMs = System.currentTimeMillis().toDouble(),
                     ),
                 ),
@@ -63,28 +64,25 @@ class CommandPaletteViewModelTest {
                 ok = true,
                 truncated = false,
                 sessions = listOf(
-                    SessionCatalogItem(
-                        id = "abc",
-                        path = "/root/sessions/abc.jsonl",
+                    dev.scoutr.app.data.catalogSessionFixture(
+                        key = dev.scoutr.app.data.SessionKey("pi", "/root/sessions/abc.jsonl"),
                         title = "Fix billing bug",
                         cwd = "/repo/a",
                         model = "openai-codex/gpt-5.4",
-                        updatedAt = System.currentTimeMillis().toDouble(),
-                        preview = "",
-                        active = true,
-                        paneId = "pane1",
-                        workspaceId = "ws1",
-                        status = "blocked",
+                        updatedAtMs = System.currentTimeMillis().toDouble(),
+                        live = dev.scoutr.app.data.SessionLiveAttachment(
+                            paneId = "pane1",
+                            workspaceId = "ws1",
+                            tabId = "t1",
+                            status = "blocked",
+                        ),
                     ),
-                    SessionCatalogItem(
-                        id = "ghi",
-                        path = "/root/sessions/ghi.jsonl",
+                    dev.scoutr.app.data.catalogSessionFixture(
+                        key = dev.scoutr.app.data.SessionKey("pi", "/root/sessions/ghi.jsonl"),
                         title = "Old migration",
                         cwd = "/repo/c",
                         model = "anthropic/claude-sonnet-4-6",
-                        updatedAt = (System.currentTimeMillis() - 3_600_000).toDouble(),
-                        preview = "",
-                        active = false,
+                        updatedAtMs = (System.currentTimeMillis() - 3_600_000).toDouble(),
                     ),
                 ),
             ),
@@ -121,9 +119,9 @@ class CommandPaletteViewModelTest {
     @Test
     fun resumePostsToCatalogResume() = runBlocking {
         val viewModel = CommandPaletteViewModel(fake, savedConnection())
-        viewModel.resume("/root/sessions/ghi.jsonl")
+        viewModel.resume(SessionKey("pi", "/root/sessions/ghi.jsonl"))
         viewModel.waitForIdle()
-        assertNull(viewModel.ui.value.busyPath)
+        assertNull(viewModel.ui.value.busySessionKey)
         assertNull(viewModel.ui.value.error)
         val resume = fake.calls.last { it.name == "sessionCatalogAction" }
         assertEquals(CatalogAction.Resume, resume.args["action"])
@@ -172,7 +170,7 @@ class CommandPaletteViewModelTest {
     private fun CommandPaletteViewModel.waitForIdle() = runBlocking {
         repeat(100) {
             org.robolectric.shadows.ShadowLooper.idleMainLooper()
-            if (ui.value.busyPath == null && ui.value.busyPaneId == null && ui.value.error == null) return@runBlocking
+            if (ui.value.busySessionKey == null && ui.value.busyPaneId == null && ui.value.error == null) return@runBlocking
             delay(25)
         }
     }

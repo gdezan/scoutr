@@ -107,6 +107,7 @@ import dev.scoutr.app.ui.components.StatusRingAnimation
 import dev.scoutr.app.ui.components.ConfirmDialog
 import dev.scoutr.app.data.AgentStatus
 import dev.scoutr.app.data.SessionCatalogItem
+import dev.scoutr.app.data.encode
 import dev.scoutr.app.state.HistoryItem
 import dev.scoutr.app.state.HistoryUiState
 import dev.scoutr.app.state.HistoryScope
@@ -240,12 +241,12 @@ fun HistoryScreen(
                     sorted = sortedItems,
                     listState = historyListState,
                     onOpen = { item ->
-                        if (viewModel.ui.value.busyPath == null) {
+                        if (viewModel.ui.value.busySessionKey == null) {
                             scope.launch { viewModel.resume(item)?.let(onOpenSession) }
                         }
                     },
                     onFork = { item ->
-                        if (viewModel.ui.value.busyPath == null) {
+                        if (viewModel.ui.value.busySessionKey == null) {
                             scope.launch { viewModel.fork(item)?.let(onOpenSession) }
                         }
                     },
@@ -267,7 +268,7 @@ fun HistoryScreen(
             confirmLabel = "Close",
             onConfirm = {
                 pendingClose = null
-                if (viewModel.ui.value.busyPath == null) scope.launch { viewModel.close(item) }
+                if (viewModel.ui.value.busySessionKey == null) scope.launch { viewModel.close(item) }
             },
             onDismiss = { pendingClose = null },
         )
@@ -280,7 +281,7 @@ fun HistoryScreen(
             destructive = true,
             onConfirm = {
                 pendingDelete = null
-                if (viewModel.ui.value.busyPath == null) scope.launch { viewModel.delete(item) }
+                if (viewModel.ui.value.busySessionKey == null) scope.launch { viewModel.delete(item) }
             },
             onDismiss = { pendingDelete = null },
         )
@@ -290,7 +291,7 @@ fun HistoryScreen(
             initial = item.session.title,
             onConfirm = { name ->
                 renaming = null
-                if (viewModel.ui.value.busyPath == null) scope.launch { viewModel.rename(item, name) }
+                if (viewModel.ui.value.busySessionKey == null) scope.launch { viewModel.rename(item, name) }
             },
             onDismiss = { renaming = null },
         )
@@ -458,10 +459,10 @@ private fun HistoryList(
                     )
                 }
             }
-            item(key = historyItem.session.path) {
+            item(key = historyItem.session.key.encode()) {
                 HistoryRow(
                     item = historyItem,
-                    busy = ui.busyPath == historyItem.session.path,
+                    busy = ui.busySessionKey == historyItem.session.key,
                     busyLabel = ui.busyLabel,
                     onOpen = { onOpen(historyItem) },
                     onFork = { onFork(historyItem) },
@@ -478,12 +479,12 @@ private fun HistoryList(
 }
 
 private data class HistoryAnchor(
-    val path: String,
+    val sessionKey: String,
     val scrollOffset: Int,
-    /** The path's index in the old ordered list, used when path and neighbors all disappear. */
+    /** The key's index in the old ordered list, used when it and its neighbors all disappear. */
     val index: Int,
-    val previousPath: String?,
-    val nextPath: String?,
+    val previousSessionKey: String?,
+    val nextSessionKey: String?,
     val headerVisible: Boolean,
 )
 
@@ -495,11 +496,11 @@ private val HistoryAnchorMapSaver = Saver<Map<String, HistoryAnchor>, List<Strin
         anchors.entries.flatMap { (key, anchor) ->
             listOf(
                 key,
-                anchor.path,
+                anchor.sessionKey,
                 anchor.scrollOffset.toString(),
                 anchor.index.toString(),
-                anchor.previousPath.orEmpty(),
-                anchor.nextPath.orEmpty(),
+                anchor.previousSessionKey.orEmpty(),
+                anchor.nextSessionKey.orEmpty(),
                 anchor.headerVisible.toString(),
             )
         }
@@ -507,11 +508,11 @@ private val HistoryAnchorMapSaver = Saver<Map<String, HistoryAnchor>, List<Strin
     restore = { saved ->
         saved.chunked(7).associate { fields ->
             fields[0] to HistoryAnchor(
-                path = fields[1],
+                sessionKey = fields[1],
                 scrollOffset = fields[2].toInt(),
                 index = fields[3].toInt(),
-                previousPath = fields[4].ifEmpty { null },
-                nextPath = fields[5].ifEmpty { null },
+                previousSessionKey = fields[4].ifEmpty { null },
+                nextSessionKey = fields[5].ifEmpty { null },
                 headerVisible = fields[6].toBoolean(),
             )
         }
@@ -616,28 +617,28 @@ private fun captureHistoryAnchor(
     listState: LazyListState,
     items: List<HistoryItem>,
 ): HistoryAnchor? {
-    val paths = items.map { it.session.path }
+    val sessionKeys = items.map { it.session.key.encode() }
     // Select the row at (or after) the state's first-visible index, not the
     // layout's first visible key: an overscroll stretch at the list end can
     // pull the previous row back into the layout while the state still points
     // at the real top row, which would store the wrong anchor.
     val item = listState.layoutInfo.visibleItemsInfo.firstOrNull {
-        it.index >= listState.firstVisibleItemIndex && it.key in paths
+        it.index >= listState.firstVisibleItemIndex && it.key in sessionKeys
     } ?: return null
-    val path = item.key as String
+    val sessionKey = item.key as String
     val headerVisible = listState.layoutInfo.visibleItemsInfo
         .firstOrNull { it.index == listState.firstVisibleItemIndex }
         ?.key
         ?.toString()
         ?.startsWith("history_date_") == true
-    val index = paths.indexOf(path)
+    val index = sessionKeys.indexOf(sessionKey)
     if (index < 0) return null
     return HistoryAnchor(
-        path = path,
+        sessionKey = sessionKey,
         scrollOffset = if (item.index == listState.firstVisibleItemIndex) listState.firstVisibleItemScrollOffset else 0,
         index = index,
-        previousPath = paths.getOrNull(index - 1),
-        nextPath = paths.getOrNull(index + 1),
+        previousSessionKey = sessionKeys.getOrNull(index - 1),
+        nextSessionKey = sessionKeys.getOrNull(index + 1),
         headerVisible = headerVisible,
     )
 }
@@ -647,19 +648,19 @@ private fun resolveHistoryAnchor(
     items: List<HistoryItem>,
 ): HistoryAnchorTarget? {
     if (anchor == null) return null
-    val paths = items.map { it.session.path }
-    val exactIndex = paths.indexOf(anchor.path)
+    val sessionKeys = items.map { it.session.key.encode() }
+    val exactIndex = sessionKeys.indexOf(anchor.sessionKey)
     if (exactIndex >= 0) return HistoryAnchorTarget(exactIndex, anchor.scrollOffset, anchor.headerVisible)
 
-    val nextIndex = anchor.nextPath?.let(paths::indexOf)?.takeIf { it >= 0 }
+    val nextIndex = anchor.nextSessionKey?.let(sessionKeys::indexOf)?.takeIf { it >= 0 }
     if (nextIndex != null) return HistoryAnchorTarget(nextIndex, 0, false)
     // Anchor and its next neighbor are gone: the saved old ordered index prefers
     // the next surviving item at the old slot. When the removals run to the tail,
     // the clamp lands the prior item; an empty list falls back to the top.
-    // (previousPath stays in the snapshot to document the anchor's neighborhood,
+    // (previousSessionKey stays in the snapshot to document the anchor's neighborhood,
     // but the positional clamp subsumes the prior-item fallback.)
-    if (paths.isEmpty()) return null
-    return HistoryAnchorTarget(anchor.index.coerceIn(0, paths.lastIndex), 0, false)
+    if (sessionKeys.isEmpty()) return null
+    return HistoryAnchorTarget(anchor.index.coerceIn(0, sessionKeys.lastIndex), 0, false)
 }
 
 /** Swipe-to-reveal anchor values for a session row. */
@@ -731,7 +732,7 @@ private fun HistoryRow(
             scheme.onSurfaceVariant,
             onToggleArchive,
         ))
-        if (session.active && session.paneId != null) {
+        if (session.active) {
             add(RowAction("close", "Close", Icons.Outlined.Close, scheme.onSurfaceVariant, onClose))
         } else {
             add(RowAction("delete", "Delete", Icons.Outlined.Delete, scheme.error, onDelete))
@@ -861,7 +862,7 @@ private fun HistoryRow(
                                 leadingIcon = { Icon(if (item.archived) Icons.Default.Unarchive else Icons.Default.Archive, contentDescription = null) },
                                 onClick = { menuOpen = false; onToggleArchive() },
                             )
-                            if (session.active && session.paneId != null) {
+                            if (session.active) {
                                 DropdownMenuItem(
                                     text = { Text("Close") },
                                     leadingIcon = { Icon(Icons.Default.Close, contentDescription = null) },

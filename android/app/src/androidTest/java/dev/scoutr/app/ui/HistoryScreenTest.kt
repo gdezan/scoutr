@@ -134,15 +134,37 @@ class HistoryScreenTest {
         server.shutdown()
     }
 
+    private fun catalogSession(
+        path: String,
+        title: String,
+        cwd: String,
+        updatedAtMs: Long,
+        preview: String,
+        agentKind: String = "pi",
+        model: String? = null,
+        paneId: String? = null,
+        workspaceId: String = "ws",
+        status: String = "working",
+    ): String {
+        val live = if (paneId == null) {
+            "null"
+        } else {
+            """{"paneId":"$paneId","workspaceId":"$workspaceId","tabId":"tab-$paneId","status":"$status"}"""
+        }
+        val encodedModel = model?.let { "\"$it\"" } ?: "null"
+        val displayName = if (agentKind == "claude") "Claude" else "Pi"
+        return """{"session":{"key":{"agentKind":"$agentKind","path":"$path"},"agentKind":"$agentKind","displayName":"$displayName","title":"$title","cwd":"$cwd","model":$encodedModel,"updatedAtMs":$updatedAtMs,"latestActivity":"$preview","live":$live},"createdAtMs":0}"""
+    }
+
     private fun longCatalogBody(removed: Set<String> = emptySet()): String {
         val sessions = buildList {
             repeat(30) { index ->
                 val path = "/sessions/active-${index.toString().padStart(2, '0')}.jsonl"
-                if (path !in removed) add("""{"id":"active-$index","path":"$path","title":"Active $index","cwd":"/repo/active-$index","updatedAt":${100_000 - index}.0,"preview":"active preview $index","active":true,"paneId":"pane-active-$index","workspaceId":"ws"}""")
+                if (path !in removed) add(catalogSession(path, "Active $index", "/repo/active-$index", 100_000L - index, "active preview $index", paneId = "pane-active-$index"))
             }
             repeat(30) { index ->
                 val path = "/sessions/completed-${index.toString().padStart(2, '0')}.jsonl"
-                if (path !in removed) add("""{"id":"completed-$index","path":"$path","title":"Completed $index","cwd":"/repo/completed-$index","updatedAt":${90_000 - index}.0,"preview":"completed preview $index","active":false}""")
+                if (path !in removed) add(catalogSession(path, "Completed $index", "/repo/completed-$index", 90_000L - index, "completed preview $index"))
             }
         }
         return """{"ok":true,"truncated":false,"sessions":[${sessions.joinToString(",")}] }"""
@@ -152,22 +174,14 @@ class HistoryScreenTest {
         listState.layoutInfo.visibleItemsInfo
             .filter { it.index >= listState.firstVisibleItemIndex }
             .mapNotNull { it.key as? String }
-            .firstOrNull { it.startsWith("/") }
+            .mapNotNull { dev.scoutr.app.data.decodeSessionKey(it)?.path }
+            .firstOrNull()
 
-    private val catalogBody = """
-        {"ok":true,"truncated":false,"sessions":[
-          {"id":"abc","path":"/root/sessions/abc.jsonl","title":"Fix billing bug","cwd":"/repo/a","model":"openai-codex/gpt-5.4","updatedAt":${System.currentTimeMillis()}.0,"preview":"User asked to fix the billing math","active":true,"paneId":"pane1","workspaceId":"ws1","status":"blocked"},
-          {"id":"def","path":"/root/sessions/def.jsonl","agentKind":"claude","title":"Docs refresh","cwd":"/repo/b","model":"anthropic/claude-sonnet-4-6","updatedAt":${System.currentTimeMillis() - 3_600_000}.0,"preview":"Update the README","active":false}
-        ]}
-    """.trimIndent()
+    private val catalogBody: String
+        get() = """{"ok":true,"truncated":false,"sessions":[${catalogSession("/root/sessions/abc.jsonl", "Fix billing bug", "/repo/a", System.currentTimeMillis(), "User asked to fix the billing math", model = "openai-codex/gpt-5.4", paneId = "pane1", workspaceId = "ws1", status = "blocked")},${catalogSession("/root/sessions/def.jsonl", "Docs refresh", "/repo/b", System.currentTimeMillis() - 3_600_000, "Update the README", agentKind = "claude", model = "anthropic/claude-sonnet-4-6")}]}"""
 
-    private val repositoryFilterCatalogBody = """
-        {"ok":true,"truncated":false,"sessions":[
-          {"id":"active-a","path":"/root/sessions/active-a.jsonl","title":"Active A","cwd":"/repo/a","updatedAt":${System.currentTimeMillis()}.0,"preview":"active","active":true,"paneId":"pane-a","workspaceId":"ws1"},
-          {"id":"done-b","path":"/root/sessions/done-b.jsonl","title":"Done B","cwd":"/repo/b","updatedAt":${System.currentTimeMillis() - 3_600_000}.0,"preview":"done b","active":false},
-          {"id":"done-c","path":"/root/sessions/done-c.jsonl","title":"Done C","cwd":"/repo/c","updatedAt":${System.currentTimeMillis() - 7_200_000}.0,"preview":"done c","active":false}
-        ]}
-    """.trimIndent()
+    private val repositoryFilterCatalogBody: String
+        get() = """{"ok":true,"truncated":false,"sessions":[${catalogSession("/root/sessions/active-a.jsonl", "Active A", "/repo/a", System.currentTimeMillis(), "active", paneId = "pane-a", workspaceId = "ws1")},${catalogSession("/root/sessions/done-b.jsonl", "Done B", "/repo/b", System.currentTimeMillis() - 3_600_000, "done b")},${catalogSession("/root/sessions/done-c.jsonl", "Done C", "/repo/c", System.currentTimeMillis() - 7_200_000, "done c")}]}"""
 
     private fun stubCatalog(
         deleteOk: Boolean = true,
@@ -595,16 +609,16 @@ private class RecordingStore(
     pinned: Set<String> = emptySet(),
     archived: Set<String> = emptySet(),
 ) : SessionCatalogStore {
-    private val pinned = pinned.toMutableSet()
-    private val archived = archived.toMutableSet()
+    private val pinned = pinned.mapTo(mutableSetOf()) { dev.scoutr.app.data.SessionKey("pi", it) }
+    private val archived = archived.mapTo(mutableSetOf()) { dev.scoutr.app.data.SessionKey("pi", it) }
 
-    override fun pinnedPaths(): Set<String> = pinned.toSet()
-    override fun archivedPaths(): Set<String> = archived.toSet()
-    override fun setPinned(path: String, pinned: Boolean) {
-        if (pinned) this.pinned.add(path) else this.pinned.remove(path)
+    override fun pinnedKeys(catalogKeys: Collection<dev.scoutr.app.data.SessionKey>) = pinned.toSet()
+    override fun archivedKeys(catalogKeys: Collection<dev.scoutr.app.data.SessionKey>) = archived.toSet()
+    override fun setPinned(key: dev.scoutr.app.data.SessionKey, pinned: Boolean) {
+        if (pinned) this.pinned.add(key) else this.pinned.remove(key)
     }
 
-    override fun setArchived(path: String, archived: Boolean) {
-        if (archived) this.archived.add(path) else this.archived.remove(path)
+    override fun setArchived(key: dev.scoutr.app.data.SessionKey, archived: Boolean) {
+        if (archived) this.archived.add(key) else this.archived.remove(key)
     }
 }

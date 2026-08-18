@@ -58,6 +58,8 @@ import dev.scoutr.app.data.SessionAction
 import dev.scoutr.app.state.CommandPaletteViewModel
 import dev.scoutr.app.state.PaletteResult
 import dev.scoutr.app.state.PaletteResultKind
+import dev.scoutr.app.data.SessionKey
+import dev.scoutr.app.data.encode
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
 
@@ -69,8 +71,7 @@ import kotlinx.coroutines.flow.first
 @Composable
 fun CommandPalette(
     viewModel: CommandPaletteViewModel,
-    onOpenAgent: (paneId: String, sessionPath: String?) -> Unit,
-    onOpenSession: (paneId: String, sessionPath: String?) -> Unit,
+    onOpen: (key: SessionKey?, bootstrapPaneId: String?) -> Unit,
     resultListState: LazyListState = rememberLazyListState(),
 
     onDismiss: () -> Unit = viewModel::close,
@@ -157,26 +158,19 @@ fun CommandPalette(
                     Modifier.fillMaxSize().testTag("palette_results"),
                     state = resultListState,
                 ) {
-                    items(ui.results, key = { "${it.kind}-${it.paneId ?: it.sessionPath}" }) { result ->
+                    items(ui.results, key = {
+                        "${it.kind}-${it.sessionKey?.encode() ?: it.livePaneId}"
+                    }) { result ->
                         PaletteRow(
                             result = result,
-                            busy = ui.busyPath == result.sessionPath || ui.busyPaneId == result.paneId,
+                            busy = ui.busySessionKey == result.sessionKey || ui.busyPaneId == result.livePaneId,
                             onOpen = {
-                                when (result.kind) {
-                                    PaletteResultKind.Agent -> {
-                                        viewModel.openResult(result) {
-                                            onOpenAgent(result.paneId ?: "", result.sessionPath)
-                                        }
-                                    }
-                                    PaletteResultKind.Session -> {
-                                        viewModel.openResult(result) {
-                                            onOpenSession(result.paneId ?: "", result.sessionPath)
-                                        }
-                                    }
+                                viewModel.openResult(result) {
+                                    onOpen(result.sessionKey, result.livePaneId)
                                 }
                             },
-                            onResume = { viewModel.resume(result.sessionPath ?: "") },
-                            onAbort = { viewModel.control(result.paneId ?: "", SessionAction.Abort) },
+                            onResume = { result.sessionKey?.let(viewModel::resume) },
+                            onAbort = { result.livePaneId?.let { viewModel.control(it, SessionAction.Abort) } },
                             onClose = { pendingClose = result },
                         )
                     }
@@ -192,7 +186,7 @@ fun CommandPalette(
             confirmLabel = "Close",
             onConfirm = {
                 pendingClose = null
-                viewModel.control(result.paneId ?: "", SessionAction.Close)
+                result.livePaneId?.let { viewModel.control(it, SessionAction.Close) }
             },
             onDismiss = { pendingClose = null },
         )

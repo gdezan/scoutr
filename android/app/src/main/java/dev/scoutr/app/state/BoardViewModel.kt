@@ -3,7 +3,7 @@ package dev.scoutr.app.state
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dev.scoutr.app.data.SessionAction
-import dev.scoutr.app.data.AgentCard
+import dev.scoutr.app.data.SessionDescriptor
 import dev.scoutr.app.data.BoardState
 import dev.scoutr.app.data.ConnectionStore
 import dev.scoutr.app.data.ScoutrApiCompatibility

@@ -162,7 +162,9 @@ describe("POST /api/sessions and /api/sessions/:paneId/control", () => {
 
   it("resumes a stored session through a quoted headless launch", async () => {
     sent.length = 0;
-    const { status, data } = await post("/api/session-catalog/resume", { path: sessionPath });
+    const { status, data } = await post("/api/session-catalog/resume", {
+      key: { agentKind: "pi", path: sessionPath },
+    });
 
     assert.equal(status, 201);
     assert.equal(data.paneId, "p1");
@@ -285,7 +287,7 @@ describe("POST /api/sessions and /api/sessions/:paneId/control", () => {
   });
 
   it("session read for a path outside every registered store returns 403", async () => {
-    const response = await fetch(`http://127.0.0.1:${PORT}/api/sessions?path=${encodeURIComponent("/etc/passwd")}`, {
+    const response = await fetch(`http://127.0.0.1:${PORT}/api/sessions?agentKind=pi&path=${encodeURIComponent("/etc/passwd")}`, {
       headers: { authorization: `Bearer ${TOKEN}` },
     });
     assert.equal(response.status, 403);

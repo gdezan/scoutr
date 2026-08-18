@@ -4,7 +4,7 @@
  * required field, changing required semantics, or requiring new command or
  * response behavior bumps it.
  */
-export const SCOUTR_API_PROTOCOL = 1;
+export const SCOUTR_API_PROTOCOL = 2;
 
 /** Additive capabilities advertised by the current Scoutr API protocol. */
-export const SCOUTR_API_FEATURES = ["terminal.v1", "asks.v2", "update.pull.v1"] as const;
+export const SCOUTR_API_FEATURES = ["terminal.v1", "asks.v2", "update.pull.v1", "session-model.v3"] as const;

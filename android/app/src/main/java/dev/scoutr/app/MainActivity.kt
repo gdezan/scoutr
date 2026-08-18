@@ -62,12 +62,15 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.navigation.NavController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
-import dev.scoutr.app.data.AgentCard
 import dev.scoutr.app.data.ScoutrApiCompatibility
+import dev.scoutr.app.data.SessionKey
+import dev.scoutr.app.data.decodeSessionKey
+import dev.scoutr.app.data.encode
 import dev.scoutr.app.state.BoardViewModel
 import dev.scoutr.app.state.NewSessionViewModel
 import dev.scoutr.app.state.ChatViewModel
@@ -108,14 +111,17 @@ import dev.scoutr.app.ui.theme.ScoutrTheme
 /** Non-tab routes; the tab routes live in [Destination]. */
 private object Routes {
     const val CONNECT = "connect"
-    const val CHAT = "chat/{paneId}?sessionPath={sessionPath}&status={status}"
+    const val CHAT = "chat?sessionKey={sessionKey}&bootstrapPaneId={bootstrapPaneId}&status={status}"
     const val FILE_BROWSER = "files?cwd={cwd}"
     const val FILE_VIEWER = "file-viewer?cwd={cwd}&file={file}"
     const val SETTINGS = "settings"
     const val TERMINAL = "terminal?paneId={paneId}"
 
-    fun chat(paneId: String, sessionPath: String?, status: String): String =
-        "chat/$paneId?sessionPath=${sessionPath?.let { java.net.URLEncoder.encode(it, "UTF-8") } ?: ""}&status=$status"
+    fun chat(key: SessionKey, status: String): String =
+        "chat?sessionKey=${key.encode()}&status=$status"
+
+    fun bootstrapChat(paneId: String, status: String): String =
+        "chat?bootstrapPaneId=${java.net.URLEncoder.encode(paneId, "UTF-8")}&status=$status"
 
     fun fileBrowser(cwd: String): String =
         "$FILE_BROWSER_BASE${java.net.URLEncoder.encode(cwd, "UTF-8")}"
@@ -133,6 +139,14 @@ private object Routes {
      */
     fun terminal(paneId: String? = null): String =
         "terminal?paneId=${paneId?.let { java.net.URLEncoder.encode(it, "UTF-8") } ?: ""}"
+}
+
+/** Open a session by canonical key, or by its pane until a fresh launch converges. */
+private fun NavController.navigateToChat(key: SessionKey?, bootstrapPaneId: String?, status: String) {
+    val route = key?.let { Routes.chat(it, status) }
+        ?: bootstrapPaneId?.let { Routes.bootstrapChat(it, status) }
+        ?: return
+    navigate(route)
 }
 
 class MainActivity : ComponentActivity() {
@@ -207,16 +221,26 @@ private fun ScoutrAppNav(
         }
     }
 
-    // A scoutr://chat/<paneId> deep link (notification tap) jumps straight to
-    // the session once the nav graph is ready.
+    // Legacy notification links carry a live pane id. Resolve that attachment
+    // through the bridge-owned Board descriptor before navigation so an
+    // existing session still enters Chat by canonical key.
     val pendingDeepLink = deepLink.value
-    LaunchedEffect(pendingDeepLink, boardUi.apiCompatibility) {
+    LaunchedEffect(pendingDeepLink, boardUi.apiCompatibility, boardUi.board) {
         if (pendingDeepLink != null) {
             if (container.connectionStore.saved == null) {
                 deepLink.value = null
             } else if (boardUi.apiCompatibility == ScoutrApiCompatibility.Compatible) {
-                navController.navigate(Routes.chat(pendingDeepLink.paneId, null, pendingDeepLink.status ?: "working"))
-                deepLink.value = null
+                val session = boardUi.board.sessions.firstOrNull {
+                    it.live?.paneId == pendingDeepLink.paneId
+                }
+                if (session != null) {
+                    navController.navigateToChat(
+                        session.key,
+                        pendingDeepLink.paneId,
+                        session.live?.status ?: pendingDeepLink.status ?: "working",
+                    )
+                    deepLink.value = null
+                }
             }
         }
     }
@@ -328,7 +352,7 @@ private fun ScoutrAppNav(
                 ) { innerBoard ->
                     BoardScreen(
                         onOpenAgent = { agent ->
-                            navController.navigate(Routes.chat(agent.paneId, agent.sessionPath, agent.status))
+                            agent.live?.let { navController.navigateToChat(agent.key, it.paneId, it.status) }
                         },
                         onReviewAgent = { agent ->
                             val cwd = agent.cwd
@@ -337,7 +361,7 @@ private fun ScoutrAppNav(
                                 onTab(Destination.Review.route)
                             }
                         },
-                        onCloseAgent = { agent -> boardViewModel.closeAgent(agent.paneId) },
+                        onCloseAgent = { agent -> agent.live?.let { boardViewModel.closeAgent(it.paneId) } },
                         onResolveCompatibility = openSettings,
                         viewModel = boardViewModel,
                         modifier = Modifier.padding(innerBoard),
@@ -349,7 +373,7 @@ private fun ScoutrAppNav(
                         onDismiss = { showNewSession = false },
                         onCreated = { paneId ->
                             showNewSession = false
-                            navController.navigate(Routes.chat(paneId, null, "working"))
+                            navController.navigate(Routes.bootstrapChat(paneId, "working"))
                         },
                     )
                 }
@@ -370,7 +394,7 @@ private fun ScoutrAppNav(
                 ) { innerSessions ->
                     HistoryScreen(
                         onOpenSession = { resumed ->
-                            navController.navigate(Routes.chat(resumed.paneId, null, "working"))
+                            navController.navigateToChat(resumed.key, resumed.bootstrapPaneId, "working")
                         },
                         onReview = { item ->
                             reviewViewModel.selectRepo(item.session.cwd)
@@ -384,8 +408,11 @@ private fun ScoutrAppNav(
             composable(
                 route = Routes.CHAT,
                 arguments = listOf(
-                    androidx.navigation.navArgument("paneId") { type = androidx.navigation.NavType.StringType },
-                    androidx.navigation.navArgument("sessionPath") {
+                    androidx.navigation.navArgument("sessionKey") {
+                        type = androidx.navigation.NavType.StringType
+                        defaultValue = ""
+                    },
+                    androidx.navigation.navArgument("bootstrapPaneId") {
                         type = androidx.navigation.NavType.StringType
                         defaultValue = ""
                     },
@@ -395,8 +422,11 @@ private fun ScoutrAppNav(
                     },
                 ),
             ) { backStackEntry ->
-                val paneId = backStackEntry.arguments?.getString("paneId") ?: ""
-                val sessionPath = backStackEntry.arguments?.getString("sessionPath")?.takeIf { it.isNotBlank() }
+                val initialKey = backStackEntry.arguments?.getString("sessionKey")
+                    ?.takeIf(String::isNotBlank)
+                    ?.let(::decodeSessionKey)
+                val bootstrapPaneId = backStackEntry.arguments?.getString("bootstrapPaneId")
+                    ?.takeIf(String::isNotBlank)
                 val agentStatus = backStackEntry.arguments?.getString("status") ?: "working"
                 val chatViewModel: ChatViewModel = viewModel(
                     // Saved state, not just the view model scope: a half-filled
@@ -404,19 +434,31 @@ private fun ScoutrAppNav(
                     factory = savedStateViewModelFactory<ChatViewModel> { app, savedState ->
                         ChatViewModel(
                             app.container.bridge,
-                            paneId,
-                            sessionPath,
+                            initialKey,
+                            bootstrapPaneId,
                             agentStatus,
                             app.container.performanceCounters,
                             savedState,
                         )
                     },
-                    key = "chat_$paneId",
+                    key = "chat_${initialKey?.encode() ?: "bootstrap_$bootstrapPaneId"}",
                 )
+                val chatUi by chatViewModel.ui.collectAsState()
+                LaunchedEffect(initialKey, chatUi.sessionKey) {
+                    val converged = chatUi.sessionKey
+                    if (initialKey == null && converged != null) {
+                        navController.navigate(Routes.chat(converged, chatUi.agentStatus)) {
+                            popUpTo(backStackEntry.destination.id) { inclusive = true }
+                            launchSingleTop = true
+                        }
+                    }
+                }
                 ChatScreen(
                     viewModel = chatViewModel,
                     onBack = { navController.popBackStack() },
-                    onOpenTerminal = { navController.navigate(Routes.terminal(paneId)) },
+                    onOpenTerminal = {
+                        chatUi.livePaneId?.let { navController.navigate(Routes.terminal(it)) }
+                    },
                     onOpenFiles = { cwd -> navController.navigate(Routes.fileBrowser(cwd)) },
                 )
             }
@@ -563,11 +605,8 @@ private fun ScoutrAppNav(
                         paletteOpen = false
                     },
                     viewModel = paletteViewModel,
-                    onOpenAgent = { paneId, sessionPath ->
-                        navController.navigate(Routes.chat(paneId, sessionPath, "working"))
-                    },
-                    onOpenSession = { paneId, sessionPath ->
-                        navController.navigate(Routes.chat(paneId, sessionPath, "working"))
+                    onOpen = { key, bootstrapPaneId ->
+                        navController.navigateToChat(key, bootstrapPaneId, "working")
                     },
                 )
             }

@@ -8,7 +8,7 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performTextInput
-import dev.scoutr.app.data.AgentCard
+import dev.scoutr.app.data.SessionDescriptor
 import dev.scoutr.app.data.BoardState
 import dev.scoutr.app.data.ConnectionStore
 import dev.scoutr.app.net.BridgeClient
@@ -86,20 +86,20 @@ class ScoutrUiTest {
             loading = false,
             board = BoardState.group(
                 listOf(
-                    AgentCard(
+                    dev.scoutr.app.data.liveSessionFixture(
                         paneId = "w1:p1",
                         workspaceId = "w1",
                         tabId = "w1:t1",
-                        agent = "pi",
+                        agentKind = "pi",
                         status = "blocked",
                         title = "hestia",
                         cwd = "/home/gdezan/Dev/hestia",
                     ),
-                    AgentCard(
+                    dev.scoutr.app.data.liveSessionFixture(
                         paneId = "w2:p1",
                         workspaceId = "w2",
                         tabId = "w2:t1",
-                        agent = "pi",
+                        agentKind = "pi",
                         status = "working",
                         title = "agents-mobile",
                     ),

@@ -131,8 +131,8 @@ describe("scoutr bridge HTTP/WS API (offline)", () => {
     };
     assert.equal(health.ok, true);
     assert.deepEqual(health.api, {
-      protocol: 1,
-      features: ["terminal.v1", "asks.v2", "update.pull.v1"],
+      protocol: 2,
+      features: ["terminal.v1", "asks.v2", "update.pull.v1", "session-model.v3"],
     });
     assert.equal(health.herdr.connected, true);
     assert.equal(health.herdr.version, "test");
@@ -149,8 +149,8 @@ describe("scoutr bridge HTTP/WS API (offline)", () => {
 
     assert.equal(status, 200);
     assert.deepEqual(health.api, {
-      protocol: 1,
-      features: ["terminal.v1", "asks.v2", "update.pull.v1"],
+      protocol: 2,
+      features: ["terminal.v1", "asks.v2", "update.pull.v1", "session-model.v3"],
     });
     assert.equal(health.herdr.connected, false);
   });
@@ -171,11 +171,10 @@ describe("scoutr bridge HTTP/WS API (offline)", () => {
     feed.setSnapshot(snapshotWithAgents([{ agent_status: "blocked", cwd: "/work/project" }]));
     const { status, body } = await getJson("/api/agents");
     assert.equal(status, 200);
-    const cards = (body as { agents: { paneId: string; status: string; blocked: boolean }[] }).agents;
+    const cards = (body as { agents: { live: { paneId: string; status: string } }[] }).agents;
     assert.equal(cards.length, 1);
-    assert.equal(cards[0]?.paneId, "p1");
-    assert.equal(cards[0]?.status, "blocked");
-    assert.equal(cards[0]?.blocked, true);
+    assert.equal(cards[0]?.live.paneId, "p1");
+    assert.equal(cards[0]?.live.status, "blocked");
   });
 
   test("a pane close event prunes status entries for panes no longer alive", async () => {
@@ -205,20 +204,21 @@ describe("scoutr bridge HTTP/WS API (offline)", () => {
     });
     feed.emit({ kind: "pane_agent_status_changed", data: { pane_id: "p1", agent_status: "done" } } as never);
     const before = await getJson("/api/agents");
-    const beforeCard = ((before.body as { agents: { paneId: string; statusSinceMs?: number }[] }).agents)[0];
-    assert.equal(beforeCard?.paneId, "p1");
-    assert.equal(typeof beforeCard?.statusSinceMs, "number", "status entry exists before the pane closes");
+    const beforeCard = ((before.body as { agents: { live: { paneId: string; statusSinceMs: number | null } }[] }).agents)[0];
+    assert.equal(beforeCard?.live.paneId, "p1");
+    assert.equal(typeof beforeCard?.live.statusSinceMs, "number", "status entry exists before the pane closes");
 
     feed.setSnapshot({ ...snapshot, panes: [] });
     feed.emit({ kind: "pane_exited", data: { pane_id: "p1" } } as never);
     const after = await getJson("/api/agents");
-    const afterCard = ((after.body as { agents: { paneId: string; statusSinceMs?: number }[] }).agents)[0];
-    assert.equal(afterCard?.paneId, "p1");
-    assert.equal(afterCard?.statusSinceMs, undefined, "status entry pruned for the closed pane");
+    const afterCard = ((after.body as { agents: { live: { paneId: string; statusSinceMs: number | null } }[] }).agents)[0];
+    assert.equal(afterCard?.live.paneId, "p1");
+    assert.equal(afterCard?.live.statusSinceMs, null, "status entry pruned for the closed pane");
   });
 
   test("agents enrich cards with bounded model and latest activity", async () => {
-    const liveDir = await mkdtemp(join(tmpdir(), "scoutr-agent-session-"));
+    const liveDir = join(sessionRoot, "live-project");
+    await mkdir(liveDir, { recursive: true });
     const liveSession = join(liveDir, "session.jsonl");
     await writeFile(
       liveSession,
@@ -233,20 +233,19 @@ describe("scoutr bridge HTTP/WS API (offline)", () => {
     const { status, body } = await getJson("/api/agents");
     assert.equal(status, 200);
     const cards = (body as { agents: Array<{
-      paneId: string;
-      sessionPath?: string;
-      model?: string | null;
-      latestActivity?: string;
-      latestActivityAtMs?: number | null;
+      key: { path: string } | null;
+      model: string | null;
+      latestActivity: string | null;
+      updatedAtMs: number | null;
     }> }).agents;
     assert.equal(cards.length, 1);
-    // Fields are always present on cards with a session path (values may be null).
+    assert.equal(cards[0]?.key?.path, liveSession);
     assert.ok("model" in cards[0]!);
     assert.ok("latestActivity" in cards[0]!);
     if (typeof cards[0]?.latestActivity === "string") {
       assert.ok(cards[0].latestActivity.length <= 160);
     }
-    assert.ok("latestActivityAtMs" in cards[0]!);
+    assert.ok("updatedAtMs" in cards[0]!);
   });
 
   test("commands returns the slash-command catalog", async () => {
@@ -340,18 +339,31 @@ describe("scoutr bridge HTTP/WS API (offline)", () => {
   });
 
   test("sessions requires an allowed path", async () => {
-    const { status } = await getJson("/api/sessions?path=/etc/passwd");
+    const { status } = await getJson("/api/sessions?agentKind=pi&path=/etc/passwd");
     assert.equal(status, 403); // path guard rejects outside the allow-list
+  });
+
+  test("stored-session reads and mutations enforce the key's backend namespace", async () => {
+    const read = await getJson(`/api/sessions?agentKind=claude&path=${encodeURIComponent(sessionPath)}`);
+    assert.equal(read.status, 403);
+
+    const mutate = await postJson("/api/session-catalog/resume", {
+      key: { agentKind: "claude", path: sessionPath },
+    });
+    assert.equal(mutate.status, 403);
   });
 
   test("session catalog lists persisted sessions and validates limits", async () => {
     const { status, body } = await getJson("/api/session-catalog?q=route");
     assert.equal(status, 200);
-    const catalog = body as { ok: boolean; sessions: { id: string; status: string }[] };
+    const catalog = body as {
+      ok: boolean;
+      sessions: { session: { key: { path: string }; live: null } }[];
+    };
     assert.equal(catalog.ok, true);
     assert.equal(catalog.sessions.length, 1);
-    assert.equal(catalog.sessions[0]?.id, "catalog-session");
-    assert.equal(catalog.sessions[0]?.status, "completed");
+    assert.ok(catalog.sessions[0]?.session.key.path.endsWith("session.jsonl"));
+    assert.equal(catalog.sessions[0]?.session.live, null);
 
     const invalid = await getJson("/api/session-catalog?limit=0");
     assert.equal(invalid.status, 400);
@@ -382,11 +394,15 @@ describe("scoutr bridge HTTP/WS API (offline)", () => {
       },
     ]));
 
-    const resumed = await postJson("/api/session-catalog/resume", { path: claudePath });
+    const resumed = await postJson("/api/session-catalog/resume", {
+      key: { agentKind: "claude", path: claudePath },
+    });
     assert.equal(resumed.status, 200);
     assert.deepEqual(resumed.body, { ok: true, workspaceId: "ws1", paneId: "p1" });
 
-    const deleted = await postJson("/api/session-catalog/delete", { path: claudePath });
+    const deleted = await postJson("/api/session-catalog/delete", {
+      key: { agentKind: "claude", path: claudePath },
+    });
     assert.equal(deleted.status, 409);
 
     feed.setSnapshot(null);

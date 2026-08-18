@@ -3,7 +3,6 @@ import { BridgeError } from "../errors.js";
 import { FILE_HEAD_MAX_BYTES } from "../file-head.js";
 import { listFiles, readWorkspaceFile, type FileReadOptions } from "../files.js";
 import type { SessionSnapshot } from "../herdr/types.js";
-import { deriveAgentCards } from "./agents.js";
 import type { Route, RouteContext, RouteResult } from "./types.js";
 
 export const filesRoutes: Route[] = [
@@ -77,7 +76,7 @@ function parsePageLimit(value: string | null): number | undefined {
 
 function activeAgentCwds(snapshot: SessionSnapshot | null): string[] {
   if (!snapshot) return [];
-  return deriveAgentCards(snapshot)
+  return snapshot.agents
     .map((agent) => agent.cwd)
     .filter((cwd): cwd is string => Boolean(cwd))
     .map((cwd) => canonicalPath(cwd));

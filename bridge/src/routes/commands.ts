@@ -1,7 +1,6 @@
 import { canonicalPath } from "../dirs.js";
 import type { SessionSnapshot } from "../herdr/types.js";
 import { backendFor } from "../agents/registry.js";
-import { deriveAgentCards } from "./agents.js";
 import type { Route, RouteContext, RouteResult } from "./types.js";
 
 export const commandsRoutes: Route[] = [{ method: "GET", path: "/api/commands", handle: commands }];
@@ -14,8 +13,8 @@ async function commands(ctx: RouteContext): Promise<RouteResult> {
   if (cwd) {
     const snapshot = ctx.deps.feed.snapshot as SessionSnapshot | null;
     const requestedCwd = canonicalPath(cwd);
-    const belongsToActiveAgent = snapshot && deriveAgentCards(snapshot).some((agent) => (
-      agent.cwd !== undefined && canonicalPath(agent.cwd) === requestedCwd
+    const belongsToActiveAgent = snapshot && snapshot.agents.some((agent) => (
+      agent.cwd !== null && canonicalPath(agent.cwd) === requestedCwd
     ));
     if (!belongsToActiveAgent) {
       return { status: 403, body: { ok: false, error: "cwd is not attached to an active agent" } };

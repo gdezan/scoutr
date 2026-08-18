@@ -1,7 +1,11 @@
-import { cleanActivity } from "../board-detail.js";
 import type { BoardDetailCache } from "../board-detail.js";
-import type { SessionSnapshot, AgentInfo } from "../herdr/types.js";
+import type { SessionSnapshot } from "../herdr/types.js";
 import { backendForAgentSessionInfo, getBackendOrNull, knownBackends } from "../agents/registry.js";
+import {
+  descriptorForLiveAgent,
+  keyForAgent,
+  type SessionDescriptor,
+} from "../session-model.js";
 import type { Route, RouteContext, RouteResult } from "./types.js";
 
 export const agentsRoutes: Route[] = [
@@ -9,92 +13,20 @@ export const agentsRoutes: Route[] = [
   { method: "GET", path: "/api/agents/kinds", handle: agentKinds },
 ];
 
-export interface AgentCard {
-  paneId: string;
-  workspaceId: string;
-  tabId: string;
-  agent: string;
-  /** Registry backend id (same as `agent` for known backends). */
-  agentKind: string;
-  /** Human-readable backend name (e.g. "Claude Code"). */
-  displayName: string;
-  /** Control actions the backend supports; the app gates its menus on this. */
-  capabilities: string[];
-  status: string;
-  cwd?: string;
-  title?: string;
-  sessionPath?: string;
-  terminalTitle?: string;
-  blocked?: boolean;
-  statusSinceMs?: number;
-  /** Active model from the session file (bounded tail read). */
-  model?: string | null;
-  /** Latest meaningful transcript line (bounded). */
-  latestActivity?: string | null;
-  /** Epoch ms of the latest activity record. */
-  latestActivityAtMs?: number | null;
-}
-
-export function deriveAgentCards(
+/** Build canonical descriptors for every current Herdr agent. */
+export async function deriveSessionDescriptors(
   snapshot: SessionSnapshot,
   statusSince: (paneId: string) => number | undefined = () => undefined,
-): AgentCard[] {
-  const cards: AgentCard[] = [];
-  for (const agent of snapshot.agents ?? []) {
-    const backend = getBackendOrNull(agent.agent);
-    const card: AgentCard = {
-      paneId: agent.pane_id,
-      workspaceId: agent.workspace_id,
-      tabId: agent.tab_id,
-      agent: agent.agent,
-      agentKind: backend?.id ?? agent.agent,
-      displayName: backend?.displayName ?? agent.agent,
-      capabilities: backend ? [...backend.capabilities] : [],
-      status: agent.agent_status,
-      cwd: agent.cwd ?? undefined,
-      title: agent.terminal_title ?? undefined,
-      terminalTitle: agent.terminal_title_stripped ?? undefined,
-      blocked: agent.agent_status === "blocked",
-    };
-    const since = statusSince(agent.pane_id);
-    if (since !== undefined) card.statusSinceMs = since;
-    if (agent.agent_session?.kind === "path") card.sessionPath = agent.agent_session.value;
-    cards.push(card);
-  }
-  return cards;
-}
-
-/** Cards enriched with bounded model + latest activity from their session files. */
-export async function deriveAgentCardsWithDetail(
-  snapshot: SessionSnapshot,
-  statusSince: (paneId: string) => number | undefined,
-  cache: BoardDetailCache,
-): Promise<AgentCard[]> {
-  const cards = deriveAgentCards(snapshot, statusSince);
-  await Promise.all(cards.map(async (card) => {
-    const agentInfo = snapshot.agents.find((candidate) => candidate.pane_id === card.paneId);
-    let sessionPath = card.sessionPath;
-    // Agents that report an id-kind session reference (e.g. claude) need the
-    // backend to resolve the reference to a transcript path first.
-    if (!sessionPath && agentInfo?.agent_session) {
-      const backend = backendForAgentSessionInfo(agentInfo.agent_session);
-      if (backend) {
-        sessionPath = (await backend.resolveSessionPath(agentInfo.agent_session, agentInfo.cwd ?? undefined).catch(() => null)) ?? undefined;
-        if (sessionPath) card.sessionPath = sessionPath;
-      }
-    }
-    if (!sessionPath) return;
-    const detail = await cache.detailFor(sessionPath).catch(() => null);
-    // Stable shape: fields always present on cards with a session path,
-    // values may be null (a live agent whose session file is missing/empty
-    // — e.g. a just-launched session — must still produce well-typed cards).
-    const title = detail?.title?.trim();
-    if (title) card.title = title;
-    card.model = detail?.model ?? null;
-    card.latestActivity = detail?.latestActivity ? cleanActivity(detail.latestActivity) : null;
-    card.latestActivityAtMs = detail?.latestActivityAtMs ?? null;
+  cache?: BoardDetailCache,
+): Promise<SessionDescriptor[]> {
+  return Promise.all((snapshot.agents ?? []).map(async (agent) => {
+    const backend = backendForAgentSessionInfo(agent.agent_session) ?? getBackendOrNull(agent.agent);
+    const key = backend && agent.agent_session
+      ? await keyForAgent(backend, agent.agent_session, agent.cwd ?? undefined)
+      : null;
+    const detail = key && cache ? await cache.detailFor(key.path).catch(() => null) : null;
+    return descriptorForLiveAgent(agent, key, detail, statusSince(agent.pane_id));
   }));
-  return cards;
 }
 
 async function agents(ctx: RouteContext): Promise<RouteResult> {
@@ -102,12 +34,12 @@ async function agents(ctx: RouteContext): Promise<RouteResult> {
   if (!current) {
     return { status: 503, body: { ok: false, error: "no herdr snapshot yet" } };
   }
-  const cards = await deriveAgentCardsWithDetail(
+  const sessions = await deriveSessionDescriptors(
     current,
     (paneId) => ctx.deps.tracker.since(paneId),
     ctx.deps.boardDetail,
   );
-  return { status: 200, body: { ok: true, agents: cards } };
+  return { status: 200, body: { ok: true, agents: sessions } };
 }
 
 async function agentKinds(_ctx: RouteContext): Promise<RouteResult> {
@@ -125,4 +57,3 @@ async function agentKinds(_ctx: RouteContext): Promise<RouteResult> {
     },
   };
 }
-

@@ -4,6 +4,7 @@ import { readdir, realpath, stat, unlink } from "node:fs/promises";
 import { BridgeError } from "./errors.js";
 import { MAX_SESSION_TITLE_LENGTH } from "./transcript.js";
 import { backendForSessionPath, knownBackends } from "./agents/registry.js";
+import { keyForStoredSession, type SessionDescriptor, type SessionKey } from "./session-model.js";
 
 const MAX_CANDIDATES = 2_000;
 const MAX_SCANNED_FILES = 500;
@@ -15,24 +16,15 @@ export interface ActiveSessionRef {
   path: string;
   paneId: string;
   workspaceId: string;
+  tabId: string;
   status: string;
+  statusSinceMs?: number;
   title?: string;
 }
 
 export interface CatalogSession {
-  id: string;
-  path: string;
-  agentKind: string;
-  cwd: string;
-  title: string;
-  preview: string;
-  createdAt: number;
-  updatedAt: number;
-  model: string | null;
-  active: boolean;
-  paneId: string | null;
-  workspaceId: string | null;
-  status: string;
+  session: SessionDescriptor;
+  createdAtMs: number;
 }
 
 export interface SessionCatalog {
@@ -55,12 +47,12 @@ interface SessionFile {
 }
 
 interface ParsedCatalogFile {
-  id: string;
   cwd: string;
   title: string;
   preview: string;
   createdAt: number;
   model: string | null;
+  thinkingLevel: string | null;
 }
 
 /**
@@ -72,7 +64,7 @@ interface ParsedCatalogFile {
 interface CatalogMemoEntry {
   mtimeMs: number;
   size: number;
-  parsed: (ParsedCatalogFile & { agentKind: string }) | null;
+  parsed: ParsedCatalogFile | null;
 }
 
 const CATALOG_MEMO_CAP = 600; // just above MAX_SCANNED_FILES
@@ -111,6 +103,18 @@ export async function resolveCatalogSessionPath(path: string): Promise<{ path: s
     throw new SessionCatalogError("session path is outside a registered session store", 403);
   }
   return { path: target, backend };
+}
+
+/** Resolve a client-supplied durable key through both its path and backend namespace. */
+export async function resolveCatalogSessionKey(key: SessionKey): Promise<{ path: string; backend: NonNullable<ReturnType<typeof backendForSessionPath>> }> {
+  if (typeof key?.agentKind !== "string" || !key.agentKind || typeof key?.path !== "string" || !key.path) {
+    throw new SessionCatalogError("session key is required");
+  }
+  const resolved = await resolveCatalogSessionPath(key.path);
+  if (resolved.backend.id !== key.agentKind) {
+    throw new SessionCatalogError("session key backend does not own path", 403);
+  }
+  return resolved;
 }
 
 export async function renameStoredSession(path: string, name: string): Promise<void> {
@@ -174,20 +178,31 @@ export async function listSessionCatalog(options: ListSessionCatalogOptions = {}
     const parsed = await readCatalogFile(file).catch(() => null);
     if (!parsed) continue;
     const active = activeByPath.get(file.path);
+    const backend = backendForSessionPath(file.path);
+    if (!backend) continue;
+    const key = keyForStoredSession(backend, file.path);
+    if (!key) continue;
     const session: CatalogSession = {
-      id: parsed.id,
-      path: file.path,
-      agentKind: parsed.agentKind,
-      cwd: parsed.cwd,
-      title: active?.title?.trim() || parsed.title,
-      preview: parsed.preview,
-      createdAt: parsed.createdAt,
-      updatedAt: file.mtimeMs,
-      model: parsed.model,
-      active: active !== undefined,
-      paneId: active?.paneId ?? null,
-      workspaceId: active?.workspaceId ?? null,
-      status: active?.status ?? "completed",
+      session: {
+        key,
+        agentKind: key.agentKind,
+        displayName: backend.displayName,
+        title: active?.title?.trim() || parsed.title,
+        cwd: parsed.cwd,
+        model: parsed.model,
+        thinkingLevel: parsed.thinkingLevel,
+        capabilities: [...backend.capabilities],
+        updatedAtMs: file.mtimeMs,
+        latestActivity: parsed.preview || null,
+        live: active ? {
+          paneId: active.paneId,
+          workspaceId: active.workspaceId,
+          tabId: active.tabId,
+          status: active.status,
+          statusSinceMs: active.statusSinceMs ?? null,
+        } : null,
+      },
+      createdAtMs: parsed.createdAt,
     };
     if (!needle || catalogSearchText(session).includes(needle)) sessions.push(session);
   }
@@ -274,7 +289,7 @@ async function addSessionFile(root: string, path: string, files: SessionFile[]):
  * catalog understands each agent's JSONL vocabulary exactly as the chat and
  * board views do.
  */
-async function readCatalogFile(file: SessionFile): Promise<(ParsedCatalogFile & { agentKind: string }) | null> {
+async function readCatalogFile(file: SessionFile): Promise<ParsedCatalogFile | null> {
   const backend = backendForSessionPath(file.path);
   if (!backend) return null;
   const cached = catalogMemo.get(file.path);
@@ -282,13 +297,11 @@ async function readCatalogFile(file: SessionFile): Promise<(ParsedCatalogFile & 
     return cached.parsed;
   }
   const transcript = await backend.readTranscript(file.path, { metadataOnly: true });
-  let parsed: (ParsedCatalogFile & { agentKind: string }) | null = null;
+  let parsed: ParsedCatalogFile | null = null;
   if (transcript.id && transcript.cwd) {
     const createdAt = Date.parse(transcript.timestamp);
     const preview = transcript.preview;
     parsed = {
-      id: transcript.id,
-      agentKind: backend.id,
       cwd: transcript.cwd,
       title:
         transcript.title
@@ -298,6 +311,7 @@ async function readCatalogFile(file: SessionFile): Promise<(ParsedCatalogFile & 
       preview,
       createdAt: Number.isFinite(createdAt) ? createdAt : file.mtimeMs,
       model: transcript.model,
+      thinkingLevel: transcript.thinkingLevel,
     };
   }
   catalogMemo.set(file.path, { mtimeMs: file.mtimeMs, size: file.size, parsed });
@@ -309,7 +323,8 @@ async function readCatalogFile(file: SessionFile): Promise<(ParsedCatalogFile & 
 }
 
 function catalogSearchText(session: CatalogSession): string {
-  return `${session.title}\n${session.preview}\n${session.cwd}\n${session.model ?? ""}`.toLocaleLowerCase();
+  const descriptor = session.session;
+  return `${descriptor.title}\n${descriptor.latestActivity ?? ""}\n${descriptor.cwd ?? ""}\n${descriptor.model ?? ""}`.toLocaleLowerCase();
 }
 
 function isInside(root: string, target: string): boolean {

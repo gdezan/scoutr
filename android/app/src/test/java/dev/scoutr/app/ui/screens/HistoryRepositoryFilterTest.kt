@@ -74,14 +74,16 @@ class HistoryRepositoryFilterTest {
         updatedAt: Double,
         status: String? = null,
     ) = HistoryItem(
-        session = SessionCatalogItem(
-            id = id,
-            path = "/sessions/$id.jsonl",
+        session = dev.scoutr.app.data.catalogSessionFixture(
+            key = dev.scoutr.app.data.SessionKey("pi", "/sessions/$id.jsonl"),
             cwd = cwd,
             title = id,
-            updatedAt = updatedAt,
-            active = active,
-            status = status,
+            updatedAtMs = updatedAt,
+            live = if (active) {
+                dev.scoutr.app.data.SessionLiveAttachment(id, "workspace", "tab", status ?: "working", null)
+            } else {
+                null
+            },
         ),
         pinned = pinned,
         archived = archived,

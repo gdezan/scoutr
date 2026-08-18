@@ -1,6 +1,6 @@
 package dev.scoutr.app.state
 
-import dev.scoutr.app.data.AgentCard
+import dev.scoutr.app.data.SessionDescriptor
 import dev.scoutr.app.data.AgentsResponse
 import dev.scoutr.app.data.CommandsCatalog
 import dev.scoutr.app.data.CommandsCatalogResponse
@@ -80,14 +80,14 @@ class ChatPendingMessageTest {
             AgentsResponse(
                 agents = if (agentPresent) {
                     listOf(
-                        AgentCard(
+                        dev.scoutr.app.data.liveSessionFixture(
                             paneId = "w1:p1",
                             workspaceId = "w1",
                             tabId = "t1",
-                            agent = "pi",
+                            agentKind = "pi",
                             status = agentStatus,
                             cwd = agentCwd,
-                            sessionPath = "/tmp/session.jsonl",
+                            key = dev.scoutr.app.data.SessionKey("pi", "/tmp/session.jsonl"),
                         ),
                     )
                 } else emptyList(),
@@ -274,7 +274,9 @@ class ChatPendingMessageTest {
         stubAgents()
         viewModel.refreshNow()
 
-        waitUntil("global catalog") { viewModel.ui.value.cwd == null && commandsCwds().lastOrNull() == null }
+        waitUntil("live controls cleared") {
+            viewModel.ui.value.livePaneId == null && viewModel.readyCommands().isEmpty()
+        }
     }
 
     /** One coordinator refresh through the Main looper (a direct suspend call would deadlock). */
@@ -291,7 +293,7 @@ class ChatPendingMessageTest {
     }
 
     private fun viewModel(): ChatViewModel =
-        ChatViewModel(fake, "w1:p1", "/tmp/session.jsonl", "working").also { it.startPolling() }
+        ChatViewModel(fake, dev.scoutr.app.data.SessionKey("pi", "/tmp/session.jsonl"), "w1:p1", "working").also { it.startPolling() }
 
     @Test
     fun duplicateTextDropsOneMessagePerEntry() {

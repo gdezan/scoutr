@@ -4,10 +4,10 @@ package dev.scoutr.app.data
  * Oldest Scoutr API protocol this Android build can use. Additive optional
  * fields do not move this range; required shape or semantic breaks do.
  */
-const val MIN_SCOUTR_API_PROTOCOL = 1
+const val MIN_SCOUTR_API_PROTOCOL = 2
 
 /** Newest Scoutr API protocol this Android build can use. */
-const val MAX_SCOUTR_API_PROTOCOL = 1
+const val MAX_SCOUTR_API_PROTOCOL = 2
 
 /** Result of classifying a bridge health response against this app's supported range. */
 sealed interface ScoutrApiCompatibility {

@@ -81,24 +81,28 @@ async function readTranscriptMemoized(
 
 async function readSessionRoute(ctx: RouteContext): Promise<RouteResult> {
   const pathParam = ctx.query.get("path");
+  const agentKind = ctx.query.get("agentKind");
   const since = ctx.query.get("since") ?? null;
-  if (!pathParam) {
-    return { status: 400, body: { ok: false, error: "missing path query parameter" } };
+  if (!pathParam || !agentKind) {
+    return { status: 400, body: { ok: false, error: "missing session key query parameters" } };
   }
   // Session reads are file-bound, not herdr-bound: the deliberate
   // outside-the-store rejection surfaces as its 403 via the dispatcher, and
   // unexpected failures are server faults (502 via the dispatcher's
   // catch-all).
-  const result = await readSession(pathParam, since);
+  const result = await readSession(pathParam, since, agentKind);
   return { status: 200, body: { ok: true, ...result } };
 }
 
-export async function readSession(pathParam: string, since: string | null): Promise<SessionReadResult> {
+export async function readSession(pathParam: string, since: string | null, agentKind?: string): Promise<SessionReadResult> {
   // Only allow absolute paths claimed by a registered backend (read-only data).
   const target = canonicalPath(resolve(pathParam));
   const backend = backendForSessionPath(target);
   if (!backend) {
     throw new SessionsError("session path is outside a registered session store", 403);
+  }
+  if (agentKind !== undefined && backend.id !== agentKind) {
+    throw new SessionsError("session key backend does not own path", 403);
   }
   const info = await inspectSessionFile(target);
   if (!info.exists) {
@@ -166,4 +170,3 @@ async function controlRoute(ctx: RouteContext): Promise<RouteResult> {
   await controlSession(ctx.deps.herdr, { paneId, action: body.action as ControlAction, text: body.text });
   return { status: 200, body: { ok: true } };
 }
-

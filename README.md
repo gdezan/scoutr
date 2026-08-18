@@ -129,7 +129,7 @@ Verify:
 curl -s http://127.0.0.1:8737/api/health                    # -> {"ok":false,"error":"unauthorized"} (auth works)
 TOKEN=$(python3 -c "import json;print(json.load(open('$HOME/.config/scoutr/config.json'))['token'])")
 curl -s -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8737/api/health
-# {"ok":true,"service":"scoutr-bridge","api":{"protocol":1,"features":[...]},"herdr":{"connected":true,...},...}
+# {"ok":true,"service":"scoutr-bridge","api":{"protocol":2,"features":[...]},"herdr":{"connected":true,...},...}
 ```
 
 ### Claude question cards (one time)

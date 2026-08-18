@@ -45,26 +45,30 @@ class CommandPaletteTest {
     private lateinit var server: MockWebServer
     private lateinit var controlBodies: MutableList<String>
     private var controlDelayMs: Long = 0
-    private val agentsBody = """
-        {"ok":true,"agents":[
-          {"paneId":"pane1","workspaceId":"ws1","tabId":"t1","agent":"pi","status":"blocked","cwd":"/repo/a","title":"Fix billing bug","sessionPath":"/root/sessions/abc.jsonl","statusSinceMs":${System.currentTimeMillis() - 90_000}.0},
-          {"paneId":"pane2","workspaceId":"ws1","tabId":"t2","agent":"pi","status":"blocked","cwd":"/repo/b","title":"Fix auth bug","sessionPath":"/root/sessions/def.jsonl","statusSinceMs":${System.currentTimeMillis() - 90_000}.0}
-        ]}
-    """.trimIndent()
 
-    private val singleAgentBody = """
-        {"ok":true,"agents":[{"paneId":"pane1","workspaceId":"ws1","tabId":"t1","agent":"pi","status":"blocked","cwd":"/repo/a","title":"Fix billing bug","sessionPath":"/root/sessions/abc.jsonl","statusSinceMs":${System.currentTimeMillis() - 90_000}.0}]}
-    """.trimIndent()
+    private fun agentDescriptor(
+        paneId: String,
+        tabId: String,
+        path: String,
+        cwd: String,
+        title: String,
+        status: String,
+    ): String = """{"key":{"agentKind":"pi","path":"$path"},"agentKind":"pi","displayName":"Pi","title":"$title","cwd":"$cwd","capabilities":["abort","retry","compact","fork","rename","close"],"live":{"paneId":"$paneId","workspaceId":"ws1","tabId":"$tabId","status":"$status","statusSinceMs":${System.currentTimeMillis() - 90_000}.0}}"""
 
-    private val busyAgentsBody = """
-        {"ok":true,"agents":[{"paneId":"pane1","workspaceId":"ws1","tabId":"t1","agent":"pi","status":"working","cwd":"/repo/a","title":"Fix billing bug","sessionPath":"/root/sessions/abc.jsonl"}]}
-    """.trimIndent()
+    private val agentsBody: String
+        get() = """{"ok":true,"agents":[${agentDescriptor("pane1", "t1", "/root/sessions/abc.jsonl", "/repo/a", "Fix billing bug", "blocked")},${agentDescriptor("pane2", "t2", "/root/sessions/def.jsonl", "/repo/b", "Fix auth bug", "blocked")}]}"""
+
+    private val singleAgentBody: String
+        get() = """{"ok":true,"agents":[${agentDescriptor("pane1", "t1", "/root/sessions/abc.jsonl", "/repo/a", "Fix billing bug", "blocked")}]}"""
+
+    private val busyAgentsBody: String
+        get() = """{"ok":true,"agents":[${agentDescriptor("pane1", "t1", "/root/sessions/abc.jsonl", "/repo/a", "Fix billing bug", "working")}]}"""
 
     private fun manyAgentsBody(count: Int = 35): String = buildString {
         append("{\"ok\":true,\"agents\":[")
         repeat(count) { index ->
             if (index > 0) append(',')
-            append("{\"paneId\":\"pane$index\",\"workspaceId\":\"ws1\",\"tabId\":\"t$index\",\"agent\":\"pi\",\"status\":\"blocked\",\"cwd\":\"/repo/$index\",\"title\":\"Agent $index\",\"sessionPath\":\"/sessions/$index.jsonl\"}")
+            append(agentDescriptor("pane$index", "t$index", "/sessions/$index.jsonl", "/repo/$index", "Agent $index", "blocked"))
         }
         append("]}")
     }
@@ -136,8 +140,7 @@ class CommandPaletteTest {
             ScoutrTheme {
                 CommandPalette(
                     viewModel = vm,
-                    onOpenAgent = { paneId, _ -> opened = paneId },
-                    onOpenSession = { _, _ -> },
+                    onOpen = { _, livePaneId -> opened = livePaneId },
                 )
             }
         }
@@ -160,8 +163,7 @@ class CommandPaletteTest {
             ScoutrTheme {
                 CommandPalette(
                     viewModel = vm,
-                    onOpenAgent = { _, _ -> },
-                    onOpenSession = { _, _ -> },
+                    onOpen = { _, _ -> },
                 )
             }
         }
@@ -184,8 +186,7 @@ class CommandPaletteTest {
             ScoutrTheme {
                 CommandPalette(
                     viewModel = vm,
-                    onOpenAgent = { _, _ -> },
-                    onOpenSession = { _, _ -> },
+                    onOpen = { _, _ -> },
                     resultListState = listState,
                 )
             }
@@ -226,7 +227,7 @@ class CommandPaletteTest {
         val vm = viewModel()
         compose.setContent {
             ScoutrTheme {
-                CommandPalette(vm, onOpenAgent = { _, _ -> }, onOpenSession = { _, _ -> })
+                CommandPalette(vm, onOpen = { _, _ -> })
             }
         }
         vm.open()
@@ -264,7 +265,7 @@ class CommandPaletteTest {
         val vm = viewModel()
         compose.setContent {
             ScoutrTheme {
-                CommandPalette(vm, onOpenAgent = { _, _ -> }, onOpenSession = { _, _ -> })
+                CommandPalette(vm, onOpen = { _, _ -> })
             }
         }
         vm.open()

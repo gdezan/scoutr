@@ -73,7 +73,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
-import dev.scoutr.app.data.AgentCard
+import dev.scoutr.app.data.SessionDescriptor
 import dev.scoutr.app.data.AgentStatus
 import dev.scoutr.app.data.ScoutrApiCompatibility
 import dev.scoutr.app.data.formatScoutrApiIncompatibility
@@ -102,11 +102,11 @@ import kotlinx.coroutines.launch
  */
 @Composable
 fun BoardScreen(
-    onOpenAgent: (AgentCard) -> Unit = {},
+    onOpenAgent: (SessionDescriptor) -> Unit = {},
     viewModel: BoardViewModel = rememberBoardViewModel(),
     modifier: Modifier = Modifier,
-    onReviewAgent: (AgentCard) -> Unit = {},
-    onCloseAgent: (AgentCard) -> Unit = {},
+    onReviewAgent: (SessionDescriptor) -> Unit = {},
+    onCloseAgent: (SessionDescriptor) -> Unit = {},
     onResolveCompatibility: () -> Unit = {},
 ) {
     val ui by viewModel.ui.collectAsState()
@@ -127,7 +127,7 @@ fun BoardScreen(
     // Close stops a live pane, so it is gated the same way Sessions gates it:
     // a swipe is easy to trigger while scrolling, and every board card is by
     // definition a running agent.
-    var pendingClose by remember { mutableStateOf<AgentCard?>(null) }
+    var pendingClose by remember { mutableStateOf<SessionDescriptor?>(null) }
 
     if (ui.loading && ui.board.total == 0) {
         Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -270,11 +270,11 @@ private fun CompatibilityBanner(
 /** Adds a section header + its agent cards to the LazyList. */
 private fun LazyListScope.boardSection(
     title: String,
-    agents: List<AgentCard>,
-    onOpenAgent: (AgentCard) -> Unit,
+    agents: List<SessionDescriptor>,
+    onOpenAgent: (SessionDescriptor) -> Unit,
     reduceMotion: Boolean,
-    onReviewAgent: (AgentCard) -> Unit,
-    onCloseAgent: (AgentCard) -> Unit,
+    onReviewAgent: (SessionDescriptor) -> Unit,
+    onCloseAgent: (SessionDescriptor) -> Unit,
 ) {
     if (agents.isEmpty()) return
     item(key = "header_$title") {
@@ -304,7 +304,7 @@ private fun LazyListScope.boardSection(
             )
         }
     }
-    items(agents, key = { it.paneId }) { agent ->
+    items(agents, key = { requireNotNull(it.live).paneId }) { agent ->
         AgentCardRow(
             agent,
             onClick = { onOpenAgent(agent) },
@@ -356,8 +356,8 @@ private fun DisconnectedBanner(error: String?, onRetry: () -> Unit) {
 }
 
 /** The name the card shows, so the close confirmation names the same thing. */
-private fun AgentCard.cardTitle(): String =
-    agentDisplayTitle(title).takeIf { it.isNotBlank() } ?: agent
+private fun SessionDescriptor.cardTitle(): String =
+    agentDisplayTitle(title).takeIf { it.isNotBlank() } ?: agentKind
 
 /** Swipe-to-reveal anchor values for a board card. */
 private enum class BoardReveal { Closed, Open }
@@ -373,7 +373,7 @@ private data class BoardAction(
 
 @Composable
 private fun AgentCardRow(
-    agent: AgentCard,
+    agent: SessionDescriptor,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     onReview: () -> Unit = {},
@@ -388,7 +388,7 @@ private fun AgentCardRow(
     val context = LocalContext.current
     var menuOpen by remember { mutableStateOf(false) }
     val copyPath = {
-        clipboard.setText(AnnotatedString(agent.cwd ?: agent.workspaceId))
+        clipboard.setText(AnnotatedString(agent.cwd ?: agent.live?.workspaceId.orEmpty()))
         haptic(HapticEvent.Confirm)
         Toast.makeText(context, "Copied path", Toast.LENGTH_SHORT).show()
     }
@@ -438,7 +438,7 @@ private fun AgentCardRow(
                             closeReveal()
                             action.onClick()
                         }
-                        .testTag("board_action_${action.key}_${agent.paneId}"),
+                        .testTag("board_action_${action.key}_${agent.live?.paneId}"),
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(
@@ -459,7 +459,7 @@ private fun AgentCardRow(
                 .offset { IntOffset(reveal.requireOffset().roundToInt(), 0) }
                 .anchoredDraggable(reveal, reverseDirection = false, orientation = Orientation.Horizontal)
                 .fillMaxWidth()
-                .testTag("agent_card_${agent.paneId}"),
+                .testTag("agent_card_${agent.live?.paneId}"),
         ) {
             Card(
                 colors = CardDefaults.cardColors(containerColor = Color.Transparent),
@@ -511,7 +511,7 @@ private fun AgentCardRow(
                         // above the transcript line's weight, not below it.
                         Text(
                             text = listOfNotNull(
-                                projectFolderName(agent.cwd) ?: agent.workspaceId,
+                                projectFolderName(agent.cwd) ?: agent.live?.workspaceId.orEmpty(),
                                 agent.model?.let { shortModel(it) },
                             ).joinToString(" · "),
                             style = ScoutrType.monoMeta,
@@ -521,13 +521,13 @@ private fun AgentCardRow(
                         )
                     }
                     Spacer(Modifier.width(12.dp))
-                    TimeInState(status, agent.statusSinceMs ?: agent.latestActivityAtMs)
+                    TimeInState(status, agent.statusSinceMs ?: agent.updatedAtMs)
                     Box {
                         androidx.compose.material3.IconButton(
                             onClick = { menuOpen = true },
                             modifier = Modifier
                                 .size(28.dp)
-                                .testTag("agent_actions_${agent.paneId}")
+                                .testTag("agent_actions_${agent.live?.paneId}")
                                 .semantics { contentDescription = "Agent actions for ${agent.cardTitle()}" },
                         ) {
                             Icon(
@@ -549,7 +549,7 @@ private fun AgentCardRow(
                                         action.onClick()
                                     },
                                     leadingIcon = { Icon(action.icon, contentDescription = null) },
-                                    modifier = Modifier.testTag("board_menu_${action.key}_${agent.paneId}"),
+                                    modifier = Modifier.testTag("board_menu_${action.key}_${agent.live?.paneId}"),
                                 )
                             }
                         }

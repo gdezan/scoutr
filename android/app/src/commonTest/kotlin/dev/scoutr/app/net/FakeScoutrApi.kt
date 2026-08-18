@@ -20,6 +20,7 @@ import dev.scoutr.app.data.RepoFileDiffResponse
 import dev.scoutr.app.data.RepoFileResponse
 import dev.scoutr.app.data.RepoOverviewResponse
 import dev.scoutr.app.data.SessionCatalogResponse
+import dev.scoutr.app.data.SessionKey
 import dev.scoutr.app.data.SessionReadResponse
 import dev.scoutr.app.data.SnapshotResponse
 import dev.scoutr.app.data.TerminalHierarchyCommand
@@ -55,7 +56,7 @@ class FakeScoutrApi : ScoutrApi {
     val sentCommands = mutableListOf<JsonObject>()
 
     var healthResult: Result<HealthResponse> = Result.success(
-        HealthResponse(ok = true, api = ScoutrApiInfo(protocol = 1)),
+        HealthResponse(ok = true, api = ScoutrApiInfo(protocol = 2)),
     )
     var agentsResult: Result<AgentsResponse> = Result.success(AgentsResponse())
     var sessionResult: Result<SessionReadResponse> = Result.success(SessionReadResponse())
@@ -116,14 +117,14 @@ class FakeScoutrApi : ScoutrApi {
 
     override suspend fun agents(): AgentsResponse = record("agents") { agentsResult }
 
-    override suspend fun session(path: String, since: String?): SessionReadResponse =
-        record("session", mapOf("path" to path, "since" to since)) { sessionResult }
+    override suspend fun session(key: SessionKey, since: String?): SessionReadResponse =
+        record("session", mapOf("key" to key, "path" to key.path, "since" to since)) { sessionResult }
 
     override suspend fun sessionCatalog(query: String?, limit: Int?): SessionCatalogResponse =
         record("sessionCatalog", mapOf("query" to query, "limit" to limit)) { sessionCatalogResult }
 
-    override suspend fun sessionCatalogAction(action: CatalogAction, path: String, text: String?): CreatedSessionResponse =
-        record("sessionCatalogAction", mapOf("action" to action, "path" to path, "text" to text)) { catalogActionResult }
+    override suspend fun sessionCatalogAction(action: CatalogAction, key: SessionKey, text: String?): CreatedSessionResponse =
+        record("sessionCatalogAction", mapOf("action" to action, "key" to key, "path" to key.path, "text" to text)) { catalogActionResult }
 
     override suspend fun createSession(
         cwd: String,
