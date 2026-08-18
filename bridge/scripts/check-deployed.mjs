@@ -2,8 +2,9 @@
 /**
  * Deployment freshness gate for the self-hosted scoutr bridge.
  *
- * The Android/desktop apps talk to the systemd `scoutr-bridge.service`,
- * which runs the COMPILED `dist/` output — NOT the `tsx src/cli.ts` scratch
+ * The Android/desktop apps talk to the supervised bridge service (a systemd
+ * user unit on Linux, a user LaunchAgent on macOS — `scripts/bridge-service.mjs`
+ * owns that difference), which runs the COMPILED `dist/` output — NOT the `tsx src/cli.ts` scratch
  * bridge that development and tests use. A `dist/` built before a source
  * change, or a service that was never restarted after a build, silently
  * serves stale code to the real apps. That happened with the review
@@ -26,6 +27,7 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
+const serviceHelper = join(root, "..", "scripts", "bridge-service.mjs");
 
 /**
  * Newest mtime under a tree. This walks subdirectories: while it only read the
@@ -40,6 +42,26 @@ function newestMtime(dir, ext) {
     if (m > newest) newest = m;
   }
   return newest;
+}
+
+/**
+ * Does the supervised PID hold the listening socket? `ss` is Linux-only, so
+ * Darwin proves the same thing with `lsof`; both answer "which pid listens on
+ * this port", which is the invariant that catches a stray manual bridge.
+ */
+function servicePidOwnsPort(pid, port) {
+  if (!pid) return false;
+  if (process.platform === "darwin") {
+    const out = execFileSync("lsof", ["-nP", "-a", "-p", pid, `-iTCP:${port}`, "-sTCP:LISTEN"], {
+      encoding: "utf8",
+    });
+    return out.split("\n").some((line) => line.trim().split(/\s+/)[1] === pid);
+  }
+  const listeners = execFileSync("ss", ["-ltnp"], { encoding: "utf8" });
+  return listeners.split("\n").some((line) => {
+    const fields = line.trim().split(/\s+/);
+    return fields[0] === "LISTEN" && fields[3]?.endsWith(`:${port}`) && line.includes(`pid=${pid},`);
+  });
 }
 
 let failed = false;
@@ -61,67 +83,50 @@ if (newestDist < newestSrc) {
 // The running service must have started after the dist build, else it serves
 // the previous build even though dist/ on disk is current. It must also be the
 // process that owns the configured listening socket; a stray manual bridge can
-// otherwise make the health probe succeed while systemd crash-loops.
-let serviceMainPid = "";
+// otherwise make the health probe succeed while the service crash-loops.
+let service = null;
 try {
-  const out = execFileSync(
-    "systemctl",
-    [
-      "--user",
-      "show",
-      "scoutr-bridge.service",
-      "-p",
-      "ActiveState",
-      "-p",
-      "SubState",
-      "-p",
-      "MainPID",
-      "-p",
-      "ExecMainStartTimestamp",
-    ],
-    { encoding: "utf8" },
+  service = JSON.parse(
+    execFileSync(process.execPath, [serviceHelper, "status", "--json"], { encoding: "utf8" }),
   );
-  const values = Object.fromEntries(
-    out
-      .trim()
-      .split("\n")
-      .map((line) => line.split("="))
-      .filter(([key]) => key),
-  );
-  serviceMainPid = values.MainPID ?? "";
-  if (values.ActiveState !== "active" || values.SubState !== "running" || !serviceMainPid || serviceMainPid === "0") {
+  console.log(`service manager ${service.manager} (${service.service})`);
+  if (!service.active || !service.pid) {
     fail(
-      `scoutr-bridge.service is not running (state=${values.ActiveState ?? "unknown"}/${values.SubState ?? "unknown"}, pid=${serviceMainPid || "none"})`,
+      `${service.service} is not running (${JSON.stringify(service.detail)}, pid=${service.pid ?? "none"})` +
+        (service.problem ? ` — ${service.problem}` : ""),
     );
   }
-  const stamp = values.ExecMainStartTimestamp?.trim();
-  if (!stamp) {
-    fail("cannot read scoutr-bridge.service start time");
+  if (!service.installed) {
+    fail(`no service definition at ${service.definitionPath} — run \`node scripts/bridge-service.mjs install\``);
+  } else if (!service.definitionCurrent) {
+    // Only a warning: a hand-tuned but working definition is legitimate, and
+    // the freshness invariants below still decide whether the deploy is good.
+    console.warn(
+      `WARN: ${service.definitionPath} differs from the generated definition ` +
+        "(`node scripts/bridge-service.mjs install` regenerates it)",
+    );
+  }
+  if (!service.startedAtMs) {
+    fail(`cannot read ${service.service} start time`);
   } else {
-    const started = Date.parse(stamp);
-    console.log(`service started ${stamp}`);
-    if (Number.isNaN(started)) {
-      fail(`cannot parse scoutr-bridge.service start time: ${stamp}`);
-    } else if (started < newestDist) {
-      fail("scoutr-bridge.service started BEFORE dist/ was built — restart it (`npm run deploy`)");
+    console.log(`service started ${new Date(service.startedAtMs).toISOString()}`);
+    if (service.startedAtMs < newestDist) {
+      fail(`${service.service} started BEFORE dist/ was built — restart it (\`npm run deploy\`)`);
     }
   }
 } catch (e) {
-  fail(`cannot query scoutr-bridge.service: ${e.message}`);
+  fail(`cannot query the bridge service: ${e.message}`);
 }
+const serviceMainPid = service?.pid ? String(service.pid) : "";
 
-// Probe the real local bridge (the process the apps reach via tailscale serve).
+// Probe the real local bridge (the process the apps reach through the
+// configured exposure).
 try {
   const cfg = JSON.parse(readFileSync(join(homedir(), ".config/scoutr/config.json"), "utf8"));
   const port = cfg.port ?? 8737;
   const token = cfg.token;
-  const listeners = execFileSync("ss", ["-ltnp"], { encoding: "utf8" });
-  const serviceOwnsPort = listeners.split("\n").some((line) => {
-    const fields = line.trim().split(/\s+/);
-    return fields[0] === "LISTEN" && fields[3]?.endsWith(`:${port}`) && line.includes(`pid=${serviceMainPid},`);
-  });
-  if (!serviceOwnsPort) {
-    fail(`scoutr-bridge.service PID ${serviceMainPid || "none"} does not own listening port ${port}`);
+  if (!servicePidOwnsPort(serviceMainPid, port)) {
+    fail(`bridge service PID ${serviceMainPid || "none"} does not own listening port ${port}`);
   }
   const resp = execFileSync(
     "curl",

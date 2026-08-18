@@ -95,40 +95,35 @@ async function main(): Promise<void> {
       case "pair": {
         const { loadOrCreateConfig } = await import("./config.js");
         const { buildPairingPayload } = await import("./pairing.js");
-        const { execFile } = await import("node:child_process");
+        const { resolveExposure, ExposureError } = await import("./exposure.js");
         const { default: qr } = await import("qrcode-terminal");
 
         const config = await loadOrCreateConfig();
         if (!config.ntfyUrl || !config.ntfyTopic) {
           console.error("warning: ntfy not configured — push will not work until it is");
         }
-        // Public host resolution order: config.publicHost > SCOUTR_PUBLIC_HOST
-        // > the tailnet MagicDNS name (tailscale status) > loopback fallback.
-        let host = config.publicHost ?? process.env.SCOUTR_PUBLIC_HOST;
-        if (!host) {
-          host = await new Promise<string>((resolve) => {
-            execFile("tailscale", ["status", "--json"], { timeout: 5000 }, (err, stdout) => {
-              if (err) return resolve("");
-              try {
-                const dns = (JSON.parse(stdout) as { Self?: { DNSName?: string } }).Self?.DNSName;
-                resolve(dns ? dns.replace(/\.$/, "") : "");
-              } catch {
-                resolve("");
-              }
-            });
-          });
+        let exposure;
+        try {
+          exposure = await resolveExposure(config);
+        } catch (error) {
+          if (!(error instanceof ExposureError)) throw error;
+          console.error(`error: ${error.message}`);
+          process.exitCode = 1;
+          break;
         }
         const payload = buildPairingPayload({
-          host: host || `http://127.0.0.1:${config.port}`,
+          exposure,
           token: config.token,
           ntfyUrl: config.ntfyUrl,
           ntfyTopic: config.ntfyTopic,
         });
+        // Host and exposure kind are safe to log; the token never is.
+        console.error(`exposure: ${exposure.kind} → ${exposure.publicUrl}`);
         qr.generate(payload, { small: true }, (out: string) => console.log(out));
         console.error("\nScan this QR with the Scoutr app (Connect → Scan QR code).");
-        if (!host) {
+        if (exposure.loopbackFallback) {
           console.error("warning: could not detect the tailnet hostname — the QR points at 127.0.0.1.");
-          console.error("set publicHost in ~/.config/scoutr/config.json (or SCOUTR_PUBLIC_HOST) first.");
+          console.error("set exposure.publicUrl in ~/.config/scoutr/config.json (or SCOUTR_PUBLIC_HOST) first.");
         }
         console.error("If scanning fails, type the fields below into the app:");
         console.log(payload);
@@ -170,7 +165,8 @@ async function main(): Promise<void> {
           console.error(`push: ntfy at ${config.ntfyUrl}/topic/${config.ntfyTopic}`);
         }
         console.error(
-          `front with: tailscale serve --bg 443 ${server.url} (then the app uses https://<host>/ws + token)`,
+          `exposure: ${config.exposure.kind}${config.exposure.publicUrl ? ` → ${config.exposure.publicUrl}` : ""} ` +
+            `(the provider fronts ${server.url} with TLS; run 'scoutr-bridge pair' for the app's QR)`,
         );
 
         await new Promise<void>((resolve) => {

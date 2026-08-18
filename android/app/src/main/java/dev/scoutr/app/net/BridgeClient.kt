@@ -70,7 +70,8 @@ class BridgeException(val status: Int, reason: String) : IOException("bridge $st
  * ([TopologyFeedClient] for the herdr feed, [TerminalSocketClient] for
  * /ws/terminal).
  *
- * Base URL is built from the stored connection (e.g. https://artemis.tail…ts.net:8737).
+ * Base URL is built from the stored connection (e.g. https://scoutr.example.com),
+ * whatever provider fronts it.
  * Every request carries the pairing token as a Bearer header. Pairing tokens
  * never appear in URLs created by this client.
  */

@@ -66,7 +66,7 @@ fun ConnectScreen(
                 host = payload.host
                 token = payload.token
                 scanError = null
-                viewModel.connect(payload.host, payload.token)
+                viewModel.connect(payload.host, payload.token, payload.exposure)
             } else {
                 scanError = "That QR doesn't look like a Scoutr pairing code"
             }
@@ -110,7 +110,7 @@ fun ConnectScreen(
             value = host,
             onValueChange = { host = it },
             label = { Text("Bridge address") },
-            placeholder = { Text("https://artemis.tail…ts.net:8737") },
+            placeholder = { Text("https://scoutr.example.com") },
             singleLine = true,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
             modifier = Modifier.fillMaxWidth().testTag("connect_host"),

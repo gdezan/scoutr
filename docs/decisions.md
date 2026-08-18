@@ -6,11 +6,16 @@ pi agents, as an alternative to Moshi's paid herdr integration.
 ## Architecture (settled, 2026-08-09)
 
 - **Transport**: a Node/TS bridge daemon owns the herdr Unix socket and exposes a
-  private HTTP/WS API on localhost, fronted by `tailscale serve` TLS. The socket
-  itself is never exposed (it equals arbitrary code execution on the host).
-- **Bridge runtime**: `scoutr-bridge` runs as a systemd user unit
-  (`~/.config/systemd/user/scoutr-bridge.service`) with `Restart=on-failure`.
-  Node path is the mise install (no `node` on /usr/bin).
+  private HTTP/WS API on `127.0.0.1`, fronted by a **configured exposure** that
+  terminates TLS. The socket itself is never exposed (it equals arbitrary code
+  execution on the host).
+- **Bridge runtime**: `scoutr-bridge` runs under one supervisor per host,
+  owned by `scripts/bridge-service.mjs`: a systemd user unit
+  (`~/.config/systemd/user/scoutr-bridge.service`, `Restart=on-failure`) on
+  Linux, a user LaunchAgent (`dev.scoutr.bridge`, `RunAtLoad` + `KeepAlive`) on
+  macOS. Every executable path in the definition is absolute and resolved at
+  install time — neither `systemctl --user` nor launchd inherits an interactive
+  shell (Node from mise, `HERDR_BIN` from `which herdr` on macOS).
 - **App**: Kotlin + Jetpack Compose Material 3, dark-first, package
   `dev.scoutr.app`, minSdk 26 / targetSdk 36. No Hilt/Room; manual DI via
   `ScoutrApp.AppContainer`.
@@ -24,7 +29,9 @@ pi agents, as an alternative to Moshi's paid herdr integration.
   usage snapshot remains visible when its endpoint is unavailable. Expired xAI access
   tokens are refreshed in memory only.
 
-- **Push monitoring**: self-hosted ntfy on the host, tailscale-served at `/ntfy`;
+- **Push monitoring**: self-hosted ntfy on the host, published through the same
+  exposure (a `/ntfy` path under Tailscale, a separate hostname under
+  Cloudflare/custom);
   `BoardViewModel` polls the topic while Board is STARTED, while the opt-in
   `ScoutrMonitorService` polls every 30 seconds in the background. Both paths
   show local notifications with separate cursors; the service persists its
@@ -35,6 +42,42 @@ pi agents, as an alternative to Moshi's paid herdr integration.
   bridge owns capability, child lifecycle, and the 30s reconnect grace; Android
   owns the emulator, local scrollback, and input UX. The current contract and
   evidence live in `docs/terminal.md`; ADRs retain historical decisions.
+
+## Pluggable exposure (2026-08-18)
+
+- **The bridge protocol does not know who fronts it.** `exposure` in
+  `config.json` (`{ kind, publicUrl? }`, `kind` one of `tailscale`,
+  `cloudflare`, `custom`) answers exactly one question: what public base URL
+  should pairing advertise, and who is responsible for making it reach
+  `127.0.0.1:8737`. `bridge/src/exposure.ts` is the only module with provider
+  knowledge; route handlers, the terminal broker, `BridgeClient`,
+  `TopologyFeedClient`, and every ViewModel stay provider-agnostic and derive
+  everything from the saved base URL + token.
+- **Tailscale stays the default and the easiest personal path.** A config with
+  no `exposure` normalizes to `{ kind: "tailscale" }` and a legacy top-level
+  `publicHost` migrates into `exposure.publicUrl`, so existing deployments need
+  no edit and keep their v1 QR. An unknown kind is a hard `ConfigError`, never
+  a silent fallback — falling back would shell out to a provider the operator
+  did not choose.
+- **Cloudflare Tunnel is consumed, never provisioned.** The user creates the
+  named tunnel, DNS routes, and `cloudflared` service with Cloudflare's own
+  tooling; Scoutr stores only the resulting URLs. No Cloudflare API client, no
+  account state, no credentials in `~/.config/scoutr/config.json`, and
+  `scripts/bridge-service.mjs` explicitly does not manage `cloudflared`. Two
+  hostnames, because the ntfy client expects its `baseUrl` to be the ntfy root:
+  bridge → `127.0.0.1:8737`, ntfy → `127.0.0.1:8382`. The Tailscale `/ntfy`
+  path prefix is not reproduced through Cloudflare path routing.
+- **A misconfigured URL is an error, not a coercion.** `cloudflare` requires
+  `https://` (TLS terminates at Cloudflare) and is rejected — not upgraded —
+  when given `http://`. `custom` may keep an explicit `http://` as declared
+  dev intent, subject to Android's cleartext policy. `cloudflare`/`custom`
+  without a URL fail `pair` with the exact config fix while `serve` still runs
+  locally.
+- **A tunnel failure is an infrastructure failure.** Local health green plus a
+  dead public URL is diagnosed in `cloudflared`, not worked around in Scoutr.
+  Managed-WARP policy blocking the tunnel edge (outbound `7844`) is reported
+  and stopped at; Scoutr adds no VPN-coexistence logic and nobody edits company
+  WARP policy on its behalf.
 
 ## Versioning and in-app self-update (2026-08-15)
 
@@ -113,13 +156,23 @@ pi agents, as an alternative to Moshi's paid herdr integration.
 
 ## QR pairing (added with the library-first rule)
 
-- Pairing is a QR code printed by `scoutr-bridge pair`: compact v1 JSON
-  `{v, host, token, ntfy}` — the address, the pairing token, and ntfy discovery
-  in one scan. The app's Connect screen has a **Scan QR code** button
-  (zxing-android-embedded, the standard Android QR scanner) that fills the
-  fields and connects automatically, mirroring Moshi's Easy Pair flow.
-- The public host is resolved automatically from `tailscale status` (Self
-  DNSName), overridable via `publicHost` in config or `SCOUTR_PUBLIC_HOST`.
+- Pairing is a QR code printed by `scoutr-bridge pair`: compact JSON — the
+  address, the pairing token, and ntfy discovery in one scan. The app's Connect
+  screen has a **Scan QR code** button (zxing-android-embedded, the standard
+  Android QR scanner) that fills the fields and connects automatically,
+  mirroring Moshi's Easy Pair flow.
+- **The payload is versioned by exposure.** `tailscale` keeps emitting the
+  original v1 `{v, host, token, ntfy}`, byte-for-byte, so pairings and APKs
+  already in the field are untouched. `cloudflare` and `custom` emit v2, which
+  adds `exposure: { kind }` and nothing else — no edge-auth or Access
+  credentials, because Access was rejected (below). There is deliberately **no
+  v1 fallback** for the new kinds: an old app that only knows v1 rejects a v2
+  QR by version rather than half-connecting to a provider it cannot record.
+  The app parses both; a manually typed host+token records `custom`.
+- For `tailscale`, the public host is resolved automatically from
+  `tailscale status` (Self DNSName), overridable via `exposure.publicUrl` or
+  `SCOUTR_PUBLIC_HOST`. `cloudflare`/`custom` require an explicit URL and never
+  execute the Tailscale binary.
 - Carrying the token in the QR is equivalent to typing it: the code is printed
   only on the host terminal, and the token remains the sole credential.
 - Libraries: QR generation uses `qrcode-terminal` (battle-tested, no native
@@ -156,12 +209,40 @@ pi agents, as an alternative to Moshi's paid herdr integration.
   volatile test counts in product decisions.
 ## Security notes
 
-- The bridge token (`scoutr_<18 random bytes>`) is stored in
-  `~/.config/scoutr/config.json` (mode 0600) and on-device in
-  SharedPreferences. Current clients send it as a Bearer header; the bridge
+- The bridge token (`scoutr_<18 random bytes>` — 144 bits of `randomBytes`) is
+  stored in `~/.config/scoutr/config.json` (mode 0600) and on-device as AES-GCM
+  ciphertext under a dedicated Android Keystore key (metadata stays plain in
+  SharedPreferences; the plaintext token is removed only once encrypted
+  persistence succeeds). Current clients send it as a Bearer header; the bridge
   still accepts a WebSocket query token from older APKs during migration.
-- ntfy topic (`scoutr_<12 random bytes>`) is a shared secret between bridge and
-  app; the server listens on 127.0.0.1:8382, fronted by tailscale serve (no auth).
+- **Bearer-only public posture, decided deliberately.** Under `cloudflare` or
+  `custom` the bridge is Internet-routable and that token is the *entire*
+  application authentication boundary. Cloudflare Access (service tokens,
+  `CF-Access-Client-*` headers, JWT validation) was considered and **explicitly
+  rejected** for this iteration: it would put Cloudflare account provisioning,
+  a second credential in the QR, and Access state inside a product whose point
+  is that it owns no cloud. This is knowingly weaker defense-in-depth than
+  Access + Scoutr auth. The compensating invariants are non-negotiable: 401
+  before route match or body parsing, constant-time token compare, header-only
+  client auth (never a token in a URL), and no token in `serve` output, service
+  definitions, or deployment logs. Anyone who wants Access/mTLS/device posture
+  configures it on the Cloudflare side; do not smuggle it back into Scoutr.
+- **ntfy is a capability secret, not authentication.** The topic
+  (`scoutr_<12 random bytes>`) is a shared secret between bridge and app; the
+  server listens on 127.0.0.1:8382 with **no auth**. Under Tailscale, the
+  tailnet bounds who can reach it. Under a public Cloudflare/custom hostname
+  the topic is the only thing standing between the Internet and the event
+  stream: whoever learns it can read blocked/done events and publish forged
+  ones to the phone. That is materially weaker than the bridge's bearer auth
+  and must not be conflated with it. Adding ntfy authentication is a new
+  security decision, not an implementation detail.
+- **Rotation is the response to any disclosure.** The pairing QR carries both
+  the token and the topic, so a leaked QR, screenshot, terminal recording, or
+  config copy is a full credential compromise: rotate `token` and `ntfyTopic`
+  in `config.json` in place (see README §8 — deleting the file also resets
+  `port`/`ntfyUrl`/`exposure`), restart the service, and re-pair every device.
+  Old pairings 401 at once; already-cached ntfy messages under the old topic
+  stay readable until the cache duration expires.
 - Never expose the herdr socket raw; never modify herdr-agent-state.ts /
   moshi-hooks.ts; never write auth.json.
 

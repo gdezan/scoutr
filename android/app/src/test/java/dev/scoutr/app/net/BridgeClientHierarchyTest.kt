@@ -2,6 +2,7 @@ package dev.scoutr.app.net
 
 import android.content.Context
 import dev.scoutr.app.data.ConnectionStore
+import dev.scoutr.app.data.FakeConnectionCipher
 import dev.scoutr.app.data.TerminalHierarchyCommand
 import kotlinx.coroutines.runBlocking
 import okhttp3.OkHttpClient
@@ -44,7 +45,7 @@ class BridgeClientHierarchyTest {
             .apply()
         client = BridgeClient(
             OkHttpClient.Builder().readTimeout(5, TimeUnit.SECONDS).build(),
-            ConnectionStore(app),
+            ConnectionStore(app, FakeConnectionCipher()),
         )
     }
 

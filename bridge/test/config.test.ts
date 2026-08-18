@@ -4,7 +4,8 @@ import { mkdtempSync, mkdirSync, rmSync, statSync, chmodSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { defaultConfigPath, generateToken, loadOrCreateConfig } from "../src/config.js";
+import { readFile } from "node:fs/promises";
+import { ConfigError, defaultConfigPath, generateToken, loadOrCreateConfig } from "../src/config.js";
 
 describe("defaultConfigPath", () => {
   test("honors XDG_CONFIG_HOME", () => {
@@ -80,6 +81,59 @@ describe("loadOrCreateConfig", () => {
     assert.ok(config.ntfyTopic?.startsWith("scoutr_"));
   });
 
+  test("defaults a config without exposure to tailscale", async () => {
+    const path = join(dir, "no-exposure", "config.json");
+    mkdirSync(join(dir, "no-exposure"), { recursive: true });
+    await writeFile(path, JSON.stringify({ token: "0123456789abcdef", port: 8737 }));
+    const config = await loadOrCreateConfig(path);
+    assert.deepEqual(config.exposure, { kind: "tailscale" });
+  });
+
+  test("migrates a legacy publicHost into the tailscale public URL", async () => {
+    const path = join(dir, "legacy-host", "config.json");
+    mkdirSync(join(dir, "legacy-host"), { recursive: true });
+    await writeFile(
+      path,
+      JSON.stringify({ token: "0123456789abcdef", port: 8737, publicHost: "artemis.tail7dc568.ts.net" }),
+    );
+    const config = await loadOrCreateConfig(path);
+    assert.deepEqual(config.exposure, { kind: "tailscale", publicUrl: "artemis.tail7dc568.ts.net" });
+    // The canonical shape is persisted, so the migration happens once.
+    const persisted = JSON.parse(await readFile(path, "utf8")) as Record<string, unknown>;
+    assert.deepEqual(persisted.exposure, { kind: "tailscale", publicUrl: "artemis.tail7dc568.ts.net" });
+    assert.equal(persisted.publicHost, undefined);
+  });
+
+  test("preserves a canonical exposure config", async () => {
+    const path = join(dir, "canonical", "config.json");
+    mkdirSync(join(dir, "canonical"), { recursive: true });
+    await writeFile(
+      path,
+      JSON.stringify({
+        token: "0123456789abcdef",
+        port: 8737,
+        exposure: { kind: "cloudflare", publicUrl: "https://scoutr.example.com" },
+      }),
+    );
+    const config = await loadOrCreateConfig(path);
+    assert.deepEqual(config.exposure, { kind: "cloudflare", publicUrl: "https://scoutr.example.com" });
+    assert.equal(config.token, "0123456789abcdef");
+  });
+
+  test("rejects an unknown exposure kind instead of falling back to tailscale", async () => {
+    const path = join(dir, "bad-kind", "config.json");
+    mkdirSync(join(dir, "bad-kind"), { recursive: true });
+    const raw = JSON.stringify({ token: "0123456789abcdef", port: 8737, exposure: { kind: "ngrok" } });
+    await writeFile(path, raw);
+    await assert.rejects(() => loadOrCreateConfig(path), (error: unknown) => {
+      assert.ok(error instanceof ConfigError);
+      assert.match(error.message, /unknown exposure kind "ngrok"/);
+      return true;
+    });
+    // The token is never rotated over a config the operator must fix.
+    assert.equal(await readFile(path, "utf8"), raw);
+  });
+
   test("keeps the token when the parsed config cannot be re-persisted", { skip: process.getuid?.() === 0 }, async () => {
     // Only a missing or unparseable config may mint a token. A valid config
     // whose write fails (read-only directory) must be kept
@@ -88,7 +142,7 @@ describe("loadOrCreateConfig", () => {
     mkdirSync(roDir, { recursive: true });
     const path = join(roDir, "config.json");
     const token = "0123456789abcdef";
-    await writeFile(path, JSON.stringify({ token, port: 8737 }));
+    await writeFile(path, JSON.stringify({ token, port: 8737, publicHost: "artemis.tail7dc568.ts.net" }));
     // Directory permissions do not stop a write to an existing file — the
     // file itself must lose its write bit for writeFile to fail (EACCES).
     chmodSync(path, 0o400);
@@ -96,6 +150,7 @@ describe("loadOrCreateConfig", () => {
       const config = await loadOrCreateConfig(path);
       assert.equal(config.token, token, "token must survive a failed re-persist");
       assert.equal(config.port, 8737);
+      assert.deepEqual(config.exposure, { kind: "tailscale", publicUrl: "artemis.tail7dc568.ts.net" });
     } finally {
       chmodSync(path, 0o600);
     }

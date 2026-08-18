@@ -1,6 +1,7 @@
 package dev.scoutr.app.state
 
 import dev.scoutr.app.data.ConnectionStore
+import dev.scoutr.app.data.FakeConnectionCipher
 import dev.scoutr.app.data.DirListing
 import dev.scoutr.app.data.DirListingResponse
 import dev.scoutr.app.data.RepoCommit
@@ -35,7 +36,7 @@ class ReviewViewModelTest {
     @Before
     fun setUp() {
         fake = FakeScoutrApi()
-        connectionStore = ConnectionStore(RuntimeEnvironment.getApplication())
+        connectionStore = ConnectionStore(RuntimeEnvironment.getApplication(), FakeConnectionCipher())
         saveConnection()
         viewModel = ReviewViewModel(fake, connectionStore, ReviewStore(RuntimeEnvironment.getApplication()))
     }

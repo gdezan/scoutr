@@ -3,6 +3,7 @@ package dev.scoutr.app.state
 import dev.scoutr.app.data.CatalogAction
 import dev.scoutr.app.data.SessionAction
 import dev.scoutr.app.data.ConnectionStore
+import dev.scoutr.app.data.FakeConnectionCipher
 import dev.scoutr.app.data.CreatedSessionResponse
 import dev.scoutr.app.data.SessionCatalogItem
 import dev.scoutr.app.data.SessionCatalogResponse
@@ -182,7 +183,7 @@ class SessionHistoryViewModelTest {
     }
 
     private fun savedConnection(): ConnectionStore =
-        ConnectionStore(RuntimeEnvironment.getApplication()).apply {
+        ConnectionStore(RuntimeEnvironment.getApplication(), FakeConnectionCipher()).apply {
             save("http://test-bridge", "test-token", null, null)
         }
 

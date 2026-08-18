@@ -1,20 +1,16 @@
 #!/usr/bin/env bash
-# Deploy the bridge: rebuild dist and restart the scoutr-bridge systemd unit.
+# Deploy the bridge: rebuild dist, restart the supervised service (systemd user
+# unit on Linux, user LaunchAgent on macOS — scripts/bridge-service.mjs picks),
+# then prove the deployed process is the fresh one.
 set -euo pipefail
-cd "$(dirname "$0")/../bridge"
+here="$(cd "$(dirname "$0")" && pwd)"
+cd "$here/../bridge"
 
 echo "== building dist (tsc)…"
 npx tsc
 
-echo "== restarting scoutr-bridge…"
-systemctl --user restart scoutr-bridge
-sleep 2
-systemctl --user is-active scoutr-bridge >/dev/null && echo "== unit active" || { echo "unit FAILED"; exit 1; }
+echo "== restarting the bridge service…"
+node "$here/bridge-service.mjs" restart
 
-TOKEN="$(python3 -c "import json;print(json.load(open('$HOME/.config/scoutr/config.json'))['token'])" 2>/dev/null || true)"
-if [ -n "$TOKEN" ]; then
-  HEALTH="$(curl -s -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8737/api/health || true)"
-  echo "== health: $HEALTH"
-else
-  echo "== no config token found; /api/health requires auth"
-fi
+echo "== checking the deployed bridge…"
+npm run --silent check:deployed

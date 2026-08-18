@@ -17,6 +17,7 @@ import androidx.compose.ui.test.performScrollTo
 import androidx.test.platform.app.InstrumentationRegistry
 import dev.scoutr.app.data.AppearancePreferencesStore
 import dev.scoutr.app.data.ConnectionStore
+import dev.scoutr.app.data.ExposureKind
 import dev.scoutr.app.data.TerminalPreferencesStore
 import dev.scoutr.app.data.ApkBuild
 import dev.scoutr.app.data.UpdateApkStatusResponse
@@ -51,6 +52,7 @@ class SettingsScreenTest {
     private val saved = ConnectionStore.Saved(
         host = "http://bridge.local:8787",
         token = "super-secret-token-42",
+        exposure = ExposureKind.Tailscale,
         ntfyUrl = "https://ntfy.sh",
         ntfyTopic = "scoutr-abc123",
     )

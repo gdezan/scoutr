@@ -2,6 +2,7 @@ package dev.scoutr.app.net
 
 import android.content.Context
 import dev.scoutr.app.data.ConnectionStore
+import dev.scoutr.app.data.FakeConnectionCipher
 import kotlinx.coroutines.runBlocking
 import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.MockResponse
@@ -45,7 +46,7 @@ class PerformanceCountersTest {
         val counters = PerformanceCounters()
         val client = BridgeClient(
             okHttp = OkHttpClient.Builder().readTimeout(5, TimeUnit.SECONDS).build(),
-            connectionStore = ConnectionStore(RuntimeEnvironment.getApplication()),
+            connectionStore = ConnectionStore(RuntimeEnvironment.getApplication(), FakeConnectionCipher()),
             performanceCounters = counters,
         )
 

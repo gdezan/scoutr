@@ -6,6 +6,7 @@ import android.content.IntentFilter
 import android.os.Bundle
 import androidx.core.app.RemoteInput
 import dev.scoutr.app.data.ConnectionStore
+import dev.scoutr.app.data.FakeConnectionCipher
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
@@ -56,7 +57,7 @@ class NotificationReplyReceiverTest {
         // Robolectric shares prefs across tests — start from a clean slate.
         context.getSharedPreferences("scoutr_connection", Context.MODE_PRIVATE)
             .edit().clear().commit()
-        ConnectionStore(context).save(
+        ConnectionStore(context, FakeConnectionCipher()).save(
             // server.url() does a reverse-DNS lookup — keep it off the main thread.
             host = runBlocking(Dispatchers.IO) { server.url("/").toString().trimEnd('/') },
             token = "test-token",
@@ -67,7 +68,7 @@ class NotificationReplyReceiverTest {
         NotificationReplyReceiver.bridgeProvider = { ctx ->
             dev.scoutr.app.net.BridgeClient(
                 OkHttpClient.Builder().readTimeout(5, TimeUnit.SECONDS).build(),
-                ConnectionStore(ctx),
+                ConnectionStore(ctx, FakeConnectionCipher()),
             )
         }
         ShadowLog.stream = System.out

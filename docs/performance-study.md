@@ -36,7 +36,7 @@ The most important findings are more specific:
 
 ## Product and implementation map
 
-Scoutr is a self-hosted native Android console for supervising herdr panes and pi/Claude agents on a Linux host. The Node/TypeScript bridge is the only owner of the herdr Unix socket. The Android app communicates with its token-authenticated private HTTP/WebSocket API over Tailscale.
+Scoutr is a self-hosted native Android console for supervising herdr panes and pi/Claude agents on a Linux host. The Node/TypeScript bridge is the only owner of the herdr Unix socket. The Android app communicates with its token-authenticated private HTTP/WebSocket API through the host's configured exposure (Tailscale in the measured setup; a Cloudflare Tunnel or a custom reverse proxy are equally supported).
 
 | Feature | Android implementation | Bridge implementation | Runtime behavior |
 |---|---|---|---|

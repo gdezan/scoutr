@@ -48,16 +48,22 @@ The app on the interactive emulator is a real build with a saved connection.
 3. **Screenshot**: `adb -s emulator-5554 exec-out screencap -p > /tmp/shot.png`, then inspect
    with the vision-pane workflow in AGENTS.md (or `read` if the model has vision).
 4. **Repoint the app at a scratch bridge** (for features the real bridge
-   can't serve, or to isolate): write the prefs directly as root:
+   can't serve, or to isolate): pair through the Connect screen. The saved
+   token is AES-GCM ciphertext under an Android Keystore key, so a
+   hand-authored `scoutr_connection.xml` no longer produces a usable pairing —
+   only app code can write a decryptable credential.
    ```bash
-   adb -s emulator-5554 root
-   cat > /tmp/scoutr_connection.xml <<'EOF'
-   <?xml version='1.0' encoding='utf-8' standalone='yes' ?>
-   <map><string name="host">http://10.0.2.2:8791</string><string name="token">testtoken1234567890</string></map>
-   EOF
-   adb -s emulator-5554 push /tmp/scoutr_connection.xml /data/data/dev.scoutr.app/shared_prefs/scoutr_connection.xml
+   adb -s emulator-5554 shell pm clear dev.scoutr.app     # back to Connect
+   adb -s emulator-5554 shell am start -n dev.scoutr.app/.MainActivity
+   # tap the "Bridge address" field (bounds from the uiautomator dump), then:
+   adb -s emulator-5554 shell input text "http://10.0.2.2:8791"
+   # tap "Pairing token", then:
+   adb -s emulator-5554 shell input text "testtoken1234567890"
+   # tap "Connect"; the ViewModel probes /api/health before it saves.
    ```
-   (10.0.2.2 is the host loopback from the emulator.)
+   (10.0.2.2 is the host loopback from the emulator.) The Connect fields carry
+   test tags `connect_host`, `connect_token`, and `connect_button`, so
+   instrumentation tests drive the same path without adb taps.
 
 ## Scratch bridge
 
@@ -82,10 +88,26 @@ curl -s -H "Authorization: Bearer testtoken1234567890" http://127.0.0.1:8791/api
 
 ## Deploying bridge changes
 
-The apps talk to the **real** systemd unit (`scoutr-bridge.service`, port
-8737, `~/.config/scoutr/config.json`, exposed to the phone via
-`tailscale serve`), which runs the **compiled `dist/`** — NOT the `tsx`
+The apps talk to the **real supervised service** (port 8737,
+`~/.config/scoutr/config.json`, reachable from the phone through the
+configured exposure), which runs the **compiled `dist/`** — NOT the `tsx`
 scratch bridge above. The scratch bridge is source-level validation only.
+
+`scripts/bridge-service.mjs` owns that service on both hosts — a systemd user
+unit (`scoutr-bridge.service`) on Linux, a user LaunchAgent
+(`dev.scoutr.bridge`, logs in `~/Library/Logs/scoutr/`) on macOS:
+
+```bash
+node scripts/bridge-service.mjs install       # write/update the definition (idempotent)
+node scripts/bridge-service.mjs restart       # what `npm run deploy` calls
+node scripts/bridge-service.mjs status --json # { manager, active, pid, startedAtMs, ... }
+```
+
+`install` only rewrites the definition when it actually differs (new checkout,
+new Node path, new resolved `HERDR_BIN`), so an existing valid service is never
+churned. Anything other than Linux/macOS exits with an unsupported-manager
+error and installs nothing. `cloudflared` is not managed here — the tunnel is
+owned by Cloudflare's own service tooling.
 
 The review-403 incident (fixes 5/13) shipped with every test green while the
 user still hit `bridge 403: path outside allowed repo roots`: `dist/` had been
@@ -95,14 +117,115 @@ restarted. A stale deployed artifact is invisible to source-level tests.
 Every bridge change ends with:
 
 ```bash
-cd bridge && npm run deploy          # tsc build + restart the service + run the gate
+cd bridge && npm run deploy          # tsc build + `bridge-service.mjs restart` + run the gate
 npm run check:deployed               # gate: dist >= src AND service restarted after build AND real /api/health OK
 ```
 
-`check:deployed` fails on any of: dist older than the newest src file, the
-service started before the dist build, or the real bridge not answering
-health with the deployed token. Treat a failing gate as a hard stop — the
+(`make deploy-bridge` / `scripts/deploy-bridge.sh` run the same three steps.)
+
+`check:deployed` reads `bridge-service.mjs status --json` and fails on any of:
+dist older than the newest src file, the service started before the dist build,
+or the supervised PID not owning port 8737 and answering authenticated health
+(`ss` proves the port owner on Linux, `lsof` on macOS). Treat a failing gate as a hard stop — the
 app in your hand talks to that process, not to `tsx`.
+
+### macOS host (LaunchAgent)
+
+Same three commands, different supervisor. `install` resolves everything
+launchd cannot look up for itself **at install time** and bakes it into
+`~/Library/LaunchAgents/dev.scoutr.bridge.plist`:
+
+- the absolute Node path (`process.execPath`, realpath-resolved) as
+  `ProgramArguments[0]`, with `WorkingDirectory` at this checkout's `bridge/`;
+- `HERDR_BIN`, from `$HERDR_BIN` if exported, else `which herdr`. A LaunchAgent
+  gets no login shell, so an unresolved herdr would fail at pane-create time
+  rather than at install time;
+- an explicit `PATH`: the Node dir, the herdr dir, then
+  `/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin`.
+
+```bash
+node scripts/bridge-service.mjs install       # writes the plist, bootstraps it into gui/<uid>
+node scripts/bridge-service.mjs status --json # manager: "launchd"
+cd bridge && npm run deploy                   # build + restart + the same gate as Linux
+tail -f ~/Library/Logs/scoutr/scoutr-bridge.err.log
+```
+
+Because those paths are baked in, **re-run `install` after switching Node
+versions, moving the checkout, or installing herdr somewhere else** — it
+rewrites the plist only when the rendered definition actually differs, so it is
+safe to run every time. `status --json` reports `definitionCurrent: false` when
+the installed plist has drifted from what this checkout would render.
+
+### cloudflared is a separate ownership boundary
+
+Scoutr never creates, reads, or writes Cloudflare credentials, tunnel configs,
+or DNS routes, and `bridge-service.mjs` refuses to know about `cloudflared`.
+The tunnel is installed and supervised by Cloudflare's own documented service
+mechanism:
+
+```bash
+# after `cloudflared tunnel login` / `create` / `route dns` and writing your own config.yml
+sudo cloudflared service install              # installs com.cloudflare.cloudflared (launchd daemon on macOS)
+sudo launchctl stop com.cloudflare.cloudflared
+sudo launchctl start com.cloudflare.cloudflared
+```
+
+Two processes, two owners: `dev.scoutr.bridge` (this repo, user LaunchAgent,
+serves `127.0.0.1:8737`) and `com.cloudflare.cloudflared` (Cloudflare's
+installer, system daemon, publishes it). A failure in one is diagnosed without
+touching the other. Cloudflare's macOS service reference:
+<https://developers.cloudflare.com/tunnel/advanced/local-management/as-a-service/macos/>
+
+### Diagnosing the public path
+
+Bisect from the inside out; only the last step involves Cloudflare at all.
+
+```bash
+# 1. bridge itself (this repo's problem)
+curl -s -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8737/api/health
+node scripts/bridge-service.mjs status --json
+
+# 2. the tunnel process (Cloudflare's problem)
+cloudflared tunnel info <name-or-uuid>     # active connectors, or none
+cloudflared tunnel diag                    # bundles logs/config/connectivity for a report
+sudo launchctl print system/com.cloudflare.cloudflared | head -30
+
+# 3. the public hostnames
+curl -sv https://scoutr.example.com/api/health          # expect 401 without a bearer
+curl -s -H "Authorization: Bearer $TOKEN" https://scoutr.example.com/api/health
+curl -s https://scoutr-ntfy.example.com/v1/health
+```
+
+A green step 1 with a failing step 2 or 3 is an **exposure/infrastructure**
+failure. Do not add Cloudflare branches to bridge or app code to work around
+it; nothing in `BridgeClient`, `TopologyFeedClient`, the terminal transport, or
+the route dispatcher may learn which provider is in front.
+
+Restarting `cloudflared` drops long-lived sockets. Terminal and topology
+WebSockets reconnect through the app's existing grace/reconnect behavior;
+verify that explicitly after a tunnel restart rather than assuming the socket
+survived.
+
+#### Managed WARP hosts
+
+On a company-managed device, WARP may route or block `cloudflared`'s outbound
+edge connections. `cloudflared` needs **outbound** access to Cloudflare's edge
+on port `7844` (TCP for `http2`, UDP for `quic`); a WARP or firewall policy
+that drops it shows up as a tunnel with zero registered connectors while local
+health is perfectly green.
+
+```bash
+warp-cli status                            # is WARP connected / which policy
+cloudflared tunnel diag                    # records the connectivity result
+nc -vz region1.v2.argotunnel.com 7844
+```
+
+**This is an infrastructure/policy outcome, not a Scoutr bug and not a reason
+to work around a VPN.** Record what the diagnostic says and stop: do not modify
+WARP routes, split-tunnel settings, or security policy, and do not add
+VPN-coexistence logic to Scoutr. Either the policy is changed by whoever owns
+it, or that host uses a different exposure (`tailscale`, or `custom` behind a
+proxy the policy already permits).
 
 ## Testing patterns
 

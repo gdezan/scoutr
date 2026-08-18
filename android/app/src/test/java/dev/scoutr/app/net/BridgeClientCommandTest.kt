@@ -2,6 +2,7 @@ package dev.scoutr.app.net
 
 import android.content.Context
 import dev.scoutr.app.data.ConnectionStore
+import dev.scoutr.app.data.FakeConnectionCipher
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -54,7 +55,7 @@ class BridgeClientCommandTest {
             .apply()
         client = BridgeClient(
             OkHttpClient.Builder().readTimeout(5, TimeUnit.SECONDS).build(),
-            ConnectionStore(app),
+            ConnectionStore(app, FakeConnectionCipher()),
         )
     }
 

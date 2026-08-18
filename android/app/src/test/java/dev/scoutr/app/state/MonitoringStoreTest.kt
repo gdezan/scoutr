@@ -1,6 +1,7 @@
 package dev.scoutr.app.state
 
 import dev.scoutr.app.data.ConnectionStore
+import dev.scoutr.app.data.FakeConnectionCipher
 import dev.scoutr.app.service.ScoutrMonitorService
 import dev.scoutr.app.service.ScoutrDeepLink
 import dev.scoutr.app.service.scoutrChatUri
@@ -67,7 +68,7 @@ class ScoutrMonitorServiceTest {
         service.startCommand(0, 0)
 
         val shadow = org.robolectric.Shadows.shadowOf(service.get())
-        val connection = ConnectionStore(app)
+        val connection = ConnectionStore(app, FakeConnectionCipher())
         if (connection.saved == null) {
             // No saved connection: the service stops itself right away.
             assertTrue(shadow.isStoppedBySelf)

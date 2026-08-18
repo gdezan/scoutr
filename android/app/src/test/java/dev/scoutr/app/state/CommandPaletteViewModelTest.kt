@@ -5,6 +5,7 @@ import dev.scoutr.app.data.AgentsResponse
 import dev.scoutr.app.data.CatalogAction
 import dev.scoutr.app.data.SessionAction
 import dev.scoutr.app.data.ConnectionStore
+import dev.scoutr.app.data.FakeConnectionCipher
 import dev.scoutr.app.data.SessionCatalogItem
 import dev.scoutr.app.data.SessionCatalogResponse
 import dev.scoutr.app.data.SessionKey
@@ -145,7 +146,7 @@ class CommandPaletteViewModelTest {
 
     @Test
     fun openWithoutConnectionShowsError() = runBlocking {
-        val connection = ConnectionStore(RuntimeEnvironment.getApplication()).apply { clear() }
+        val connection = ConnectionStore(RuntimeEnvironment.getApplication(), FakeConnectionCipher()).apply { clear() }
         val viewModel = CommandPaletteViewModel(fake, connection)
         viewModel.open()
         assertTrue(viewModel.ui.value.open)
@@ -154,7 +155,7 @@ class CommandPaletteViewModelTest {
     }
 
     private fun savedConnection(): ConnectionStore =
-        ConnectionStore(RuntimeEnvironment.getApplication()).apply {
+        ConnectionStore(RuntimeEnvironment.getApplication(), FakeConnectionCipher()).apply {
             save("http://test-bridge", "test-token", null, null)
         }
 

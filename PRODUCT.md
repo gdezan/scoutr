@@ -8,8 +8,10 @@ labeled as such; inferences are labeled._
 
 Scoutr is a native Android app (Kotlin + Jetpack Compose, Material 3) that
 turns a phone into a remote supervision console for the user's AI coding
-agents. Agents run on a Linux host (herdr + pi); a local bridge daemon owns
-the herdr socket and exposes a token-authed HTTP/WSS API over the tailnet.
+agents. Agents run on the user's own host (Linux or macOS, herdr + pi); a
+local bridge daemon owns the herdr socket and exposes a token-authed HTTP/WSS
+API on loopback, published to the phone through whichever **exposure** the
+user configures — Tailscale, a Cloudflare Tunnel, or their own reverse proxy.
 The phone shows a live board of agents, per-agent chat/steer, usage rings,
 and push notifications — Moshi-style, self-hosted, no subscriptions.
 
@@ -52,5 +54,15 @@ surprise; calm cards so a running agent's state is the visual anchor.
 ## Constraints
 
 Never expose the herdr socket raw; auth.json / models-store.json read-only;
-no cloud/subscriptions; no Play Store; user is not interrupted (runs inside
-a goal); /simplify before every commit; close every herdr pane created.
+**no Scoutr-owned cloud or backend and no required subscription**; no Play
+Store; user is not interrupted (runs inside a goal); /simplify before every
+commit; close every herdr pane created.
+
+"No Scoutr-owned cloud" is about ownership, not about avoiding the network.
+The user may point Scoutr at an exposure provider they already own —
+Tailscale, a Cloudflare Tunnel, a reverse proxy — and that does not change
+the self-hosted identity: there is still no Scoutr relay, Worker, hosted
+backend, or account, no Scoutr-operated service in the data path, and no
+subscription anyone must buy to use the product. Scoutr consumes a public URL
+the user provisioned; it never provisions, manages, or holds credentials for
+one.

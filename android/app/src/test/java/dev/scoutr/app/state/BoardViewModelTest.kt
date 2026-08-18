@@ -4,6 +4,7 @@ import android.os.Looper
 import dev.scoutr.app.data.CatalogAction
 import dev.scoutr.app.data.SessionAction
 import dev.scoutr.app.data.ConnectionStore
+import dev.scoutr.app.data.FakeConnectionCipher
 import dev.scoutr.app.data.HealthResponse
 import dev.scoutr.app.data.HerdrInfo
 import dev.scoutr.app.data.REQUIRED_SCOUTR_API_FEATURES
@@ -37,7 +38,7 @@ class BoardViewModelTest {
     fun setUp() {
         fake = FakeScoutrApi()
         val app = RuntimeEnvironment.getApplication()
-        val connectionStore = ConnectionStore(app)
+        val connectionStore = ConnectionStore(app, FakeConnectionCipher())
         // Unsaved at construction: the VM init never connects, so no health
         // probe and no poll loop interfere with the control POST below.
         connectionStore.clear()
@@ -119,7 +120,7 @@ class BoardViewModelTest {
 
     @Test
     fun disconnectStopsPollingAndClearsTheBoard() {
-        val connectionStore = ConnectionStore(RuntimeEnvironment.getApplication())
+        val connectionStore = ConnectionStore(RuntimeEnvironment.getApplication(), FakeConnectionCipher())
         viewModel.reportError("stale")
 
         // Park the loop inside its first tick so "did the poll die" is provable
@@ -148,7 +149,7 @@ class BoardViewModelTest {
 
     @Test
     fun incompatibleSavedPairingIsRetainedAndFeaturePollingIsGated() {
-        val store = ConnectionStore(RuntimeEnvironment.getApplication()).also {
+        val store = ConnectionStore(RuntimeEnvironment.getApplication(), FakeConnectionCipher()).also {
             it.clear()
             it.save("https://saved-bridge.test", "saved-token")
         }
@@ -177,7 +178,7 @@ class BoardViewModelTest {
 
     @Test
     fun supportedHealthRetryClearsIncompatibilityAndRestartsPolling() {
-        val store = ConnectionStore(RuntimeEnvironment.getApplication()).also {
+        val store = ConnectionStore(RuntimeEnvironment.getApplication(), FakeConnectionCipher()).also {
             it.clear()
             it.save("https://saved-bridge.test", "saved-token")
         }
@@ -207,7 +208,7 @@ class BoardViewModelTest {
 
     @Test
     fun transientInitialHealthFailureRetriesTheHandshakeBeforeFeaturePolling() {
-        val store = ConnectionStore(RuntimeEnvironment.getApplication()).also {
+        val store = ConnectionStore(RuntimeEnvironment.getApplication(), FakeConnectionCipher()).also {
             it.clear()
             it.save("https://saved-bridge.test", "saved-token")
         }

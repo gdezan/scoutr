@@ -3,6 +3,7 @@ package dev.scoutr.app.net
 import android.content.Context
 import kotlinx.coroutines.runBlocking
 import dev.scoutr.app.data.ConnectionStore
+import dev.scoutr.app.data.FakeConnectionCipher
 import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
@@ -41,7 +42,7 @@ class BridgeClientUploadTest {
             .putString("token", "test-token")
             .apply()
         client = BridgeClient(OkHttpClient.Builder().readTimeout(5, TimeUnit.SECONDS).build(),
-            ConnectionStore(app))
+            ConnectionStore(app, FakeConnectionCipher()))
     }
 
     @After

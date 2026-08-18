@@ -1,7 +1,7 @@
 {
   "name": "scoutr-bridge",
   "version": "0.1.0",
-  "description": "Bridge daemon: owns the local herdr socket and pi sessions, exposes a private API on the Tailscale tailnet for the Scoutr Android app.",
+  "description": "Bridge daemon: owns the local herdr socket and pi sessions, exposes a token-authenticated loopback API for the Scoutr Android app, published through the configured exposure (Tailscale, Cloudflare Tunnel, or a custom proxy).",
   "private": true,
   "type": "module",
   "bin": {
@@ -10,7 +10,7 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "build": "tsc",
-    "deploy": "npm run build && systemctl --user restart scoutr-bridge.service && sleep 2 && npm run check:deployed",
+    "deploy": "npm run build && node ../scripts/bridge-service.mjs restart && npm run check:deployed",
     "check:deployed": "node scripts/check-deployed.mjs",
     "test": "node --import tsx --test --test-timeout=120000 test/*.test.ts",
     "cli": "tsx src/cli.ts"

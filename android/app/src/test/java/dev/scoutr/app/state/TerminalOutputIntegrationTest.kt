@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.ViewModelStore
 import dev.scoutr.app.data.ConnectionStore
+import dev.scoutr.app.data.FakeConnectionCipher
 import dev.scoutr.app.data.HealthResponse
 import dev.scoutr.app.data.SnapshotResponse
 import dev.scoutr.app.data.TerminalCapabilityInfo
@@ -65,7 +66,7 @@ class TerminalOutputIntegrationTest {
             .putString("host", "http://bridge")
             .putString("token", "test-token")
             .apply()
-        connectionStore = ConnectionStore(app)
+        connectionStore = ConnectionStore(app, FakeConnectionCipher())
         preferencesStore = TerminalPreferencesStore(app)
         api.healthResult = Result.success(
             HealthResponse(ok = true, terminal = TerminalCapabilityInfo(status = "supported", protocol = 1)),
