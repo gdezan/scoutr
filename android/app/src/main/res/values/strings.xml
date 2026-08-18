@@ -2,9 +2,7 @@
 <resources>
     <string name="app_name">Scoutr</string>
     <string name="connect_title">Connect to your agents</string>
-    <string name="connect_subtitle">Point Scoutr at your bridge on the tailnet.</string>
     <string name="connect_host_label">Bridge address</string>
-    <string name="connect_host_hint">https://artemis.tail…ts.net</string>
     <string name="connect_token_label">Pairing token</string>
     <string name="connect_token_hint">scoutr_…</string>
     <string name="connect_button">Connect</string>

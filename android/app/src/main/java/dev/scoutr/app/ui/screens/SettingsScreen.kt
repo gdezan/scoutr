@@ -226,8 +226,9 @@ private fun ConnectionSection(
  * Host vs installed build identity, plus the self-update trigger.
  *
  * The update pulls: the host builds an APK, this app downloads it over the
- * tailnet and installs it through PackageInstaller. Nothing here needs adb, so
- * an update works from anywhere on the tailnet — at the cost of one system
+ * exposed bridge API and installs it through PackageInstaller. Nothing here
+ * needs adb, so an update works from anywhere the bridge is reachable — at the
+ * cost of one system
  * confirmation sheet per install, which Android does not let an app skip.
  *
  * The status ring and rows are display-only: the update signal stays
@@ -302,7 +303,7 @@ private fun UpdateSection(api: ScoutrApi) {
     SettingsSection(
         "Update",
         footnote = "Checks the host checkout for a newer build, then downloads and installs it " +
-            "over the tailnet. Only the app is updated, never the bridge.",
+            "over your bridge connection. Only the app is updated, never the bridge.",
     ) {
         val current = status
         val stage = progress

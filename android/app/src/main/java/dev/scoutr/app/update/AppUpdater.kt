@@ -9,7 +9,7 @@ import java.security.MessageDigest
 
 /**
  * Drives one self-update end to end: ask the host to build an APK, wait for it,
- * download the bytes over the tailnet, check them against the host's hash, and
+ * download the bytes over the exposed bridge API, check them against the host's hash, and
  * hand them to the on-device installer.
  *
  * No adb anywhere — that is the point. The bridge cannot reach the phone at

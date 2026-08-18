@@ -8,7 +8,7 @@
 #   scripts/install-app.sh --build-only    # build the APK and stop (no adb)
 #
 # --build-only is what the bridge runs for the phone-pull update path: the app
-# downloads the APK over the tailnet and installs it itself, so no device needs
+# downloads the APK over the exposed bridge API and installs it itself, so no device needs
 # to be attached here.
 #
 # The serial is also read from $SCOUTR_SERIAL. With several devices connected

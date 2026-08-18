@@ -122,7 +122,7 @@ async function main(): Promise<void> {
         qr.generate(payload, { small: true }, (out: string) => console.log(out));
         console.error("\nScan this QR with the Scoutr app (Connect → Scan QR code).");
         if (exposure.loopbackFallback) {
-          console.error("warning: could not detect the tailnet hostname — the QR points at 127.0.0.1.");
+          console.error("warning: could not detect the public hostname — the QR points at 127.0.0.1.");
           console.error("set exposure.publicUrl in ~/.config/scoutr/config.json (or SCOUTR_PUBLIC_HOST) first.");
         }
         console.error("If scanning fails, type the fields below into the app:");

@@ -20,8 +20,8 @@ import { attachTerminalSocket } from "./terminal/websocket.js";
  *
  * Design (grounded in the goal + research):
  *   - The bridge owns the herdr socket (never exposed raw).
- *   - Listens on 127.0.0.1:PORT in plain HTTP; `tailscale serve` terminates
- *     TLS and fronts it on the tailnet. All requests carry the bearer token.
+ *   - Listens on 127.0.0.1:PORT in plain HTTP; the configured exposure
+ *     terminates TLS and fronts it. All requests carry the bearer token.
  *   - GET endpoints are read-only (health, snapshot, transcript, usage).
  *   - The /ws endpoint streams feed events. One-shot session commands are
  *     HTTP routes (`commands.http.v1`); /ws still answers the legacy command

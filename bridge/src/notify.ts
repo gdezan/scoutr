@@ -11,7 +11,7 @@ import type { FeedEvent } from "./herdr/feed.js";
 const THROTTLE_MS = 60_000;
 
 export interface NtfyConfig {
-  baseUrl: string; // e.g. https://artemis.tail7dc568.ts.net/ntfy
+  baseUrl: string; // e.g. https://scoutr.example.com/ntfy
   topic: string;
 }
 

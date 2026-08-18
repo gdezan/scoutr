@@ -10,7 +10,7 @@ import { join } from "node:path";
  * The install path used to push bytes host -> phone over adb, so updating the
  * app required a live `adb pair` (and, off USB, re-pairing after every phone
  * reboot). This inverts the direction: the bridge builds an APK on the host,
- * the phone downloads it over the tailnet, and Android's PackageInstaller does
+ * the phone downloads it over the exposed API, and Android's PackageInstaller does
  * the install on-device. Nothing here shells out to adb.
  *
  * Build state is process-wide on purpose — one checkout can only run one

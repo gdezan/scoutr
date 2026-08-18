@@ -6,7 +6,7 @@ import { gitRepoRoot } from "../review.js";
 import type { Route, RouteContext, RouteResult } from "./types.js";
 
 /**
- * Phone-triggered self-update, over the tailnet only — no adb, so no
+ * Phone-triggered self-update, over the exposed API only — no adb, so no
  * `adb pair` and no USB cable. Four authenticated endpoints behind the
  * existing bearer token (the dispatcher enforces auth):
  *
