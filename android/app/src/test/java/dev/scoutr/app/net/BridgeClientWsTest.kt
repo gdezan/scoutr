@@ -26,6 +26,7 @@ import org.robolectric.annotation.Config
 import org.junit.runner.RunWith
 import java.io.IOException
 import java.util.concurrent.TimeUnit
+import kotlin.system.measureTimeMillis
 
 /**
  * Real-transport contract tests for the one-command-per-socket WS surface
@@ -79,7 +80,8 @@ class BridgeClientWsTest {
 
         assertEquals("ack", frame.type)
         val upgrade = server.takeRequest()
-        assertEquals("/ws?token=test-token", upgrade.path)
+        assertEquals("/ws", upgrade.path)
+        assertEquals("Bearer test-token", upgrade.getHeader("Authorization"))
         val command = runBlocking { Json.parseToJsonElement(captured.await()).jsonObject }
         assertEquals("steer", command["type"]!!.jsonPrimitive.content)
         assertEquals("w1:p1", command["target"]!!.jsonPrimitive.content)
@@ -165,5 +167,43 @@ class BridgeClientWsTest {
         )
         val frame = runBlocking { client.sendCommand(mapOf("type" to "steer", "target" to "w1:p1", "text" to "x")) }
         assertEquals("ack", frame.type)
+    }
+
+    @Test
+    fun cleanCloseBeforeReply_failsTheCommand() {
+        server.enqueue(
+            MockResponse().withWebSocketUpgrade(object : WebSocketListener() {
+                override fun onMessage(webSocket: WebSocket, text: String) {
+                    webSocket.close(1000, "no reply")
+                }
+            }),
+        )
+
+        try {
+            runBlocking { client.sendCommand(mapOf("type" to "steer", "target" to "w1:p1", "text" to "x")) }
+            throw AssertionError("expected IOException")
+        } catch (expected: IOException) {
+            assertTrue(expected.message!!.contains("1000"))
+            assertTrue(expected.message!!.contains("no reply"))
+        }
+    }
+
+    @Test
+    fun noReply_failsAtTheCommandDeadline() {
+        server.enqueue(
+            MockResponse().withWebSocketUpgrade(object : WebSocketListener() {
+                override fun onMessage(webSocket: WebSocket, text: String) = Unit
+            }),
+        )
+
+        val elapsed = measureTimeMillis {
+            try {
+                runBlocking { client.sendCommand(mapOf("type" to "steer", "target" to "w1:p1", "text" to "x")) }
+                throw AssertionError("expected IOException")
+            } catch (expected: IOException) {
+                assertTrue(expected.message!!.contains("timed out"))
+            }
+        }
+        assertTrue("command should have a bounded deadline", elapsed in 1_000..10_000)
     }
 }

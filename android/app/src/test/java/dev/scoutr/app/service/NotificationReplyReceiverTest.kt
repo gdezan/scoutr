@@ -142,7 +142,9 @@ class NotificationReplyReceiverTest {
         assertEquals("steer", frame["type"]!!.jsonPrimitive.content)
         assertEquals("w1:p1", frame["target"]!!.jsonPrimitive.content)
         assertEquals("fix it now", frame["text"]!!.jsonPrimitive.content)
-        assertEquals("/ws?token=test-token", server.takeRequest().path)
+        val upgrade = server.takeRequest()
+        assertEquals("/ws", upgrade.path)
+        assertEquals("Bearer test-token", upgrade.getHeader("Authorization"))
     }
 
     @Test

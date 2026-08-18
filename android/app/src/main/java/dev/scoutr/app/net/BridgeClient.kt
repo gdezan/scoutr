@@ -41,6 +41,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import okhttp3.Call
@@ -70,9 +71,8 @@ class BridgeException(val status: Int, reason: String) : IOException("bridge $st
  * production [ScoutrApi] implementation.
  *
  * Base URL is built from the stored connection (e.g. https://artemis.tail…ts.net:8737).
- * Every request carries the pairing token as a Bearer header; the WS upgrade uses
- * a query-param token (tailscale serve passes headers through, but query params are
- * simplest to keep working across proxies).
+ * Every request carries the pairing token as a Bearer header, including WebSocket
+ * upgrades. Pairing tokens never appear in URLs created by this client.
  */
 class BridgeClient(
     private val okHttp: OkHttpClient,
@@ -362,16 +362,19 @@ class BridgeClient(
         buildJsonObject { for ((k, v) in command) put(k, JsonPrimitive(v)) },
     )
 
-    /** sendCommand with structured values (e.g. key arrays); see sendCommand. */
-    override suspend fun sendCommandJson(command: JsonObject): WsFrame = suspendCancellableCoroutine { continuation ->
+    /** Sends one structured command and bounds the wait for its non-feed reply. */
+    override suspend fun sendCommandJson(command: JsonObject): WsFrame =
+        withTimeoutOrNull(COMMAND_ACK_TIMEOUT_MS) { exchangeCommand(command) }
+            ?: throw IOException("Bridge command timed out after $COMMAND_ACK_TIMEOUT_MS ms")
+
+    private suspend fun exchangeCommand(command: JsonObject): WsFrame = suspendCancellableCoroutine { continuation ->
         val saved = connectionStore.saved
         if (saved == null) {
             continuation.resumeWithException(IOException("no connection configured"))
             return@suspendCancellableCoroutine
         }
         val base = saved.host.trimEnd('/')
-        val wsUrl = base.replaceFirst("https://", "wss://").replaceFirst("http://", "ws://") + "/ws?token=" +
-            java.net.URLEncoder.encode(saved.token, "UTF-8")
+        val wsUrl = base.replaceFirst("https://", "wss://").replaceFirst("http://", "ws://") + "/ws"
         val payload = json.encodeToString(command)
         val settled = AtomicBoolean(false)
 
@@ -397,9 +400,32 @@ class BridgeClient(
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                 if (settled.compareAndSet(false, true)) continuation.resumeWithException(t)
             }
+
+            override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
+                failForEarlyClose(code, reason)
+                webSocket.close(code, reason)
+            }
+
+            override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                failForEarlyClose(code, reason)
+            }
+
+            private fun failForEarlyClose(code: Int, reason: String) {
+                if (settled.compareAndSet(false, true)) {
+                    continuation.resumeWithException(
+                        IOException("Bridge command socket closed before reply: code=$code reason=$reason"),
+                    )
+                }
+            }
         }
 
-        val ws = okHttp.newWebSocket(Request.Builder().url(wsUrl).build(), listener)
+        val ws = okHttp.newWebSocket(
+            Request.Builder()
+                .url(wsUrl)
+                .header("Authorization", "Bearer ${saved.token}")
+                .build(),
+            listener,
+        )
         continuation.invokeOnCancellation {
             settled.set(true)
             ws.cancel()
@@ -499,6 +525,7 @@ class BridgeClient(
         }
 
     private companion object {
+        const val COMMAND_ACK_TIMEOUT_MS = 5_000L
         val EMPTY_JSON_BODY: RequestBody = "{}".toRequestBody("application/json".toMediaType())
         const val DOWNLOAD_BUFFER_BYTES = 64 * 1024
     }
