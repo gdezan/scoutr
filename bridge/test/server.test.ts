@@ -248,6 +248,95 @@ describe("scoutr bridge HTTP/WS API (offline)", () => {
     assert.ok("updatedAtMs" in cards[0]!);
   });
 
+  test("agents carry normalized attention for a simple ask, a multi-question ask, and neither", async () => {
+    const askDir = join(sessionRoot, "attention-project");
+    await mkdir(askDir, { recursive: true });
+    const write = async (name: string, questions: unknown[]) => {
+      const path = join(askDir, name);
+      await writeFile(
+        path,
+        [
+          JSON.stringify({ type: "session", version: 3, id: name, timestamp: "2026-01-01T00:00:00.000Z", cwd: "/work/project" }),
+          JSON.stringify({
+            type: "message",
+            id: "e1",
+            timestamp: "2026-01-01T00:00:01.000Z",
+            message: {
+              role: "assistant",
+              content: [{ type: "toolCall", id: `call_${name}`, name: "ask_user_question", arguments: { questions } }],
+            },
+          }),
+        ].join("\n"),
+      );
+      return path;
+    };
+    const simple = await write("simple.jsonl", [{
+      question: "Ship the fix?",
+      header: "Ship",
+      options: [{ label: "Ship it", description: "Deploy now." }, { label: "Hold", description: "Wait for review." }],
+    }]);
+    const multi = await write("multi.jsonl", [
+      { question: "Ship the fix?", header: "Ship", options: [{ label: "Ship it", description: "" }] },
+      { question: "Tag a release?", header: "Tag", options: [{ label: "Yes", description: "" }] },
+    ]);
+
+    const cardsFor = async (sessionPathValue: string, status = "blocked") => {
+      feed.setSnapshot(
+        snapshotWithAgents([{ agent_status: status, agent_session: { kind: "path", value: sessionPathValue } }]),
+      );
+      const { body } = await getJson("/api/agents");
+      return (body as { agents: Array<Record<string, unknown>> }).agents;
+    };
+
+    const simpleCard = (await cardsFor(simple))[0] as { attention: {
+      kind: string;
+      callId: string;
+      questionCount: number;
+      canQuickAnswer: boolean;
+      currentQuestion: { id: string; header: string; question: string; multiSelect: boolean; options: Array<Record<string, string>> };
+    } };
+    assert.equal(simpleCard.attention.kind, "ask");
+    assert.equal(simpleCard.attention.callId, "call_simple.jsonl");
+    assert.equal(simpleCard.attention.questionCount, 1);
+    assert.equal(simpleCard.attention.canQuickAnswer, true);
+    assert.equal(simpleCard.attention.currentQuestion.header, "Ship");
+    assert.equal(simpleCard.attention.currentQuestion.question, "Ship the fix?");
+    assert.equal(simpleCard.attention.currentQuestion.multiSelect, false);
+    assert.deepEqual(simpleCard.attention.currentQuestion.options, [
+      { label: "Ship it", description: "Deploy now." },
+      { label: "Hold", description: "Wait for review." },
+    ]);
+
+    const multiCard = (await cardsFor(multi))[0] as { attention: { questionCount: number; canQuickAnswer: boolean; currentQuestion: { header: string } } };
+    assert.equal(multiCard.attention.questionCount, 2);
+    assert.equal(multiCard.attention.canQuickAnswer, false, "the board cannot submit a two-question round");
+    assert.equal(multiCard.attention.currentQuestion.header, "Ship");
+
+    const plain = join(askDir, "plain.jsonl");
+    await writeFile(
+      plain,
+      [
+        JSON.stringify({ type: "session", version: 3, id: "plain", timestamp: "2026-01-01T00:00:00.000Z", cwd: "/work/project" }),
+        JSON.stringify({ type: "message", id: "e1", timestamp: "2026-01-01T00:00:01.000Z", message: { role: "assistant", content: [{ type: "text", text: "still working on it" }] } }),
+      ].join("\n"),
+    );
+    const workingCard = (await cardsFor(plain, "working"))[0] as { attention: unknown };
+    assert.equal(workingCard.attention, null, "a working pane with no open ask is not waiting on the user");
+  });
+
+  test("a blocked pane with no structured ask reports prompt attention only", async () => {
+    feed.setSnapshot(snapshotWithAgents([{ agent_status: "blocked" }]));
+    const { body } = await getJson("/api/agents");
+    const card = (body as { agents: Array<{ attention: unknown }> }).agents[0]!;
+    assert.deepEqual(card.attention, {
+      kind: "prompt",
+      callId: null,
+      questionCount: 0,
+      currentQuestion: null,
+      canQuickAnswer: false,
+    });
+  });
+
   test("commands returns the slash-command catalog", async () => {
     const { status, body } = await getJson("/api/commands");
     assert.equal(status, 200);

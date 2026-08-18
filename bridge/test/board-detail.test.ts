@@ -1,10 +1,20 @@
 import { strict as assert } from "node:assert";
-import { mkdtemp, writeFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, stat, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it, beforeEach, afterEach } from "node:test";
-import { BoardDetailCache, deriveBoardDetail, cleanActivity } from "../src/board-detail.js";
+import {
+  BoardDetailCache,
+  currentAttention,
+  deriveBoardDetail,
+  cleanActivity,
+  promptAttention,
+} from "../src/board-detail.js";
 import { parsePiTranscript } from "../src/agents/pi/transcript.js";
+import { piBackend } from "../src/agents/pi/index.js";
+import { claudeBackend } from "../src/agents/claude/index.js";
+import { handleClaudeHook } from "../src/agents/claude/hook.js";
+import type { QuestionEntry } from "../src/questions.js";
 
 let nextId = 0;
 
@@ -158,3 +168,260 @@ describe("cleanActivity", () => {
     assert.equal(cleanActivity("a".repeat(200), 10), `${"a".repeat(9)}…`);
   });
 });
+
+/** One question card, as a backend extractor would report it. */
+function question(fields: Partial<QuestionEntry> & { id: string }): QuestionEntry {
+  return {
+    callId: "call1",
+    entryId: "e1",
+    question: "Which color?",
+    header: "Color",
+    options: [{ label: "Red", description: "Warm" }, { label: "Green", description: "" }],
+    multiSelect: false,
+    answered: false,
+    answerText: null,
+    selected: [],
+    timestamp: "2026-08-10T00:00:00.000Z",
+    ...fields,
+  };
+}
+
+describe("currentAttention", () => {
+  it("summarizes a simple single-select ask as quick-answerable", () => {
+    const attention = currentAttention([question({ id: "call1#0" })]);
+    assert.equal(attention?.kind, "ask");
+    assert.equal(attention?.callId, "call1");
+    assert.equal(attention?.questionCount, 1);
+    assert.equal(attention?.currentQuestion?.id, "call1#0");
+    assert.equal(attention?.currentQuestion?.header, "Color");
+    assert.deepEqual(attention?.currentQuestion?.options.map((o) => o.label), ["Red", "Green"]);
+    assert.equal(attention?.canQuickAnswer, true);
+  });
+
+  it("has no attention once every question is answered", () => {
+    assert.equal(currentAttention([question({ id: "call1#0", answered: true })]), null);
+    assert.equal(currentAttention([]), null);
+  });
+
+  it("counts a multi-question ask and refuses to quick answer it", () => {
+    const attention = currentAttention([
+      question({ id: "call1#0" }),
+      question({ id: "call1#1", question: "Which size?", header: "Size" }),
+    ]);
+    assert.equal(attention?.questionCount, 2);
+    assert.equal(attention?.currentQuestion?.id, "call1#0");
+    assert.equal(attention?.canQuickAnswer, false);
+  });
+
+  it("points at the first unanswered question of a partly answered group", () => {
+    const attention = currentAttention([
+      question({ id: "call1#0", answered: true }),
+      question({ id: "call1#1", question: "Which size?", header: "Size" }),
+    ]);
+    assert.equal(attention?.currentQuestion?.id, "call1#1");
+    assert.equal(attention?.questionCount, 1);
+    assert.equal(attention?.canQuickAnswer, true);
+  });
+
+  it("refuses quick answer for multi-select, free text, and long option lists", () => {
+    assert.equal(currentAttention([question({ id: "a#0", multiSelect: true })])?.canQuickAnswer, false);
+    assert.equal(currentAttention([question({ id: "a#0", options: [] })])?.canQuickAnswer, false);
+    const many = ["A", "B", "C", "D"].map((label) => ({ label, description: "" }));
+    assert.equal(currentAttention([question({ id: "a#0", options: many })])?.canQuickAnswer, false);
+  });
+
+  it("exposes the newest open group when an older one is still unanswered", () => {
+    const attention = currentAttention([
+      question({ id: "old#0", callId: "old", timestamp: "2026-08-10T00:00:00.000Z" }),
+      question({ id: "new#0", callId: "new", timestamp: "2026-08-10T01:00:00.000Z", question: "Ship it?" }),
+    ]);
+    assert.equal(attention?.callId, "new");
+    assert.equal(attention?.currentQuestion?.question, "Ship it?");
+  });
+
+  it("passes option labels through verbatim, however long", () => {
+    const label = "y".repeat(300);
+    const attention = currentAttention([question({ id: "a#0", options: [{ label, description: "" }] })]);
+    assert.equal(attention?.currentQuestion?.options[0]?.label, label);
+  });
+});
+
+describe("promptAttention", () => {
+  it("describes a blocked pane without inventing a question", () => {
+    const attention = promptAttention();
+    assert.equal(attention.kind, "prompt");
+    assert.equal(attention.currentQuestion, null);
+    assert.equal(attention.callId, null);
+    assert.equal(attention.questionCount, 0);
+    assert.equal(attention.canQuickAnswer, false);
+  });
+});
+
+/** A pi `ask_user_question` call, as the session file records it. */
+function piAskLine(callId: string, questions: unknown[], ts: string): string {
+  return sessionLine(
+    "message",
+    { message: { role: "assistant", content: [{ type: "toolCall", id: callId, name: "ask_user_question", arguments: { questions } }] } },
+    ts,
+  );
+}
+
+function piAnswerLine(callId: string, answers: unknown[], ts: string): string {
+  return sessionLine(
+    "message",
+    { message: { role: "toolResult", toolCallId: callId, toolName: "ask_user_question", content: [], details: { answers } } },
+    ts,
+  );
+}
+
+const PI_QUESTIONS = [
+  {
+    question: "Where should the papercut live?",
+    header: "Scope",
+    options: [{ label: "This repo", description: "Handle it here." }, { label: "Skip it", description: "Leave it open." }],
+  },
+];
+
+describe("BoardDetailCache attention (pi)", () => {
+  let dir: string;
+
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), "scoutr-board-attention-"));
+    process.env.PI_CODING_AGENT_SESSION_DIR = dir;
+  });
+
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it("exposes the same open ask Chat reads from the transcript", async () => {
+    const path = join(dir, "ask.jsonl");
+    await writeFile(path, `${piAskLine("call_pi", PI_QUESTIONS, "2026-08-10T00:00:00Z")}\n`);
+    const detail = await new BoardDetailCache().detailFor(path);
+    const chat = piBackend.extractQuestions(await piBackend.readTranscript(path));
+    assert.equal(chat.length, 1, "Chat sees exactly the one open question");
+    assert.equal(detail?.attention?.kind, "ask");
+    assert.equal(detail?.attention?.currentQuestion?.id, chat[0]?.id);
+    assert.equal(detail?.attention?.callId, chat[0]?.callId);
+    assert.deepEqual(
+      detail?.attention?.currentQuestion?.options,
+      chat[0]?.options.map((o) => ({ label: o.label, description: o.description })),
+    );
+    assert.equal(detail?.attention?.canQuickAnswer, true);
+  });
+
+  it("drops the attention once the ask is answered", async () => {
+    const path = join(dir, "answered.jsonl");
+    await writeFile(path, [
+      piAskLine("call_pi", PI_QUESTIONS, "2026-08-10T00:00:00Z"),
+      piAnswerLine("call_pi", [{ questionIndex: 0, kind: "option", answer: "This repo" }], "2026-08-10T00:00:10Z"),
+    ].join("\n"));
+    const detail = await new BoardDetailCache().detailFor(path);
+    assert.equal(detail?.attention, null);
+  });
+
+  it("leaves a working session with no attention at all", async () => {
+    const path = join(dir, "plain.jsonl");
+    await writeFile(path, sessionLine("message", { message: { role: "user", content: "Fix the billing bug" } }, "2026-08-10T00:00:00Z"));
+    const detail = await new BoardDetailCache().detailFor(path);
+    assert.equal(detail?.attention, null);
+  });
+});
+
+const CLAUDE_SESSION = "9f1c2d3e-0000-0000-0000-0000000000a1";
+
+function claudePreToolUse(transcriptPath: string, toolUseId = "toolu_board"): string {
+  return JSON.stringify({
+    hook_event_name: "PreToolUse",
+    session_id: CLAUDE_SESSION,
+    transcript_path: transcriptPath,
+    tool_name: "AskUserQuestion",
+    tool_use_id: toolUseId,
+    tool_input: {
+      questions: [
+        {
+          question: "Which color?",
+          header: "Color",
+          multiSelect: false,
+          options: [{ label: "Red", description: "Warm" }, { label: "Green" }],
+        },
+      ],
+    },
+  });
+}
+
+describe("BoardDetailCache attention (claude sidecar)", () => {
+  let home = "";
+  let path = "";
+  const realConfigHome = process.env.XDG_CONFIG_HOME;
+  const realClaudeDir = process.env.CLAUDECONFIGDIR;
+
+  beforeEach(async () => {
+    home = await mkdtemp(join(tmpdir(), "scoutr-board-claude-"));
+    process.env.XDG_CONFIG_HOME = home;
+    process.env.CLAUDECONFIGDIR = join(home, "claude");
+    const project = join(home, "claude", "projects", "-work");
+    await mkdir(project, { recursive: true });
+    path = join(project, `${CLAUDE_SESSION}.jsonl`);
+    await writeFile(path, `${JSON.stringify({
+      type: "user",
+      uuid: "u1",
+      sessionId: CLAUDE_SESSION,
+      cwd: "/work",
+      timestamp: "2026-08-10T00:00:00.000Z",
+      message: { role: "user", content: "Pick a color for me" },
+    })}\n`);
+  });
+
+  afterEach(async () => {
+    if (realConfigHome === undefined) delete process.env.XDG_CONFIG_HOME;
+    else process.env.XDG_CONFIG_HOME = realConfigHome;
+    if (realClaudeDir === undefined) delete process.env.CLAUDECONFIGDIR;
+    else process.env.CLAUDECONFIGDIR = realClaudeDir;
+    await rm(home, { recursive: true, force: true });
+  });
+
+  it("converges when the pending sidecar appears and clears without a transcript change", async () => {
+    const cache = new BoardDetailCache();
+    const before = await stat(path);
+    assert.equal((await cache.detailFor(path))?.attention, null);
+
+    // The hook writes the open ask; Claude does not touch the JSONL until the
+    // ask is answered, so only the sidecar has changed.
+    handleClaudeHook(claudePreToolUse(path));
+    assert.deepEqual(await statTimes(path), [before.mtimeMs, before.size]);
+    const open = (await cache.detailFor(path))?.attention;
+    assert.equal(open?.kind, "ask");
+    assert.equal(open?.currentQuestion?.id, "toolu_board#0");
+    assert.equal(open?.canQuickAnswer, true);
+
+    // Answering in the terminal clears the sidecar; still no transcript write.
+    handleClaudeHook(JSON.stringify({
+      hook_event_name: "PostToolUse",
+      session_id: CLAUDE_SESSION,
+      tool_name: "AskUserQuestion",
+      tool_use_id: "toolu_board",
+    }));
+    assert.deepEqual(await statTimes(path), [before.mtimeMs, before.size]);
+    assert.equal((await cache.detailFor(path))?.attention, null);
+  });
+
+  it("exposes the ids and options Chat reads for the same open ask", async () => {
+    handleClaudeHook(claudePreToolUse(path));
+    const detail = await new BoardDetailCache().detailFor(path);
+    const chat = claudeBackend.extractQuestions(await claudeBackend.readTranscript(path));
+    assert.equal(chat.length, 1, "Chat sees the hook-reported ask");
+    assert.equal(chat[0]?.id, "toolu_board#0");
+    assert.equal(detail?.attention?.currentQuestion?.id, chat[0]?.id);
+    assert.equal(detail?.attention?.callId, chat[0]?.callId);
+    assert.deepEqual(
+      detail?.attention?.currentQuestion?.options,
+      chat[0]?.options.map((o) => ({ label: o.label, description: o.description })),
+    );
+  });
+});
+
+async function statTimes(path: string): Promise<[number, number]> {
+  const info = await stat(path);
+  return [info.mtimeMs, info.size];
+}

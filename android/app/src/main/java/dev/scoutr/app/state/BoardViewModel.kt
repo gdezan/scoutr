@@ -9,7 +9,13 @@ import dev.scoutr.app.data.ConnectionStore
 import dev.scoutr.app.data.ScoutrApiCompatibility
 import dev.scoutr.app.data.classifyScoutrApiCompatibility
 import dev.scoutr.app.data.formatScoutrApiIncompatibility
+import dev.scoutr.app.net.AskAnswer
+import dev.scoutr.app.net.BridgeException
 import dev.scoutr.app.net.ScoutrApi
+// The Board's own quick-answer eligibility rule, shared with the cards that
+// draw the controls so the check that submits cannot drift from the check that
+// offers.
+import dev.scoutr.app.ui.screens.quickAnswerOptions
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -32,6 +38,12 @@ data class BoardUiState(
     val connected: Boolean = false,
     val error: String? = null,
     val apiCompatibility: ScoutrApiCompatibility? = null,
+    /**
+     * Pane ids with a quick answer in flight. Membership is what makes a
+     * second tap a no-op, so it is set before the request leaves and cleared
+     * only once the request has settled.
+     */
+    val quickAnswering: Set<String> = emptySet(),
 )
 
 class BoardViewModel(
@@ -283,8 +295,88 @@ class BoardViewModel(
         }
     }
 
+    /**
+     * Answer a Needs-you card's open ask straight from the Board.
+     *
+     * Only the whole round travels: exactly one [AskAnswer] built from the
+     * server's own question id and the server's own option label (never the
+     * truncated text the button drew). Eligibility and ids are re-read from
+     * the board this VM currently holds rather than the card the tap carried,
+     * because a poll may have replaced the ask in between. Nothing is marked
+     * answered locally — the Board refreshes after every outcome and lets
+     * `/api/agents` say what is still open.
+     */
+    fun quickAnswer(agent: SessionDescriptor, optionLabel: String) {
+        val incompatible = _ui.value.apiCompatibility as? ScoutrApiCompatibility.Incompatible
+        if (incompatible != null) {
+            reportError(formatScoutrApiIncompatibility(incompatible))
+            return
+        }
+        if (_ui.value.apiCompatibility != ScoutrApiCompatibility.Compatible) {
+            reportError("Checking bridge compatibility")
+            return
+        }
+        val paneId = agent.live?.paneId
+        if (paneId == null) {
+            reportError("That agent is no longer running")
+            return
+        }
+        // The one guard against a double tap: the second call sees the first
+        // still in flight and stops here, before any request is built.
+        if (paneId in _ui.value.quickAnswering) return
+
+        val attention = _ui.value.board.sessions
+            .firstOrNull { it.live?.paneId == paneId }
+            ?.attention
+        val question = attention?.currentQuestion
+        val callId = attention?.callId
+        val option = quickAnswerOptions(attention).firstOrNull { it.label == optionLabel }
+        if (question == null || callId.isNullOrEmpty() || option == null) {
+            viewModelScope.launch {
+                loadBoard()
+                reportError(QUICK_ANSWER_STALE)
+            }
+            return
+        }
+
+        _ui.update { it.copy(quickAnswering = it.quickAnswering + paneId, error = null) }
+        viewModelScope.launch {
+            val failure = try {
+                bridge.answerAsk(
+                    paneId = paneId,
+                    callId = callId,
+                    answers = listOf(
+                        AskAnswer(questionId = question.id, selectedLabels = listOf(option.label)),
+                    ),
+                )
+                null
+            } catch (c: CancellationException) {
+                throw c
+            } catch (e: Exception) {
+                e
+            }
+            _ui.update { it.copy(quickAnswering = it.quickAnswering - paneId) }
+            // Refresh on success and on failure alike: only the bridge knows
+            // whether the ask is gone. The error is raised after the refresh
+            // so the successful reload does not clear it.
+            loadBoard()
+            failure?.let { reportError(quickAnswerErrorMessage(it)) }
+        }
+    }
+
+    private fun quickAnswerErrorMessage(error: Exception): String = when {
+        // The bridge rejects an ask that no longer matches the pane with 409:
+        // someone (or something) got there first.
+        error is BridgeException && error.status == 409 -> QUICK_ANSWER_STALE
+        else -> error.message ?: "Answer failed to send"
+    }
+
     override fun onCleared() {
         stopLiveLoops()
         super.onCleared()
+    }
+
+    private companion object {
+        const val QUICK_ANSWER_STALE = "That question is no longer open"
     }
 }

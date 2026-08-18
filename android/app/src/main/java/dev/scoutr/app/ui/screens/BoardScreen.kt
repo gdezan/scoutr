@@ -42,6 +42,8 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.material3.MaterialTheme
@@ -73,6 +75,8 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import dev.scoutr.app.data.AttentionSummary
+import dev.scoutr.app.data.QuestionOption
 import dev.scoutr.app.data.SessionDescriptor
 import dev.scoutr.app.data.AgentStatus
 import dev.scoutr.app.data.ScoutrApiCompatibility
@@ -108,6 +112,7 @@ fun BoardScreen(
     onReviewAgent: (SessionDescriptor) -> Unit = {},
     onCloseAgent: (SessionDescriptor) -> Unit = {},
     onResolveCompatibility: () -> Unit = {},
+    onQuickAnswer: (SessionDescriptor, String) -> Unit = {_, _ -> },
 ) {
     val ui by viewModel.ui.collectAsState()
 
@@ -198,7 +203,7 @@ fun BoardScreen(
                             }
                         }
                     } else {
-                        boardSection("Needs you", ui.board.needsYou, onOpenAgent, reduceMotion, onReviewAgent, { pendingClose = it })
+                        boardSection("Needs you", ui.board.needsYou, onOpenAgent, reduceMotion, onReviewAgent, { pendingClose = it }, onQuickAnswer)
                         boardSection("Working", ui.board.working, onOpenAgent, reduceMotion, onReviewAgent, { pendingClose = it })
                         boardSection("Done", ui.board.done, onOpenAgent, reduceMotion, onReviewAgent, { pendingClose = it })
                         boardSection("Idle", ui.board.idle, onOpenAgent, reduceMotion, onReviewAgent, { pendingClose = it })
@@ -275,6 +280,7 @@ private fun LazyListScope.boardSection(
     reduceMotion: Boolean,
     onReviewAgent: (SessionDescriptor) -> Unit,
     onCloseAgent: (SessionDescriptor) -> Unit,
+    onQuickAnswer: (SessionDescriptor, String) -> Unit = { _, _ -> },
 ) {
     if (agents.isEmpty()) return
     item(key = "header_$title") {
@@ -310,6 +316,7 @@ private fun LazyListScope.boardSection(
             onClick = { onOpenAgent(agent) },
             onReview = { onReviewAgent(agent) },
             onClose = { onCloseAgent(agent) },
+            onQuickAnswer = { label -> onQuickAnswer(agent, label) },
             modifier = Modifier.animateItem(
                 fadeInSpec = ScoutrMotion.itemSpec(reduceMotion),
                 placementSpec = ScoutrMotion.itemPlacementSpec(reduceMotion),
@@ -378,6 +385,7 @@ private fun AgentCardRow(
     modifier: Modifier = Modifier,
     onReview: () -> Unit = {},
     onClose: () -> Unit = {},
+    onQuickAnswer: (String) -> Unit = {},
 ) {
     val status = AgentStatus.fromWire(agent.status)
     val isNeedsYou = status == AgentStatus.NeedsYou
@@ -505,6 +513,15 @@ private fun AgentCardRow(
                                 overflow = TextOverflow.Ellipsis,
                             )
                         }
+                        if (isNeedsYou) {
+                            AttentionBlock(
+                                attention = agent.attention,
+                                paneId = agent.live?.paneId.orEmpty(),
+                                cardTitle = agent.cardTitle(),
+                                onQuickAnswer = onQuickAnswer,
+                                onOpen = onClick,
+                            )
+                        }
                         Spacer(Modifier.height(2.dp))
                         // Machine facts: which project, on which model. The project
                         // name is what the user recognises the card by, so it reads
@@ -558,6 +575,148 @@ private fun AgentCardRow(
             }
         }
     }
+}
+
+/**
+ * What the agent is waiting for, under the card's own activity line: the open
+ * question in ordinary UI type, then either up to three one-tap answers or a
+ * single Open affordance. The Board stays an inbox — anything the bridge will
+ * not let it submit whole goes to Chat instead.
+ */
+@Composable
+private fun AttentionBlock(
+    attention: AttentionSummary?,
+    paneId: String,
+    cardTitle: String,
+    onQuickAnswer: (String) -> Unit,
+    onOpen: () -> Unit,
+) {
+    if (attention == null) return
+    val question = attentionQuestionText(attention)
+    val options = quickAnswerOptions(attention)
+
+    if (question != null) {
+        Spacer(Modifier.height(6.dp))
+        Text(
+            text = question,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+            // Presentation only: a long question is cut here, never where it
+            // is answered.
+            maxLines = BOARD_ATTENTION_QUESTION_LINES,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.testTag("board_attention_question_$paneId"),
+        )
+        attentionQuestionCountLabel(attention)?.let { count ->
+            Spacer(Modifier.height(2.dp))
+            Text(
+                text = count,
+                style = ScoutrType.monoMeta,
+                color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.testTag("board_attention_count_$paneId"),
+            )
+        }
+    }
+
+    if (options.isNotEmpty()) {
+        Spacer(Modifier.height(8.dp))
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            options.forEach { option ->
+                OutlinedButton(
+                    shape = MaterialTheme.shapes.small,
+                    // The server's own label is what travels; the button text
+                    // is only what fits.
+                    onClick = { onQuickAnswer(option.label) },
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                        horizontal = 10.dp,
+                        vertical = 4.dp,
+                    ),
+                    modifier = Modifier
+                        .weight(1f)
+                        .semantics { contentDescription = "Answer ${option.label} for $cardTitle" }
+                        .testTag("board_quick_answer_${paneId}_${option.label}"),
+                ) {
+                    Text(
+                        quickAnswerLabel(option.label),
+                        style = MaterialTheme.typography.labelLarge,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+        }
+    } else {
+        Spacer(Modifier.height(2.dp))
+        TextButton(
+            onClick = onOpen,
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                horizontal = 6.dp,
+                vertical = 2.dp,
+            ),
+            modifier = Modifier
+                .semantics { contentDescription = attentionOpenDescription(attention, cardTitle) }
+                .testTag("board_attention_open_$paneId"),
+        ) {
+            Text("Open", style = MaterialTheme.typography.labelLarge)
+        }
+    }
+}
+
+/** How many lines of the open question a card is allowed to spend. */
+internal const val BOARD_ATTENTION_QUESTION_LINES = 2
+
+/** The most one-tap answers a card will ever show. */
+internal const val BOARD_QUICK_ANSWER_OPTIONS = 3
+
+/** How much of an option label fits on a compact board control. */
+internal const val BOARD_QUICK_ANSWER_LABEL_CHARS = 18
+
+/**
+ * The line that says what the agent is asking. A prompt-kind attention has no
+ * structured question, so the card's latest activity stays the only preview
+ * rather than the Board inventing one.
+ */
+internal fun attentionQuestionText(attention: AttentionSummary?): String? {
+    val question = attention?.takeIf { it.isAsk }?.currentQuestion ?: return null
+    return question.question.trim().ifBlank { question.header.trim() }.takeIf { it.isNotEmpty() }
+}
+
+/** `N questions` when the open round holds more than the one being previewed. */
+internal fun attentionQuestionCountLabel(attention: AttentionSummary?): String? =
+    attention?.questionCount?.takeIf { attention.isAsk && it > 1 }?.let { "$it questions" }
+
+/**
+ * The options the Board may offer as one-tap answers. The bridge decides
+ * whether a tap submits the whole ask; the Board additionally refuses anything
+ * it cannot draw as a small bounded row of controls.
+ */
+internal fun quickAnswerOptions(attention: AttentionSummary?): List<QuestionOption> {
+    val summary = attention?.takeIf { it.isAsk && it.canQuickAnswer } ?: return emptyList()
+    val question = summary.currentQuestion ?: return emptyList()
+    if (summary.questionCount > 1 || question.multiSelect) return emptyList()
+    val options = question.options.filter { it.label.isNotBlank() }
+    if (options.isEmpty() || options.size > BOARD_QUICK_ANSWER_OPTIONS) return emptyList()
+    return options
+}
+
+/**
+ * Display-only shortening for a quick-answer control. The answer that is sent
+ * always carries the server's exact label, never this string.
+ */
+internal fun quickAnswerLabel(label: String, max: Int = BOARD_QUICK_ANSWER_LABEL_CHARS): String {
+    val trimmed = label.trim()
+    if (trimmed.length <= max) return trimmed
+    return trimmed.take(max - 1).trimEnd() + "…"
+}
+
+/** What a screen reader hears on the Open affordance, since "Open" alone says nothing. */
+internal fun attentionOpenDescription(attention: AttentionSummary?, cardTitle: String): String = when {
+    attention == null || !attention.isAsk -> "Open $cardTitle in chat to respond"
+    attention.questionCount > 1 -> "Open $cardTitle in chat to answer ${attention.questionCount} questions"
+    else -> "Open $cardTitle in chat to answer"
 }
 
 /** Accent dot color per status; blocked is the loud one. */

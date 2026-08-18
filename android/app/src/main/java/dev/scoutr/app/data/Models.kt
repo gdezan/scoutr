@@ -99,6 +99,38 @@ data class SessionLiveAttachment(
     val statusSinceMs: Double? = null,
 )
 
+/**
+ * Why a session is waiting on the user, normalized and bounded by the bridge
+ * (mirrors `AttentionSummary` in bridge/src/board-detail.ts). `kind == "ask"`
+ * carries the open question's ids and authored options — the same ones Chat
+ * answers with; `kind == "prompt"` is a blocked pane with no structured ask,
+ * where [currentQuestion] is null and the card's latest activity is the only
+ * preview. The app never parses raw tool arguments to build this.
+ */
+@Serializable
+data class AttentionSummary(
+    val kind: String = "prompt",
+    /** Tool call id grouping the open ask; null for a plain prompt. */
+    val callId: String? = null,
+    /** Unanswered questions in the open group; 0 for a plain prompt. */
+    val questionCount: Int = 0,
+    val currentQuestion: AttentionQuestion? = null,
+    /** The bridge's verdict that one option tap submits the whole ask. */
+    val canQuickAnswer: Boolean = false,
+) {
+    val isAsk: Boolean get() = kind == "ask"
+}
+
+/** The one open question a waiting session is showing, as the bridge normalized it. */
+@Serializable
+data class AttentionQuestion(
+    val id: String,
+    val header: String = "",
+    val question: String = "",
+    val options: List<QuestionOption> = emptyList(),
+    val multiSelect: Boolean = false,
+)
+
 /** The one session model shared by Board, history, palette, and Chat. */
 @Serializable
 data class SessionDescriptor(
@@ -112,6 +144,7 @@ data class SessionDescriptor(
     val capabilities: List<String> = emptyList(),
     val updatedAtMs: Double? = null,
     val latestActivity: String? = null,
+    val attention: AttentionSummary? = null,
     val live: SessionLiveAttachment? = null,
 ) {
     val status: String get() = live?.status ?: "done"

@@ -25,6 +25,9 @@ import android.content.ClipboardManager
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.unit.dp
+import dev.scoutr.app.data.AttentionQuestion
+import dev.scoutr.app.data.AttentionSummary
+import dev.scoutr.app.data.QuestionOption
 import dev.scoutr.app.data.SessionDescriptor
 import dev.scoutr.app.data.BoardState
 import dev.scoutr.app.data.AgentsResponse
@@ -449,6 +452,177 @@ class BoardScreenTest {
 
         compose.waitUntil(5_000) { fake.calls.count { it.name == "agents" } > callsBeforeSwipe }
         assertTrue("pulling down should request a fresh board", fake.calls.count { it.name == "agents" } > callsBeforeSwipe)
+    }
+
+    // --- Needs-you attention -------------------------------------------------
+
+    private fun askAttention(
+        questionCount: Int = 1,
+        canQuickAnswer: Boolean = true,
+        multiSelect: Boolean = false,
+        question: String = "Deploy to production?",
+        options: List<String> = listOf("Yes", "No"),
+    ) = AttentionSummary(
+        kind = "ask",
+        callId = "call_1",
+        questionCount = questionCount,
+        currentQuestion = AttentionQuestion(
+            id = "q1",
+            header = "Deploy",
+            question = question,
+            options = options.map { QuestionOption(label = it) },
+            multiSelect = multiSelect,
+        ),
+        canQuickAnswer = canQuickAnswer,
+    )
+
+    private fun waitingAgent(attention: AttentionSummary?, activity: String? = "Waiting for you") =
+        blockedAgent("p1", "Fix billing bug", "/repo/a", "openai-codex/gpt-5.4", activity)
+            .copy(attention = attention)
+
+    private fun showBoard(
+        agent: SessionDescriptor,
+        onOpenAgent: (SessionDescriptor) -> Unit = {},
+        onQuickAnswer: (SessionDescriptor, String) -> Unit = { _, _ -> },
+    ) {
+        compose.setContent {
+            ScoutrTheme {
+                BoardScreen(
+                    onOpenAgent = onOpenAgent,
+                    onQuickAnswer = onQuickAnswer,
+                    viewModel = staticBoardViewModel(
+                        BoardUiState(board = BoardState.group(listOf(agent)), connected = true),
+                    ),
+                )
+            }
+        }
+    }
+
+    @Test
+    fun simpleAskShowsTheQuestionAndAnswersWithTheServerLabel() {
+        var answered: Pair<String?, String>? = null
+        showBoard(
+            waitingAgent(askAttention()),
+            onQuickAnswer = { agent, label -> answered = agent.live?.paneId to label },
+        )
+
+        compose.onNodeWithTag("board_attention_question_p1").assertIsDisplayed()
+        compose.onNodeWithText("Deploy to production?").assertIsDisplayed()
+        // One question: no "N questions" line, and no Open fallback.
+        compose.onNodeWithTag("board_attention_count_p1").assertDoesNotExist()
+        compose.onNodeWithTag("board_attention_open_p1").assertDoesNotExist()
+        compose.onNodeWithTag("board_quick_answer_p1_Yes").assertIsDisplayed()
+        compose.onNodeWithTag("board_quick_answer_p1_No").assertIsDisplayed()
+
+        compose.onNodeWithTag("board_quick_answer_p1_Yes").performClick()
+        compose.waitForIdle()
+        assertEquals("the card's own agent and the server's label travel", "p1" to "Yes", answered)
+    }
+
+    @Test
+    fun quickAnswerShowsAtMostThreeControls() {
+        showBoard(waitingAgent(askAttention(options = listOf("A", "B", "C"))))
+        compose.onNodeWithTag("board_quick_answer_p1_A").assertIsDisplayed()
+        compose.onNodeWithTag("board_quick_answer_p1_B").assertIsDisplayed()
+        compose.onNodeWithTag("board_quick_answer_p1_C").assertIsDisplayed()
+        compose.onNodeWithTag("board_attention_open_p1").assertDoesNotExist()
+    }
+
+    @Test
+    fun aFourthOptionFallsBackToOpen() {
+        // Four choices do not fit a card, so the ask goes to Chat whole.
+        showBoard(waitingAgent(askAttention(options = listOf("A", "B", "C", "D"))))
+        compose.onNodeWithTag("board_quick_answer_p1_A").assertDoesNotExist()
+        compose.onNodeWithTag("board_attention_open_p1").assertIsDisplayed()
+    }
+
+    @Test
+    fun multiQuestionAskIsOpenOnly() {
+        var opened: String? = null
+        var answered: String? = null
+        showBoard(
+            waitingAgent(askAttention(questionCount = 3, canQuickAnswer = false)),
+            onOpenAgent = { opened = it.live?.paneId },
+            onQuickAnswer = { _, label -> answered = label },
+        )
+
+        compose.onNodeWithText("Deploy to production?").assertIsDisplayed()
+        compose.onNodeWithTag("board_attention_count_p1").assertIsDisplayed()
+        compose.onNodeWithText("3 questions").assertIsDisplayed()
+        compose.onNodeWithTag("board_quick_answer_p1_Yes").assertDoesNotExist()
+
+        compose.onNodeWithTag("board_attention_open_p1")
+            .assertContentDescriptionContains("Open Fix billing bug in chat to answer 3 questions")
+        compose.onNodeWithTag("board_attention_open_p1").performClick()
+        compose.waitForIdle()
+        assertEquals("Open routes the ask into Chat", "p1", opened)
+        assertTrue("a complex ask never submits from the Board", answered == null)
+    }
+
+    @Test
+    fun plainPromptKeepsActivityAndOffersOnlyOpen() {
+        var opened: String? = null
+        showBoard(
+            waitingAgent(AttentionSummary(kind = "prompt"), activity = "Allow running the migration?"),
+            onOpenAgent = { opened = it.live?.paneId },
+        )
+
+        // No structured ask: the card's own activity line is the preview and
+        // the Board invents no choices.
+        compose.onNodeWithText("Allow running the migration?").assertIsDisplayed()
+        compose.onNodeWithTag("board_attention_question_p1").assertDoesNotExist()
+        compose.onNodeWithTag("board_attention_count_p1").assertDoesNotExist()
+        compose.onNodeWithTag("board_attention_open_p1")
+            .assertContentDescriptionContains("Open Fix billing bug in chat to respond")
+        compose.onNodeWithTag("board_attention_open_p1").performClick()
+        compose.waitForIdle()
+        assertEquals("p1", opened)
+    }
+
+    @Test
+    fun longAttentionTextTruncatesForDisplayOnly() {
+        val longOption = "Rebuild the whole index from scratch"
+        val longQuestion = "The migration touches every table in the billing schema " +
+            "and cannot be rolled back once it starts, so how should the deploy proceed tonight?"
+        var answered: String? = null
+        showBoard(
+            waitingAgent(askAttention(question = longQuestion, options = listOf(longOption, "Skip"))),
+            onQuickAnswer = { _, label -> answered = label },
+        )
+
+        // The question is bounded to two lines, so its node is no taller than
+        // a two-line body row, and the button shows an elided label.
+        compose.onNodeWithTag("board_attention_question_p1").assertIsDisplayed()
+        val questionHeight = compose.onNodeWithTag("board_attention_question_p1")
+            .getUnclippedBoundsInRoot().let { (it.bottom - it.top).value }
+        assertTrue("question must stay bounded, was ${questionHeight}dp", questionHeight < 64f)
+        compose.onNodeWithText("Rebuild the whole…").assertIsDisplayed()
+
+        compose.onNodeWithTag("board_quick_answer_p1_$longOption").performClick()
+        compose.waitForIdle()
+        assertEquals("the untruncated server label is what would be submitted", longOption, answered)
+    }
+
+    @Test
+    fun attentionControlsPreserveSwipeActions() {
+        var reviewedCwd: String? = null
+        compose.setContent {
+            ScoutrTheme {
+                BoardScreen(
+                    onReviewAgent = { reviewedCwd = it.cwd },
+                    viewModel = staticBoardViewModel(
+                        BoardUiState(
+                            board = BoardState.group(listOf(waitingAgent(askAttention()))),
+                            connected = true,
+                        ),
+                    ),
+                )
+            }
+        }
+        compose.onNodeWithTag("agent_card_p1").performTouchInput { swipeLeft() }
+        compose.onNodeWithTag("board_action_review_p1").performClick()
+        compose.waitForIdle()
+        assertEquals("swipe actions survive the attention block", "/repo/a", reviewedCwd)
     }
 
     private fun staticBoardViewModel(ui: BoardUiState): BoardViewModel {

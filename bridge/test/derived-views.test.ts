@@ -57,6 +57,7 @@ describe("deriveSessionDescriptors", () => {
       capabilities: ["abort", "retry", "compact", "fork", "rename", "close", "set_model", "set_thinking"],
       updatedAtMs: null,
       latestActivity: null,
+      attention: { kind: "prompt", callId: null, questionCount: 0, currentQuestion: null, canQuickAnswer: false },
       live: {
         paneId: "p1",
         workspaceId: "ws1",
@@ -67,6 +68,11 @@ describe("deriveSessionDescriptors", () => {
     });
     assert.equal(cards[1]?.live?.status, "done");
     assert.equal(cards[1]?.key, null);
+  });
+
+  test("leaves attention null for a pane that is not blocked", async () => {
+    const cards = await deriveSessionDescriptors(snapshotWithAgents([{ agent_status: "working" }]));
+    assert.equal(cards[0]?.attention, null);
   });
 
   test("reports statusSinceMs only inside the live attachment", async () => {

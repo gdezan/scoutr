@@ -194,6 +194,9 @@ export async function listSessionCatalog(options: ListSessionCatalogOptions = {}
         capabilities: [...backend.capabilities],
         updatedAtMs: file.mtimeMs,
         latestActivity: parsed.preview || null,
+        // The catalog is a history surface: it reads stored files, not the
+        // board's live ask state, so it never claims a session wants the user.
+        attention: null,
         live: active ? {
           paneId: active.paneId,
           workspaceId: active.workspaceId,

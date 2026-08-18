@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -83,6 +83,24 @@ export function readPendingAsk(sessionId: string): PendingAsk | null {
     return null;
   }
   return ask;
+}
+
+/**
+ * Cheap fingerprint of a session's sidecar state: absent, or its mtime/size.
+ *
+ * A sidecar appears and disappears without the transcript file ever changing,
+ * so anything memoized by transcript stat alone (the board detail cache) would
+ * keep serving an ask that is already answered, or miss one that just opened.
+ * One stat per poll is the whole cost of noticing.
+ */
+export function pendingAskStamp(sessionId: string): string {
+  if (!sessionId) return "none";
+  try {
+    const info = statSync(sidecarPath(sessionId));
+    return `${Math.round(info.mtimeMs)}:${info.size}`;
+  } catch {
+    return "none";
+  }
 }
 
 /**

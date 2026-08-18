@@ -22,7 +22,7 @@ import { parseClaudeTranscript } from "./transcript.js";
 import { claudeEffortArg, claudeModelArg, readClaudeModelsCatalog } from "./models.js";
 import { readClaudeCommandsCatalog } from "./commands.js";
 import { claudeQuestions } from "./questions.js";
-import { clearPendingAsk } from "./pending-asks.js";
+import { clearPendingAsk, pendingAskStamp } from "./pending-asks.js";
 import { claudeAskPlan } from "./questionnaire.js";
 
 /** Claude config dir honors CLAUDECONFIGDIR (default ~/.claude), like the herdr hook. */
@@ -127,6 +127,16 @@ export async function claudeReadTranscript(path: string, opts?: TranscriptReadOp
 
 export function claudeExtractQuestions(transcript: Transcript): QuestionEntry[] {
   return claudeQuestions(transcript);
+}
+
+/**
+ * Claude's open ask lives in a hook-written sidecar, not in the transcript, so
+ * a caller memoizing on the transcript file alone cannot see it open or clear.
+ * The path's basename is the session uuid (see [claudeResumeCommand]).
+ */
+export function claudeQuestionStateStamp(path: string): string {
+  const id = path.replace(/\.jsonl$/, "").split(/[\\/]/).pop() ?? "";
+  return pendingAskStamp(id);
 }
 
 /**
@@ -306,6 +316,7 @@ export const claudeBackend: AgentBackend = {
   resolveSessionPath: claudeResolveSessionPath,
   readTranscript: claudeReadTranscript,
   extractQuestions: claudeExtractQuestions,
+  questionStateStamp: claudeQuestionStateStamp,
   answerAsk: claudeAnswerAsk,
   dismissAsk: claudeDismissAsk,
   control: claudeControl,

@@ -362,6 +362,7 @@ private fun ScoutrAppNav(
                             }
                         },
                         onCloseAgent = { agent -> agent.live?.let { boardViewModel.closeAgent(it.paneId) } },
+                        onQuickAnswer = { agent, label -> boardViewModel.quickAnswer(agent, label) },
                         onResolveCompatibility = openSettings,
                         viewModel = boardViewModel,
                         modifier = Modifier.padding(innerBoard),

@@ -2,7 +2,7 @@ import { canonicalPath } from "./dirs.js";
 import type { AgentBackend } from "./agents/types.js";
 import { getBackendOrNull } from "./agents/registry.js";
 import type { AgentInfo, AgentSessionInfo } from "./herdr/types.js";
-import type { BoardDetail } from "./board-detail.js";
+import { promptAttention, type AttentionSummary, type BoardDetail } from "./board-detail.js";
 
 /** Durable identity for one backend-owned coding-agent transcript. */
 export interface SessionKey {
@@ -31,6 +31,12 @@ export interface SessionDescriptor {
   capabilities: string[];
   updatedAtMs: number | null;
   latestActivity: string | null;
+  /**
+   * Why this session wants the user, normalized and bounded: the open ask's
+   * ids and authored options, never raw tool arguments. Null unless the
+   * session is waiting.
+   */
+  attention: AttentionSummary | null;
   live: SessionLiveAttachment | null;
 }
 
@@ -75,6 +81,10 @@ export function descriptorForLiveAgent(
     capabilities: backend ? [...backend.capabilities] : [],
     updatedAtMs: detail?.latestActivityAtMs ?? null,
     latestActivity: detail?.latestActivity || null,
+    // A blocked pane with no structured ask still needs the user; only here is
+    // the herdr status known, so the board detail cannot say it on its own.
+    attention: detail?.attention
+      ?? (agent.agent_status === "blocked" ? promptAttention() : null),
     live: {
       paneId: agent.pane_id,
       workspaceId: agent.workspace_id,

@@ -86,6 +86,72 @@ class ModelsTest {
     }
 
     @Test
+    fun `agents response round-trips simple, multi-question, and absent attention`() {
+        val json = """
+            {"ok":true,"agents":[
+              {"key":{"agentKind":"pi","path":"/p/simple.jsonl"},"agentKind":"pi","displayName":"Pi",
+               "title":"Ship","cwd":"/a","model":null,"thinkingLevel":null,"capabilities":[],
+               "updatedAtMs":1.0,"latestActivity":"[ask_user_question]",
+               "attention":{"kind":"ask","callId":"call_simple","questionCount":1,
+                "currentQuestion":{"id":"call_simple#0","header":"Ship","question":"Ship the fix?",
+                 "options":[{"label":"Ship it","description":"Deploy now."},
+                            {"label":"Hold","description":"Wait for review."}],"multiSelect":false},
+                "canQuickAnswer":true},
+               "live":{"paneId":"w1:p1","workspaceId":"w1","tabId":"w1:t1","status":"blocked","statusSinceMs":null}},
+              {"key":null,"agentKind":"pi","displayName":"Pi","title":"Release","cwd":"/a","model":null,
+               "thinkingLevel":null,"capabilities":[],"updatedAtMs":null,"latestActivity":null,
+               "attention":{"kind":"ask","callId":"call_multi","questionCount":2,
+                "currentQuestion":{"id":"call_multi#0","header":"Ship","question":"Ship the fix?",
+                 "options":[{"label":"Ship it","description":""}],"multiSelect":false},
+                "canQuickAnswer":false},
+               "live":{"paneId":"w1:p2","workspaceId":"w1","tabId":"w1:t1","status":"blocked","statusSinceMs":null}},
+              {"key":null,"agentKind":"pi","displayName":"Pi","title":"Busy","cwd":"/a","model":null,
+               "thinkingLevel":null,"capabilities":[],"updatedAtMs":null,"latestActivity":null,
+               "attention":null,
+               "live":{"paneId":"w1:p3","workspaceId":"w1","tabId":"w1:t1","status":"working","statusSinceMs":null}}
+            ]}
+        """.trimIndent()
+        val response = Json.decodeFromString(AgentsResponse.serializer(), json)
+        assertEquals(3, response.agents.size)
+
+        val simple = response.agents[0].attention!!
+        assertTrue(simple.isAsk)
+        assertEquals("call_simple", simple.callId)
+        assertEquals(1, simple.questionCount)
+        assertTrue(simple.canQuickAnswer)
+        assertEquals("call_simple#0", simple.currentQuestion?.id)
+        assertEquals("Ship the fix?", simple.currentQuestion?.question)
+        assertEquals(listOf("Ship it", "Hold"), simple.currentQuestion?.options?.map { it.label })
+        assertFalse(simple.currentQuestion?.multiSelect ?: true)
+
+        val multi = response.agents[1].attention!!
+        assertEquals(2, multi.questionCount)
+        assertFalse(multi.canQuickAnswer)
+
+        assertEquals(null, response.agents[2].attention)
+
+        // Re-encoding must preserve every field the board decides on.
+        val reencoded = Json.decodeFromString(
+            AgentsResponse.serializer(),
+            Json.encodeToString(AgentsResponse.serializer(), response),
+        )
+        assertEquals(response, reencoded)
+    }
+
+    @Test
+    fun `prompt attention carries no question and no quick answer`() {
+        val json = """
+            {"kind":"prompt","callId":null,"questionCount":0,"currentQuestion":null,"canQuickAnswer":false}
+        """.trimIndent()
+        val attention = Json.decodeFromString(AttentionSummary.serializer(), json)
+        assertFalse(attention.isAsk)
+        assertEquals(null, attention.currentQuestion)
+        assertEquals(null, attention.callId)
+        assertEquals(0, attention.questionCount)
+        assertFalse(attention.canQuickAnswer)
+    }
+
+    @Test
     fun `session catalog response decodes a full payload`() {
         val json = """
             {"ok":true,"truncated":false,"sessions":[

@@ -16,6 +16,7 @@ fun liveSessionFixture(
     model: String? = null,
     latestActivity: String? = null,
     updatedAtMs: Double? = null,
+    attention: AttentionSummary? = null,
 ): SessionDescriptor = SessionDescriptor(
     key = key,
     agentKind = agentKind,
@@ -26,6 +27,7 @@ fun liveSessionFixture(
     capabilities = capabilities,
     updatedAtMs = updatedAtMs,
     latestActivity = latestActivity,
+    attention = attention,
     live = SessionLiveAttachment(
         paneId = paneId,
         workspaceId = workspaceId,

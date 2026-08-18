@@ -272,9 +272,13 @@ class FakeScoutrApi : ScoutrApi {
      * fixture shape, not a wire frame — the real request shape is pinned by
      * BridgeClientCommandTest.
      */
-    private fun send(name: String, command: JsonObject): CommandResponse {
+    private suspend fun send(name: String, command: JsonObject): CommandResponse {
         calls += ApiCall(name, mapOf("command" to command))
         sentCommands += command
+        // Commands honour the same gates/delays as the read methods, so a test
+        // can park one in flight and observe what a second tap does.
+        gates[name]?.let { it.await() }
+        callDelays[name]?.let { kotlinx.coroutines.delay(it) }
         commandFailure?.let { throw it }
         return commandResult.getOrThrow()
     }

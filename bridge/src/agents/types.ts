@@ -109,6 +109,15 @@ export interface AgentBackend {
 
   extractQuestions(transcript: Transcript): QuestionEntry[];
   /**
+   * Fingerprint of question state this backend keeps *outside* the transcript
+   * file, cheap enough to call on every board poll. Claude's open ask is a
+   * hook-written sidecar that appears and disappears while the transcript stat
+   * never moves, so a cache keyed on the transcript alone would serve a stale
+   * ask; it includes this stamp instead. Backends whose questions live only in
+   * the transcript leave it undefined.
+   */
+  questionStateStamp?(path: string): string;
+  /**
    * Deliver a whole ask into the pane in one pass. The backend owns its TUI's
    * grammar — which keys move between questions, how an option is picked, how
    * a custom answer is typed, how the ask is submitted. It either lands the
