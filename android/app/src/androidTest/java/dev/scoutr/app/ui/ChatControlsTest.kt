@@ -52,6 +52,12 @@ class ChatControlsTest {
     @get:Rule
     val compose = createComposeRule()
 
+    /** Thinking/tool-details toggles live in the overflow menu; each click closes it again. */
+    private fun clickMenuItem(tag: String) {
+        compose.onNodeWithTag("chat_controls").performClick()
+        compose.onNodeWithTag(tag).performClick()
+    }
+
     private lateinit var server: MockWebServer
     private val controlBodies = CopyOnWriteArrayList<String>()
     @Volatile private var agentStatus = "working"
@@ -245,7 +251,7 @@ class ChatControlsTest {
         }
 
         // Hiding thinking must not touch the tool-call collapse state.
-        compose.onNodeWithTag("toggle_thinking").performClick()
+        clickMenuItem("toggle_thinking")
         compose.waitUntil(timeoutMillis = 5_000) {
             compose.onAllNodes(hasTestTag("thinking_block")).fetchSemanticsNodes().isEmpty()
         }
@@ -254,7 +260,7 @@ class ChatControlsTest {
         }
 
         // Expanding tool calls must not bring thinking back.
-        compose.onNodeWithTag("toggle_tools").performClick()
+        clickMenuItem("toggle_tools")
         compose.waitUntil(timeoutMillis = 5_000) {
             compose.onAllNodes(androidx.compose.ui.test.hasContentDescription("Collapse bash")).fetchSemanticsNodes().isNotEmpty()
         }
@@ -263,7 +269,7 @@ class ChatControlsTest {
         }
 
         // Showing thinking again must leave the tool calls expanded.
-        compose.onNodeWithTag("toggle_thinking").performClick()
+        clickMenuItem("toggle_thinking")
         compose.waitUntil(timeoutMillis = 5_000) {
             compose.onAllNodes(hasTestTag("thinking_block")).fetchSemanticsNodes().isNotEmpty()
         }
@@ -274,7 +280,7 @@ class ChatControlsTest {
         // Collapsing tool calls must leave thinking visible — every
         // combination is reachable, so a handler that couples the two
         // toggles could not pass.
-        compose.onNodeWithTag("toggle_tools").performClick()
+        clickMenuItem("toggle_tools")
         compose.waitUntil(timeoutMillis = 5_000) {
             compose.onAllNodes(androidx.compose.ui.test.hasContentDescription("Expand bash")).fetchSemanticsNodes().isNotEmpty()
         }
@@ -309,7 +315,7 @@ class ChatControlsTest {
         compose.onNodeWithTag("thinking_block").assertDoesNotExist()
 
         // The header still wins for this visit.
-        compose.onNodeWithTag("toggle_thinking").performClick()
+        clickMenuItem("toggle_thinking")
         compose.waitUntil(timeoutMillis = 5_000) {
             compose.onAllNodes(hasTestTag("thinking_block")).fetchSemanticsNodes().isNotEmpty()
         }

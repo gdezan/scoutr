@@ -51,6 +51,14 @@ import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material.icons.filled.Code
+import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Compress
+import androidx.compose.material.icons.automirrored.filled.CallSplit
+import androidx.compose.material.icons.filled.DriveFileRenameOutline
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -74,6 +82,7 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.runtime.produceState
 import androidx.compose.foundation.Image
@@ -147,6 +156,8 @@ import dev.scoutr.app.ui.motion.HapticEvent
 import dev.scoutr.app.ui.motion.rememberHaptic
 import dev.scoutr.app.ui.motion.useReduceMotion
 import dev.scoutr.app.state.AskDraft
+import dev.scoutr.app.state.ContextTone
+import dev.scoutr.app.state.ContextUsage
 import dev.scoutr.app.state.DraftAnswer
 import dev.scoutr.app.state.Loadable
 import dev.scoutr.app.state.ChatUiState
@@ -212,6 +223,7 @@ fun ChatScreen(
             paneId = viewModel.paneId,
             sessionTitle = ui.sessionTitle,
             model = ui.model,
+            contextUsage = ui.contextUsage,
             thinkingLevel = ui.thinkingLevel,
             capabilities = ui.capabilities,
             agentKind = ui.agentKind,
@@ -467,11 +479,22 @@ private val DEFAULT_MENU_ACTIONS = setOf(
     SessionAction.Close,
 )
 
+private fun SessionAction.icon(): ImageVector = when (this) {
+    SessionAction.Abort -> Icons.Default.Stop
+    SessionAction.Retry -> Icons.Default.Refresh
+    SessionAction.Compact -> Icons.Default.Compress
+    SessionAction.Fork -> Icons.AutoMirrored.Filled.CallSplit
+    SessionAction.Rename -> Icons.Default.DriveFileRenameOutline
+    SessionAction.Close -> Icons.Default.Close
+    SessionAction.SetModel, SessionAction.SetThinking -> Icons.Default.Settings
+}
+
 @Composable
 private fun ChatHeader(
     paneId: String,
     sessionTitle: String,
     model: String?,
+    contextUsage: ContextUsage?,
     thinkingLevel: String?,
     capabilities: List<String>?,
     agentKind: String?,
@@ -508,38 +531,22 @@ private fun ChatHeader(
                     )
                 }
                 Text(
-                    listOfNotNull(paneId, model?.substringAfterLast('/')).joinToString(" · "),
+                    buildAnnotatedString {
+                        withStyle(SpanStyle(color = MaterialTheme.colorScheme.onSurfaceVariant)) {
+                            append(listOfNotNull(paneId, model?.substringAfterLast('/')).joinToString(" · "))
+                        }
+                        if (contextUsage != null) {
+                            append(" · ")
+                            withStyle(SpanStyle(color = contextUsage.tone.color())) {
+                                append(contextUsage.label)
+                            }
+                        }
+                    },
                     style = ScoutrType.monoMeta,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.testTag("chat_header_meta"),
                 )
-            }
-            IconButton(onClick = onToggleThinking, modifier = Modifier.testTag("toggle_thinking")) {
-                Icon(
-                    if (showThinking) Icons.Default.VisibilityOff else Icons.Default.Visibility,
-                    modifier = Modifier.size(20.dp),
-                    contentDescription = if (showThinking) "Hide thinking" else "Show thinking",
-                    tint = if (showThinking) MaterialTheme.colorScheme.primary
-                    else MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            IconButton(onClick = onToggleTools, modifier = Modifier.testTag("toggle_tools")) {
-                Icon(
-                    Icons.Default.Terminal,
-                    modifier = Modifier.size(20.dp),
-                    contentDescription = if (expandTools) "Collapse tool details" else "Expand tool details",
-                    tint = if (expandTools) MaterialTheme.colorScheme.primary
-                    else MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            if (onOpenFiles != null && !cwd.isNullOrBlank()) {
-                IconButton(
-                    onClick = { onOpenFiles(cwd) },
-                    modifier = Modifier.testTag("chat_open_files"),
-                ) {
-                    Icon(Icons.Default.FolderOpen, contentDescription = "Files")
-                }
             }
             var menuOpen by remember { mutableStateOf(false) }
             Box {
@@ -550,12 +557,44 @@ private fun ChatHeader(
                     Icon(Icons.Default.MoreVert, contentDescription = "Session actions")
                 }
                 DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                    DropdownMenuItem(
+                        text = { Text(if (showThinking) "Hide thinking" else "Show thinking") },
+                        leadingIcon = {
+                            Icon(if (showThinking) Icons.Default.VisibilityOff else Icons.Default.Visibility, contentDescription = null)
+                        },
+                        modifier = Modifier.testTag("toggle_thinking"),
+                        onClick = {
+                            menuOpen = false
+                            onToggleThinking()
+                        },
+                    )
+                    DropdownMenuItem(
+                        text = { Text(if (expandTools) "Collapse tool details" else "Expand tool details") },
+                        leadingIcon = { Icon(Icons.Default.Code, contentDescription = null) },
+                        modifier = Modifier.testTag("toggle_tools"),
+                        onClick = {
+                            menuOpen = false
+                            onToggleTools()
+                        },
+                    )
+                    if (onOpenFiles != null && !cwd.isNullOrBlank()) {
+                        DropdownMenuItem(
+                            text = { Text("Files") },
+                            leadingIcon = { Icon(Icons.Default.FolderOpen, contentDescription = null) },
+                            modifier = Modifier.testTag("chat_open_files"),
+                            onClick = {
+                                menuOpen = false
+                                onOpenFiles(cwd)
+                            },
+                        )
+                    }
                     // Terminal for this pane: the chat transcript stays a
                     // rendered transcript, and raw PTY output lives only on the
                     // terminal route.
                     if (onOpenTerminal != null) {
                         DropdownMenuItem(
                             text = { Text("Open terminal") },
+                            leadingIcon = { Icon(Icons.Default.Terminal, contentDescription = null) },
                             modifier = Modifier.testTag("chat_open_terminal"),
                             onClick = {
                                 menuOpen = false
@@ -568,10 +607,14 @@ private fun ChatHeader(
                     // Rendered from the decoded set in enum declaration order
                     // (Set iteration does not preserve menu order).
                     val available = capabilities?.toSessionActions() ?: DEFAULT_MENU_ACTIONS
-                    SessionAction.entries.forEach { action ->
-                        if (action !in DEFAULT_MENU_ACTIONS || action !in available) return@forEach
+                    val visibleActions = SessionAction.entries.filter { it in DEFAULT_MENU_ACTIONS && it in available }
+                    if (visibleActions.isNotEmpty()) {
+                        HorizontalDivider()
+                    }
+                    visibleActions.forEach { action ->
                         DropdownMenuItem(
                             text = { Text(action.label) },
+                            leadingIcon = { Icon(action.icon(), contentDescription = null) },
                             onClick = {
                                 menuOpen = false
                                 onControl(action)
@@ -623,6 +666,14 @@ private fun ChatHeader(
         }
         HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f))
     }
+}
+
+/** Quiet/Warning/Critical → the DESIGN.md status color for each tone. */
+@Composable
+private fun ContextTone.color(): Color = when (this) {
+    ContextTone.Quiet -> MaterialTheme.colorScheme.onSurfaceVariant
+    ContextTone.Warning -> MaterialTheme.colorScheme.tertiary
+    ContextTone.Critical -> MaterialTheme.colorScheme.error
 }
 
 /**

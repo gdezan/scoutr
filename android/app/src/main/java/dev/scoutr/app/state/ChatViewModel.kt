@@ -359,8 +359,21 @@ data class ChatUiState(
             ?: entries.asReversed().firstOrNull { it.role == "user" }
                 ?.let { entryText(it.content) }
 
+    /**
+     * Matches the picker key (`provider/id`) first — pi reports its own model
+     * this way — then falls back to a bare id match: the Claude Code backend
+     * relays the CLI's own transcript model (`claude-sonnet-5`), never
+     * prefixed with its provider.
+     */
     val activeModel: ModelInfo?
-        get() = (configuration as? Loadable.Ready)?.value.orEmpty().flatMap { it.models }.firstOrNull { "${it.provider}/${it.id}" == model }
+        get() {
+            val models = (configuration as? Loadable.Ready)?.value.orEmpty().flatMap { it.models }
+            return models.firstOrNull { "${it.provider}/${it.id}" == model } ?: models.firstOrNull { it.id == model }
+        }
+
+    /** How full the session's context window is; null until an assistant turn reports usage. */
+    val contextUsage: ContextUsage?
+        get() = contextUsageOf(entries, activeModel?.contextWindow)
 
     val availableThinkingLevels: List<String>
         get() = activeModel?.thinkingLevels ?: emptyList()
