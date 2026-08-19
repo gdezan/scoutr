@@ -53,8 +53,6 @@ class SettingsScreenTest {
         host = "http://bridge.local:8787",
         token = "super-secret-token-42",
         exposure = ExposureKind.Tailscale,
-        ntfyUrl = "https://ntfy.sh",
-        ntfyTopic = "scoutr-abc123",
     )
 
     @Before
@@ -72,7 +70,6 @@ class SettingsScreenTest {
         terminalPreferences: TerminalPreferencesStore = terminalStore(),
         api: ScoutrApi = FakeScoutrApi(),
         onForget: () -> Unit = {},
-        onMonitoringChanged: ((Boolean) -> Unit)? = {},
     ) {
         compose.setContent {
             ScoutrTheme {
@@ -82,45 +79,22 @@ class SettingsScreenTest {
                     terminalPreferences = terminalPreferences,
                     api = api,
                     onForget = onForget,
-                    onMonitoringChanged = onMonitoringChanged,
                 )
             }
         }
     }
 
     @Test
-    fun monitoringToggleRendersAndFlips() {
-        var lastToggle: Boolean? = null
-        setSettings(onMonitoringChanged = { lastToggle = it })
-        compose.onNodeWithTag("settings_monitoring_switch").performScrollTo().assertIsOff().performClick()
-        compose.onNodeWithTag("settings_monitoring_switch").assertIsOn()
-        compose.onNodeWithText("Background monitoring").assertExists()
-        compose.onNodeWithText(
-            "Watch agents for blocked / done events while the app is closed. " +
-                "Android 15+ limits data-sync monitoring to six hours in a 24-hour period.",
-        ).assertExists()
-        assertTrue(lastToggle == true)
-    }
-
-    @Test
-    fun connectionCardShowsHostAndNtfyButNeverTheToken() {
+    fun connectionCardShowsTheHostButNeverTheToken() {
         setSettings()
         compose.onNodeWithTag("settings_connection_status").assertExists()
         compose.onNodeWithText("Connected").assertExists()
         compose.onNodeWithTag("settings_host").assertTextEquals(saved.host)
-        compose.onNodeWithTag("settings_ntfy")
-            .assertTextEquals("${saved.ntfyUrl}\n${saved.ntfyTopic}")
         // The token is neither text nor a content description anywhere on the page.
         compose.onAllNodes(
             hasText(saved.token, substring = true) or
                 hasContentDescription(saved.token, substring = true),
         ).assertCountEquals(0)
-    }
-
-    @Test
-    fun missingNtfyReadsAsNotConfigured() {
-        setSettings(saved = saved.copy(ntfyUrl = null))
-        compose.onNodeWithTag("settings_ntfy").assertTextEquals("Push not configured.")
     }
 
     @Test
@@ -131,7 +105,7 @@ class SettingsScreenTest {
         compose.onNodeWithTag("settings_forget").performScrollTo().performClick()
         assertEquals("confirm must gate the callback", 0, forgot)
         compose.onNodeWithText(
-            "Forget ${saved.host}? You'll need to pair again. Background monitoring will turn off.",
+            "Forget ${saved.host}? You'll need to pair again. Notifications will stop.",
         ).assertExists()
 
         compose.onNodeWithText("Cancel").performClick()

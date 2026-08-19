@@ -27,10 +27,8 @@ export interface BridgeConfig {
   token: string;
   /** Loopback port the bridge listens on (an exposure provider fronts it with TLS). */
   port: number;
-  /** Base URL of the self-hosted ntfy server (layer 5); empty = disabled. */
-  ntfyUrl?: string;
-  /** Random topic under which the bridge publishes blocked-agent events. */
-  ntfyTopic?: string;
+  /** Path to the FCM service-account JSON. Absent = push disabled. */
+  fcmServiceAccountPath?: string;
   /** Deployment exposure used to advertise a reachable URL at pairing time. */
   exposure: ExposureConfig;
 }
@@ -94,8 +92,10 @@ export async function loadOrCreateConfig(path = defaultConfigPath()): Promise<Br
       configDir: join(path, ".."),
       token: parsed.token,
       port: parsed.port,
-      ntfyUrl: typeof parsed.ntfyUrl === "string" ? parsed.ntfyUrl : undefined,
-      ntfyTopic: typeof parsed.ntfyTopic === "string" ? parsed.ntfyTopic : `scoutr_${randomBytes(12).toString("base64url")}`,
+      fcmServiceAccountPath:
+        typeof parsed.fcmServiceAccountPath === "string" && parsed.fcmServiceAccountPath
+          ? parsed.fcmServiceAccountPath
+          : undefined,
       exposure,
     };
   } catch (error) {
@@ -110,7 +110,6 @@ export async function loadOrCreateConfig(path = defaultConfigPath()): Promise<Br
       configDir: join(path, ".."),
       token: generateToken(),
       port: 8737,
-      ntfyTopic: `scoutr_${randomBytes(12).toString("base64url")}`,
       exposure: { kind: "tailscale" },
     };
     await mkdir(join(path, ".."), { recursive: true });

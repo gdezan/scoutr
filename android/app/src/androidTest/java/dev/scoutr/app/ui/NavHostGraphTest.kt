@@ -25,11 +25,9 @@ import org.junit.rules.TestRule
  *
  * The permission dialog problem: MainActivity requests POST_NOTIFICATIONS
  * before setContent, and a pending request steals the compose test owner's
- * window (ActivityScenario.launch never sees the RESUMED state). The request
- * is gated on background monitoring being enabled (MonitoringStore), so the
- * seed rule resets monitoring off — no dialog, no pm-grant dance, on any
- * device regardless of leftover QA state. The seeded connection must also
- * land BEFORE the rule launches the activity, hence the outer rule.
+ * window (ActivityScenario.launch never sees the RESUMED state). The seeded
+ * connection must land BEFORE the rule launches the activity, hence the
+ * outer rule.
  */
 @RunWith(AndroidJUnit4::class)
 class NavHostGraphTest {
@@ -40,8 +38,7 @@ class NavHostGraphTest {
         object : Statement() {
             override fun evaluate() {
                 val context = ApplicationProvider.getApplicationContext<android.content.Context>()
-                ConnectionStore(context).save("http://127.0.0.1:1", "t", null, null)
-                dev.scoutr.app.state.MonitoringStore(context).also { it.enabled = false }
+                ConnectionStore(context).save("http://127.0.0.1:1", "t")
                 base.evaluate()
             }
         }

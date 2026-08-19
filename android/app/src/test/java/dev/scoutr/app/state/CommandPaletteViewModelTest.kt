@@ -156,7 +156,7 @@ class CommandPaletteViewModelTest {
 
     private fun savedConnection(): ConnectionStore =
         ConnectionStore(RuntimeEnvironment.getApplication(), FakeConnectionCipher()).apply {
-            save("http://test-bridge", "test-token", null, null)
+            save("http://test-bridge", "test-token")
         }
 
     private fun CommandPaletteViewModel.waitForSettled() = runBlocking {

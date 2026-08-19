@@ -202,12 +202,7 @@ private fun ScoutrAppNav(
     // share the same live snapshot, so there is no duplicate polling.
     val boardViewModel: BoardViewModel = viewModel(
         factory = viewModelFactory<BoardViewModel> { app ->
-            BoardViewModel(
-                app.container.bridge,
-                app.container.connectionStore,
-                app.container.ntfy,
-                app.container::showAgentNotification,
-            )
+            BoardViewModel(app.container.bridge, app.container.connectionStore)
         },
         key = "activity_board",
     )

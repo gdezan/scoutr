@@ -13,7 +13,7 @@ data class HealthResponse(
     val api: ScoutrApiInfo? = null,
     val herdr: HerdrInfo? = null,
     val terminal: TerminalCapabilityInfo? = null,
-    val ntfy: NtfyInfo? = null,
+    val push: PushInfo? = null,
 )
 
 /** Scoutr Android-to-bridge API metadata advertised by the health handshake. */
@@ -43,10 +43,10 @@ data class TerminalCapabilityInfo(
     val isUnsupported: Boolean get() = status == "unsupported"
 }
 
+/** Whether the bridge can send push at all (health surface). */
 @Serializable
-data class NtfyInfo(
-    val url: String? = null,
-    val topic: String? = null,
+data class PushInfo(
+    val fcm: Boolean = false,
 )
 
 @Serializable
@@ -152,23 +152,6 @@ data class SessionDescriptor(
     val active: Boolean get() = live != null
     val blocked: Boolean get() = status == "blocked"
 }
-
-/** A message delivered by the self-hosted ntfy server (layer 5 push). */
-@Serializable
-data class NtfyMessage(
-    val id: String,
-    val time: Long = 0,
-    val event: String = "message",
-    val topic: String = "",
-    val title: String? = null,
-    val message: String? = null,
-    val priority: Int = 3,
-
-    /** Bridge pane id, carried so a pushed event can deep-link to the session. */
-    val paneId: String? = null,
-    /** ntfy 'click' URL (survives ntfy storage, unlike custom fields): scoutr://chat/<paneId>. */
-    val click: String? = null,
-)
 
 @Serializable
 data class SessionReadResponse(

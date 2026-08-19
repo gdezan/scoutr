@@ -6,7 +6,6 @@ import dev.scoutr.app.data.ExposureKind
 import dev.scoutr.app.data.FakeConnectionCipher
 import dev.scoutr.app.data.HealthResponse
 import dev.scoutr.app.data.HerdrInfo
-import dev.scoutr.app.data.NtfyInfo
 import dev.scoutr.app.data.PairingPayloadParser
 import dev.scoutr.app.data.REQUIRED_SCOUTR_API_FEATURES
 import dev.scoutr.app.data.ScoutrApiInfo
@@ -80,7 +79,6 @@ class ConnectViewModelTest {
                 ok = true,
                 api = ScoutrApiInfo(protocol = 2, features = REQUIRED_SCOUTR_API_FEATURES),
                 herdr = HerdrInfo(connected = true, version = "0.8.0", protocol = 19),
-                ntfy = NtfyInfo(url = "https://bridge.test/ntfy", topic = "topic"),
             ),
         )
 
@@ -91,7 +89,6 @@ class ConnectViewModelTest {
         assertEquals(ConnectedInfo("0.8.0", 19), ready.value)
         assertEquals("https://bridge.test", store.saved?.host)
         assertEquals("secret", store.saved?.token)
-        assertEquals("topic", store.saved?.ntfyTopic)
         assertEquals(
             "a hand-typed address carries no provider metadata",
             ExposureKind.Custom,

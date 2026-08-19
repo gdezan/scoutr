@@ -2,6 +2,7 @@ import type { Route } from "./types.js";
 import { agentsRoutes } from "./agents.js";
 import { catalogRoutes } from "./catalog.js";
 import { commandsRoutes } from "./commands.js";
+import { devicesRoutes } from "./devices.js";
 import { dirsRoutes } from "./dirs.js";
 import { filesRoutes } from "./files.js";
 import { healthRoutes } from "./health.js";
@@ -26,6 +27,7 @@ export function buildRoutes(): Route[] {
     ...usageRoutes,
     ...modelsRoutes,
     ...commandsRoutes,
+    ...devicesRoutes,
     ...dirsRoutes,
     ...filesRoutes,
     ...reviewRoutes,

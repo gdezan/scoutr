@@ -12,6 +12,9 @@
  */
 import { HerdrClient, defaultSocketPath, HerdrError } from "./herdr/client.js";
 import { HerdrEventFeed } from "./herdr/feed.js";
+// Type-only, so the runtime keeps the lazy imports below.
+import type { JsonDeviceRegistry } from "./push/devices.js";
+import type { FcmPublisher } from "./push/publisher.js";
 
 async function main(): Promise<void> {
   const [command, subcommand] = process.argv.slice(2);
@@ -99,8 +102,8 @@ async function main(): Promise<void> {
         const { default: qr } = await import("qrcode-terminal");
 
         const config = await loadOrCreateConfig();
-        if (!config.ntfyUrl || !config.ntfyTopic) {
-          console.error("warning: ntfy not configured — push will not work until it is");
+        if (!config.fcmServiceAccountPath) {
+          console.error("warning: push not configured — set fcmServiceAccountPath in the config to enable it");
         }
         let exposure;
         try {
@@ -111,12 +114,7 @@ async function main(): Promise<void> {
           process.exitCode = 1;
           break;
         }
-        const payload = buildPairingPayload({
-          exposure,
-          token: config.token,
-          ntfyUrl: config.ntfyUrl,
-          ntfyTopic: config.ntfyTopic,
-        });
+        const payload = buildPairingPayload({ exposure, token: config.token });
         // Host and exposure kind are safe to log; the token never is.
         console.error(`exposure: ${exposure.kind} → ${exposure.publicUrl}`);
         qr.generate(payload, { small: true }, (out: string) => console.log(out));
@@ -134,7 +132,9 @@ async function main(): Promise<void> {
         const { loadOrCreateConfig, defaultConfigPath } = await import("./config.js");
         const { UsageService } = await import("./usage/providers.js");
         const { HerdrTerminalLauncher } = await import("./terminal/process.js");
-        const { NtfyPublisher } = await import("./notify.js");
+        const { createFcmSender } = await import("./push/fcm.js");
+        const { JsonDeviceRegistry } = await import("./push/devices.js");
+        const { FcmPublisher } = await import("./push/publisher.js");
 
         const { pruneStalePendingAsks } = await import("./agents/claude/pending-asks.js");
 
@@ -147,23 +147,36 @@ async function main(): Promise<void> {
         await feed.start();
         console.error(`connected to herdr at ${socketPath}`);
 
+        // Push is optional. Without a readable key file the publisher stays
+        // undefined and the bridge behaves exactly as it does today; a broken
+        // credential must never keep the bridge from serving.
+        let push: { publisher: FcmPublisher; devices: JsonDeviceRegistry } | undefined;
+        if (config.fcmServiceAccountPath) {
+          try {
+            const devices = await JsonDeviceRegistry.open(config.configDir);
+            push = { publisher: new FcmPublisher(await createFcmSender(config.fcmServiceAccountPath), devices), devices };
+          } catch (error) {
+            console.error(`warning: push disabled — ${error instanceof Error ? error.message : String(error)}`);
+          }
+        }
+
         const server = createScoutrServer({
           herdr: new HerdrClient({ socketPath }),
           terminal: new HerdrTerminalLauncher({ socketPath }),
           feed,
           usage: new UsageService(),
           config,
-          publisher:
-            config.ntfyUrl && config.ntfyTopic
-              ? new NtfyPublisher({ baseUrl: config.ntfyUrl, topic: config.ntfyTopic })
-              : undefined,
+          publisher: push?.publisher,
+          devices: push?.devices,
         });
         console.error(`scoutr bridge listening on ${server.url}`);
         // Never print the token: the credential would persist in journald.
         console.error(`token: run 'scoutr-bridge pair' or read ${defaultConfigPath()}`);
-        if (config.ntfyUrl && config.ntfyTopic) {
-          console.error(`push: ntfy at ${config.ntfyUrl}/topic/${config.ntfyTopic}`);
-        }
+        console.error(
+          push
+            ? `push: FCM (${push.devices.list().length} device(s) registered)`
+            : "push: disabled (no fcmServiceAccountPath in the config)",
+        );
         console.error(
           `exposure: ${config.exposure.kind}${config.exposure.publicUrl ? ` → ${config.exposure.publicUrl}` : ""} ` +
             `(the provider fronts ${server.url} with TLS; run 'scoutr-bridge pair' for the app's QR)`,

@@ -53,7 +53,7 @@ Scoutr currently targets Herdr 0.8.0 / protocol 19. The Android app and bridge a
 - **Full-screen terminal** — open a Herdr pane from Android with terminal ownership and take-control handling.
 - **Session history** — reopen persisted sessions even when their original pane is no longer live.
 - **Provider usage** — inspect Codex, Claude, DeepSeek, xAI, and supported Antigravity usage from the host.
-- **Push notifications** — optionally self-host ntfy for blocked/done notifications.
+- **Push notifications** — optional Firebase Cloud Messaging push when an agent needs you; the ping carries no content, and the app fetches the detail from your bridge.
 - **QR pairing** — pair the phone with the bridge without typing the host and token.
 - **Remote app updates** — after the first install, the app can ask the host to build an APK, download it through the bridge, and hand it to Android's package installer.
 - **No Scoutr cloud** — choose how the phone reaches the bridge: Tailscale, Cloudflare Tunnel, or your own reverse proxy.
@@ -71,7 +71,7 @@ You need:
 | An agent CLI | `pi`, Claude Code, and/or Antigravity/Gemini CLI depending on what you use |
 | Git | Used by the build/version flow |
 | Android tooling | Only required to build/install the app yourself |
-| ntfy | Optional; only needed for push notifications |
+| A Firebase project | Optional; only needed for push notifications |
 
 Clone the repo and build the bridge:
 
@@ -179,12 +179,6 @@ tailscale serve --bg 8737
 tailscale serve status
 ```
 
-With ntfy enabled, expose it under `/ntfy` on the same tailnet hostname:
-
-```bash
-tailscale serve --set-path /ntfy 8382
-```
-
 Config:
 
 ```json
@@ -199,12 +193,7 @@ Scoutr discovers the host's Tailscale HTTPS name when pairing. Set `exposure.pub
 
 Use a named tunnel that you create and manage yourself. Scoutr does not read Cloudflare credentials or manage `cloudflared`.
 
-Use separate public hostnames for the bridge and ntfy:
-
-| Public hostname | Origin |
-|---|---|
-| `scoutr.example.com` | `http://127.0.0.1:8737` |
-| `scoutr-ntfy.example.com` | `http://127.0.0.1:8382` |
+Only the bridge needs a public hostname — push leaves the host through FCM, not through your proxy.
 
 Example `cloudflared` ingress:
 
@@ -215,8 +204,6 @@ credentials-file: /path/to/<tunnel-uuid>.json
 ingress:
   - hostname: scoutr.example.com
     service: http://127.0.0.1:8737
-  - hostname: scoutr-ntfy.example.com
-    service: http://127.0.0.1:8382
   - service: http_status:404
 ```
 
@@ -226,8 +213,6 @@ Then configure Scoutr:
 {
   "token": "scoutr_<random>",
   "port": 8737,
-  "ntfyUrl": "https://scoutr-ntfy.example.com",
-  "ntfyTopic": "scoutr_<random>",
   "exposure": {
     "kind": "cloudflare",
     "publicUrl": "https://scoutr.example.com"
@@ -264,8 +249,7 @@ The proxy must:
 - forward the bridge hostname to `http://127.0.0.1:8737`;
 - preserve the `Authorization` header;
 - support WebSocket upgrades for terminal/topology sockets;
-- terminate TLS for a physical Android device;
-- expose ntfy at its own root URL if you use push notifications.
+- terminate TLS for a physical Android device.
 
 `http://` is allowed for explicit development setups, such as an emulator talking to the host. Android release builds expect HTTPS.
 
@@ -279,13 +263,9 @@ Install Caddy using the package for your OS, then edit its Caddyfile. A common L
 scoutr.example.com {
     reverse_proxy 127.0.0.1:8737
 }
-
-scoutr-ntfy.example.com {
-    reverse_proxy 127.0.0.1:8382
-}
 ```
 
-The second hostname is only needed when you use ntfy. Caddy's `reverse_proxy` handles WebSocket upgrades and forwards normal incoming headers, including `Authorization`, so Scoutr needs no special WebSocket/header rules.
+Caddy's `reverse_proxy` handles WebSocket upgrades and forwards normal incoming headers, including `Authorization`, so Scoutr needs no special WebSocket/header rules.
 
 Validate and reload the config when Caddy is running as a system service:
 
@@ -300,8 +280,6 @@ Set the matching Scoutr config:
 {
   "token": "scoutr_<random>",
   "port": 8737,
-  "ntfyUrl": "https://scoutr-ntfy.example.com",
-  "ntfyTopic": "scoutr_<random>",
   "exposure": {
     "kind": "custom",
     "publicUrl": "https://scoutr.example.com"
@@ -318,7 +296,6 @@ curl -s https://scoutr.example.com/api/health
 # unauthorized is expected without the token
 
 curl -s -H "Authorization: Bearer $TOKEN" https://scoutr.example.com/api/health
-curl -s https://scoutr-ntfy.example.com/v1/health   # only when using ntfy
 
 cd bridge
 node dist/cli.js pair
@@ -326,30 +303,38 @@ node dist/cli.js pair
 
 If Caddy runs on another machine, `127.0.0.1` is the wrong upstream. Route Caddy to the Scoutr host over a network path you trust instead.
 
-## Optional: ntfy push
+## Optional: push notifications
 
-Scoutr can use a self-hosted ntfy server for blocked/done notifications.
+Scoutr can push a notification to your phone the moment an agent blocks, even
+when the app is closed. It uses Firebase Cloud Messaging as a wake-up bell
+only: the message contains nothing but a pane id, and the app fetches the
+agent's name and workspace from your own bridge. No notification text ever
+reaches Google. See `docs/adr/0007-fcm-contentless-push.md` for why.
 
-A minimal local ntfy config at `~/.config/ntfy/server.yml`:
+This needs a Firebase project of your own — it holds nothing but FCM
+credentials:
 
-```yaml
-listen-http: "127.0.0.1:8382"
-cache-file: "/home/<you>/.cache/ntfy/cache.db"
-cache-duration: "48h"
+1. Create a project at [console.firebase.google.com](https://console.firebase.google.com).
+2. Add an Android app with the package name `dev.scoutr.app`, and download
+   `google-services.json` into `android/app/`. It ships inside your APK and is
+   not a secret, but it is gitignored because it is per-developer.
+3. Project settings → Service accounts → **Generate new private key**. Save it
+   as `~/.config/scoutr/fcm-service-account.json` and `chmod 600` it. This one
+   *is* a secret: it can send push to your devices.
+4. Point the bridge at it:
+
+```json
+{
+  "fcmServiceAccountPath": "/home/<you>/.config/scoutr/fcm-service-account.json"
+}
 ```
 
-After starting ntfy, verify it locally:
+Restart the bridge and rebuild the app. `GET /api/health` reports
+`"push": { "fcm": true }` when the key loaded. Without it the bridge logs one
+warning at startup and everything else works exactly as before — you simply
+get no notifications.
 
-```bash
-curl -s http://127.0.0.1:8382/v1/health
-```
-
-Then expose it using the same network approach as the bridge:
-
-- Tailscale: `https://<host>.ts.net/ntfy`
-- Cloudflare/custom: preferably a dedicated hostname such as `https://scoutr-ntfy.example.com`
-
-Set `ntfyUrl` to the ntfy **root** and restart the bridge. The pairing QR carries the ntfy configuration to the app.
+Push notifications require Google Play Services on the phone.
 
 ## Build and install the Android app
 
@@ -462,8 +447,7 @@ The main bridge config is `~/.config/scoutr/config.json` or `$XDG_CONFIG_HOME/sc
 | `token` | Bearer token used by Android |
 | `exposure.kind` | `tailscale`, `cloudflare`, or `custom` |
 | `exposure.publicUrl` | Public bridge base URL; required for Cloudflare/custom |
-| `ntfyUrl` | Optional ntfy root URL |
-| `ntfyTopic` | Optional random ntfy topic |
+| `fcmServiceAccountPath` | Optional path to the Firebase service-account JSON; enables push |
 | `HERDR_SOCKET_PATH` | Override the Herdr Unix socket path |
 | `SCOUTR_REPO_ROOTS` | Allow-list roots for repository/review access |
 | `PI_CODING_AGENT_DIR` | pi data directory used for sessions/models/usage |
@@ -524,10 +508,10 @@ Additive optional fields stay on the current protocol. Removing or renaming requ
 - Tailscale mode adds tailnet reachability on top of the application token.
 - Cloudflare/custom mode may put the bridge on the public Internet. Scoutr does not automatically add Cloudflare Access, mTLS, device posture, or another identity provider.
 - The pairing QR contains credentials. Treat a leaked QR or token as a credential compromise and rotate it.
-- A public ntfy instance has a weaker boundary: the random topic acts as a capability unless you configure additional ntfy authentication yourself.
+- Push carries no content. The FCM message names a pane and nothing else, so notification text never leaves your host. Keep `fcm-service-account.json` at mode `0600`: it can send push to your paired devices.
 - Android stores the saved bridge token encrypted with Android Keystore-backed AES-GCM.
 
-To rotate the Scoutr token and ntfy topic without resetting the rest of the config:
+To rotate the Scoutr token without resetting the rest of the config:
 
 ```bash
 python3 - <<'PY'
@@ -542,8 +526,6 @@ c = json.loads(p.read_text())
 b64 = lambda n: base64.urlsafe_b64encode(secrets.token_bytes(n)).rstrip(b"=").decode()
 
 c["token"] = "scoutr_" + b64(18)
-if c.get("ntfyTopic"):
-    c["ntfyTopic"] = "scoutr_" + b64(12)
 
 p.write_text(json.dumps(c, indent=2) + "\n")
 os.chmod(p, 0o600)
@@ -565,7 +547,7 @@ Re-pair every phone after rotating credentials.
 | Public URL returns 401 | expected without `Authorization: Bearer <token>`; verify the phone has the current token |
 | `pair` says there is no public URL | set `exposure.publicUrl` for `cloudflare`/`custom`, or fix Tailscale discovery |
 | v2 QR is rejected | update the Android app to a build that supports Cloudflare/custom pairing |
-| ntfy health works but notifications do not | verify `ntfyUrl`, topic, Android notification permission, and background monitoring |
+| No push notifications arrive | check `/api/health` reports `"push": {"fcm": true}`, that the phone has Google Play Services, and that Android's notification permission is granted |
 | App stays disconnected after a bridge restart | verify the bridge and exposure URL; the board should recover once the endpoint is reachable |
 | Stale bridge behavior after code changes | rebuild before restart: `scripts/deploy-bridge.sh` |
 
@@ -577,7 +559,7 @@ For deeper host, bridge, emulator, and tunnel diagnostics, see [`docs/dev-workfl
 - Terminal ownership and lifetime have explicit constraints documented in [`docs/terminal.md`](./docs/terminal.md).
 - Backend capabilities differ. Claude and Antigravity do not expose every control/model/session behavior that pi does.
 - Time-in-state depends on agent lifecycle events being available from Herdr.
-- Background ntfy monitoring is subject to Android foreground-service limits.
+- Push requires Google Play Services; a de-Googled device gets no notifications.
 
 ## Project docs
 

@@ -45,8 +45,6 @@ import androidx.core.content.ContextCompat
 import dev.scoutr.app.data.AppearancePreferencesStore
 import dev.scoutr.app.data.ConnectionStore
 import dev.scoutr.app.data.TerminalPreferencesStore
-import dev.scoutr.app.service.ScoutrMonitorService
-import dev.scoutr.app.state.MonitoringStore
 import dev.scoutr.app.ui.components.ConfirmDialog
 import dev.scoutr.app.ui.components.SectionLabel
 import dev.scoutr.app.ui.components.StatusRing
@@ -91,7 +89,6 @@ fun SettingsScreen(
     modifier: Modifier = Modifier,
     /** Null only before the first pairing, which the tab shell cannot reach. */
     saved: ConnectionStore.Saved? = null,
-    onMonitoringChanged: ((Boolean) -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val appearance = remember(context) { AppearancePreferencesStore(context) }
@@ -120,8 +117,6 @@ fun SettingsScreen(
         }
 
         UpdateSection(api = api)
-
-        MonitoringSection(onMonitoringChanged = onMonitoringChanged)
 
         ChatSection(appearance = appearance)
 
@@ -155,7 +150,7 @@ private fun ConnectionSection(
         ConfirmDialog(
             title = "Forget connection?",
             text = "Forget ${saved.host}? You'll need to pair again. " +
-                "Background monitoring will turn off.",
+                "Notifications will stop.",
             confirmLabel = "Forget",
             destructive = true,
             onConfirm = {
@@ -193,23 +188,6 @@ private fun ConnectionSection(
                 overflow = TextOverflow.Ellipsis,
                 maxLines = 2,
                 modifier = Modifier.testTag("settings_host"),
-            )
-            Spacer(Modifier.height(14.dp))
-            Text("Push", style = MaterialTheme.typography.bodyMedium)
-            Spacer(Modifier.height(4.dp))
-            // ntfy is configured by the bridge during the health handshake, so
-            // it is status, not a form. Either half missing means no push.
-            val push = saved.ntfyUrl?.let { url -> saved.ntfyTopic?.let { topic -> "$url\n$topic" } }
-            // A URL and topic are machine facts; "not configured" is a sentence.
-            // Mono is for the former only — never as decoration (§9d).
-            Text(
-                push ?: "Push not configured.",
-                style = if (push != null) ScoutrType.monoMeta
-                else MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                overflow = TextOverflow.Ellipsis,
-                maxLines = 3,
-                modifier = Modifier.testTag("settings_ntfy"),
             )
         }
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
@@ -399,68 +377,6 @@ private fun installedIdentity(): String =
 
 private fun hostIdentity(status: UpdateStatusResponse): String =
     "${status.host.version} (${status.host.commit})"
-/**
- * The opt-in, time-bounded background monitor. A foreground service keeps the
- * ntfy poll alive so blocked/done events reach the notification shade with a
- * deep link and inline reply, even when the app is closed. Android 15+ stops
- * this session after six background hours and Scoutr will not restart it.
- */
-@Composable
-private fun MonitoringSection(onMonitoringChanged: ((Boolean) -> Unit)?) {
-    val context = LocalContext.current
-    val store = remember { MonitoringStore(context) }
-    var monitoring by remember { mutableStateOf(store.enabled) }
-
-    // Enabling monitoring needs POST_NOTIFICATIONS (the foreground service
-    // cannot start without it on 33+); request it before starting the service
-    // so the toggle never crashes into a SecurityException.
-    val requestNotifications = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission(),
-    ) { granted ->
-        if (granted) {
-            ContextCompat.startForegroundService(
-                context,
-                android.content.Intent(context, ScoutrMonitorService::class.java),
-            )
-        }
-    }
-
-    SettingsSection(
-        "Notifications",
-        footnote = "Monitoring only works while a connection is saved. On Android 15+, the system stops this background session after six hours in a 24-hour period. Notifications deep-link to the exact session and support an inline Reply that steers the agent.",
-    ) {
-        SettingsSwitchRow(
-            title = "Background monitoring",
-            subtitle = "Watch agents for blocked / done events while the app is closed. Android 15+ limits data-sync monitoring to six hours in a 24-hour period.",
-            checked = monitoring,
-            onCheckedChange = { value ->
-                monitoring = value
-                store.enabled = value
-                if (onMonitoringChanged != null) {
-                    onMonitoringChanged(value)
-                } else {
-                    val serviceIntent = android.content.Intent(context, ScoutrMonitorService::class.java)
-                    if (value) {
-                        val granted = ContextCompat.checkSelfPermission(
-                            context,
-                            android.Manifest.permission.POST_NOTIFICATIONS,
-                        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
-                        if (granted) {
-                            ContextCompat.startForegroundService(context, serviceIntent)
-                        } else {
-                            requestNotifications.launch(android.Manifest.permission.POST_NOTIFICATIONS)
-                        }
-                    } else {
-                        context.stopService(serviceIntent)
-                    }
-                }
-            },
-            testTag = "settings_monitoring_switch",
-            rowTestTag = "settings_monitoring_row",
-        )
-    }
-}
-
 /**
  * How a *new* Chat visit starts. The header toggles still win for the visit
  * they belong to, and changing these never rewrites a chat that is already

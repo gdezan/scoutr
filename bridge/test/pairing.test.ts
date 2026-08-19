@@ -11,26 +11,9 @@ test("buildPairingPayload emits compact v1 JSON with host + token for tailscale"
   assert.equal(payload, '{"v":1,"host":"https://artemis.tail7dc568.ts.net","token":"scoutr_secret"}');
 });
 
-test("buildPairingPayload includes ntfy when both url and topic are set", () => {
-  const payload = buildPairingPayload({
-    exposure: TAILSCALE,
-    token: "scoutr_secret",
-    ntfyUrl: "https://artemis.tail7dc568.ts.net/ntfy",
-    ntfyTopic: "scoutr_topic",
-  });
-  assert.deepEqual(parsePairingPayload(payload), {
-    v: 1,
-    host: "https://artemis.tail7dc568.ts.net",
-    token: "scoutr_secret",
-    ntfy: { url: "https://artemis.tail7dc568.ts.net/ntfy", topic: "scoutr_topic" },
-  });
-});
-
-test("buildPairingPayload drops ntfy unless both url and topic are set", () => {
-  const onlyUrl = buildPairingPayload({ exposure: TAILSCALE, token: "t", ntfyUrl: "https://n" });
-  const onlyTopic = buildPairingPayload({ exposure: CLOUDFLARE, token: "t", ntfyTopic: "topic" });
-  assert.equal(JSON.parse(onlyUrl).ntfy, undefined);
-  assert.equal(JSON.parse(onlyTopic).ntfy, undefined);
+test("the payload carries no push discovery: the app registers itself after pairing", () => {
+  const payload = buildPairingPayload({ exposure: TAILSCALE, token: "scoutr_secret" });
+  assert.deepEqual(Object.keys(JSON.parse(payload)).sort(), ["host", "token", "v"]);
 });
 
 test("parsePairingPayload round-trips the v1 builder output", () => {
@@ -46,23 +29,16 @@ test("parsePairingPayload round-trips the v1 builder output", () => {
 });
 
 test("buildPairingPayload emits v2 with the exposure kind for cloudflare", () => {
-  const payload = buildPairingPayload({
-    exposure: CLOUDFLARE,
-    token: "scoutr_secret",
-    ntfyUrl: "https://scoutr-ntfy.example.com",
-    ntfyTopic: "scoutr_topic",
-  });
+  const payload = buildPairingPayload({ exposure: CLOUDFLARE, token: "scoutr_secret" });
   assert.equal(
     payload,
-    '{"v":2,"host":"https://scoutr.example.com","token":"scoutr_secret",' +
-      '"exposure":{"kind":"cloudflare"},"ntfy":{"url":"https://scoutr-ntfy.example.com","topic":"scoutr_topic"}}',
+    '{"v":2,"host":"https://scoutr.example.com","token":"scoutr_secret","exposure":{"kind":"cloudflare"}}',
   );
   assert.deepEqual(parsePairingPayload(payload), {
     v: 2,
     host: "https://scoutr.example.com",
     token: "scoutr_secret",
     exposure: { kind: "cloudflare" },
-    ntfy: { url: "https://scoutr-ntfy.example.com", topic: "scoutr_topic" },
   });
 });
 
@@ -96,8 +72,8 @@ test("parsePairingPayload rejects garbage, wrong version, and missing fields", (
   assert.equal(parsePairingPayload('{"v":1,"host":"","token":"t"}'), null);
   assert.equal(parsePairingPayload('{"v":1,"host":"h"}'), null);
   assert.equal(parsePairingPayload('{"v":1,"token":"t"}'), null);
-  // ntfy with only one field is dropped, not fatal
-  assert.deepEqual(parsePairingPayload('{"v":1,"host":"h","token":"t","ntfy":{"url":"u"}}'), {
+  // Unknown fields — e.g. a QR printed by an older bridge — are ignored, not fatal.
+  assert.deepEqual(parsePairingPayload('{"v":1,"host":"h","token":"t","legacyPush":{"url":"u"}}'), {
     v: 1,
     host: "h",
     token: "t",

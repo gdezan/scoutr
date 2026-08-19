@@ -18,8 +18,6 @@ data class PairingPayload(
     val host: String,
     val token: String,
     val exposure: ExposureKind,
-    val ntfyUrl: String? = null,
-    val ntfyTopic: String? = null,
 )
 
 object PairingPayloadParser {
@@ -43,19 +41,7 @@ object PairingPayloadParser {
         val token = (obj["token"] as? JsonPrimitive)?.contentOrNull ?: return null
         if (host.isEmpty() || token.isEmpty()) return null
         val exposure = if (version == "1") ExposureKind.Tailscale else parseV2Exposure(obj) ?: return null
-
-        var ntfyUrl: String? = null
-        var ntfyTopic: String? = null
-        val ntfy = obj["ntfy"] as? JsonObject
-        if (ntfy != null) {
-            val url = (ntfy["url"] as? JsonPrimitive)?.contentOrNull
-            val topic = (ntfy["topic"] as? JsonPrimitive)?.contentOrNull
-            if (!url.isNullOrEmpty() && !topic.isNullOrEmpty()) {
-                ntfyUrl = url
-                ntfyTopic = topic
-            }
-        }
-        return PairingPayload(withScheme(host), token, exposure, ntfyUrl, ntfyTopic)
+        return PairingPayload(withScheme(host), token, exposure)
     }
 
     /**

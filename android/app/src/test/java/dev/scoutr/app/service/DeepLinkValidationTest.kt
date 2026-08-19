@@ -8,7 +8,7 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
 /**
- * Pushed ntfy payload is untrusted — the click string must be validated and
+ * Pushed payload is untrusted — the link string must be validated and
  * rebuilt exactly like MainActivity's entry path, never handed to the launcher raw.
  */
 @RunWith(RobolectricTestRunner::class)
@@ -55,12 +55,8 @@ class DeepLinkValidationTest {
     }
 
     @Test
-    fun noClickFallsBackToPaneIdWithTitleStatus() {
-        val link = resolveNotificationLink(
-            click = null,
-            paneId = "p3",
-            status = statusForTitle("Agent needs you"),
-        )
+    fun noClickFallsBackToThePaneIdAndGivenStatus() {
+        val link = resolveNotificationLink(click = null, paneId = "p3", status = "blocked")
         assertEquals("scoutr://chat/p3?status=blocked", link?.uri)
         assertEquals("p3", link?.paneId)
     }
@@ -72,10 +68,4 @@ class DeepLinkValidationTest {
         assertEquals("p1", parseScoutrUri("scoutr://chat/p1?status=blocked")?.paneId)
     }
 
-    @Test
-    fun serviceTitleDrivesBlockedStatus() {
-        assertEquals("blocked", statusForTitle("Agent needs you"))
-        assertEquals("working", statusForTitle("Agent finished"))
-        assertEquals("working", statusForTitle(null))
-    }
 }

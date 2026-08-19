@@ -19,7 +19,8 @@ API; the Android app talks only to that API.
   - Tests live in `bridge/test/`; offline HTTP tests use `test/support/fake-herdr.ts` and `fake-feed.ts`.
 - `android/` — Kotlin + Jetpack Compose Material 3, package `dev.scoutr.app`; manual DI through `ScoutrApp.AppContainer` (no Hilt/Room).
   - `data/` DTOs and SharedPreferences stores; `net/` API clients; `state/` ViewModels;
-    `service/` monitoring and receivers; `ui/` screens, components, theme, and motion.
+    `service/` the FCM messaging service, notification receivers, and deep-link validation;
+    `notify/` owns every notification the app posts; `ui/` screens, components, theme, and motion.
   - Terminal code is under `terminal/`, `net/TerminalSocketClient.kt`, `state/TerminalViewModel.kt`, and `ui/screens/terminal/`.
   - `android/vendor/termux/` contains only the pinned Apache-2.0 renderer subset; keep `UPSTREAM.md` accurate.
 

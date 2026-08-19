@@ -2,7 +2,8 @@ import type { HerdrEventFeed } from "../herdr/feed.js";
 import type { HerdrPort } from "../herdr/port.js";
 import type { UsageService } from "../usage/providers.js";
 import type { BridgeConfig } from "../config.js";
-import type { NtfyPublisher } from "../notify.js";
+import type { DeviceRegistry } from "../push/fcm.js";
+import type { FcmPublisher } from "../push/publisher.js";
 import type { StatusTracker } from "../status.js";
 import type { BoardDetailCache } from "../board-detail.js";
 import type { TerminalLauncher } from "../terminal/types.js";
@@ -23,6 +24,7 @@ export interface JsonBody {
   text?: string;
   path?: string;
   key?: SessionKey;
+  fcmToken?: string;
 }
 
 /** Everything the HTTP + WS layers need beyond the caller-provided wiring. */
@@ -40,8 +42,10 @@ export interface ServerDeps {
     TerminalConnectionOptions,
     "highWaterBytes" | "lowWaterBytes" | "slowClientTimeoutMs" | "inputQueueMaxBytes"
   > & { graceMs?: number };
-  /** Push publisher for blocked-agent events (layer 5); optional. */
-  publisher?: NtfyPublisher;
+  /** Push publisher for blocked-agent events; absent when push is unconfigured. */
+  publisher?: FcmPublisher;
+  /** Registered phones, written by POST /api/devices; absent when push is unconfigured. */
+  devices?: DeviceRegistry;
 }
 
 /**

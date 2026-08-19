@@ -72,7 +72,7 @@ unit (which owns `~/.config/scoutr/config.json` and port 8737):
 
 ```bash
 mkdir -p /tmp/scoutr-scratch/scoutr
-printf '{"token":"testtoken1234567890","port":8791,"ntfyUrl":null,"ntfyTopic":null,"publicHost":null}\n' \
+printf '{"token":"testtoken1234567890","port":8791,"publicHost":null}\n' \
   > /tmp/scoutr-scratch/scoutr/config.json
 cd bridge && setsid env XDG_CONFIG_HOME=/tmp/scoutr-scratch SCOUTR_REPO_ROOTS=/home/gdezan/Dev \
   node --import tsx src/cli.ts serve > /tmp/scoutr-scratch/bridge.log 2>&1 < /dev/null &
@@ -193,7 +193,6 @@ sudo launchctl print system/com.cloudflare.cloudflared | head -30
 # 3. the public hostnames
 curl -sv https://scoutr.example.com/api/health          # expect 401 without a bearer
 curl -s -H "Authorization: Bearer $TOKEN" https://scoutr.example.com/api/health
-curl -s https://scoutr-ntfy.example.com/v1/health
 ```
 
 A green step 1 with a failing step 2 or 3 is an **exposure/infrastructure**
@@ -292,19 +291,21 @@ Hard-won rules for scroll and placement assertions in Compose tests:
 
 ## Live notification / deep-link validation
 
-The full chain (bridge → ntfy → foreground service → notification → tap) can
-be validated without a real blocked agent: publish a synthetic event to the
-topic with the ntfy **`click`** field (ntfy drops arbitrary JSON fields, so
-`paneId` alone never reaches the app):
+The full chain is bridge → FCM → `ScoutrMessagingService` → `/api/agents`
+fetch → notification → tap (see ADR 0007). The notification carries no pushed
+text, so there is nothing to inject: the ping only names a pane, and the app
+builds everything the user sees from the bridge.
 
-```bash
-curl -s -X POST "https://<host>/ntfy/" -H "Content-Type: application/json" \
-  -d '{"topic":"<topic>","title":"π needs you","message":"x","priority":4,"click":"scoutr://chat/<paneId>?status=blocked"}'
-```
+Drive it from a real transition — block an agent on the host — with Scoutr
+force-stopped, and confirm a heads-up notification arrives within seconds.
+Expand the shade with
+`adb -s emulator-5554 shell cmd statusbar expand-notifications`, tap, and
+verify the exact chat opens. Unblock the agent and confirm the notification
+clears with no interaction.
 
-Enable monitoring in Settings, background the app (Home), wait ≤30 s for the
-service poll, expand the shade (`adb -s emulator-5554 shell cmd statusbar expand-notifications`),
-tap, and verify the exact chat opens.
+To exercise the app half alone, POST a ping to FCM for a known `paneId`; to
+exercise the presenter alone, prefer `NotificationPresenterTest`, which pins
+slots, the group summary, and mute suppression without a device.
 
 ## Papercuts to record when you hit them
 

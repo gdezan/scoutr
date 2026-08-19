@@ -49,8 +49,6 @@ data class BoardUiState(
 class BoardViewModel(
     private val bridge: ScoutrApi,
     private val connectionStore: ConnectionStore,
-    private val ntfyClient: dev.scoutr.app.net.NtfyClient? = null,
-    private val onNtfyMessage: (dev.scoutr.app.data.NtfyMessage) -> Unit = {},
     initialState: BoardUiState = BoardUiState(),
     private val pollInterval: Duration = 3.seconds,
 ) : ViewModel() {
@@ -61,7 +59,6 @@ class BoardViewModel(
     private val poller = Poller(viewModelScope)
     private val connectionMutex = Mutex()
     private val loadMutex = Mutex()
-    private var ntfyJob: Job? = null
 
     val hasSavedConnection: Boolean get() = connectionStore.saved != null
 
@@ -97,7 +94,6 @@ class BoardViewModel(
             val health = bridge.health(host, token)
             val compatibility = classifyScoutrApiCompatibility(health.api)
             if (compatibility is ScoutrApiCompatibility.Incompatible) {
-                stopPush()
                 _ui.update {
                     it.copy(
                         board = BoardState(),
@@ -111,12 +107,7 @@ class BoardViewModel(
             }
             val hadSavedConnection = connectionStore.saved != null
             if (host != null && token != null) {
-                connectionStore.save(
-                    host = host,
-                    token = token,
-                    ntfyUrl = health.ntfy?.url,
-                    ntfyTopic = health.ntfy?.topic,
-                )
+                connectionStore.save(host = host, token = token)
             }
             _ui.update {
                 it.copy(
@@ -128,7 +119,6 @@ class BoardViewModel(
             }
             if (lifecycleActive) {
                 if (!hadSavedConnection && connectionStore.saved != null) startLive()
-                startPush()
                 loadBoard()
             }
         } catch (c: CancellationException) {
@@ -152,33 +142,22 @@ class BoardViewModel(
     // after a stop that raced the health probe.
     private var lifecycleActive = false
 
-    /** Start the 3s board poll and the ntfy push loop; no-op when already polling. */
+    /** Start the 3s board poll; no-op when already polling. */
     fun startPolling() {
         if (lifecycleActive) return
         lifecycleActive = true
         if (connectionStore.saved != null) startLive()
-        if (_ui.value.apiCompatibility == ScoutrApiCompatibility.Compatible) startPush()
     }
 
-    /** Stop both loops; in-flight one-shot actions are untouched. */
+    /** Stop the poll; in-flight one-shot actions are untouched. */
     fun stopPolling() {
         if (!lifecycleActive) return
         lifecycleActive = false
-        stopLiveLoops()
-    }
-
-    private fun stopLiveLoops() {
         poller.stop()
-        stopPush()
-    }
-
-    private fun stopPush() {
-        ntfyJob?.cancel()
-        ntfyJob = null
     }
 
     /**
-     * Forget: the pairing is gone, so stop both loops and drop the board we
+     * Forget: the pairing is gone, so stop polling and drop the board we
      * fetched under it. This VM is activity-scoped and is not recreated when
      * nav resets to Connect, so without this it would keep polling a cleared
      * store. Re-pairing calls [connect] again, which restarts everything.
@@ -197,42 +176,6 @@ class BoardViewModel(
                 loadBoard()
             } else {
                 probeConnection()
-            }
-        }
-    }
-
-    /**
-     * Poll the ntfy topic the bridge publishes to, and surface each new message
-     * as a local notification. Failure is silent: push must never break the board.
-     */
-    private fun startPush() {
-        ntfyJob?.cancel()
-        val saved = connectionStore.saved ?: return
-        val url = saved.ntfyUrl ?: return
-        val topic = saved.ntfyTopic ?: return
-        val client = ntfyClient ?: return
-        ntfyJob = viewModelScope.launch {
-            var lastId = try {
-                client.latestId(url, topic)
-            } catch (c: CancellationException) {
-                throw c
-            } catch (_: Exception) {
-                null
-            }
-            while (isActive) {
-                try {
-                    // Collect advances the cursor so re-polls never re-deliver.
-                    client.messages(url, topic, initialSince = lastId)
-                        .collect { message ->
-                            onNtfyMessage(message)
-                            lastId = message.id
-                        }
-                } catch (c: CancellationException) {
-                    throw c
-                } catch (_: Exception) {
-                    // ntfy may be briefly unreachable; retry on the next loop.
-                }
-                delay(30_000)
             }
         }
     }
@@ -372,7 +315,7 @@ class BoardViewModel(
     }
 
     override fun onCleared() {
-        stopLiveLoops()
+        poller.stop()
         super.onCleared()
     }
 

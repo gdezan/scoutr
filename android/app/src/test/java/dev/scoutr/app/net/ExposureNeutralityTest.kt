@@ -56,8 +56,6 @@ class ExposureNeutralityTest {
                 host = server.url("/").toString().trimEnd('/'),
                 token = "test-token",
                 exposure = kind,
-                ntfyUrl = "https://ntfy.example.com",
-                ntfyTopic = "scoutr_topic",
             )
             assertEquals(kind, store.saved?.exposure)
             listOf(httpGet(), httpPost(), topologySocket(), terminalSocket())

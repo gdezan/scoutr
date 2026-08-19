@@ -47,7 +47,7 @@ surprise; calm cards so a running agent's state is the visual anchor.
   a new workspace only when the folder has none),
   JSONL transcript polling with a since cursor, dedupe by entryId,
   answer/steer unified composer.
-- Push: self-hosted ntfy, app-side polling, blocked + done notifications.
+- Push: contentless FCM pings (`kind` + `paneId` only, no notification block), blocked-only triggers; the app wakes, fetches identity from `/api/agents` over the tailnet, and posts one self-clearing notification per pane. See ADR 0007.
 - QR pairing (Moshi-style Easy Pair).
 - Usage: Codex and Claude quota windows, DeepSeek balance, and xAI weekly credits; rings on the usage screen.
 

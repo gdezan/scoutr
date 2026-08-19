@@ -116,7 +116,7 @@ fun BoardScreen(
 ) {
     val ui by viewModel.ui.collectAsState()
 
-    // The board poll and ntfy push loop run only while the board is STARTED.
+    // The board poll runs only while the board is STARTED.
     LifecycleStartEffect(Unit) {
         viewModel.startPolling()
         onStopOrDispose { viewModel.stopPolling() }

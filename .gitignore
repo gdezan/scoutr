@@ -38,3 +38,9 @@ Thumbs.db
 *.swp
 *.swo
 *~
+
+# Per-developer Firebase config. Not secret (it ships inside the APK) but it is
+# yours, not the repo's. The service-account key never lives in the tree at all
+# — it belongs at ~/.config/scoutr/fcm-service-account.json, mode 0600.
+android/app/google-services.json
+fcm-service-account.json

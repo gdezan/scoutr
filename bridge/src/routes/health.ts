@@ -29,7 +29,7 @@ async function health(ctx: RouteContext): Promise<RouteResult> {
       api: { protocol: SCOUTR_API_PROTOCOL, features: [...SCOUTR_API_FEATURES] },
       herdr: { connected: herdrConnected, version: herdrVersion, protocol: herdrProtocol },
       terminal: { capability: terminalBroker.capability() },
-      ntfy: config.ntfyUrl && config.ntfyTopic ? { url: config.ntfyUrl, topic: config.ntfyTopic } : undefined,
+      push: { fcm: Boolean(config.fcmServiceAccountPath) },
     },
   };
 }

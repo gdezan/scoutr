@@ -39,20 +39,17 @@ class ConnectionStoreTest {
         prefs().edit()
             .putString(ConnectionStore.KEY_HOST, host)
             .putString(ConnectionStore.KEY_LEGACY_TOKEN, token)
-            .putString(ConnectionStore.KEY_NTFY_TOPIC, "scoutr_legacy")
             .commit()
     }
 
     @Test
     fun save_read_and_clear_round_trip() {
-        assertTrue(store().save(" https://bridge.example.com ", " tok-123 ", "https://ntfy.example.com", "scoutr_abc"))
+        assertTrue(store().save(" https://bridge.example.com ", " tok-123 "))
 
         val saved = store().saved
         assertNotNull(saved)
         assertEquals("https://bridge.example.com", saved!!.host)
         assertEquals("tok-123", saved.token)
-        assertEquals("https://ntfy.example.com", saved.ntfyUrl)
-        assertEquals("scoutr_abc", saved.ntfyTopic)
         assertEquals("an unlabelled save is a manual, custom base URL", ExposureKind.Custom, saved.exposure)
 
         store().clear()
@@ -129,7 +126,6 @@ class ConnectionStoreTest {
         val saved = store().saved
 
         assertEquals("legacy-token", saved?.token)
-        assertEquals("scoutr_legacy", saved?.ntfyTopic)
         assertFalse(prefs().all.containsKey(ConnectionStore.KEY_LEGACY_TOKEN))
         assertTrue(prefs().all.containsKey(ConnectionStore.KEY_TOKEN_CIPHERTEXT))
         // A fresh store reads the migrated pairing through the cipher alone.

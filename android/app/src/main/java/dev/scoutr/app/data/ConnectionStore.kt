@@ -6,11 +6,10 @@ import android.util.Base64
 import android.util.Log
 
 /**
- * Persists the bridge host + pairing token, plus the ntfy push topic the
- * bridge revealed during the health handshake (layer 5).
+ * Persists the bridge host + pairing token.
  *
- * Host and ntfy metadata are ordinary preferences; the bearer token is only
- * ever stored as AES-GCM ciphertext + IV produced by [ConnectionCipher].
+ * The host and its exposure kind are ordinary preferences; the bearer token is
+ * only ever stored as AES-GCM ciphertext + IV produced by [ConnectionCipher].
  * Callers see plain [Saved] values and learn nothing about the encryption.
  */
 class ConnectionStore(
@@ -26,8 +25,6 @@ class ConnectionStore(
         val token: String,
         /** Provider metadata only: no client branches on it. */
         val exposure: ExposureKind,
-        val ntfyUrl: String? = null,
-        val ntfyTopic: String? = null,
     )
 
     val saved: Saved?
@@ -42,8 +39,6 @@ class ConnectionStore(
                 // spelling, reads as Custom: an unlabelled base URL.
                 exposure = ExposureKind.fromWire(prefs.getString(KEY_EXPOSURE, null))
                     ?: ExposureKind.Custom,
-                ntfyUrl = prefs.getString(KEY_NTFY_URL, null)?.takeIf { it.isNotBlank() },
-                ntfyTopic = prefs.getString(KEY_NTFY_TOPIC, null)?.takeIf { it.isNotBlank() },
             )
         }
 
@@ -59,15 +54,11 @@ class ConnectionStore(
     fun save(
         host: String,
         token: String,
-        ntfyUrl: String? = null,
-        ntfyTopic: String? = null,
         exposure: ExposureKind = ExposureKind.Custom,
     ): Boolean {
         val encrypted = encryptOrNull(token.trim())
         val edit = prefs.edit()
             .putString(KEY_HOST, host.trim())
-            .putString(KEY_NTFY_URL, ntfyUrl?.trim())
-            .putString(KEY_NTFY_TOPIC, ntfyTopic?.trim())
             .putString(KEY_EXPOSURE, exposure.wire)
             .remove(KEY_LEGACY_TOKEN)
         if (encrypted == null) {
@@ -148,9 +139,7 @@ class ConnectionStore(
         const val KEY_LEGACY_TOKEN = "token"
         const val KEY_TOKEN_CIPHERTEXT = "tokenCiphertext"
         const val KEY_TOKEN_IV = "tokenIv"
-        const val KEY_NTFY_URL = "ntfyUrl"
         const val KEY_EXPOSURE = "exposure"
-        const val KEY_NTFY_TOPIC = "ntfyTopic"
         private const val TAG = "ConnectionStore"
     }
 }

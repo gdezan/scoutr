@@ -2,10 +2,6 @@ package dev.scoutr.app.service
 
 import android.net.Uri
 
-/** The status a notification's title implies ("needs you" → blocked), used to rebuild deep links. */
-fun statusForTitle(title: String?): String =
-    if (title?.contains("needs you") == true) "blocked" else "working"
-
 /** A scoutr://chat/<paneId>?status=<status> deep link from a notification. */
 data class ScoutrDeepLink(
     val paneId: String,
@@ -36,7 +32,7 @@ data class ValidatedNotificationLink(
 )
 
 /**
- * Turns untrusted ntfy payload into a validated scoutr deep link, the same
+ * Turns an untrusted push payload into a validated scoutr deep link, the same
  * way MainActivity's entry path validates incoming URIs.
  *
  * A `click` that parses as a `scoutr://chat/<paneId>` URI wins (and is

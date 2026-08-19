@@ -52,13 +52,7 @@ class ConnectViewModel(
                     return@launch
                 }
                 if (health.ok && health.herdr?.connected == true) {
-                    connectionStore.save(
-                        host = host,
-                        token = token,
-                        ntfyUrl = health.ntfy?.url,
-                        ntfyTopic = health.ntfy?.topic,
-                        exposure = exposure,
-                    )
+                    connectionStore.save(host = host, token = token, exposure = exposure)
                     _state.value = Loadable.Ready(
                         ConnectedInfo(health.herdr.version, health.herdr.protocol),
                     )

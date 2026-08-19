@@ -37,7 +37,7 @@ interface ConnectionCipher {
 
 /**
  * AES-256/GCM backed by a key that never leaves `AndroidKeyStore`. No user-auth
- * requirement: background monitoring must decrypt the pairing while locked.
+ * requirement: a push wake-up must decrypt the pairing while the device is locked.
  */
 class AndroidKeystoreConnectionCipher(
     private val alias: String = DEFAULT_ALIAS,

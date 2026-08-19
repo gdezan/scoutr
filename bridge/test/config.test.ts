@@ -45,7 +45,7 @@ describe("loadOrCreateConfig", () => {
     const config = await loadOrCreateConfig(path);
     assert.ok(config.token.length >= 16);
     assert.equal(config.port, 8737);
-    assert.ok(config.ntfyTopic?.startsWith("scoutr_"));
+    assert.equal(config.fcmServiceAccountPath, undefined);
     assert.equal(config.configDir, join(dir, "fresh"));
     // Written with owner-only permissions.
     assert.equal(statSync(path).mode & 0o777, 0o600);
@@ -57,7 +57,6 @@ describe("loadOrCreateConfig", () => {
     const again = await loadOrCreateConfig(path);
     assert.equal(again.token, config.token);
     assert.equal(again.port, 8737);
-    assert.equal(again.ntfyTopic, config.ntfyTopic);
   });
 
   test("recreates the config when the stored token is shorter than 16 chars", async () => {
@@ -69,16 +68,15 @@ describe("loadOrCreateConfig", () => {
     assert.notEqual(config.token, "short");
   });
 
-  test("generates a topic when ntfy is enabled but the topic is missing", async () => {
-    const path = join(dir, "with-url", "config.json");
-    mkdirSync(join(dir, "with-url"), { recursive: true });
+  test("keeps the configured FCM service-account path", async () => {
+    const path = join(dir, "with-fcm", "config.json");
+    mkdirSync(join(dir, "with-fcm"), { recursive: true });
     await writeFile(
       path,
-      JSON.stringify({ token: "0123456789abcdef", port: 8737, ntfyUrl: "https://ntfy.example" }),
+      JSON.stringify({ token: "0123456789abcdef", port: 8737, fcmServiceAccountPath: "/keys/fcm.json" }),
     );
     const config = await loadOrCreateConfig(path);
-    assert.equal(config.ntfyUrl, "https://ntfy.example");
-    assert.ok(config.ntfyTopic?.startsWith("scoutr_"));
+    assert.equal(config.fcmServiceAccountPath, "/keys/fcm.json");
   });
 
   test("defaults a config without exposure to tailscale", async () => {

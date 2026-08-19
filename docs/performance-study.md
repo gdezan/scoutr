@@ -3,6 +3,8 @@
 _Date: 2026-08-14_
 _Scope: static code study, external research, and incrementally verified implementation slices. Runtime results are labeled by target; no representative-device speed, memory, radio, or battery claim is made from the emulator run below._
 
+> **Superseded (2026-08-19):** every finding below about background attention — the `dataSync` monitor (P0), foreground ntfy ownership (P1), and ntfy as the attention transport — is superseded by ADR 0007. Push is now a contentless FCM ping the app resolves over the tailnet; the ntfy subsystem, `ScoutrMonitorService`, and the monitoring opt-in are deleted. The sections are kept as the record of why that path was abandoned. Findings outside background attention still stand.
+
 > **Maintenance rule:** update this document in the same change whenever a performance-study slice is implemented, verified, deferred, or superseded. Keep each item's status, evidence date, exact checks/results, remaining acceptance work, and the recommended next slice current. Distinguish observed facts, external facts, hypotheses, and measured results; never mark runtime work complete from compilation alone.
 
 ## Executive summary
@@ -11,7 +13,7 @@ Scoutr already has a sound high-level split:
 
 - **Interactive terminal:** a dedicated, route-scoped WebSocket with bounded queues and slow-client handling.
 - **Foreground app state:** pooled HTTP snapshots and incremental transcript reads, mostly scoped to the visible screen.
-- **Background attention:** self-hosted ntfy notifications rather than a permanent bridge WebSocket.
+- **Background attention:** system-delivered push rather than a permanent bridge WebSocket (self-hosted ntfy at the time of this study; FCM since ADR 0007).
 - **Bridge state:** one shared long-lived herdr feed, with bounded file reads and several effective caches.
 
 A blanket “replace polling with WebSockets” migration is not recommended. WebSockets improve change latency when events are frequent, but a complete mobile policy also includes heartbeats, reconnects, network changes, catch-up, queue limits, and lifecycle ownership. For Scoutr, the right comparison is an optimized adaptive HTTP policy versus one foreground-only invalidation stream, measured against the same freshness and energy targets.
@@ -49,9 +51,9 @@ Scoutr is a self-hosted native Android console for supervising herdr panes and p
 | Read-only git review | `ReviewScreen`, `ReviewViewModel` | `/api/repo*`, `review.ts` | Demand-driven, bounded per-file reads and VM caching |
 | Full-screen terminal | `TerminalScreen`, `TerminalViewModel`, `RemoteTerminalSession`, vendored Termux core | `/ws/terminal`, `terminal/broker.ts`, `terminal/websocket.ts`, `terminal/process.ts` | Dedicated WebSocket only while route is STARTED |
 | Terminal hierarchy | `HierarchyDrawer`, `TopologyFeedClient` | `/api/snapshot`, `/api/terminal/hierarchy`, filtered `/ws` feed | Route-scoped filtered event invalidation plus HTTP reconciliation |
-| Notifications and reply | `ScoutrMonitorService`, `NtfyClient`, deep links, reply receiver | `NtfyPublisher` in `notify.ts` | Opt-in foreground service performs finite ntfy polls every 30 s |
+| Notifications and reply | `ScoutrMessagingService`, `NotificationPresenter`, deep links, reply/mute receivers | `FcmPublisher` in `push/publisher.ts` | System-delivered FCM ping; the app fetches identity from `/api/agents` on wake (ADR 0007) |
 | Command palette | `CommandPaletteViewModel` | Existing agent/catalog/control routes | Demand-driven with debounce |
-| Settings | `SettingsScreen`, SharedPreferences stores | None for local preferences | Local reads/writes; pairing removal stops monitoring |
+| Settings | `SettingsScreen`, SharedPreferences stores | None for local preferences | Local reads/writes |
 
 ## What is already efficient
 
@@ -69,7 +71,7 @@ Scoutr is a self-hosted native Android console for supervising herdr panes and p
 
 ### Bridge feed and file work
 
-- One `HerdrEventFeed` owns the long-lived upstream subscription and fans events out to status tracking, ntfy publishing, and filtered WebSocket clients.
+- One `HerdrEventFeed` owns the long-lived upstream subscription and fans events out to status tracking, push publishing, and filtered WebSocket clients.
 - It rebuilds pane subscriptions after topology changes and performs a 30-second authoritative snapshot resync.
 - Board detail is memoized by `(path, mtime, size)` with a 128-entry cap.
 - Chat transcript parsing is memoized by `(path, mtime, size)` with an 8-entry cap.
@@ -95,7 +97,7 @@ This architecture should be retained. Further batching or rendering changes are 
 
 ## Verified opportunities
 
-### P0 — replace the indefinite `dataSync` monitor design
+### P0 — replace the indefinite `dataSync` monitor design *(superseded by ADR 0007)*
 
 **Observed before this slice:** `ScoutrMonitorService` declared `foregroundServiceType="dataSync"`, returned `START_STICKY`, and polled ntfy every 30 seconds indefinitely. The app targets API 36 and had no `onTimeout` implementation.
 
@@ -110,6 +112,8 @@ This architecture should be retained. Further batching or rendering changes are 
 3. Use WorkManager only for delayed reconciliation, not real-time monitoring: periodic work has a 15-minute minimum and is inexact. [Periodic WorkManager](https://developer.android.com/develop/background-work/background-tasks/persistent/getting-started/define-work#schedule_periodic_work)
 
 The current implementation is not described as durable all-day monitoring on API 35+.
+
+**Resolution (ADR 0007):** none of the three options was taken. Option 1 was rejected for its install dependency and unvalidated broadcast contract; option 2 was the state this study described and never delivered background attention at all. Scoutr moved to FCM, where the *system* does the waking, and deleted the foreground service outright.
 
 ### P0 — create a production-like performance build
 **Status (2026-08-14): implementation complete; emulator Macrobenchmark acceptance passed; broader runtime acceptance remains pending.**
@@ -189,18 +193,20 @@ After instrumentation, compare:
 - fast cadence while an agent is working or immediately after user action;
 - slower cadence when state is stable;
 - exponential, jittered backoff on failures;
-- immediate refresh on resume, pull-to-refresh, ntfy event, or filtered foreground feed invalidation;
+- immediate refresh on resume, pull-to-refresh, push wake-up, or filtered foreground feed invalidation;
 - endpoint revisions/ETags and `304 Not Modified` for unchanged board/history/usage bodies.
 
 HTTP validators reduce payload and parsing, though not request wakeups. [RFC 9110 conditional requests](https://www.rfc-editor.org/rfc/rfc9110.html#name-conditional-requests)
 
-### P1 — rationalize foreground ntfy ownership
+### P1 — rationalize foreground ntfy ownership *(superseded by ADR 0007)*
 
 **Observed:** ntfy `poll=1` is a finite cached-message fetch, not a long-held stream. Board and the monitor service can both poll the same topic with separate cursors. Board seeds its cursor from the latest message; the service persists its cursor.
 
 **Recommendation:** define one owner for local notifications. When the monitor service is enabled, the Board should not run a second notification producer. If in-app status freshness is needed, refresh board state rather than post a duplicate local notification.
 
 For an app-owned foreground subscription, ntfy recommends the NDJSON stream for most non-JavaScript clients and also supports WebSocket. That can remove 30-second finite polls while visible, but it does not solve Android background execution. [ntfy subscription API](https://docs.ntfy.sh/subscribe/api/)
+
+**Resolution (ADR 0007):** the duplicate-owner problem is gone by construction. `NotificationPresenter` is the single owner of every notification, and the app posts nothing at all while foregrounded.
 
 ### P2 — terminal render batching: implemented, and the hypothesis did not hold
 
@@ -253,7 +259,7 @@ Android warns that repeated periodic requests can wake the radio and recommends 
 2. Retain HTTP as the authoritative snapshot and command/result surface.
 3. Fix lifecycle, hidden work, redundant payload/list work, and conditional/adaptive polling first.
 4. Then benchmark one foreground-only multiplexed invalidation stream for board/chat/history. Events should carry a monotonically increasing revision; reconnect performs HTTP catch-up/snapshot reconciliation.
-5. Do not keep that bridge socket alive in the background. Use ntfy or another user-approved self-hosted notification subscriber for attention events.
+5. Do not keep that bridge socket alive in the background. Attention events arrive as FCM pings (ADR 0007).
 
 ## Measurement plan
 
@@ -304,7 +310,7 @@ Compare complete policies over both Wi-Fi and cellular/Tailscale:
 - adaptive polling + backoff + validators;
 - foreground event stream with no application ping;
 - event stream with the minimum infrastructure-required ping;
-- ntfy-triggered background attention followed by an HTTP refresh.
+- push-triggered background attention followed by an HTTP refresh.
 
 Report request/event counts, bytes, connection reuse, p50/p95/p99 freshness, reconnects, heartbeats, catch-up requests, CPU, radio/system energy rails, thermal state, and bridge resources. Randomize repeated run order and report distributions—not one battery-percentage observation.
 

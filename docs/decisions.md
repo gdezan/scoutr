@@ -29,14 +29,11 @@ pi agents, as an alternative to Moshi's paid herdr integration.
   usage snapshot remains visible when its endpoint is unavailable. Expired xAI access
   tokens are refreshed in memory only.
 
-- **Push monitoring**: self-hosted ntfy on the host, published through the same
-  exposure (a `/ntfy` path under Tailscale, a separate hostname under
-  Cloudflare/custom);
-  `BoardViewModel` polls the topic while Board is STARTED, while the opt-in
-  `ScoutrMonitorService` polls every 30 seconds in the background. Both paths
-  show local notifications with separate cursors; the service persists its
-  cursor. The foreground service is time-bounded, returns `START_NOT_STICKY`,
-  and is not an always-on push channel.
+- **Push**: contentless FCM pings. The bridge sends `{kind, paneId}` (no
+  `notification` block, no agent text) through FCM HTTP v1; the app wakes,
+  fetches identity from `/api/agents` over the tailnet, and posts one
+  self-clearing notification per pane. There is no foreground service and no
+  monitoring opt-in. See ADR 0007.
 - **Interactive terminal (shipped)**: Live Output is gone; a full-screen, one-pane
   Herdr terminal replaced it. Herdr owns processes, PTYs, and terminal state; the
   bridge owns capability, child lifecycle, and the 30s reconnect grace; Android
@@ -63,10 +60,10 @@ pi agents, as an alternative to Moshi's paid herdr integration.
   named tunnel, DNS routes, and `cloudflared` service with Cloudflare's own
   tooling; Scoutr stores only the resulting URLs. No Cloudflare API client, no
   account state, no credentials in `~/.config/scoutr/config.json`, and
-  `scripts/bridge-service.mjs` explicitly does not manage `cloudflared`. Two
-  hostnames, because the ntfy client expects its `baseUrl` to be the ntfy root:
-  bridge → `127.0.0.1:8737`, ntfy → `127.0.0.1:8382`. The Tailscale `/ntfy`
-  path prefix is not reproduced through Cloudflare path routing.
+  `scripts/bridge-service.mjs` explicitly does not manage `cloudflared`. One
+  hostname is enough: the bridge at `127.0.0.1:8737` is the only thing that
+  needs exposing, since push now leaves through FCM rather than a self-hosted
+  server of its own.
 - **A misconfigured URL is an error, not a coercion.** `cloudflare` requires
   `https://` (TLS terminates at Cloudflare) and is rejected — not upgraded —
   when given `http://`. `custom` may keep an explicit `http://` as declared
@@ -122,9 +119,6 @@ pi agents, as an alternative to Moshi's paid herdr integration.
 
 ## Decisions learned from live E2E
 
-- **ntfy JSON bodies only parse when POSTed to the root path `/`** with `topic`
-  inside the body. POSTing JSON to `/<topic>` stores the raw body as the message
-  text (title lost). The publisher posts to `{baseUrl}/`.
 - **OkHttp WebSocket reader crashes on abrupt server close** (EOFException escapes
   through `callbackFlow.close(cause)` into the collector coroutine). The board uses
   a 3s poll of `/api/agents` instead of a long-lived WS; the bridge re-snapshots
@@ -134,18 +128,9 @@ pi agents, as an alternative to Moshi's paid herdr integration.
   Enter to submit; bare text is inert.
 - **Board self-heals**: the poll loop runs unconditionally after connect (not only
   on a successful first probe), so a down bridge recovers automatically.
-- **ntfy cursors**: the service persists the last shown message ID and polls with
-  `since=<id>`, so service restarts resume without re-delivery. The Board's
-  lifecycle-scoped poll is separate and seeds the current latest ID.
-- **Publish path**: blocked (high priority) and done events are throttled to one
-  per pane per 60s and are best-effort (never break the bridge).
-- **Monitoring lifecycle**: notification monitoring is an opt-in, time-bounded
-  `ScoutrMonitorService` foreground session. It polls ntfy every 30 seconds,
-  resumes from the stored cursor, and stops at Android 15's six-hour data-sync
-  foreground-service limit. `BoardViewModel` has a separate topic poll only while
-  Board is STARTED and seeds the current latest ID; opening Board does not resume
-  the service cursor or replay service messages. If the service is inactive, ntfy
-  retains messages for the configured cache period.
+- **Publish path**: push is edge-triggered — a ping goes out only on a pane's
+  transition into `blocked` and out of it, never on a repeat of the same
+  status. Sends are best-effort and never break the bridge or the feed loop.
 - **Bridge-owned `pi --mode rpc` sessions** answer extension_ui_request dialogs
   programmatically: the bridge surfaces pending dialogs to the app
   (`GET /api/rpc/:id`) and the app responds with a value via
@@ -157,13 +142,13 @@ pi agents, as an alternative to Moshi's paid herdr integration.
 ## QR pairing (added with the library-first rule)
 
 - Pairing is a QR code printed by `scoutr-bridge pair`: compact JSON — the
-  address, the pairing token, and ntfy discovery in one scan. The app's Connect
+  address and the pairing token in one scan. Push needs no discovery in the
+  payload: the app registers its own FCM token with the bridge after pairing. The app's Connect
   screen has a **Scan QR code** button (zxing-android-embedded, the standard
   Android QR scanner) that fills the fields and connects automatically,
   mirroring Moshi's Easy Pair flow.
-- **The payload is versioned by exposure.** `tailscale` keeps emitting the
-  original v1 `{v, host, token, ntfy}`, byte-for-byte, so pairings and APKs
-  already in the field are untouched. `cloudflare` and `custom` emit v2, which
+- **The payload is versioned by exposure.** `tailscale` emits v1
+  `{v, host, token}`. `cloudflare` and `custom` emit v2, which
   adds `exposure: { kind }` and nothing else — no edge-auth or Access
   credentials, because Access was rejected (below). There is deliberately **no
   v1 fallback** for the new kinds: an old app that only knows v1 rejects a v2
@@ -227,22 +212,18 @@ pi agents, as an alternative to Moshi's paid herdr integration.
   client auth (never a token in a URL), and no token in `serve` output, service
   definitions, or deployment logs. Anyone who wants Access/mTLS/device posture
   configures it on the Cloudflare side; do not smuggle it back into Scoutr.
-- **ntfy is a capability secret, not authentication.** The topic
-  (`scoutr_<12 random bytes>`) is a shared secret between bridge and app; the
-  server listens on 127.0.0.1:8382 with **no auth**. Under Tailscale, the
-  tailnet bounds who can reach it. Under a public Cloudflare/custom hostname
-  the topic is the only thing standing between the Internet and the event
-  stream: whoever learns it can read blocked/done events and publish forged
-  ones to the phone. That is materially weaker than the bridge's bearer auth
-  and must not be conflated with it. Adding ntfy authentication is a new
-  security decision, not an implementation detail.
-- **Rotation is the response to any disclosure.** The pairing QR carries both
-  the token and the topic, so a leaked QR, screenshot, terminal recording, or
-  config copy is a full credential compromise: rotate `token` and `ntfyTopic`
-  in `config.json` in place (see README §8 — deleting the file also resets
-  `port`/`ntfyUrl`/`exposure`), restart the service, and re-pair every device.
-  Old pairings 401 at once; already-cached ntfy messages under the old topic
-  stay readable until the cache duration expires.
+- **Push credentials never enter git or a log line.** The FCM service-account
+  key lives at `~/.config/scoutr/fcm-service-account.json`, mode `0600`;
+  `android/app/google-services.json` is per-developer and gitignored even
+  though it ships inside the APK. Device tokens are stored 0600 in
+  `<configDir>/devices.json` and are never logged, not even on a failed send.
+  Because the payload is contentless, a compromised FCM project leaks the fact
+  that *some* pane changed state — never which agent, workspace, or text.
+- **Rotation is the response to any disclosure.** The pairing QR carries the
+  token, so a leaked QR, screenshot, terminal recording, or config copy is a
+  full credential compromise: rotate `token` in `config.json` in place (see
+  README §8 — deleting the file also resets `port`/`exposure`), restart the
+  service, and re-pair every device. Old pairings 401 at once.
 - Never expose the herdr socket raw; never modify herdr-agent-state.ts /
   moshi-hooks.ts; never write auth.json.
 
