@@ -22,7 +22,7 @@ Scoutr keeps the agent runtime on your own machine. The Android app talks to a s
 ```text
 ┌────────────────┐      HTTPS / WSS       ┌──────────────────┐
 │ Android phone  │ ─────────────────────► │ scoutr-bridge    │
-│ Scoutr app     │   Tailscale / CF /     │ 127.0.0.1:8737  │
+│ Scoutr app     │   Tailscale / CF /     │ 127.0.0.1:8737   │
 └────────────────┘   reverse proxy        └────────┬─────────┘
                                                    │
                                              Unix socket
@@ -64,14 +64,14 @@ Scoutr currently targets Herdr 0.8.0 / protocol 19. The Android app and bridge a
 
 You need:
 
-| Requirement | Notes |
-|---|---|
-| Herdr 0.8.0 | Must be running; default socket is `~/.config/herdr/herdr.sock` |
-| Node.js 22+ | The bridge is tested with newer Node versions as well |
-| An agent CLI | `pi`, Claude Code, and/or Antigravity/Gemini CLI depending on what you use |
-| Git | Used by the build/version flow |
-| Android tooling | Only required to build/install the app yourself |
-| A Firebase project | Optional; only needed for push notifications |
+| Requirement        | Notes                                                                      |
+| ------------------ | -------------------------------------------------------------------------- |
+| Herdr 0.8.0        | Must be running; default socket is `~/.config/herdr/herdr.sock`            |
+| Node.js 22+        | The bridge is tested with newer Node versions as well                      |
+| An agent CLI       | `pi`, Claude Code, and/or Antigravity/Gemini CLI depending on what you use |
+| Git                | Used by the build/version flow                                             |
+| Android tooling    | Only required to build/install the app yourself                            |
+| A Firebase project | Optional; only needed for push notifications                               |
 
 Clone the repo and build the bridge:
 
@@ -161,11 +161,11 @@ Restart any Claude sessions that were already running after installing the hook.
 
 The phone needs an HTTPS URL that reaches `127.0.0.1:8737` on the host. Set `exposure.kind` to one of:
 
-| Kind | Best for | `publicUrl` |
-|---|---|---|
-| `tailscale` | private access inside a tailnet | optional; normally discovered automatically |
-| `cloudflare` | access from anywhere through your Cloudflare Tunnel | required, HTTPS only |
-| `custom` | Caddy, nginx, Traefik, WireGuard/VPS, or another proxy you own | required; HTTPS for a physical phone |
+| Kind         | Best for                                                       | `publicUrl`                                 |
+| ------------ | -------------------------------------------------------------- | ------------------------------------------- |
+| `tailscale`  | private access inside a tailnet                                | optional; normally discovered automatically |
+| `cloudflare` | access from anywhere through your Cloudflare Tunnel            | required, HTTPS only                        |
+| `custom`     | Caddy, nginx, Traefik, WireGuard/VPS, or another proxy you own | required; HTTPS for a physical phone        |
 
 Only the `tailscale` mode invokes the Tailscale binary. Cloudflare and custom exposure are externally owned: Scoutr only stores the URL it should advertise in the pairing QR.
 
@@ -320,7 +320,7 @@ credentials:
    not a secret, but it is gitignored because it is per-developer.
 3. Project settings → Service accounts → **Generate new private key**. Save it
    as `~/.config/scoutr/fcm-service-account.json` and `chmod 600` it. This one
-   *is* a secret: it can send push to your devices.
+   _is_ a secret: it can send push to your devices.
 4. Point the bridge at it:
 
 ```json
@@ -441,22 +441,22 @@ After the initial ADB install, **Settings → Update** can build the current APK
 
 The main bridge config is `~/.config/scoutr/config.json` or `$XDG_CONFIG_HOME/scoutr/config.json`.
 
-| Setting / environment variable | Purpose |
-|---|---|
-| `port` | Bridge loopback port; default `8737` |
-| `token` | Bearer token used by Android |
-| `exposure.kind` | `tailscale`, `cloudflare`, or `custom` |
-| `exposure.publicUrl` | Public bridge base URL; required for Cloudflare/custom |
-| `fcmServiceAccountPath` | Optional path to the Firebase service-account JSON; enables push |
-| `HERDR_SOCKET_PATH` | Override the Herdr Unix socket path |
-| `SCOUTR_REPO_ROOTS` | Allow-list roots for repository/review access |
-| `PI_CODING_AGENT_DIR` | pi data directory used for sessions/models/usage |
-| `PI_CODING_AGENT_SESSION_DIR` | Override pi's session directory |
-| `CLAUDECONFIGDIR` | Override Claude's config directory |
-| `PI_BIN` | Override the pi executable path |
-| `PI_NODE_BIN` | Override Node used to run pi |
-| `SCOUTR_PUBLIC_HOST` | Fallback/override public bridge URL used for pairing |
-| `SCOUTR_ANTIGRAVITY_CLIENTS` | JSON array of Antigravity OAuth clients kept outside the repo |
+| Setting / environment variable | Purpose                                                          |
+| ------------------------------ | ---------------------------------------------------------------- |
+| `port`                         | Bridge loopback port; default `8737`                             |
+| `token`                        | Bearer token used by Android                                     |
+| `exposure.kind`                | `tailscale`, `cloudflare`, or `custom`                           |
+| `exposure.publicUrl`           | Public bridge base URL; required for Cloudflare/custom           |
+| `fcmServiceAccountPath`        | Optional path to the Firebase service-account JSON; enables push |
+| `HERDR_SOCKET_PATH`            | Override the Herdr Unix socket path                              |
+| `SCOUTR_REPO_ROOTS`            | Allow-list roots for repository/review access                    |
+| `PI_CODING_AGENT_DIR`          | pi data directory used for sessions/models/usage                 |
+| `PI_CODING_AGENT_SESSION_DIR`  | Override pi's session directory                                  |
+| `CLAUDECONFIGDIR`              | Override Claude's config directory                               |
+| `PI_BIN`                       | Override the pi executable path                                  |
+| `PI_NODE_BIN`                  | Override Node used to run pi                                     |
+| `SCOUTR_PUBLIC_HOST`           | Fallback/override public bridge URL used for pairing             |
+| `SCOUTR_ANTIGRAVITY_CLIENTS`   | JSON array of Antigravity OAuth clients kept outside the repo    |
 
 A legacy top-level `publicHost` value is migrated into the newer exposure config on startup.
 
@@ -539,17 +539,17 @@ Re-pair every phone after rotating credentials.
 
 ## Troubleshooting
 
-| Symptom | What to check |
-|---|---|
-| Bridge cannot reach Herdr | `herdr --version`, Herdr service state, and `HERDR_SOCKET_PATH` |
-| Supervised bridge exits immediately | service definition must use an absolute Node path; rerun `node scripts/bridge-service.mjs install` |
-| Local health works but public URL times out | debug Tailscale, `cloudflared`, Caddy, DNS, firewall, or the custom network path separately |
-| Public URL returns 401 | expected without `Authorization: Bearer <token>`; verify the phone has the current token |
-| `pair` says there is no public URL | set `exposure.publicUrl` for `cloudflare`/`custom`, or fix Tailscale discovery |
-| v2 QR is rejected | update the Android app to a build that supports Cloudflare/custom pairing |
-| No push notifications arrive | check `/api/health` reports `"push": {"fcm": true}`, that the phone has Google Play Services, and that Android's notification permission is granted |
-| App stays disconnected after a bridge restart | verify the bridge and exposure URL; the board should recover once the endpoint is reachable |
-| Stale bridge behavior after code changes | rebuild before restart: `scripts/deploy-bridge.sh` |
+| Symptom                                       | What to check                                                                                                                                       |
+| --------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Bridge cannot reach Herdr                     | `herdr --version`, Herdr service state, and `HERDR_SOCKET_PATH`                                                                                     |
+| Supervised bridge exits immediately           | service definition must use an absolute Node path; rerun `node scripts/bridge-service.mjs install`                                                  |
+| Local health works but public URL times out   | debug Tailscale, `cloudflared`, Caddy, DNS, firewall, or the custom network path separately                                                         |
+| Public URL returns 401                        | expected without `Authorization: Bearer <token>`; verify the phone has the current token                                                            |
+| `pair` says there is no public URL            | set `exposure.publicUrl` for `cloudflare`/`custom`, or fix Tailscale discovery                                                                      |
+| v2 QR is rejected                             | update the Android app to a build that supports Cloudflare/custom pairing                                                                           |
+| No push notifications arrive                  | check `/api/health` reports `"push": {"fcm": true}`, that the phone has Google Play Services, and that Android's notification permission is granted |
+| App stays disconnected after a bridge restart | verify the bridge and exposure URL; the board should recover once the endpoint is reachable                                                         |
+| Stale bridge behavior after code changes      | rebuild before restart: `scripts/deploy-bridge.sh`                                                                                                  |
 
 For deeper host, bridge, emulator, and tunnel diagnostics, see [`docs/dev-workflow.md`](./docs/dev-workflow.md).
 
