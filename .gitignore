@@ -1,20 +1,40 @@
-# Android
-android/.gradle/
-android/build/
-android/app/build/
-android/benchmark/build/
-android/vendor/termux/terminal-emulator/build/
-android/vendor/termux/terminal-view/build/
-android/local.properties
-android/.kotlin/
+# Android / Gradle
+.gradle/
+**/build/
+**/.kotlin/
+**/.cxx/
+**/.externalNativeBuild/
+local.properties
 *.apk
+*.aab
 
-# Node
-bridge/node_modules/
-bridge/dist/
+# Android signing
+*.jks
+*.keystore
 
-# OS
+# Node / bridge
+node_modules/
+dist/
+coverage/
+**/coverage/
+.nyc_output/
+*.lcov
+
+# IDE / OS
+.idea/
+*.iml
+.vscode/
 .DS_Store
+Thumbs.db
 
-# Local implementation plans
-.plans
+# Logs / local config
+*.log
+*.hprof
+.env
+.env.*
+!.env.example
+
+# Editor / temp
+*.swp
+*.swo
+*~
