@@ -457,6 +457,10 @@ private fun ScoutrAppNav(
                         chatUi.livePaneId?.let { navController.navigate(Routes.terminal(it)) }
                     },
                     onOpenFiles = { cwd -> navController.navigate(Routes.fileBrowser(cwd)) },
+                    onOpenReview = { cwd ->
+                        reviewViewModel.selectRepo(cwd)
+                        onTab(Destination.Review.route)
+                    },
                 )
             }
             composable(

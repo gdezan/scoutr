@@ -185,6 +185,7 @@ fun ChatScreen(
     modifier: Modifier = Modifier,
     onOpenTerminal: (() -> Unit)? = null,
     onOpenFiles: ((String) -> Unit)? = null,
+    onOpenReview: ((String) -> Unit)? = null,
 ) {
     val ui by viewModel.ui.collectAsState()
 
@@ -237,6 +238,7 @@ fun ChatScreen(
             cwd = ui.cwd,
             onOpenTerminal = onOpenTerminal,
             onOpenFiles = onOpenFiles,
+            onOpenReview = onOpenReview,
             onControl = { action ->
                 when (action) {
                     SessionAction.Rename -> renameOpen = true
@@ -508,6 +510,7 @@ private fun ChatHeader(
     cwd: String?,
     onOpenTerminal: (() -> Unit)?,
     onOpenFiles: ((String) -> Unit)?,
+    onOpenReview: ((String) -> Unit)?,
     onControl: (SessionAction) -> Unit,
 ) {
     Column(Modifier.fillMaxWidth()) {
@@ -585,6 +588,19 @@ private fun ChatHeader(
                             onClick = {
                                 menuOpen = false
                                 onOpenFiles(cwd)
+                            },
+                        )
+                    }
+                    // Review this session's workspace: same destination and
+                    // Code mark as the Review tab and the board/sessions swipe.
+                    if (onOpenReview != null && !cwd.isNullOrBlank()) {
+                        DropdownMenuItem(
+                            text = { Text("Review") },
+                            leadingIcon = { Icon(Icons.Default.Code, contentDescription = null) },
+                            modifier = Modifier.testTag("chat_open_review"),
+                            onClick = {
+                                menuOpen = false
+                                onOpenReview(cwd)
                             },
                         )
                     }
