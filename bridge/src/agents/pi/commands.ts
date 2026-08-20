@@ -116,16 +116,6 @@ async function loadCommandsCatalog(
 
   return { commands: [...BUILTIN_COMMANDS, ...promptCommands, ...extensionCommands, ...skillCommands] };
 }
-
-export function validateSlashCommand(text: unknown): string {
-  if (typeof text !== "string") throw new Error("slash command text must be a string");
-  if (text.length === 0 || text.length > 10_000) throw new Error("slash command text must be 1 to 10000 characters");
-  if (!text.startsWith("/") || !/^\/[^\s\u0000-\u001f\u007f]+(?:[ \t][^\r\n\u0000-\u001f\u007f]*)?$/.test(text)) {
-    throw new Error("invalid slash command text");
-  }
-  return text;
-}
-
 function resolveExtensionCommands(extensions: Extension[]): Array<{ command: RegisteredCommand; invocationName: string }> {
   const commands = extensions.flatMap((extension) => [...extension.commands.values()]);
   const counts = new Map<string, number>();

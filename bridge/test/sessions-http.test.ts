@@ -138,10 +138,24 @@ describe("POST /api/sessions and /api/sessions/:paneId/control", () => {
     ]);
   });
 
+  it("flattens slash-command newlines into one pane submit", async () => {
+    sent.length = 0;
+
+    const frame = await wsCommand({ type: "slash_command", paneId: "p1", text: "/skill:research\ncompare APIs" });
+
+    assert.equal(frame.type, "command_sent");
+    assert.deepEqual(sent, [
+      {
+        method: "paneSendInput",
+        params: { pane_id: "p1", text: "/skill:research compare APIs", keys: ["Enter"] },
+      },
+    ]);
+  });
+
   it("rejects slash commands containing terminal control input", async () => {
     sent.length = 0;
 
-    const frame = await wsCommand({ type: "slash_command", paneId: "p1", text: "/compact\n/quit" });
+    const frame = await wsCommand({ type: "slash_command", paneId: "p1", text: "/compact\u001b" });
 
     assert.equal(frame.type, "error");
     assert.deepEqual(sent, []);

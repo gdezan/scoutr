@@ -222,10 +222,19 @@ describe("shared session command operations", () => {
     ]);
   });
 
+  test("runSlashCommand flattens newlines so they cannot submit extra input", async () => {
+    const { herdr, deps } = makeDeps();
+    const text = await runSlashCommand(deps, "p1", "/skill:research\ncompare APIs");
+    assert.equal(text, "/skill:research compare APIs");
+    assert.deepEqual(herdr.sent, [
+      { method: "paneSendInput", params: { pane_id: "p1", text: "/skill:research compare APIs", keys: ["Enter"] } },
+    ]);
+  });
+
   test("runSlashCommand rejects terminal control input", async () => {
     const { herdr, deps } = makeDeps();
-    await assert.rejects(() => runSlashCommand(deps, "p1", "/compact\n/quit"), /invalid slash command/);
-    assert.equal(await statusOf(() => runSlashCommand(deps, "p1", "/compact\n/quit")), 400);
+    await assert.rejects(() => runSlashCommand(deps, "p1", "/compact\u001b"), /invalid slash command/);
+    assert.equal(await statusOf(() => runSlashCommand(deps, "p1", "/compact\u001b")), 400);
     assert.deepEqual(herdr.sent, []);
   });
 

@@ -169,16 +169,22 @@ export async function sendSessionText(deps: ServerDeps, paneId: string, text: un
 /**
  * Validate a `/command [args]` string for pane-native entry. Both known
  * backends share the slash grammar, so this is a wire-level rule.
+ *
+ * Newlines in the argument become spaces. The composer treats Enter as a
+ * newline, and skill commands are filled with a trailing space so the user
+ * can type a request — often after Enter. Flattening keeps one PTY submit
+ * without rejecting the request.
  */
 export function validateSlashCommand(text: unknown): string {
   if (typeof text !== "string") throw new CommandError("slash command text must be a string");
   if (text.length === 0 || text.length > 10_000) {
     throw new CommandError("slash command text must be 1 to 10000 characters");
   }
-  if (!text.startsWith("/") || !/^\/[^\s\u0000-\u001f\u007f]+(?:[ \t][^\r\n\u0000-\u001f\u007f]*)?$/.test(text)) {
+  const normalized = text.replace(/\r\n|\r|\n/g, " ");
+  if (!normalized.startsWith("/") || !/^\/[^\s\u0000-\u001f\u007f]+(?:[ \t][^\r\n\u0000-\u001f\u007f]*)?$/.test(normalized)) {
     throw new CommandError("invalid slash command text");
   }
-  return text;
+  return normalized;
 }
 
 /**

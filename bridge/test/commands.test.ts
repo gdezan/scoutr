@@ -223,9 +223,14 @@ describe("slash command validation", () => {
     assert.equal(validateSlashCommand("/foo/bar"), "/foo/bar");
   });
 
-  it("rejects text that could submit extra terminal input", () => {
+  it("flattens newlines in arguments into a single PTY line", () => {
+    assert.equal(validateSlashCommand("/skill:research\ncompare APIs"), "/skill:research compare APIs");
+    assert.equal(validateSlashCommand("/compact\n/quit"), "/compact /quit");
+    assert.equal(validateSlashCommand("/skill:research\r\nplease\ndo this"), "/skill:research please do this");
+  });
+
+  it("rejects text that could inject terminal control input", () => {
     assert.throws(() => validateSlashCommand("compact"), /invalid/);
-    assert.throws(() => validateSlashCommand("/compact\n/quit"), /invalid/);
     assert.throws(() => validateSlashCommand("/compact\u001b"), /invalid/);
   });
 });

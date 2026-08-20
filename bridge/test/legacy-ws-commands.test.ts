@@ -112,7 +112,7 @@ describe("legacy WS mutation frames (pre-commands.http.v1 APKs)", () => {
   test("the adapter adds no validation of its own — rejections come from the shared operation", async () => {
     const { herdr, deps } = makeDeps();
     await assert.rejects(
-      () => handleLegacyWsCommand({ type: "slash_command", paneId: "p1", text: "/compact\n/quit" } as never, deps),
+      () => handleLegacyWsCommand({ type: "slash_command", paneId: "p1", text: "/compact\u001b" } as never, deps),
       /invalid slash command/,
     );
     await assert.rejects(

@@ -1,12 +1,14 @@
 ---
 name: scoutr-review
-description: Run an independent review of Scoutr's uncommitted changes before final runtime acceptance or committing. Use after implementation and cheap targeted checks.
+description: Run an independent review of Scoutr's uncommitted changes before final runtime acceptance or committing. Use after implementation and cheap targeted checks. Skip when the user explicitly asks to commit, tag, or push and does not ask for review.
 ---
 
 # Scoutr pre-commit review
 
 Use this skill after implementation and cheap targeted checks, before emulator,
-instrumentation, integration, E2E, or runtime screenshot acceptance.
+instrumentation, integration, E2E, or runtime screenshot acceptance. An explicit
+user request to commit, tag, or push that does not ask for review skips this
+skill — commit instead.
 
 ## Review contract
 

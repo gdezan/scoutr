@@ -31,6 +31,7 @@ API; the Android app talks only to that API.
 - **Diagnose infrastructure first:** AAPT2, packaging, missing-dex, emulator-focus, socket, and harness failures are not evidence that product behavior is wrong.
 - **Use completion signals:** recognized agents use Herdr lifecycle waits; ordinary long-running commands use a sibling pane and an explicit completion condition. Timeouts are safety ceilings, not completion mechanisms.
 - **Keep Android verification serial:** one Gradle invocation per checkout and one instrumentation run on `emulator-5554` at a time.
+- **Deploy finalized bridge work:** when the phone or live app would only see the change through the supervised service, run the deploy recipe in `docs/dev-workflow.md`. Source-green is not live.
 
 ## Verification boundary
 
@@ -41,9 +42,10 @@ inner loop. If final acceptance exposes a real defect, return to review and chea
 checks before another final pass; a successful final pass is terminal.
 
 Use `skills/scoutr-verification/SKILL.md` when selecting checks or running
-emulator/integration/E2E acceptance. Use `docs/dev-workflow.md` for deployment,
-scratch-bridge, emulator diagnostics, and recovery recipes. `--rerun-tasks` is
-exceptional: use it only after evidence of stale or skipped Gradle output.
+emulator/integration/E2E acceptance. Use `docs/dev-workflow.md` for the live
+bridge deploy recipe, scratch-bridge, emulator diagnostics, and recovery
+recipes. `--rerun-tasks` is exceptional: use it only after evidence of stale or
+skipped Gradle output.
 
 ## Product and architecture invariants
 
@@ -56,9 +58,9 @@ exceptional: use it only after evidence of stale or skipped Gradle output.
 
 ## Task-specific pointers
 
-- **Bridge deployment or Android/emulator diagnostics:** use `docs/dev-workflow.md`.
+- **Live bridge deploy, scratch-bridge, or Android/emulator diagnostics:** use `docs/dev-workflow.md`. Deploy after finalized bridge work the phone talks to.
 - **Verification selection and final runtime evidence:** use `skills/scoutr-verification/SKILL.md`.
-- **Pre-commit review:** use `skills/scoutr-review/SKILL.md`; resolve or consciously dismiss every concrete finding before committing.
+- **Pre-commit review:** use `skills/scoutr-review/SKILL.md` and resolve or dismiss every finding. An explicit ask to commit, tag, or push without requesting review is the commit itself.
 - **Visual evidence when the active model cannot inspect images:** use `skills/scoutr-vision/SKILL.md`.
 - **Herdr sibling-pane delegation:** use the global `herdr-agent-delegation` skill for start, prompt, wait, read, recovery, and cleanup.
 - **Terminal implementation or review:** use `docs/terminal.md` plus ADRs 0001 and 0002.

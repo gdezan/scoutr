@@ -114,7 +114,7 @@ user still hit `bridge 403: path outside allowed repo roots`: `dist/` had been
 built at 17:41, before the fixes landed, and the service was never rebuilt or
 restarted. A stale deployed artifact is invisible to source-level tests.
 
-Every bridge change ends with:
+When a bridge change is finalized — the phone or live app should see it — end with:
 
 ```bash
 cd bridge && npm run deploy          # tsc build + `bridge-service.mjs restart` + run the gate
