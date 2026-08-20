@@ -51,6 +51,12 @@ export interface SkillBlock {
   name: string;
   /** The skill body the harness injected; omitted from previews. */
   text: string;
+  /**
+   * The slash command that re-invokes this, spelled the way its agent expects
+   * (`/skill:name` on pi, `/name` on Claude Code). Chat shows it on the chip
+   * and Retry sends it, so neither has to know which agent wrote the turn.
+   */
+  command: string;
 }
 
 export type ContentBlock =

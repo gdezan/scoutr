@@ -141,7 +141,7 @@ import dev.scoutr.app.data.FileListing
 import dev.scoutr.app.data.SlashCommandInfo
 import dev.scoutr.app.data.SkillInvocation
 import dev.scoutr.app.data.entryText
-import dev.scoutr.app.data.parseSlashSkillCommand
+import dev.scoutr.app.data.typedPromptPresentation
 import dev.scoutr.app.data.userPromptPresentation
 import dev.scoutr.app.ui.imeOrNavigationBarsPadding
 import dev.scoutr.app.ui.components.AssistantMarkdown
@@ -330,6 +330,7 @@ fun ChatScreen(
                         agentStatus = ui.agentStatus,
                         statusSinceMs = ui.statusSinceMs,
                         hasPendingQuestion = ui.hasPendingQuestion,
+                        agentKind = ui.agentKind,
                         onRetryPending = viewModel::retryPendingMessage,
                         onAskAnswer = viewModel::setAskAnswer,
                         onAskPage = viewModel::setAskPage,
@@ -788,6 +789,7 @@ fun ChatList(
     agentStatus: String = "idle",
     statusSinceMs: Long? = null,
     hasPendingQuestion: Boolean = false,
+    agentKind: String? = null,
     onRetryPending: (String) -> Unit = {},
     onAskAnswer: (callId: String, questionId: String, answer: DraftAnswer) -> Unit = { _, _, _ -> },
     onAskPage: (callId: String, page: Int) -> Unit = { _, _ -> },
@@ -976,6 +978,7 @@ fun ChatList(
                     }
                     is ChatRow.Pending -> PendingUserBubble(
                         message = row.message,
+                        agentKind = agentKind,
                         onRetry = { onRetryPending(row.message.localId) },
                         Modifier.animateItem(
                             fadeInSpec = ScoutrMotion.itemSpec(reduceMotion),
@@ -1151,15 +1154,14 @@ private fun UserBubble(entry: SessionEntry, modifier: Modifier = Modifier) {
 @Composable
 private fun PendingUserBubble(
     message: PendingUserMessage,
+    agentKind: String?,
     onRetry: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val slash = parseSlashSkillCommand(message.text)
-    val skill = slash?.let { SkillInvocation(name = it.first) }
-    val text = slash?.second ?: message.text
+    val presentation = typedPromptPresentation(message.text, agentKind)
     UserTurn(
-        skill = skill,
-        text = text,
+        skill = presentation.skill,
+        text = presentation.text,
         bubbleTestTag = "pending_user_bubble",
         bubbleShape = RoundedCornerShape(8.dp),
         selectable = false,

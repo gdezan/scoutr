@@ -62,13 +62,38 @@ on the preferred approach"""
     }
 
     @Test
-    fun parseSlashSkillCommandReadsNameAndArgs() {
-        assertEquals(
-            "grill-me" to "on the preferred approach",
-            parseSlashSkillCommand("/skill:grill-me on the preferred approach"),
+    fun typedPromptSplitsPiSkillCommand() {
+        val parsed = typedPromptPresentation("/skill:grill-me on the preferred approach")
+        assertEquals("grill-me", parsed.skill?.name)
+        assertEquals("/skill:grill-me", parsed.skill?.command)
+        assertEquals("on the preferred approach", parsed.text)
+        assertEquals("research", typedPromptPresentation("/skill:research").skill?.name)
+        assertNull(typedPromptPresentation("not a skill").skill)
+    }
+
+    @Test
+    fun typedPromptChipsAnySlashCommandOnClaudeOnly() {
+        val claude = typedPromptPresentation("/writing-for-agents draft the skill", agentKind = "claude")
+        assertEquals("writing-for-agents", claude.skill?.name)
+        assertEquals("/writing-for-agents", claude.skill?.command)
+        assertEquals("draft the skill", claude.text)
+
+        val pi = typedPromptPresentation("/writing-for-agents draft the skill", agentKind = "pi")
+        assertNull(pi.skill)
+        assertEquals("/writing-for-agents draft the skill", pi.text)
+    }
+
+    @Test
+    fun claudeCommandTurnReconstructsAndEchoes() {
+        val content = listOf(
+            ContentBlock(type = "skill", name = "writing-for-agents", command = "/writing-for-agents"),
+            ContentBlock(type = "text", text = "draft the skill"),
         )
-        assertEquals("research" to "", parseSlashSkillCommand("/skill:research"))
-        assertNull(parseSlashSkillCommand("not a skill"))
+        assertEquals("/writing-for-agents draft the skill", reconstructUserPrompt(content))
+        assertEquals(
+            userMessageEchoKey("/writing-for-agents draft the skill"),
+            userMessageEchoKey(content),
+        )
     }
 
     @Test

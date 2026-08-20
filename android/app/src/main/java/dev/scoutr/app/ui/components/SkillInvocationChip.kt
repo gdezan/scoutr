@@ -33,9 +33,11 @@ import dev.scoutr.app.data.SkillInvocation
 import dev.scoutr.app.ui.theme.ScoutrType
 
 /**
- * Collapsed skill invocation: quiet `skill` label plus the name. The
+ * Collapsed skill invocation: the slash command the user typed, in mono. The
  * injected body stays hidden until the chip is opened. The leftover prompt
- * lives in the user bubble, not here.
+ * lives in the user bubble, not here. Agents spell the command differently
+ * (`/skill:name` on pi, `/name` on Claude Code), so the chip shows whichever
+ * one re-invokes it.
  */
 @Composable
 fun SkillInvocationChip(
@@ -83,13 +85,7 @@ private fun SkillInvocationChipBody(
     Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
-                "skill",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Spacer(Modifier.width(8.dp))
-            Text(
-                skill.name,
+                skill.command,
                 style = ScoutrType.monoTool,
                 color = MaterialTheme.colorScheme.onSurface,
                 maxLines = 1,

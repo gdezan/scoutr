@@ -9,6 +9,7 @@ import {
   type TranscriptEntry,
   type TranscriptReadOpts,
 } from "../../transcript.js";
+import { peelClaudeCommandInvocation, skillInvocationPreview } from "../../skill-invocation.js";
 
 /**
  * The Claude Code JSONL parser (~/.claude/projects/<encoded-cwd>/<session-uuid>.jsonl).
@@ -113,10 +114,12 @@ function parseUserRecord(record: Record<string, unknown>): TranscriptEntry | nul
   if (!message || typeof message !== "object" || Array.isArray(message)) return null;
   const content = (message as Record<string, unknown>).content;
 
-  // Real prompt: bare string.
+  // Real prompt: bare string. A slash command arrives as the CLI's own
+  // `<command-name>` markup, which chat shows as a chip instead of the dump.
   if (typeof content === "string") {
     if (!content.trim()) return null;
-    return { entryId, parentId, timestamp, role: "user", content: [{ type: "text", text: content }] };
+    const blocks = peelClaudeCommandInvocation(content) ?? [{ type: "text", text: content }];
+    return { entryId, parentId, timestamp, role: "user", content: blocks };
   }
 
   // Tool result: array with a tool_result block.
@@ -232,6 +235,7 @@ function entryTextOf(entry: TranscriptEntry): string {
   for (const block of entry.content) {
     if (block.type === "text" && "text" in block) parts.push((block as TextBlock).text);
     if (block.type === "toolCall" && "name" in block) parts.push(`[${(block as { name: string }).name}]`);
+    if (block.type === "skill" && "name" in block) parts.push(skillInvocationPreview((block as { name: string }).name));
   }
   return parts.join("\n");
 }
