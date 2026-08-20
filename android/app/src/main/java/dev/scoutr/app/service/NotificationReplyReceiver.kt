@@ -64,11 +64,14 @@ class NotificationReplyReceiver : BroadcastReceiver() {
         fun replyAction(context: Context, paneId: String): NotificationCompat.Action {
             val intent = Intent(context, NotificationReplyReceiver::class.java)
                 .putExtra(EXTRA_PANE_ID, paneId)
+            // RemoteInput fills extras into this intent; FLAG_IMMUTABLE makes
+            // NotificationManager reject the whole notify() with
+            // "PendingIntents attached to actions with remote inputs must be mutable".
             val pending = PendingIntent.getBroadcast(
                 context,
                 paneId.hashCode(),
                 intent,
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE,
             )
             val remoteInput = RemoteInput.Builder(KEY_REPLY)
                 .setLabel("Steer the agent…")

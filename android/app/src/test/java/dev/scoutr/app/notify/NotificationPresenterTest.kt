@@ -188,6 +188,17 @@ class NotificationPresenterTest {
         val actions = slots().single().notification.actions
         assertEquals(listOf("Reply", "Mute this agent"), actions.map { it.title.toString() })
     }
+    @Test
+    fun replyActionPendingIntentIsMutable() {
+        presenter.showBlocked(blocked("w1:p1"))
+
+        val reply = slots().single().notification.actions.single { it.title == "Reply" }
+        val shadow = org.robolectric.Shadows.shadowOf(reply.actionIntent)
+        assertTrue(
+            "RemoteInput actions must be FLAG_MUTABLE or notify() is rejected",
+            !shadow.isImmutable,
+        )
+    }
 
     @Test
     fun aMutedPanePostsNothing() {
