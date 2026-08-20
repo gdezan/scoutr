@@ -107,6 +107,47 @@ class TerminalProtocolTest {
         )
     }
 
+    // --- Rejected upgrades (non-101; no socket ever opened) ---
+
+    @Test
+    fun upgradeRejection_carrying_an_unsupported_capability_is_final() {
+        // Verbatim shape of server.ts rejectUpgrade's 503 body.
+        val rejection = parseUpgradeRejection(
+            status = 503,
+            body = """{"ok":false,"error":"herdr 0.7.0 is too old",
+                "terminal":{"capability":{"status":"unsupported","installedVersion":"0.7.0",
+                "required":"0.8.0 or newer","reason":"herdr 0.7.0 is too old"}}}""",
+        )
+        assertEquals(TerminalProtocol.ERROR_UNSUPPORTED, rejection.code)
+        assertEquals("herdr 0.7.0 is too old", rejection.message)
+        // The bridge never re-probes a settled capability, so a reconnect cannot help.
+        assertFalse(rejection.retryable)
+    }
+
+    @Test
+    fun anyOtherRejection_is_a_retryable_verdict_that_names_the_status() {
+        val probeFailed = parseUpgradeRejection(
+            status = 503,
+            body = """{"ok":false,"error":"terminal capability check failed"}""",
+        )
+        assertEquals(TerminalProtocol.ERROR_UPGRADE_REJECTED, probeFailed.code)
+        assertTrue(probeFailed.message.contains("503"))
+        assertTrue(probeFailed.message.contains("terminal capability check failed"))
+        assertTrue(probeFailed.retryable)
+
+        // 401 carries no body at all.
+        val unauthorized = parseUpgradeRejection(status = 401, body = null)
+        assertEquals(TerminalProtocol.ERROR_UPGRADE_REJECTED, unauthorized.code)
+        assertTrue(unauthorized.message.contains("401"))
+    }
+
+    @Test
+    fun aRejectionBodyThatIsNotJson_still_yields_a_usable_message() {
+        val rejection = parseUpgradeRejection(status = 502, body = "<html>nginx</html>")
+        assertEquals(TerminalProtocol.ERROR_UPGRADE_REJECTED, rejection.code)
+        assertTrue(rejection.message.contains("502"))
+    }
+
     // --- Outbound queue bound (shared with TerminalSocketClient) ---
 
     @Test

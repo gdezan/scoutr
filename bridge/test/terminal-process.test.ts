@@ -416,11 +416,33 @@ test("probe: unverified no-pane without a target", async () => {
   assert.ok(cap.status === "unverified" && cap.reason === "no-pane");
 });
 
-test("probe: unsupported version", async () => {
+test("probe: a version below the floor is unsupported", async () => {
   const env = makeEnv("old-version");
   const cap = await env.launcher.probe();
   assert.equal(cap.status, "unsupported");
-  assert.ok(cap.status === "unsupported" && cap.installedVersion === "0.7.0" && cap.required === "0.8.0");
+  assert.ok(cap.status === "unsupported" && cap.installedVersion === "0.7.0" && cap.required === "0.8.0 or newer");
+});
+
+test("probe: a newer herdr is admitted and judged by the functional checks", async () => {
+  // The floor exists so a herdr release cannot take the terminal route down on
+  // its version string alone; the live handshake is the real gate. 0.10.0 also
+  // pins the ordering: a lexical compare would place it *below* the 0.8.0 floor.
+  for (const [scenario, version, protocol] of [
+    ["verified-0.8.2", "0.8.2", 20],
+    ["future-version", "0.10.0", 21],
+  ] as const) {
+    const cap = await makeEnv(scenario).launcher.probe("w1:p1");
+    assert.deepEqual(cap, { status: "supported", herdrVersion: version, protocol });
+  }
+});
+
+test("probe: a newer herdr that broke the contract still fails, on evidence", async () => {
+  // 0.10.0 clears the floor but never emits a first frame.
+  const env = makeEnv("future-no-handshake");
+  const cap = await env.launcher.probe("w1:p1");
+  assert.equal(cap.status, "unsupported");
+  assert.ok(cap.status === "unsupported" && cap.installedVersion === "0.10.0");
+  assert.match((cap as { reason: string }).reason, /observer handshake failed/);
 });
 
 test("probe: unparseable version output", async () => {

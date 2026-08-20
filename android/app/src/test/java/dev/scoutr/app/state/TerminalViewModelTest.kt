@@ -11,6 +11,7 @@ import dev.scoutr.app.data.DirListingResponse
 import dev.scoutr.app.data.HealthResponse
 import dev.scoutr.app.data.SnapshotResponse
 import dev.scoutr.app.data.TerminalCapabilityInfo
+import dev.scoutr.app.data.TerminalHealthInfo
 import dev.scoutr.app.data.TerminalPreferencesStore
 import dev.scoutr.app.net.ApiCall
 import dev.scoutr.app.net.FakeScoutrApi
@@ -73,7 +74,7 @@ class TerminalViewModelTest {
         api.healthResult = Result.success(
             HealthResponse(
                 ok = true,
-                terminal = TerminalCapabilityInfo(status = "supported", protocol = 1),
+                terminal = TerminalHealthInfo(TerminalCapabilityInfo(status = "supported", protocol = 1)),
             ),
         )
         api.snapshotResult = Result.success(snapshotWithPanes("w1:p1", focused = "w1:p1"))
@@ -128,7 +129,7 @@ class TerminalViewModelTest {
     @Test
     fun unsupported_capability_fails_fast() {
         api.healthResult = Result.success(
-            HealthResponse(ok = true, terminal = TerminalCapabilityInfo(status = "unsupported", reason = "needs herdr 0.9")),
+            HealthResponse(ok = true, terminal = TerminalHealthInfo(TerminalCapabilityInfo(status = "unsupported", reason = "needs herdr 0.9"))),
         )
         val vm = vm()
         vm.start()
@@ -147,7 +148,7 @@ class TerminalViewModelTest {
         api.healthResult = Result.success(
             HealthResponse(
                 ok = true,
-                terminal = TerminalCapabilityInfo(status = "unverified", reason = "no-pane"),
+                terminal = TerminalHealthInfo(TerminalCapabilityInfo(status = "unverified", reason = "no-pane")),
             ),
         )
         val vm = vm()
@@ -167,7 +168,7 @@ class TerminalViewModelTest {
 
         // Bridge comes back; the scheduled health retry re-runs the gate.
         api.healthResult = Result.success(
-            HealthResponse(ok = true, terminal = TerminalCapabilityInfo(status = "supported")),
+            HealthResponse(ok = true, terminal = TerminalHealthInfo(TerminalCapabilityInfo(status = "supported"))),
         )
         ShadowLooper.idleMainLooper(5, TimeUnit.SECONDS)
         assertTrue(vm.ui.value.connection is TerminalConnectionState.Ready ||
@@ -271,6 +272,50 @@ class TerminalViewModelTest {
         // No reconnect scheduled: openSocket must not run again.
         ShadowLooper.idleMainLooper()
         assertEquals(1, transport.openedRequests.size)
+    }
+
+    @Test
+    fun rejected_upgrade_carrying_unsupported_settles_instead_of_reconnecting() {
+        // The live shape of this bug: the bridge's capability is settled
+        // `unsupported`, so it refuses the upgrade with a 503 the socket
+        // reports as error(unsupported). Reconnecting can never clear it — the
+        // bridge does not re-probe a settled capability within its lifetime.
+        val vm = vm()
+        vm.start()
+        transport.lastSocket.error(
+            TerminalProtocol.ERROR_UNSUPPORTED,
+            message = "herdr 0.8.0 is not supported",
+            retryable = false,
+        )
+        val state = vm.ui.value.connection
+        assertTrue(state is TerminalConnectionState.Unsupported)
+        assertEquals("herdr 0.8.0 is not supported", (state as TerminalConnectionState.Unsupported).explanation)
+        ShadowLooper.idleMainLooper(30, TimeUnit.SECONDS)
+        assertEquals(1, transport.openedRequests.size)
+    }
+
+    @Test
+    fun rejected_upgrade_offers_a_retry_rather_than_an_endless_reconnect() {
+        val vm = vm()
+        vm.start()
+        transport.lastSocket.error(
+            TerminalProtocol.ERROR_UPGRADE_REJECTED,
+            message = "the bridge refused the terminal connection (HTTP 503)",
+            retryable = true,
+        )
+        val failed = vm.ui.value.connection
+        assertTrue(failed is TerminalConnectionState.Failed)
+        // Retryable so the overlay shows its button, but nothing auto-retries.
+        assertTrue((failed as TerminalConnectionState.Failed).retryable)
+        ShadowLooper.idleMainLooper(30, TimeUnit.SECONDS)
+        assertEquals(1, transport.openedRequests.size)
+
+        // The button re-runs the capability gate and attaches.
+        vm.retry()
+        ShadowLooper.idleMainLooper()
+        assertEquals(2, transport.openedRequests.size)
+        transport.lastSocket.ready(generation = 2)
+        assertEquals(TerminalConnectionState.Ready(generation = 2, writable = true), vm.ui.value.connection)
     }
 
     @Test

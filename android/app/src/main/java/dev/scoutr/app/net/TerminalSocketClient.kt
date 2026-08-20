@@ -115,13 +115,17 @@ class TerminalSocketClient(
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                 if (ended) return
                 endSocket()
-                // A rejected upgrade (the bridge answers non-101 when the
-                // capability re-probe fails) arrives here as a plain protocol
-                // exception; keep the status code so the route can say more
-                // than "socket failed".
-                val rejection = response?.let { IOException("terminal unavailable (HTTP ${it.code})") }
+                // A rejected upgrade (non-101) is the bridge's verdict, not a
+                // transport hiccup: report it as the error the socket would
+                // have carried so the route settles on it instead of
+                // reconnecting against a bridge that already said no.
+                if (response != null) {
+                    val body = runCatching { response.body?.string() }.getOrNull()
+                    transportListener.onError(parseUpgradeRejection(response.code, body))
+                    return
+                }
                 transportListener.onFailure(
-                    rejection ?: if (t is IOException) t else IOException("terminal socket failure: ${t.message}", t),
+                    if (t is IOException) t else IOException("terminal socket failure: ${t.message}", t),
                 )
             }
 

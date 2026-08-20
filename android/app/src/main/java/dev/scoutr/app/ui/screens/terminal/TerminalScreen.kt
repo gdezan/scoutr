@@ -298,7 +298,7 @@ fun TerminalScreen(
                 TerminalOverlay(
                     state = ui,
                     paneCount = ui.snapshot?.panes?.size ?: 0,
-                    onRetry = viewModel::refreshNow,
+                    onRetry = viewModel::retry,
                     onTakeover = viewModel::takeover,
                     onDismissTakeover = viewModel::dismissTakeover,
                 )

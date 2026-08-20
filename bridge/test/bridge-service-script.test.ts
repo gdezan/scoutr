@@ -30,6 +30,7 @@ const linuxPaths = (overrides: Record<string, unknown> = {}) =>
     repoRoot: "/home/dev/scoutr",
     home: "/home/dev",
     nodePath: "/opt/node/bin/node",
+    herdrBin: "/home/dev/.local/bin/herdr",
     ...overrides,
   });
 
@@ -59,6 +60,19 @@ test("the systemd unit keeps the existing user-service semantics", () => {
   assert.match(unit, /^WantedBy=default\.target$/m);
   // Compiled dist only: the tsx scratch bridge must never be supervised.
   assert.doesNotMatch(unit, /tsx|src\/cli\.ts/);
+});
+
+test("the systemd unit pins herdr so a stale shim on the session PATH cannot win", () => {
+  // The capability probe spawns whatever `herdr` resolves to; a version-manager
+  // shim one release behind the running herdr server fails its handshake and
+  // takes the terminal route down, so the resolved path is baked in here.
+  assert.match(helper.renderSystemdUnit(linuxPaths()), /^Environment=HERDR_BIN=\/home\/dev\/\.local\/bin\/herdr$/m);
+});
+
+test("an unresolvable herdr leaves the systemd unit's HERDR_BIN out", () => {
+  const unit = helper.renderSystemdUnit(linuxPaths({ herdrBin: null }));
+  assert.doesNotMatch(unit, /HERDR_BIN/);
+  assert.match(unit, /^ExecStart=/m);
 });
 
 test("XDG_CONFIG_HOME moves the systemd unit path", () => {

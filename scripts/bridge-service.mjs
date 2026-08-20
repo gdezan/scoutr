@@ -91,8 +91,17 @@ export function resolveServicePaths({
  * The systemd unit deliberately matches the definition Linux users already run
  * (README's "Run as a systemd user unit"), so installing the helper over an
  * existing hand-written unit is a no-op rather than a surprise rewrite.
+ *
+ * The one addition is `HERDR_BIN`, resolved at install time. systemd --user
+ * inherits the login session's PATH, which can put a stale version manager's
+ * shim ahead of the herdr the user actually runs — and the terminal capability
+ * probe spawns whatever `herdr` resolves to, so a shim one release behind the
+ * running herdr server fails its handshake and takes the whole terminal route
+ * down. Pinning the absolute path makes the service spawn the same binary the
+ * user's shell does.
  */
 export function renderSystemdUnit(paths) {
+  const herdrEnv = paths.herdrBin ? `Environment=HERDR_BIN=${paths.herdrBin}\n` : "";
   return `[Unit]
 Description=Scoutr bridge (herdr socket -> local HTTP/WSS API)
 Wants=ntfy.service
@@ -101,7 +110,7 @@ After=herdr.service ntfy.service
 [Service]
 Type=simple
 WorkingDirectory=${paths.bridgeDir}
-ExecStart=${paths.nodePath} dist/cli.js serve
+${herdrEnv}ExecStart=${paths.nodePath} dist/cli.js serve
 Restart=on-failure
 RestartSec=3
 
@@ -196,7 +205,7 @@ function tryRun(file, args, options = {}) {
   }
 }
 
-/** Absolute herdr path for launchd; `null` when it cannot be resolved here. */
+/** Absolute herdr path for the service definition; `null` when it cannot be resolved here. */
 function discoverHerdrBin(env) {
   const configured = env.HERDR_BIN?.trim();
   if (configured) return realpathSafe(configured);
@@ -210,7 +219,7 @@ function currentPaths(env = process.env, platform = process.platform) {
     platform,
     home: env.HOME || homedir(),
     xdgConfigHome: env.XDG_CONFIG_HOME,
-    herdrBin: platform === "darwin" ? discoverHerdrBin(env) : null,
+    herdrBin: discoverHerdrBin(env),
   });
 }
 

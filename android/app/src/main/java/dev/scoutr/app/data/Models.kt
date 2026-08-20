@@ -12,7 +12,7 @@ data class HealthResponse(
     val version: String? = null,
     val api: ScoutrApiInfo? = null,
     val herdr: HerdrInfo? = null,
-    val terminal: TerminalCapabilityInfo? = null,
+    val terminal: TerminalHealthInfo? = null,
     val push: PushInfo? = null,
 )
 
@@ -21,6 +21,17 @@ data class HealthResponse(
 data class ScoutrApiInfo(
     val protocol: Int? = null,
     val features: List<String> = emptyList(),
+)
+
+/**
+ * The health surface's `terminal` object. The bridge nests the cache entry one
+ * level down (`terminal: { capability: … }`, `routes/health.ts`); decoding it
+ * flat silently yields a null status, which reads as "supported" and leaves the
+ * route reconnecting forever against a bridge that can never serve it.
+ */
+@Serializable
+data class TerminalHealthInfo(
+    val capability: TerminalCapabilityInfo? = null,
 )
 
 /** The bridge's terminal capability cache entry (health surface). */

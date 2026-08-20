@@ -15,7 +15,9 @@ pi agents, as an alternative to Moshi's paid herdr integration.
   Linux, a user LaunchAgent (`dev.scoutr.bridge`, `RunAtLoad` + `KeepAlive`) on
   macOS. Every executable path in the definition is absolute and resolved at
   install time — neither `systemctl --user` nor launchd inherits an interactive
-  shell (Node from mise, `HERDR_BIN` from `which herdr` on macOS).
+  shell (Node from mise, `HERDR_BIN` from `which herdr` on both hosts, because a
+  stale version-manager shim on the session PATH otherwise fails the terminal
+  capability probe).
 - **App**: Kotlin + Jetpack Compose Material 3, dark-first, package
   `dev.scoutr.app`, minSdk 26 / targetSdk 36. No Hilt/Room; manual DI via
   `ScoutrApp.AppContainer`.

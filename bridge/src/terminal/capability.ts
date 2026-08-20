@@ -4,8 +4,9 @@
  * Rules implemented here:
  *   1. Resolve the exact executable the launcher spawns (HERDR_BIN when set,
  *      otherwise PATH) and run bounded version/status/help checks.
- *   2. The only supported set is herdr 0.8.0 / protocol 19; any other
- *      version is `unsupported` — no guessed semver ranges.
+ *   2. The version check is a floor, not an allow-list: herdr below
+ *      [MINIMUM_VERSION] predates this contract and is `unsupported`, while
+ *      anything newer is admitted and left to the functional checks below.
  *   3. Verify both `terminal session control` and `observe` surfaces.
  *   4. With a target, complete a bounded read-only observer handshake
  *      (never takes ownership) and release; failure is `unsupported`.
@@ -19,7 +20,37 @@ import { spawn } from "node:child_process";
 import type { TerminalCapability } from "./types.js";
 import { openTerminalProcess, TERMINAL_LIMITS, TerminalError } from "./process.js";
 
-const REQUIRED_VERSION = "0.8.0";
+/**
+ * Oldest herdr whose terminal NDJSON contract this bridge implements
+ * (bridge/reference/terminal-contract-0.8.0.md). Below it the CLI surface
+ * predates the contract; at or above it, the checks that follow decide.
+ *
+ * Deliberately a floor rather than an allow-list of verified versions. Steps
+ * 3 and 4 already prove the contract functionally on the installed binary —
+ * both command surfaces must exist and a live observer handshake must yield a
+ * real `terminal.frame` — so pinning exact versions mostly buys protection
+ * against *subtle* drift (a renamed `terminal.closed` reason degrades to the
+ * `unknown` code in process.ts, never a crash). That is a poor trade against
+ * its cost: an exact pin turns every herdr release into a dead terminal route
+ * until someone edits this file. A version that really did break the contract
+ * fails the handshake and reports `unsupported` with the reason. The versions
+ * the contract has actually been replayed against are listed in that
+ * document's "Verified against" table.
+ */
+const MINIMUM_VERSION = "0.8.0";
+
+const REQUIRED_VERSION = `${MINIMUM_VERSION} or newer`;
+
+/** Numeric semver ordering: -1/0/1. String compare would put 0.10.0 below 0.9.0. */
+function compareVersions(a: string, b: string): number {
+  const left = a.split(".").map(Number);
+  const right = b.split(".").map(Number);
+  for (let i = 0; i < 3; i++) {
+    const diff = (left[i] ?? 0) - (right[i] ?? 0);
+    if (diff !== 0) return diff < 0 ? -1 : 1;
+  }
+  return 0;
+}
 const PROBE_TIMEOUT_MS = 5_000;
 const CAPTURE_CAP = 64 * 1024;
 
@@ -86,10 +117,10 @@ export async function probeTerminalCapability(
   if (!installedVersion) {
     return unsupported(undefined, `unexpected herdr --version output: ${JSON.stringify(versionRun.stdout.slice(0, 80)) || "(empty)"}`);
   }
-  if (installedVersion !== REQUIRED_VERSION) {
+  if (compareVersions(installedVersion, MINIMUM_VERSION) < 0) {
     return unsupported(
       installedVersion,
-      `herdr ${installedVersion} is not supported: the terminal NDJSON contract is verified only for ${REQUIRED_VERSION} (protocol 19)`,
+      `herdr ${installedVersion} is too old for the terminal NDJSON contract, which needs ${REQUIRED_VERSION}`,
     );
   }
 

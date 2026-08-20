@@ -139,7 +139,10 @@ launchd cannot look up for itself **at install time** and bakes it into
   `ProgramArguments[0]`, with `WorkingDirectory` at this checkout's `bridge/`;
 - `HERDR_BIN`, from `$HERDR_BIN` if exported, else `which herdr`. A LaunchAgent
   gets no login shell, so an unresolved herdr would fail at pane-create time
-  rather than at install time;
+  rather than at install time. The systemd unit pins the same value as
+  `Environment=HERDR_BIN=…`: systemd --user *does* inherit the session PATH, and
+  a stale version-manager shim ahead of the real herdr fails the terminal
+  capability probe and takes the terminal route down;
 - an explicit `PATH`: the Node dir, the herdr dir, then
   `/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin`.
 

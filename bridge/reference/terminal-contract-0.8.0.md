@@ -6,6 +6,19 @@ This document is the contract source for `bridge/src/terminal/`; do not infer
 fields not listed here — verify against a live `herdr terminal session control|observe`
 run before relying on them.
 
+## Verified against
+
+Versions this document has been replayed against live, on a disposable pane.
+This is a record, not a gate: `capability.ts` admits anything at or above
+`MINIMUM_VERSION` and lets the live handshake judge it, so a newer herdr works
+without touching this table — add a row once someone has actually re-run the
+capture below against it.
+
+| version | protocol | notes |
+|---|---|---|
+| 0.8.0 | 19 | original capture |
+| 0.8.2 | 20 | re-verified: identical frame keys and `seq`/`full` behavior, identical `terminal.closed` reason strings (conflict, taken-over, detached, target-not-found), observer coexistence unchanged. Protocol 20 changes the *socket* handshake, not this CLI contract — but a 0.8.0 client is refused by a 0.8.2 server ("client version 19 is older than server version 20"), so client and server must be upgraded together. |
+
 ## Invocation
 
 - Control (writable): `herdr terminal session control <workspace>:<pane> --cols N --rows N [--takeover]`
@@ -91,7 +104,7 @@ the reason, **not** the generic `terminal attach failed: ` prefix.
   (`TerminalStartupError`, `TerminalOwnershipConflictError`, `TerminalBoundsError`),
   `sendInput`/`resize` as base64 records, `pauseOutput`/`resumeOutput`, idempotent
   `release()` with SIGTERM→SIGKILL group escalation, bounded stderr tail.
-- `capability.ts` — `probeTerminalCapability`: `--version` must be exactly
-  `0.8.0`, `herdr status client --json` protocol must be an integer, both
+- `capability.ts` — `probeTerminalCapability`: `--version` must be at or above
+  `MINIMUM_VERSION`, `herdr status client --json` protocol must be an integer, both
   `terminal session control --help` and `observe --help` must exit 0, and with a
   target an observer handshake must complete (80x24, no takeover).

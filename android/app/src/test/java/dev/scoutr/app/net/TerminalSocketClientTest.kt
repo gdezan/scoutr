@@ -124,6 +124,40 @@ class TerminalSocketClientTest {
     private fun await(): Nothing = throw AssertionError("unreachable")
 
     @Test
+    fun a_refused_upgrade_reports_the_bridge_verdict_not_a_bare_socket_failure() {
+        // server.ts rejectUpgrade: a settled `unsupported` capability answers
+        // the upgrade with a 503 and the reason, never a 101. Reported as a
+        // plain IOException it looks like an abrupt EOF, and the route
+        // reconnects forever against a bridge that already refused.
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(503)
+                .setHeader("Content-Type", "application/json")
+                .setBody(
+                    """{"ok":false,"error":"observer handshake failed",
+                       "terminal":{"capability":{"status":"unsupported","installedVersion":"0.8.0",
+                       "required":"0.8.0 or newer","reason":"observer handshake failed"}}}""",
+                ),
+        )
+        transport.open(
+            TerminalOpenRequest(
+                host = server.url("/").toString().removeSuffix("/"),
+                token = "test-token",
+                paneId = "w1:p1",
+                cols = 80,
+                rows = 24,
+                intent = TerminalIntent.AUTO,
+            ),
+            listener,
+        )
+        val error = listener.error.get(5, TimeUnit.SECONDS)
+        assertEquals(TerminalProtocol.ERROR_UNSUPPORTED, error.code)
+        assertEquals("observer handshake failed", error.message)
+        assertFalse(error.retryable)
+        assertFalse("a rejected upgrade is a verdict, not a transport failure", listener.failure.isDone)
+    }
+
+    @Test
     fun upgrade_uses_bearer_header_and_never_query_token() {
         val serverSide = ServerSide()
         openSocket(serverSide)

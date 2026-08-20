@@ -32,6 +32,13 @@ object TerminalProtocol {
     const val ERROR_UNSUPPORTED = "unsupported"
     const val ERROR_PROTOCOL = "protocol_error"
 
+    /**
+     * Client-synthesized: the bridge answered the upgrade with a non-101
+     * (server.ts `rejectUpgrade`) so no generation ever existed. Not a wire
+     * code — the socket that would have carried one never opened.
+     */
+    const val ERROR_UPGRADE_REJECTED = "upgrade_rejected"
+
     /** Server closed reasons (protocol.ts). */
     const val CLOSED_RELEASED = "released"
     const val CLOSED_REPLACED = "replaced"
@@ -167,6 +174,45 @@ fun parseServerMessage(text: String): ServerFrameParse {
     } catch (t: Throwable) {
         ServerFrameParse.Malformed("invalid $type message: ${t.message ?: "decode failed"}")
     }
+}
+
+/**
+ * Classify a rejected `/ws/terminal` upgrade (non-101) into the error the
+ * socket that never opened would have carried.
+ *
+ * The bridge refuses the upgrade with a JSON body (`server.ts rejectUpgrade`)
+ * rather than a WebSocket frame, so this is the only place its verdict can be
+ * read. An `unsupported` capability is final for the bridge process's lifetime
+ * (`broker.ts`: a settled cache entry is never re-probed), so it maps to the
+ * same non-retryable `unsupported` a live socket would send; every other
+ * rejection is a bridge-level verdict — a bad token, a probe that threw —
+ * which a user retry can clear but a silent reconnect loop cannot.
+ *
+ * @param status HTTP status of the refusal.
+ * @param body response body, when one could be read; blank is normal.
+ */
+fun parseUpgradeRejection(status: Int, body: String?): TerminalServerMessage.Error {
+    val json = body?.takeIf { it.isNotBlank() }
+        ?.let { runCatching { protocolJson.parseToJsonElement(it) as? JsonObject }.getOrNull() }
+    val capability = (json?.get("terminal") as? JsonObject)?.get("capability") as? JsonObject
+    val capabilityStatus = (capability?.get("status") as? JsonPrimitive)?.content
+    val reason = (capability?.get("reason") as? JsonPrimitive)?.content
+        ?: (json?.get("error") as? JsonPrimitive)?.content
+    if (capabilityStatus == "unsupported") {
+        return TerminalServerMessage.Error(
+            generation = -1,
+            code = TerminalProtocol.ERROR_UNSUPPORTED,
+            message = reason ?: "this bridge cannot serve the terminal route",
+            retryable = false,
+        )
+    }
+    val detail = reason?.takeIf { it.isNotBlank() }?.let { ": $it" } ?: ""
+    return TerminalServerMessage.Error(
+        generation = -1,
+        code = TerminalProtocol.ERROR_UPGRADE_REJECTED,
+        message = "the bridge refused the terminal connection (HTTP $status)$detail",
+        retryable = true,
+    )
 }
 
 /**

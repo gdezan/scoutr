@@ -9,6 +9,7 @@ import dev.scoutr.app.data.FakeConnectionCipher
 import dev.scoutr.app.data.HealthResponse
 import dev.scoutr.app.data.SnapshotResponse
 import dev.scoutr.app.data.TerminalCapabilityInfo
+import dev.scoutr.app.data.TerminalHealthInfo
 import dev.scoutr.app.data.TerminalPreferencesStore
 import dev.scoutr.app.net.FakeScoutrApi
 import dev.scoutr.app.net.FakeTerminalTransport
@@ -69,7 +70,7 @@ class TerminalOutputIntegrationTest {
         connectionStore = ConnectionStore(app, FakeConnectionCipher())
         preferencesStore = TerminalPreferencesStore(app)
         api.healthResult = Result.success(
-            HealthResponse(ok = true, terminal = TerminalCapabilityInfo(status = "supported", protocol = 1)),
+            HealthResponse(ok = true, terminal = TerminalHealthInfo(TerminalCapabilityInfo(status = "supported", protocol = 1))),
         )
         api.snapshotResult = Result.success(snapshotWithPane("w1:p1"))
     }

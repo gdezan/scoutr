@@ -182,11 +182,12 @@ class TerminalViewModel(
         val saved = connectionStore.saved ?: return
         try {
             val health = api.health(host = saved.host, token = saved.token)
-            if (health.terminal?.isUnsupported == true) {
+            val capability = health.terminal?.capability
+            if (capability?.isUnsupported == true) {
                 _ui.update {
                     it.copy(
                         connection = TerminalConnectionState.Unsupported(
-                            health.terminal?.reason ?: "this bridge does not support the terminal route",
+                            capability.reason ?: "this bridge does not support the terminal route",
                         ),
                     )
                 }
@@ -426,6 +427,24 @@ class TerminalViewModel(
         }
     }
 
+    /**
+     * User-driven retry from a terminal overlay ("Retry" / "Open terminal"):
+     * re-runs the whole capability gate and attach from a settled state.
+     *
+     * Distinct from [refreshNow], which only refreshes the catalog. A settled
+     * [TerminalConnectionState.Failed] has no reconnect scheduled behind it —
+     * a rejected upgrade is the bridge's verdict, not a transport hiccup — so
+     * without this the button would refresh a snapshot and nothing else.
+     */
+    fun retry() {
+        if (!started) return
+        reconnectJob?.cancel()
+        retireSocket()
+        reconnectAttempt = 0
+        _ui.update { it.copy(connection = TerminalConnectionState.Connecting, paneClosedNotice = false) }
+        viewModelScope.launch { checkHealthAndAttach() }
+    }
+
     /** Force a snapshot refresh (e.g. hierarchy action result). Debounced callers use [scheduleSnapshotRefresh]. */
     fun refreshNow() {
         snapshotDebounce?.cancel()
@@ -609,6 +628,12 @@ class TerminalViewModel(
                     }
                     TerminalProtocol.ERROR_PROTOCOL -> _ui.update {
                         it.copy(connection = TerminalConnectionState.Failed(message.message, retryable = false))
+                    }
+                    // The bridge refused the upgrade, so no reconnect can talk
+                    // it round — only a user retry (or a bridge that changed
+                    // its mind) can. Offer the retry; never spin on it.
+                    TerminalProtocol.ERROR_UPGRADE_REJECTED -> _ui.update {
+                        it.copy(connection = TerminalConnectionState.Failed(message.message, retryable = true))
                     }
                     "pane_not_found" -> {
                         refreshNow()

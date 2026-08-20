@@ -37,6 +37,8 @@ if [ "$1" = "--version" ]; then
   case "$SCENARIO" in
     old-version) echo "herdr 0.7.0" ;;
     no-version) echo "herdr something-else" ;;
+    verified-0.8.2) echo "herdr 0.8.2" ;;
+    future-version|future-no-handshake) echo "herdr 0.10.0" ;;
     *) echo "herdr 0.8.0" ;;
   esac
   exit 0
@@ -44,7 +46,13 @@ fi
 
 if [ "$1" = "status" ] && [ "$2" = "client" ]; then
   if [ "${3:-}" = "--json" ]; then
-    printf '%s\n' '{"version":"0.8.0","channel":"stable","protocol":19,"binary":"fake-herdr"}'
+    if [ "$SCENARIO" = "verified-0.8.2" ]; then
+      printf '%s\n' '{"version":"0.8.2","channel":"stable","protocol":20,"binary":"fake-herdr"}'
+    elif [ "$SCENARIO" = "future-version" ] || [ "$SCENARIO" = "future-no-handshake" ]; then
+      printf '%s\n' '{"version":"0.10.0","channel":"stable","protocol":21,"binary":"fake-herdr"}'
+    else
+      printf '%s\n' '{"version":"0.8.0","channel":"stable","protocol":19,"binary":"fake-herdr"}'
+    fi
   else
     echo "herdr 0.8.0 client"
   fi
@@ -97,7 +105,7 @@ if [ "$1" = "terminal" ] && [ "$2" = "session" ]; then
       echo "fatal: herdr configuration is broken" >&2
       exit 3
       ;;
-    exit-before-frame)
+    exit-before-frame|future-no-handshake)
       exit 1
       ;;
     invalid-json)
