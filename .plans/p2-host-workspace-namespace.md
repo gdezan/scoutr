@@ -305,8 +305,6 @@ Rerun `make bridge-test` and `make android-test`; perform runtime acceptance onl
 ## References
 
 - `AGENTS.md`
-- `.plans/p0-api-protocol-compatibility.md`
-- `.plans/p1-session-model-v3.md`
 - `bridge/src/config.ts`
 - `bridge/src/routes/health.ts`
 - `bridge/src/sessions.ts`

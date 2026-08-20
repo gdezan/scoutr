@@ -247,6 +247,5 @@ Rerun both cheap suites after review fixes, then perform the one final real-agen
 - `android/app/src/main/java/dev/scoutr/app/ui/screens/ReviewScreen.kt`
 - `android/app/src/main/java/dev/scoutr/app/ui/theme/DESIGN.md`
 - `docs/decisions.md`
-- `.plans/p1-session-model-v3.md`
 - `skills/scoutr-review/SKILL.md`
 - `skills/scoutr-verification/SKILL.md`

@@ -322,11 +322,8 @@ The architectural approval criteria are:
 ## References
 
 - `AGENTS.md`
-- `.plans/p1-session-model-v3.md`
-- `.plans/p1-attention-inbox.md`
 - `.plans/p1-done-ship-readiness-summary.md`
 - `.plans/p2-host-workspace-namespace.md`
-- `.plans/p2-shared-notification-monitor.md`
 - `android/app/src/main/java/dev/scoutr/app/MainActivity.kt`
 - `android/app/src/main/java/dev/scoutr/app/ScoutrApp.kt`
 - `android/app/src/main/java/dev/scoutr/app/ui/nav/Destination.kt`
