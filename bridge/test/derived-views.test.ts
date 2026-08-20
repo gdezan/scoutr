@@ -56,6 +56,8 @@ describe("deriveSessionDescriptors", () => {
       thinkingLevel: null,
       capabilities: ["abort", "retry", "compact", "fork", "rename", "close", "set_model", "set_thinking"],
       updatedAtMs: null,
+      transcriptMtimeMs: null,
+      transcriptSize: null,
       latestActivity: null,
       attention: { kind: "prompt", callId: null, questionCount: 0, currentQuestion: null, canQuickAnswer: false },
       live: {

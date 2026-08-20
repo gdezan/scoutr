@@ -235,6 +235,33 @@ class ChatRefreshTest {
         assertEquals(2L, chat.started)
         vm.stopPolling()
     }
+    @Test
+    fun olderSessionResponseCannotOverwriteNewerBoardModel() {
+        val descriptor = fake.agentsResult.getOrThrow().agents.single()
+        fake.agentsResult = Result.success(
+            AgentsResponse(agents = listOf(descriptor.copy(
+                model = "opencode-go/hy3",
+                transcriptMtimeMs = 20.0,
+                transcriptSize = 200.0,
+            ))),
+        )
+        fake.sessionResult = Result.success(
+            SessionReadResponse(
+                ok = true,
+                exists = true,
+                path = "/repo/sessions/s.jsonl",
+                model = "openai-codex/gpt-luna",
+                mtimeMs = 10.0,
+                size = 100.0,
+            ),
+        )
+        val vm = newViewModel()
+        vm.startPolling()
+        vm.awaitRefreshSettled()
+        vm.stopPolling()
+
+        assertEquals("opencode-go/hy3", vm.ui.value.model)
+    }
 
     @Test
     fun stopPollingGatesNewTriggers() {

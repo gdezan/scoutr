@@ -30,6 +30,9 @@ export interface SessionDescriptor {
   thinkingLevel: string | null;
   capabilities: string[];
   updatedAtMs: number | null;
+  /** Transcript revision used to order model metadata across API responses. */
+  transcriptMtimeMs: number | null;
+  transcriptSize: number | null;
   latestActivity: string | null;
   /**
    * Why this session wants the user, normalized and bounded: the open ask's
@@ -80,6 +83,8 @@ export function descriptorForLiveAgent(
     thinkingLevel: detail?.thinkingLevel ?? null,
     capabilities: backend ? [...backend.capabilities] : [],
     updatedAtMs: detail?.latestActivityAtMs ?? null,
+    transcriptMtimeMs: detail?.transcriptMtimeMs ?? null,
+    transcriptSize: detail?.transcriptSize ?? null,
     latestActivity: detail?.latestActivity || null,
     // A blocked pane with no structured ask still needs the user; only here is
     // the herdr status known, so the board detail cannot say it on its own.

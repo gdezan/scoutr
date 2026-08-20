@@ -102,6 +102,10 @@ export interface Transcript {
   /** Active provider-qualified model, updated by every model_change record. */
   model: string | null;
   thinkingLevel: string | null;
+  /** Internal parser signal used to merge incremental metadata scans. */
+  modelObservationSeen?: boolean;
+  /** Internal parser signal used to merge incremental metadata scans. */
+  thinkingLevelObservationSeen?: boolean;
   /** Last entry id — usable as an incremental cursor. Set in every read mode. */
   lastEntryId: string | null;
   /** User-assigned name, from the newest session_info record; null if unnamed. */
@@ -123,6 +127,10 @@ export interface TranscriptReadOpts {
    * the head, the title and active model in the tail.
    */
   metadataOnly?: boolean;
+  /** Read all metadata records instead of only bounded head/tail windows. */
+  exactMetadata?: boolean;
+  /** Read an append-only byte range, dropping a partial first JSONL record. */
+  fromByte?: number;
 }
 
 /** Bytes read from the start of the file in metadataOnly mode. */
@@ -154,16 +162,34 @@ export async function inspectSessionFile(path: string): Promise<SessionFileInfo>
 }
 
 /**
- * Read transcript JSONL in one of three bounded modes. Parsing belongs to the
- * selected agent backend because each agent owns a different record format.
+ * Read transcript JSONL in bounded, exact-metadata, or append-range mode.
+ * Parsing belongs to the selected agent backend because each agent owns a
+ * different record format.
  */
 export async function readTranscriptText(path: string, opts: TranscriptReadOpts = {}): Promise<string> {
-  if (opts.metadataOnly) return readWindows(path, { includeHead: true });
+  if (opts.fromByte !== undefined) return readFromByte(path, opts.fromByte);
+  if (opts.metadataOnly && !opts.exactMetadata) return readWindows(path, { includeHead: true });
   if (opts.tail !== undefined) return readWindows(path, { includeHead: false });
   const handle = await open(path, "r");
   try {
     const info = await handle.stat();
     return readSlice(handle, 0, Number(info.size));
+  } finally {
+    await handle.close();
+  }
+}
+
+/** Read a recent append-only range while preserving complete JSONL records. */
+async function readFromByte(path: string, requestedStart: number): Promise<string> {
+  const handle = await open(path, "r");
+  try {
+    const info = await handle.stat();
+    const size = Math.max(0, Number(info.size));
+    const start = Math.min(size, Math.max(0, Math.floor(requestedStart)));
+    const text = await readSlice(handle, start, size - start);
+    if (start === 0 || text.length === 0) return text;
+    const previous = await readSlice(handle, start - 1, 1);
+    return previous === "\n" ? text : dropPartialFirstLine(text);
   } finally {
     await handle.close();
   }

@@ -165,10 +165,12 @@ export function parsePiTranscript(text: string, opts: TranscriptReadOpts = {}): 
         const provider = rec.provider ?? "";
         const modelId = rec.modelId ?? "";
         transcript.model = provider && modelId ? `${provider}/${modelId}` : null;
+        transcript.modelObservationSeen = true;
         break;
       }
       case "thinking_level_change":
         transcript.thinkingLevel = rec.thinkingLevel ?? null;
+        transcript.thinkingLevelObservationSeen = true;
         break;
       case "message": {
         const entry = parseMessageRecord(rec);

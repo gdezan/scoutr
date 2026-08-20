@@ -94,6 +94,13 @@ export async function piReadTranscript(path: string, opts?: TranscriptReadOpts):
   return parsePiTranscript(await readTranscriptText(path, opts), opts ?? {});
 }
 
+export async function piReadTranscriptState(path: string, fromByte?: number): Promise<Transcript> {
+  const opts: TranscriptReadOpts = fromByte === undefined
+    ? { metadataOnly: true, exactMetadata: true }
+    : { metadataOnly: true, fromByte };
+  return parsePiTranscript(await readTranscriptText(path, opts), opts);
+}
+
 export async function piRenameStoredSession(path: string, title: string): Promise<void> {
   await writePiSessionTitle(path, title);
 }
@@ -242,6 +249,7 @@ export const piBackend: AgentBackend = {
   ownsSessionPath: piOwnsSessionPath,
   resolveSessionPath: piResolveSessionPath,
   readTranscript: piReadTranscript,
+  readTranscriptState: piReadTranscriptState,
   renameStoredSession: piRenameStoredSession,
   extractQuestions: piExtractQuestions,
   answerAsk: piAnswerAsk,

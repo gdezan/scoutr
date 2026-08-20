@@ -5,15 +5,18 @@ import type { AgentBackend } from "./agents/types.js";
 import type { QuestionEntry } from "./questions.js";
 
 /**
- * Bounded per-agent board detail: the session title, active model, and latest meaningful
- * transcript line. Reads bounded head/tail windows and is memoized
- * by (path, mtime, size) so the 3s board poll does not re-read unchanged files.
+ * Board detail keeps activity and titles bounded, but reads model/thinking state
+ * exactly so a mid-session model change outside the tail window remains visible.
+ * Results are memoized by (path, mtime, size) so the 3s board poll does not
+ * re-read unchanged files.
  */
 
 /** Entries kept from the tail window — the card shows one, with room to skip noise. */
 const TAIL_ENTRIES = 40;
 const MAX_ACTIVITY_LENGTH = 160;
 const MEMO_CAP = 128;
+/** Re-read this overlap when a growing file is scanned incrementally. */
+const STATE_OVERLAP_BYTES = 64 * 1024;
 
 /** The most an option list can hold and still be a one-tap board decision. */
 const MAX_QUICK_ANSWER_OPTIONS = 3;
@@ -57,6 +60,9 @@ export interface BoardDetail {
   latestActivityAtMs: number | null;
   /** The open ask this session is waiting on, when it has one. */
   attention: AttentionSummary | null;
+  /** File revision that produced this detail, used to order Chat responses. */
+  transcriptMtimeMs: number | null;
+  transcriptSize: number | null;
 }
 
 interface MemoEntry {
@@ -68,8 +74,18 @@ interface MemoEntry {
   detail: BoardDetail;
 }
 
+interface StateMemoEntry {
+  mtimeMs: number;
+  size: number;
+  model: string | null;
+  thinkingLevel: string | null;
+  modelObservationSeen: boolean;
+  thinkingLevelObservationSeen: boolean;
+}
+
 export class BoardDetailCache {
   private readonly memo = new Map<string, MemoEntry>();
+  private readonly stateMemo = new Map<string, StateMemoEntry>();
 
   /** Read bounded transcript windows for [path]; unknown or unreadable files return null. */
   async detailFor(path: string): Promise<BoardDetail | null> {
@@ -94,18 +110,25 @@ export class BoardDetailCache {
     const transcript = await backend.readTranscript(path, { tail: TAIL_ENTRIES }).catch(() => null);
     if (!transcript) return null;
     const metadata = await backend.readTranscript(path, { metadataOnly: true }).catch(() => null);
-    // The tail window alone misses a model recorded only near the top of a long
-    // session (pi writes one `model_change` at launch), which is why some cards
-    // showed no model at all. The metadata read spans both ends, so it answers
-    // when the tail cannot.
+    const state = await this.readState(path, backend, info).catch(() => null);
+    // The bounded tail can contain an older model_change while the exact state
+    // scan has the latest one. Override the tail metadata whenever the state
+    // read succeeds; otherwise retain the bounded read's best effort.
     const detail = deriveBoardDetail(
-      transcript,
+      {
+        ...transcript,
+        model: state?.modelObservationSeen ? state.model : transcript.model,
+        thinkingLevel: state?.thinkingLevelObservationSeen ? state.thinkingLevel : transcript.thinkingLevel,
+      },
       info.mtimeMs,
       metadata?.title,
-      metadata?.model ?? null,
-      metadata?.thinkingLevel ?? null,
+      state?.modelObservationSeen ? null : metadata?.model ?? null,
+      state?.thinkingLevelObservationSeen ? null : metadata?.thinkingLevel ?? null,
       questionsOf(backend, transcript),
     );
+    const revision = await inspectSessionFile(path);
+    detail.transcriptMtimeMs = revision.exists ? revision.mtimeMs : info.mtimeMs;
+    detail.transcriptSize = revision.exists ? revision.size : info.size;
     this.memo.set(path, {
       mtimeMs: info.mtimeMs,
       size: info.size,
@@ -115,15 +138,55 @@ export class BoardDetailCache {
     });
     if (this.memo.size > MEMO_CAP) {
       const oldest = this.memo.keys().next().value;
-      if (oldest !== undefined) this.memo.delete(oldest);
+      if (oldest !== undefined) {
+        this.memo.delete(oldest);
+        this.stateMemo.delete(oldest);
+      }
     }
     return detail;
   }
+  private async readState(
+    path: string,
+    backend: AgentBackend,
+    info: { mtimeMs: number; size: number },
+  ): Promise<StateMemoEntry> {
+    const cached = this.stateMemo.get(path);
+    if (cached && cached.mtimeMs === info.mtimeMs && cached.size === info.size) return cached;
 
+    let state: Transcript;
+    let modelObservationSeen: boolean;
+    let thinkingLevelObservationSeen: boolean;
+    if (cached && info.size > cached.size && info.mtimeMs >= cached.mtimeMs) {
+      state = await backend.readTranscriptState(path, Math.max(0, cached.size - STATE_OVERLAP_BYTES));
+      modelObservationSeen = state.modelObservationSeen === true;
+      thinkingLevelObservationSeen = state.thinkingLevelObservationSeen === true;
+      if (!modelObservationSeen) state.model = cached.model;
+      if (!thinkingLevelObservationSeen) state.thinkingLevel = cached.thinkingLevel;
+      modelObservationSeen ||= cached.modelObservationSeen;
+      thinkingLevelObservationSeen ||= cached.thinkingLevelObservationSeen;
+    } else {
+      state = await backend.readTranscriptState(path);
+      modelObservationSeen = state.modelObservationSeen === true;
+      thinkingLevelObservationSeen = state.thinkingLevelObservationSeen === true;
+    }
+    const next: StateMemoEntry = {
+      mtimeMs: info.mtimeMs,
+      size: info.size,
+      model: state.model,
+      thinkingLevel: state.thinkingLevel,
+      modelObservationSeen,
+      thinkingLevelObservationSeen,
+    };
+    this.stateMemo.set(path, next);
+    return next;
+  }
   /** Forget memo entries for paths that no longer exist (called on pane close). */
   prune(knownPaths: ReadonlySet<string>): void {
     for (const path of this.memo.keys()) {
       if (!knownPaths.has(path)) this.memo.delete(path);
+    }
+    for (const path of this.stateMemo.keys()) {
+      if (!knownPaths.has(path)) this.stateMemo.delete(path);
     }
   }
 
@@ -157,11 +220,22 @@ export function deriveBoardDetail(
       latestActivity: text,
       latestActivityAtMs: Number.isFinite(at) ? at : null,
       attention,
+      transcriptMtimeMs: null,
+      transcriptSize: null,
     };
   }
   // No meaningful entry in the window: fall back to the file mtime so cards
   // still show recency.
-  return { title, model, thinkingLevel, latestActivity: "", latestActivityAtMs: mtimeMs, attention };
+  return {
+    title,
+    model,
+    thinkingLevel,
+    latestActivity: "",
+    latestActivityAtMs: mtimeMs,
+    attention,
+    transcriptMtimeMs: null,
+    transcriptSize: null,
+  };
 }
 
 /** Skip control/streaming noise like bare "Enter" or single-char echoes. */

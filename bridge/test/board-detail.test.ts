@@ -1,5 +1,5 @@
 import { strict as assert } from "node:assert";
-import { mkdir, mkdtemp, stat, writeFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, stat, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it, beforeEach, afterEach } from "node:test";
@@ -131,17 +131,24 @@ describe("BoardDetailCache", () => {
     assert.equal(cache.size, 0);
   });
 
-  it("keeps the model of a session that only records it at launch", async () => {
+  it("tracks a model change outside bounded windows and after incremental growth", async () => {
     const path = join(dir, "long.jsonl");
-    // The model_change is at the very top, far outside the 64 KiB tail window,
-    // so only the metadata read (head + tail) can still see it.
-    const launch = sessionLine("model_change", { provider: "anthropic", modelId: "claude-opus-5" }, "2026-08-10T00:00:00Z");
-    const noise = Array.from({ length: 40 }, (_, i) =>
-      sessionLine("message", { message: { role: "user", content: `n${String(i).padStart(3, "0")}` + "x".repeat(2400) } }, "2026-08-10T00:10:00Z"),
+    const launch = sessionLine("model_change", { provider: "openai-codex", modelId: "gpt-luna" }, "2026-08-10T00:00:00Z");
+    const noise = (start: number) => Array.from({ length: 40 }, (_, i) =>
+      sessionLine(
+        "message",
+        { message: { role: "user", content: `n${String(start + i).padStart(3, "0")}` + "x".repeat(2400) } },
+        "2026-08-10T00:10:00Z",
+      ),
     ).join("\n");
-    await writeFile(path, `${launch}\n${noise}\n`);
-    const detail = await new BoardDetailCache().detailFor(path);
-    assert.equal(detail?.model, "anthropic/claude-opus-5");
+    const switched = sessionLine("model_change", { provider: "opencode-go", modelId: "hy3" }, "2026-08-10T01:00:00Z");
+    await writeFile(path, `${launch}\n${noise(0)}\n${switched}\n${noise(40)}\n`);
+    const cache = new BoardDetailCache();
+    assert.equal((await cache.detailFor(path))?.model, "opencode-go/hy3");
+
+    const changedAgain = sessionLine("model_change", { provider: "anthropic", modelId: "claude-sonnet" }, "2026-08-10T02:00:00Z");
+    await writeFile(path, `${await readFile(path, "utf8")}${changedAgain}\n`);
+    assert.equal((await cache.detailFor(path))?.model, "anthropic/claude-sonnet");
   });
 
   it("reads only the bounded tail of a large file", async () => {

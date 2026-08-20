@@ -105,6 +105,8 @@ export interface AgentBackend {
   /** Resolve a herdr agent_session ref to a transcript path; `cwd` lets id-kind backends predict not-yet-written paths. */
   resolveSessionPath(ref: AgentSessionInfo, cwd?: string): Promise<string | null>;
   readTranscript(path: string, opts?: TranscriptReadOpts): Promise<Transcript>;
+  /** Read only model/thinking metadata, exactly once or from an append byte range. */
+  readTranscriptState(path: string, fromByte?: number): Promise<Transcript>;
   renameStoredSession?(path: string, title: string): Promise<void>;
 
   extractQuestions(transcript: Transcript): QuestionEntry[];

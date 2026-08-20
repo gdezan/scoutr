@@ -32,6 +32,32 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlin.time.Duration.Companion.seconds
 
+private fun hasTranscriptRevision(mtimeMs: Double?, size: Double?): Boolean =
+    mtimeMs != null && size != null && (mtimeMs > 0.0 || size > 0.0)
+
+private fun transcriptRevisionAtLeast(
+    candidateMtimeMs: Double?,
+    candidateSize: Double?,
+    currentMtimeMs: Double?,
+    currentSize: Double?,
+): Boolean {
+    if (!hasTranscriptRevision(candidateMtimeMs, candidateSize)) return currentMtimeMs == null
+    if (!hasTranscriptRevision(currentMtimeMs, currentSize)) return true
+    return candidateMtimeMs!! > currentMtimeMs!! ||
+        (candidateMtimeMs == currentMtimeMs && candidateSize!! >= currentSize!!)
+}
+
+private fun revisionedValue(
+    candidate: String?,
+    current: String?,
+    revisionAccepted: Boolean,
+    hasRevision: Boolean,
+): String? = when {
+    revisionAccepted && hasRevision -> candidate
+    revisionAccepted -> candidate ?: current
+    else -> current
+}
+
 /**
  * Merge a poll result into the transcript: a null cursor replaces the list
  * (full snapshot), an incremental poll appends only ids not already present —
@@ -347,6 +373,9 @@ data class ChatUiState(
     val sessionTitle: String = "Session",
     val model: String? = null,
     val thinkingLevel: String? = null,
+    /** Latest transcript revision used to accept model metadata. */
+    val transcriptMtimeMs: Double? = null,
+    val transcriptSize: Double? = null,
     /** Model catalog for the session's backend; Ready even for an empty catalog (catalog-less backends are cached too). */
     val configuration: Loadable<List<ModelProvider>> = Loadable.Idle,
     /** A set_model/set_thinking control is in flight (the sheet's busy state; the catalog fetch shows via [configuration]). */
@@ -761,6 +790,13 @@ class ChatViewModel(
                 val lostDraft = it.askDrafts.keys.any { callId ->
                     callId !in drafts && callId != it.submittingCallId
                 }
+                val responseRevisionAccepted = transcriptRevisionAtLeast(
+                    response.mtimeMs,
+                    response.size,
+                    it.transcriptMtimeMs,
+                    it.transcriptSize,
+                )
+                val responseHasRevision = hasTranscriptRevision(response.mtimeMs, response.size)
                 it.copy(
                     entries = mergeSessionEntries(it.entries, response.entries, incremental = response.since != null),
                     questions = questions,
@@ -777,8 +813,20 @@ class ChatViewModel(
                     ),
                     exists = response.exists,
                     transcript = Loadable.Ready(Unit),
-                    model = response.model ?: it.model,
-                    thinkingLevel = response.thinkingLevel ?: it.thinkingLevel,
+                    model = revisionedValue(
+                        response.model,
+                        it.model,
+                        responseRevisionAccepted,
+                        responseHasRevision,
+                    ),
+                    thinkingLevel = revisionedValue(
+                        response.thinkingLevel,
+                        it.thinkingLevel,
+                        responseRevisionAccepted,
+                        responseHasRevision,
+                    ),
+                    transcriptMtimeMs = if (responseRevisionAccepted && responseHasRevision) response.mtimeMs else it.transcriptMtimeMs,
+                    transcriptSize = if (responseRevisionAccepted && responseHasRevision) response.size else it.transcriptSize,
                 )
             }
             true
@@ -802,6 +850,13 @@ class ChatViewModel(
                 val cwd = descriptor.cwd?.takeIf(String::isNotBlank)
                 val cwdChanged = cwd != _ui.value.cwd
                 _ui.update {
+                    val descriptorRevisionAccepted = transcriptRevisionAtLeast(
+                        descriptor.transcriptMtimeMs,
+                        descriptor.transcriptSize,
+                        it.transcriptMtimeMs,
+                        it.transcriptSize,
+                    )
+                    val descriptorHasRevision = hasTranscriptRevision(descriptor.transcriptMtimeMs, descriptor.transcriptSize)
                     it.copy(
                         sessionKey = canonicalKey,
                         livePaneId = descriptor.live?.paneId,
@@ -821,8 +876,20 @@ class ChatViewModel(
                         sessionTitle = descriptor.title.takeIf(String::isNotBlank)
                             ?: cwd?.substringAfterLast('/')?.takeIf(String::isNotBlank)
                             ?: it.sessionTitle,
-                        model = descriptor.model ?: it.model,
-                        thinkingLevel = descriptor.thinkingLevel ?: it.thinkingLevel,
+                        model = revisionedValue(
+                            descriptor.model,
+                            it.model,
+                            descriptorRevisionAccepted,
+                            descriptorHasRevision,
+                        ),
+                        thinkingLevel = revisionedValue(
+                            descriptor.thinkingLevel,
+                            it.thinkingLevel,
+                            descriptorRevisionAccepted,
+                            descriptorHasRevision,
+                        ),
+                        transcriptMtimeMs = if (descriptorRevisionAccepted && descriptorHasRevision) descriptor.transcriptMtimeMs else it.transcriptMtimeMs,
+                        transcriptSize = if (descriptorRevisionAccepted && descriptorHasRevision) descriptor.transcriptSize else it.transcriptSize,
                     )
                 }
                 if (cwdChanged) refreshCommands(cwd)

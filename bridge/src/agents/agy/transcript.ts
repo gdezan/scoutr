@@ -61,8 +61,12 @@ export function parseAgyTranscript(text: string, opts: TranscriptReadOpts = {}):
       const settingsModel = extractModelFromSettings(rawContent);
       if (settingsModel) {
         transcript.model = settingsModel;
+        transcript.modelObservationSeen = true;
         const effort = extractEffortFromModel(settingsModel);
-        if (effort) transcript.thinkingLevel = effort;
+        if (effort) {
+          transcript.thinkingLevel = effort;
+          transcript.thinkingLevelObservationSeen = true;
+        }
       }
 
       // Check for workspace CWD

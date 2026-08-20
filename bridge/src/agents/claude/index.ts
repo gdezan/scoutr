@@ -125,6 +125,13 @@ export async function claudeReadTranscript(path: string, opts?: TranscriptReadOp
   return parseClaudeTranscript(await readTranscriptText(path, opts), opts ?? {});
 }
 
+export async function claudeReadTranscriptState(path: string, fromByte?: number): Promise<Transcript> {
+  const opts: TranscriptReadOpts = fromByte === undefined
+    ? { metadataOnly: true, exactMetadata: true }
+    : { metadataOnly: true, fromByte };
+  return parseClaudeTranscript(await readTranscriptText(path, opts), opts);
+}
+
 export function claudeExtractQuestions(transcript: Transcript): QuestionEntry[] {
   return claudeQuestions(transcript);
 }
@@ -315,6 +322,7 @@ export const claudeBackend: AgentBackend = {
   ownsSessionPath: claudeOwnsSessionPath,
   resolveSessionPath: claudeResolveSessionPath,
   readTranscript: claudeReadTranscript,
+  readTranscriptState: claudeReadTranscriptState,
   extractQuestions: claudeExtractQuestions,
   questionStateStamp: claudeQuestionStateStamp,
   answerAsk: claudeAnswerAsk,

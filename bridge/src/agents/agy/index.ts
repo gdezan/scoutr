@@ -83,6 +83,18 @@ export async function agyReadTranscript(path: string, opts?: TranscriptReadOpts)
   return transcript;
 }
 
+export async function agyReadTranscriptState(path: string, fromByte?: number): Promise<Transcript> {
+  const opts: TranscriptReadOpts = fromByte === undefined
+    ? { metadataOnly: true, exactMetadata: true }
+    : { metadataOnly: true, fromByte };
+  const transcript = parseAgyTranscript(await readTranscriptText(path, opts), opts);
+  if (!transcript.id) {
+    const match = path.match(/brain\/([^/\\]+)/);
+    if (match && match[1]) transcript.id = match[1];
+  }
+  return transcript;
+}
+
 /**
  * agy answers as plain text at its prompt — it has no keyboard-navigated
  * questionnaire — so an option pick is delivered as the option label itself.
@@ -177,6 +189,7 @@ export const agyBackend: AgentBackend = {
   ownsSessionPath: agyOwnsSessionPath,
   resolveSessionPath: agyResolveSessionPath,
   readTranscript: agyReadTranscript,
+  readTranscriptState: agyReadTranscriptState,
   extractQuestions: (transcript) => extractAgyQuestions(transcript.entries),
   answerAsk: agyAnswerAsk,
   dismissAsk: agyDismissAsk,

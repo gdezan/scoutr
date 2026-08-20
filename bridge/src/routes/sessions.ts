@@ -27,6 +27,7 @@ interface SessionReadResult {
   preview?: string;
   lastEntryId: string | null;
   mtimeMs: number;
+  size: number;
 }
 
 /**
@@ -40,6 +41,11 @@ interface TranscriptMemoEntry {
   mtimeMs: number;
   size: number;
   transcript: Transcript;
+}
+
+interface MemoizedTranscript {
+  transcript: Transcript;
+  info: SessionFileInfo;
 }
 
 const TRANSCRIPT_MEMO_CAP = 8;
@@ -65,18 +71,30 @@ async function readTranscriptMemoized(
   target: string,
   backend: NonNullable<ReturnType<typeof backendForSessionPath>>,
   info: SessionFileInfo,
-): Promise<Transcript> {
+): Promise<MemoizedTranscript> {
   const cached = transcriptMemo.get(target);
   if (cached && cached.mtimeMs === info.mtimeMs && cached.size === info.size) {
-    return cached.transcript;
+    return { transcript: cached.transcript, info };
   }
-  const transcript = await backend.readTranscript(target);
-  transcriptMemo.set(target, { mtimeMs: info.mtimeMs, size: info.size, transcript });
-  if (transcriptMemo.size > TRANSCRIPT_MEMO_CAP) {
-    const oldest = transcriptMemo.keys().next().value;
-    if (oldest !== undefined) transcriptMemo.delete(oldest);
+  let before = info;
+  let lastTranscript: Transcript | null = null;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    if (attempt > 0) before = await inspectSessionFile(target);
+    lastTranscript = await backend.readTranscript(target);
+    const after = await inspectSessionFile(target);
+    if (before.mtimeMs === after.mtimeMs && before.size === after.size) {
+      transcriptMemo.set(target, { mtimeMs: after.mtimeMs, size: after.size, transcript: lastTranscript });
+      if (transcriptMemo.size > TRANSCRIPT_MEMO_CAP) {
+        const oldest = transcriptMemo.keys().next().value;
+        if (oldest !== undefined) transcriptMemo.delete(oldest);
+      }
+      return { transcript: lastTranscript, info: after };
+    }
   }
-  return transcript;
+  // A continuously growing transcript cannot be made perfectly stable; keep
+  // the read tied to the revision from immediately before its parse and do
+  // not memoize it, so the next poll will retry.
+  return { transcript: lastTranscript as Transcript, info: before };
 }
 
 async function readSessionRoute(ctx: RouteContext): Promise<RouteResult> {
@@ -106,9 +124,10 @@ export async function readSession(pathParam: string, since: string | null, agent
   }
   const info = await inspectSessionFile(target);
   if (!info.exists) {
-    return { path: target, agentKind: backend.id, name: basename(target), exists: false, since, entries: [], questions: [], model: null, thinkingLevel: null, lastEntryId: null, mtimeMs: 0 };
+    return { path: target, agentKind: backend.id, name: basename(target), exists: false, since, entries: [], questions: [], model: null, thinkingLevel: null, lastEntryId: null, mtimeMs: 0, size: 0 };
   }
-  const session = await readTranscriptMemoized(target, backend, info);
+  const read = await readTranscriptMemoized(target, backend, info);
+  const session = read.transcript;
   let entries = session.entries;
   let cursor: string | null = since;
   if (since) {
@@ -137,7 +156,8 @@ export async function readSession(pathParam: string, since: string | null, agent
     thinkingLevel: session.thinkingLevel,
     preview: lastEntry ? entryText(lastEntry, 120) : undefined,
     lastEntryId: session.lastEntryId,
-    mtimeMs: info.mtimeMs,
+    mtimeMs: read.info.mtimeMs,
+    size: read.info.size,
   };
 }
 

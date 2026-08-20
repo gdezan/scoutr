@@ -154,6 +154,9 @@ data class SessionDescriptor(
     val thinkingLevel: String? = null,
     val capabilities: List<String> = emptyList(),
     val updatedAtMs: Double? = null,
+    /** Transcript revision used to order model metadata across API responses. */
+    val transcriptMtimeMs: Double? = null,
+    val transcriptSize: Double? = null,
     val latestActivity: String? = null,
     val attention: AttentionSummary? = null,
     val live: SessionLiveAttachment? = null,
@@ -180,6 +183,7 @@ data class SessionReadResponse(
     val lastEntryId: String? = null,
     // JS Date.now() returns a float; keep Double so fractional millis parse.
     val mtimeMs: Double = 0.0,
+    val size: Double = 0.0,
 )
 
 /** Structured ask_user_question card derived by the bridge from session events. */

@@ -89,7 +89,10 @@ export function parseClaudeTranscript(text: string, opts: TranscriptReadOpts = {
         if (keepEntries) transcript.entries.push(entry);
         transcript.lastEntryId = entry.entryId;
         // Assistant records carry the active model; the newest one wins.
-        if (entry.model) transcript.model = entry.model;
+        if (entry.model) {
+          transcript.model = entry.model;
+          transcript.modelObservationSeen = true;
+        }
       }
       continue;
     }
