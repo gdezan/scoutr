@@ -346,6 +346,15 @@ class BridgeClient(
     override suspend fun agents(): AgentsResponse =
         call("/api/agents") { json.decodeFromString(AgentsResponse.serializer(), it) }
 
+    override suspend fun registerDevice(fcmToken: String) {
+        call(
+            "/api/devices",
+            body = buildJsonObject { put("fcmToken", JsonPrimitive(fcmToken)) }
+                .toString()
+                .toRequestBody("application/json".toMediaType()),
+        ) { }
+    }
+
     override suspend fun session(key: SessionKey, since: String?): SessionReadResponse =
         call("/api/sessions", query = buildMap {
             put("agentKind", key.agentKind)

@@ -61,6 +61,7 @@ class FakeScoutrApi : ScoutrApi {
         HealthResponse(ok = true, api = ScoutrApiInfo(protocol = 2, features = REQUIRED_SCOUTR_API_FEATURES)),
     )
     var agentsResult: Result<AgentsResponse> = Result.success(AgentsResponse())
+    var registerDeviceResult: Result<Unit> = Result.success(Unit)
     var sessionResult: Result<SessionReadResponse> = Result.success(SessionReadResponse())
     var sessionCatalogResult: Result<SessionCatalogResponse> = Result.success(SessionCatalogResponse(ok = true))
     var catalogActionResult: Result<CreatedSessionResponse> = Result.success(CreatedSessionResponse(ok = true))
@@ -118,6 +119,10 @@ class FakeScoutrApi : ScoutrApi {
         record("health", mapOf("host" to host, "token" to token)) { healthResult }
 
     override suspend fun agents(): AgentsResponse = record("agents") { agentsResult }
+
+    override suspend fun registerDevice(fcmToken: String) {
+        record("registerDevice", mapOf("fcmToken" to fcmToken)) { registerDeviceResult }
+    }
 
     override suspend fun session(key: SessionKey, since: String?): SessionReadResponse =
         record("session", mapOf("key" to key, "path" to key.path, "since" to since)) { sessionResult }

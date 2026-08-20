@@ -64,6 +64,22 @@ function servicePidOwnsPort(pid, port) {
   });
 }
 
+function sleepSync(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+function waitForServicePort(pid, port, timeoutMs = 8000, intervalMs = 200) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (servicePidOwnsPort(pid, port)) return true;
+    sleepSync(intervalMs);
+  }
+  return servicePidOwnsPort(pid, port);
+}
+
+function redactSecrets(message) {
+  return String(message).replace(/Bearer\s+\S+/g, "Bearer <redacted>");
+}
 let failed = false;
 const fail = (msg) => {
   console.error(`FAIL: ${msg}`);
@@ -120,29 +136,31 @@ try {
 const serviceMainPid = service?.pid ? String(service.pid) : "";
 
 // Probe the real local bridge (the process the apps reach through the
-// configured exposure).
+// configured exposure). systemd reports active before Node binds the port
+// (herdr connect happens first), so wait out that listen race.
 try {
   const cfg = JSON.parse(readFileSync(join(homedir(), ".config/scoutr/config.json"), "utf8"));
   const port = cfg.port ?? 8737;
   const token = cfg.token;
-  if (!servicePidOwnsPort(serviceMainPid, port)) {
+  if (!waitForServicePort(serviceMainPid, port)) {
     fail(`bridge service PID ${serviceMainPid || "none"} does not own listening port ${port}`);
-  }
-  const resp = execFileSync(
-    "curl",
-    ["-s", "-m", "8", "-H", `Authorization: Bearer ${token}`, `http://127.0.0.1:${port}/api/health`],
-    { encoding: "utf8" },
-  );
-  const health = JSON.parse(resp);
-  if (!health.ok) {
-    fail(`real bridge health check failed: ${resp}`);
   } else {
-    console.log(
-      `real bridge healthy: ${health.service} v${health.version} (herdr ${health.herdr?.connected ? "connected" : "DISCONNECTED"})`,
+    const resp = execFileSync(
+      "curl",
+      ["-s", "-m", "8", "-H", `Authorization: Bearer ${token}`, `http://127.0.0.1:${port}/api/health`],
+      { encoding: "utf8" },
     );
+    const health = JSON.parse(resp);
+    if (!health.ok) {
+      fail(`real bridge health check failed: ${resp}`);
+    } else {
+      console.log(
+        `real bridge healthy: ${health.service} v${health.version} (herdr ${health.herdr?.connected ? "connected" : "DISCONNECTED"})`,
+      );
+    }
   }
 } catch (e) {
-  fail(`real bridge probe failed: ${e.message}`);
+  fail(`real bridge probe failed: ${redactSecrets(e.message)}`);
 }
 
 if (failed) {

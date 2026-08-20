@@ -40,9 +40,24 @@ class ScoutrApp : Application() {
         TerminalPalette.install()
         container = AppContainer(this)
         ForegroundTracker.install(this) { container.reconcileNotifications() }
+        requestCurrentFcmToken()
+    }
+
+    private fun requestCurrentFcmToken() {
+        try {
+            com.google.firebase.messaging.FirebaseMessaging.getInstance().token
+                .addOnCompleteListener { task ->
+                    val token = task.result ?: return@addOnCompleteListener
+                    if (task.isSuccessful) container.registerFcmToken(token)
+                }
+        } catch (e: Exception) {
+            Log.w(TAG, "FCM token unavailable", e)
+        }
     }
 
     companion object {
+        private const val TAG = "ScoutrApp"
+
         /** Container access for services/receivers; safe on cold start because
          *  Application.onCreate always runs before any component. */
         fun container(context: Context): AppContainer =
@@ -81,6 +96,9 @@ class AppContainer(application: Application) {
         TopologyFeedClient(okHttp, connectionStore, listener, performanceCounters = performanceCounters)
     }
 
+    @Volatile
+    private var cachedFcmToken: String? = null
+
     /**
      * Drop the saved pairing (Settings → Forget).
      *
@@ -91,6 +109,28 @@ class AppContainer(application: Application) {
      */
     fun forgetConnection() {
         connectionStore.clear()
+    }
+
+    /**
+     * POST this phone's FCM device token to `/api/devices`. Cached so pairing
+     * after a token arrives can register without asking Firebase again.
+     */
+    fun registerFcmToken(token: String) {
+        cachedFcmToken = token
+        if (connectionStore.saved == null) return
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                bridge.registerDevice(token)
+            } catch (c: CancellationException) {
+                throw c
+            } catch (e: Exception) {
+                Log.w(TAG, "FCM device registration failed", e)
+            }
+        }
+    }
+
+    fun registerCachedFcmToken() {
+        cachedFcmToken?.let(::registerFcmToken)
     }
 
     /**

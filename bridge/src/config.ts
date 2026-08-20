@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, writeFile } from "node:fs/promises";
+import { constants } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -77,6 +78,20 @@ export function normalizeExposure(parsed: Record<string, unknown>, path: string)
   return { kind: kind as ExposureKind, ...(publicUrl ? { publicUrl } : {}) };
 }
 
+/** Filename of the conventional FCM service-account key next to config.json. */
+export const FCM_SERVICE_ACCOUNT_FILENAME = "fcm-service-account.json";
+
+async function resolveFcmServiceAccountPath(explicit: unknown, configDir: string): Promise<string | undefined> {
+  if (typeof explicit === "string" && explicit) return explicit;
+  const conventional = join(configDir, FCM_SERVICE_ACCOUNT_FILENAME);
+  try {
+    await access(conventional, constants.R_OK);
+    return conventional;
+  } catch {
+    return undefined;
+  }
+}
+
 export async function loadOrCreateConfig(path = defaultConfigPath()): Promise<BridgeConfig> {
   let config: BridgeConfig | null = null;
   let readOk = false;
@@ -88,14 +103,12 @@ export async function loadOrCreateConfig(path = defaultConfigPath()): Promise<Br
     }
     const exposure = normalizeExposure(parsed, path);
     readOk = true;
+    const configDir = join(path, "..");
     config = {
-      configDir: join(path, ".."),
+      configDir,
       token: parsed.token,
       port: parsed.port,
-      fcmServiceAccountPath:
-        typeof parsed.fcmServiceAccountPath === "string" && parsed.fcmServiceAccountPath
-          ? parsed.fcmServiceAccountPath
-          : undefined,
+      fcmServiceAccountPath: await resolveFcmServiceAccountPath(parsed.fcmServiceAccountPath, configDir),
       exposure,
     };
   } catch (error) {
@@ -113,6 +126,9 @@ export async function loadOrCreateConfig(path = defaultConfigPath()): Promise<Br
       exposure: { kind: "tailscale" },
     };
     await mkdir(join(path, ".."), { recursive: true });
+  }
+  if (!config.fcmServiceAccountPath) {
+    config.fcmServiceAccountPath = await resolveFcmServiceAccountPath(undefined, config.configDir);
   }
   try {
     // Persist the canonical shape (and any other missing fields) so

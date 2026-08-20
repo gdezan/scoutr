@@ -79,6 +79,19 @@ describe("loadOrCreateConfig", () => {
     assert.equal(config.fcmServiceAccountPath, "/keys/fcm.json");
   });
 
+  test("picks up a conventional FCM key next to config.json", async () => {
+    const folder = join(dir, "conventional-fcm");
+    mkdirSync(folder, { recursive: true });
+    const path = join(folder, "config.json");
+    const keyPath = join(folder, "fcm-service-account.json");
+    await writeFile(path, JSON.stringify({ token: "0123456789abcdef", port: 8737 }));
+    await writeFile(keyPath, "{}");
+    const config = await loadOrCreateConfig(path);
+    assert.equal(config.fcmServiceAccountPath, keyPath);
+    const persisted = JSON.parse(await readFile(path, "utf8")) as Record<string, unknown>;
+    assert.equal(persisted.fcmServiceAccountPath, keyPath);
+  });
+
   test("defaults a config without exposure to tailscale", async () => {
     const path = join(dir, "no-exposure", "config.json");
     mkdirSync(join(dir, "no-exposure"), { recursive: true });

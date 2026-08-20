@@ -41,6 +41,8 @@ interface ScoutrApi {
 
     suspend fun health(host: String? = null, token: String? = null): HealthResponse
     suspend fun agents(): AgentsResponse
+    /** Registers this phone's FCM device token so the bridge can wake it. */
+    suspend fun registerDevice(fcmToken: String)
     suspend fun session(key: SessionKey, since: String? = null): SessionReadResponse
     suspend fun sessionCatalog(query: String? = null, limit: Int? = null): SessionCatalogResponse
     suspend fun sessionCatalogAction(action: CatalogAction, key: SessionKey, text: String? = null): CreatedSessionResponse

@@ -308,6 +308,7 @@ private fun ScoutrAppNav(
             composable(Routes.CONNECT) {
                 ConnectScreen(
                     onConnected = {
+                        container.registerCachedFcmToken()
                         startDestination = Destination.Board.route
                         navController.navigate(Destination.Board.route) {
                             popUpTo(Routes.CONNECT) { inclusive = true }

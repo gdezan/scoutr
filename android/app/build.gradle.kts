@@ -7,6 +7,7 @@ plugins {
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
+    alias(libs.plugins.google.services)
 }
 
 // Version identity comes from the shared scripts/version.mjs — the same script
@@ -118,6 +119,8 @@ dependencies {
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.zxing.android.embedded)
     implementation(libs.markdown.renderer.m3)
+    implementation(platform(libs.firebase.bom))
+    implementation(libs.firebase.messaging)
     // Vendored Termux terminal stack (see android/vendor/termux/UPSTREAM.md).
     implementation(project(":vendor:termux:terminal-view"))
 
