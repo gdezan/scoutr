@@ -1,19 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-    `scoutr_icon.png` is a finished icon: the mark already sits on its own
-    rounded-square ink tile. Drawn full-bleed it loses that silhouette, because
-    the adaptive-icon foreground canvas is 108dp and every launcher mask cuts
-    it back to at most the inner 72dp. Centre the tile at exactly that 72dp so
-    the mask trims only ink — which matches `ic_launcher_background` and is
-    therefore invisible — and the mark itself stays inside the 66dp safe circle.
+    `scoutr_icon.png` is a finished rounded-square tile. AdaptiveIconDrawable
+    stretches the foreground to 150% of the *view* size (not 108dp) and the
+    launcher mask keeps only the inner 66%. An absolute 72dp child fills that
+    stretched layer whenever the icon is drawn smaller than ~108dp — recents,
+    the shelf, most launchers — so the mask centre-crops the tile and slices
+    the pipes. Percentage inset tracks the layer bounds at every size: 18%
+    leaves the tile just inside the 66% viewport (16.7% would be flush).
 -->
-<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
-    <item
-        android:gravity="center"
-        android:width="72dp"
-        android:height="72dp">
-        <bitmap
-            android:src="@drawable/scoutr_icon"
-            android:gravity="fill" />
-    </item>
-</layer-list>
+<inset xmlns:android="http://schemas.android.com/apk/res/android"
+    android:drawable="@drawable/scoutr_icon"
+    android:inset="18%" />
