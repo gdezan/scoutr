@@ -417,6 +417,23 @@ class ChatPendingMessageTest {
         assertEquals(emptyList<PendingUserMessage>(), dropConfirmedMessages(listOf(message), listOf(echo)))
     }
 
+    @Test
+    fun skillSlashCommandReconcilesAgainstPeeledSkillBlock() {
+        val message = PendingUserMessage(
+            localId = "local-skill",
+            text = "/skill:grill-me on the preferred approach",
+            state = MessageDeliveryState.QUEUED,
+        )
+        val echo = SessionEntry(
+            entryId = "u-skill",
+            role = "user",
+            content = listOf(
+                ContentBlock(type = "skill", name = "grill-me", text = "body"),
+                ContentBlock(type = "text", text = "on the preferred approach"),
+            ),
+        )
+        assertEquals(emptyList<PendingUserMessage>(), dropConfirmedMessages(listOf(message), listOf(echo)))
+    }
 
     private suspend fun waitUntil(description: String = "condition", condition: () -> Boolean) {
         repeat(200) {

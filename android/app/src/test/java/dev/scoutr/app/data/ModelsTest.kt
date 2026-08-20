@@ -69,6 +69,8 @@ class ModelsTest {
         )
         assertEquals("[bash] hello world", entryText(content))
     }
+
+
     @Test
     fun `session catalog item decodes from the bridge shape`() {
         val json = """

@@ -58,8 +58,11 @@ status metadata and controls.
   Idle collapses to a count row until tapped.
 - **Chat:** assistant rows use a quiet 1px outline spine with readable text; tool
   calls are one-line mono facts with a right-side details icon and expand into
-  4dp-radius inline result tiles. The composer is a 6dp outlined field,
-  multiline, and Enter always inserts a newline.
+  4dp-radius inline result tiles. A skill invocation is a `surfaceContainer`
+  chip above the user bubble: quiet `skill` label, Martian Mono name, tap to
+  expand the injected body. The leftover prompt stays in the user bubble; the
+  XML dump never does. The composer is a 6dp outlined field, multiline, and
+  Enter always inserts a newline.
 - **Sessions:** reuse the board tile geometry with date-group headers. Search
   and picker fields use the shared 6dp field.
 - **Usage:** teal for usage data, amber/red only for threshold states. It must

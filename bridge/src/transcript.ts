@@ -1,4 +1,5 @@
 import { open, stat } from "node:fs/promises";
+import { skillInvocationPreview } from "./skill-invocation.js";
 
 /** Shared transcript types and bounded JSONL file-reading utilities. */
 
@@ -45,13 +46,20 @@ export interface FileEditBlock {
   truncated: boolean;
 }
 
+export interface SkillBlock {
+  type: "skill";
+  name: string;
+  /** The skill body the harness injected; omitted from previews. */
+  text: string;
+}
+
 export type ContentBlock =
   | TextBlock
   | ThinkingBlock
   | ToolCallBlock
   | FileEditBlock
+  | SkillBlock
   | { type: string; [key: string]: unknown };
-
 export interface TokenUsage {
   input?: number;
   output?: number;
@@ -214,6 +222,10 @@ export function entryText(entry: TranscriptEntry, maxLength = 280): string {
 export function joinContentBlocks(entry: TranscriptEntry): string {
   const parts: string[] = [];
   for (const block of entry.content) {
+    if (block.type === "skill" && "name" in block && typeof block.name === "string") {
+      parts.push(skillInvocationPreview(block.name));
+      continue;
+    }
     if (block.type === "text" && "text" in block) parts.push((block as TextBlock).text);
     if (block.type === "thinking") continue;
     if (block.type === "toolCall" && "name" in block) {

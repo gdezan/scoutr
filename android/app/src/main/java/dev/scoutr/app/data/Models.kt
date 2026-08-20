@@ -283,6 +283,7 @@ data class UsageWindow(
 fun entryText(content: List<ContentBlock>): String {
     val parts = content.mapNotNull { block ->
         when (block.type) {
+            "skill" -> block.name?.let { skillInvocationPreview(it) }
             "text" -> block.text
             "toolCall" -> "[${block.name}]"
             else -> null

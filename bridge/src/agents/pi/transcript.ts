@@ -16,7 +16,7 @@ import {
   type TranscriptEntry,
   type TranscriptReadOpts,
 } from "../../transcript.js";
-
+import { expandSkillInvocationContent } from "../../skill-invocation.js";
 /**
  * The pi JSONL (version 3) parser. Every pi consumer — chat, catalog, board —
  * reads through here. `Transcript` is deliberately format-neutral, so the
@@ -109,14 +109,16 @@ function parseMessageRecord(record: Record<string, unknown>): TranscriptEntry | 
   const msg = message as Record<string, unknown>;
 
   const role = typeof msg.role === "string" ? msg.role : "unknown";
+  const content = role === "user"
+    ? expandSkillInvocationContent(normalizeContent(msg.content))
+    : normalizeContent(msg.content);
   const entry: TranscriptEntry = {
     entryId,
     parentId,
     timestamp,
     role,
-    content: normalizeContent(msg.content),
+    content,
   };
-
   if (typeof msg.toolCallId === "string") entry.toolCallId = msg.toolCallId;
   if (typeof msg.toolName === "string") entry.toolName = msg.toolName;
   if (typeof msg.isError === "boolean") entry.isError = msg.isError;

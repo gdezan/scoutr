@@ -139,10 +139,14 @@ import dev.scoutr.app.data.SessionEntry
 import dev.scoutr.app.data.QuestionEntry
 import dev.scoutr.app.data.FileListing
 import dev.scoutr.app.data.SlashCommandInfo
+import dev.scoutr.app.data.SkillInvocation
 import dev.scoutr.app.data.entryText
+import dev.scoutr.app.data.parseSlashSkillCommand
+import dev.scoutr.app.data.userPromptPresentation
 import dev.scoutr.app.ui.imeOrNavigationBarsPadding
 import dev.scoutr.app.ui.components.AssistantMarkdown
 import dev.scoutr.app.ui.components.PressTintSurface
+import dev.scoutr.app.ui.components.SkillInvocationChip
 import dev.scoutr.app.ui.components.AskCard
 import dev.scoutr.app.ui.components.AskAnswerBubble
 import dev.scoutr.app.ui.components.WorkingIndicator
@@ -1132,34 +1136,16 @@ private fun MessageRow(
 
 @Composable
 private fun UserBubble(entry: SessionEntry, modifier: Modifier = Modifier) {
-    val text = entryText(entry.content)
-    if (text.isBlank()) return
-    Row(modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-        Box(
-            Modifier
-                .padding(end = 4.dp)
-                .widthIn(max = 288.dp)
-                .background(
-                    MaterialTheme.colorScheme.surfaceContainerHighest,
-                    RoundedCornerShape(4.dp),
-                )
-                .padding(horizontal = 14.dp, vertical = 10.dp)
-                .testTag("user_bubble"),
-        ) {
-            SelectionContainer {
-                // What you said sits a step under what the agent answered: 14/21
-                // against the transcript's 15/23 (§7a).
-                Text(
-                    text,
-                    style = MaterialTheme.typography.bodyLarge.copy(
-                        fontSize = 14.sp,
-                        lineHeight = 21.sp,
-                    ),
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
-            }
-        }
-    }
+    val presentation = userPromptPresentation(entry.content)
+    if (presentation.skill == null && presentation.text.isBlank()) return
+    UserTurn(
+        skill = presentation.skill,
+        text = presentation.text,
+        bubbleTestTag = "user_bubble",
+        bubbleShape = RoundedCornerShape(4.dp),
+        selectable = true,
+        modifier = modifier,
+    )
 }
 
 @Composable
@@ -1168,39 +1154,80 @@ private fun PendingUserBubble(
     onRetry: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val slash = parseSlashSkillCommand(message.text)
+    val skill = slash?.let { SkillInvocation(name = it.first) }
+    val text = slash?.second ?: message.text
+    UserTurn(
+        skill = skill,
+        text = text,
+        bubbleTestTag = "pending_user_bubble",
+        bubbleShape = RoundedCornerShape(8.dp),
+        selectable = false,
+        modifier = modifier,
+    ) {
+        when (message.state) {
+            MessageDeliveryState.SENT -> Unit
+            MessageDeliveryState.QUEUED -> Row(
+                modifier = Modifier.padding(end = 8.dp, top = 2.dp).testTag("pending_message_queued"),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Text("Queued", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            MessageDeliveryState.FAILED -> TextButton(
+                onClick = onRetry,
+                modifier = Modifier.testTag("pending_message_failed"),
+            ) {
+                Text("Not sent · Retry", color = MaterialTheme.colorScheme.error)
+            }
+        }
+    }
+}
+
+@Composable
+private fun UserTurn(
+    skill: SkillInvocation?,
+    text: String,
+    bubbleTestTag: String,
+    bubbleShape: RoundedCornerShape,
+    selectable: Boolean,
+    modifier: Modifier = Modifier,
+    footer: @Composable () -> Unit = {},
+) {
     Row(modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
         Column(horizontalAlignment = Alignment.End) {
-            Box(
-                Modifier
-                    .padding(end = 4.dp)
-                    .widthIn(max = 288.dp)
-                    .background(
-                        MaterialTheme.colorScheme.surfaceContainerHighest,
-                        RoundedCornerShape(8.dp),
+            if (skill != null) {
+                SkillInvocationChip(
+                    skill,
+                    Modifier.padding(end = 4.dp, bottom = if (text.isNotBlank()) 6.dp else 0.dp),
+                )
+            }
+            if (text.isNotBlank()) {
+                Box(
+                    Modifier
+                        .padding(end = 4.dp)
+                        .widthIn(max = 288.dp)
+                        .background(
+                            MaterialTheme.colorScheme.surfaceContainerHighest,
+                            bubbleShape,
+                        )
+                        .padding(horizontal = 14.dp, vertical = 10.dp)
+                        .testTag(bubbleTestTag),
+                ) {
+                    val style = MaterialTheme.typography.bodyLarge.copy(
+                        fontSize = 14.sp,
+                        lineHeight = 21.sp,
                     )
-                    .padding(horizontal = 14.dp, vertical = 10.dp)
-                    .testTag("pending_user_bubble"),
-            ) {
-                Text(message.text, color = MaterialTheme.colorScheme.onSurface)
-            }
-            when (message.state) {
-                // Accepted by the bridge: the row stays until the transcript
-                // echoes it, but it must not keep claiming to be queued.
-                MessageDeliveryState.SENT -> Unit
-                MessageDeliveryState.QUEUED -> Row(
-                    modifier = Modifier.padding(end = 8.dp, top = 2.dp).testTag("pending_message_queued"),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    Text("Queued", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-                MessageDeliveryState.FAILED -> TextButton(
-                    onClick = onRetry,
-                    modifier = Modifier.testTag("pending_message_failed"),
-                ) {
-                    Text("Not sent · Retry", color = MaterialTheme.colorScheme.error)
+                    if (selectable) {
+                        SelectionContainer {
+                            Text(text, style = style, color = MaterialTheme.colorScheme.onSurface)
+                        }
+                    } else {
+                        Text(text, style = style, color = MaterialTheme.colorScheme.onSurface)
+                    }
                 }
             }
+            footer()
         }
     }
 }

@@ -11,7 +11,8 @@ import dev.scoutr.app.data.ModelProvider
 import dev.scoutr.app.data.FileListing
 import dev.scoutr.app.data.SessionEntry
 import dev.scoutr.app.data.SlashCommandInfo
-import dev.scoutr.app.data.entryText
+import dev.scoutr.app.data.reconstructUserPrompt
+import dev.scoutr.app.data.userMessageEchoKey
 import dev.scoutr.app.net.PerformanceCounters
 import dev.scoutr.app.net.AskAnswer
 import dev.scoutr.app.net.ScoutrApi
@@ -254,11 +255,12 @@ private fun keepPendingMessage(
     incomingQuestions: List<QuestionEntry>,
     previouslyAnsweredIds: Set<String>,
 ): Boolean {
-    // entryText collapses whitespace runs, so the typed text must be
-    // normalized the same way or multi-space/newline messages never reconcile.
-    val normalizedText = message.text.replace(Regex("\\s+"), " ").trim()
+    // `/skill:name args` and a peeled skill block share one echo key.
+    // Whitespace runs are collapsed so multi-space/newline messages still reconcile.
+    val normalizedText = userMessageEchoKey(message.text)
     val match = freshUsers.indexOfFirst { entry ->
-        entry.entryId !in message.baselineIds && entryText(entry.content) == normalizedText
+        entry.entryId !in message.baselineIds &&
+            userMessageEchoKey(entry.content) == normalizedText
     }
     if (match >= 0) {
         freshUsers.removeAt(match)
@@ -357,7 +359,7 @@ data class ChatUiState(
     val lastUserMessage: String?
         get() = pendingMessages.lastOrNull()?.text
             ?: entries.asReversed().firstOrNull { it.role == "user" }
-                ?.let { entryText(it.content) }
+                ?.let { reconstructUserPrompt(it.content) }
 
     /**
      * Matches the picker key (`provider/id`) first — pi reports its own model

@@ -43,4 +43,21 @@ class NewSessionFormatTest {
         )
         assertNull(state.lastUserMessage)
     }
+
+    @Test
+    fun lastUserMessageReconstructsSkillTurnAsSlashCommand() {
+        val state = ChatUiState(
+            entries = listOf(
+                SessionEntry(
+                    "1",
+                    role = "user",
+                    content = listOf(
+                        ContentBlock(type = "skill", name = "grill-me", text = "body"),
+                        ContentBlock(type = "text", text = "on the preferred approach"),
+                    ),
+                ),
+            ),
+        )
+        assertEquals("/skill:grill-me on the preferred approach", state.lastUserMessage)
+    }
 }
