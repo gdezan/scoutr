@@ -1,5 +1,6 @@
 import { appendFile } from "node:fs/promises";
 import { randomBytes } from "node:crypto";
+import * as v from "valibot";
 import {
   fileEditFromAnchoredDiff,
   fileEditFromUnifiedPatch,
@@ -10,13 +11,13 @@ import {
   joinContentBlocks,
   MAX_SESSION_TITLE_LENGTH,
   type FileEditBlock,
-  type TextBlock,
-  type ThinkingBlock,
+  type ContentBlock,
   type Transcript,
   type TranscriptEntry,
   type TranscriptReadOpts,
 } from "../../transcript.js";
 import { expandSkillInvocationContent } from "../../skill-invocation.js";
+
 /**
  * The pi JSONL (version 3) parser. Every pi consumer — chat, catalog, board —
  * reads through here. `Transcript` is deliberately format-neutral, so the
@@ -29,7 +30,97 @@ import { expandSkillInvocationContent } from "../../skill-invocation.js";
  *   {"type":"model_change","id":"...","parentId":null,"timestamp":"...","provider":"...","modelId":"..."}
  *   {"type":"thinking_level_change",...}
  *   {"type":"message","id":"...","parentId":"...","timestamp":"...","message":{role, content, ...}}
+ *
+ * Every record is decoded at this single I/O boundary with valibot schemas,
+ * so downstream code branches on typed domain values instead of narrowing
+ * `unknown` with `typeof`.
  */
+
+// ── decode schemas ──────────────────────────────────────────────────────
+
+const blockSchema = v.looseObject({ type: v.string() });
+type DecodedBlock = v.InferOutput<typeof blockSchema>;
+
+const contentSchema = v.union([v.string(), v.array(blockSchema)]);
+
+const usageSchema = v.looseObject({
+  input: v.optional(v.number()),
+  output: v.optional(v.number()),
+  cacheRead: v.optional(v.number()),
+  cacheWrite: v.optional(v.number()),
+  totalTokens: v.optional(v.number()),
+  cost: v.optional(v.record(v.string(), v.number())),
+});
+
+const messageSchema = v.looseObject({
+  role: v.optional(v.string()),
+  content: v.optional(contentSchema),
+  toolCallId: v.optional(v.string()),
+  toolName: v.optional(v.string()),
+  isError: v.optional(v.boolean()),
+  details: v.optional(v.record(v.string(), v.unknown())),
+  stopReason: v.optional(v.string()),
+  model: v.optional(v.string()),
+  usage: v.optional(usageSchema),
+});
+
+const fileEditDetailsSchema = v.looseObject({
+  patch: v.optional(v.string()),
+  diff: v.optional(v.string()),
+  snapshotId: v.optional(v.string()),
+});
+
+const sessionRecord = v.looseObject({
+  type: v.literal("session"),
+  version: v.optional(v.number()),
+  id: v.optional(v.string()),
+  cwd: v.optional(v.string()),
+  timestamp: v.optional(v.string()),
+});
+
+const sessionInfoRecord = v.looseObject({
+  type: v.literal("session_info"),
+  id: v.optional(v.string()),
+  parentId: v.optional(v.nullable(v.string())),
+  timestamp: v.optional(v.string()),
+  name: v.optional(v.string()),
+});
+
+const modelChangeRecord = v.looseObject({
+  type: v.literal("model_change"),
+  id: v.optional(v.string()),
+  parentId: v.optional(v.nullable(v.string())),
+  timestamp: v.optional(v.string()),
+  provider: v.optional(v.string()),
+  modelId: v.optional(v.string()),
+});
+
+const thinkingLevelRecord = v.looseObject({
+  type: v.literal("thinking_level_change"),
+  id: v.optional(v.string()),
+  parentId: v.optional(v.nullable(v.string())),
+  timestamp: v.optional(v.string()),
+  thinkingLevel: v.optional(v.string()),
+});
+
+const piMessageRecord = v.looseObject({
+  type: v.literal("message"),
+  id: v.optional(v.string()),
+  parentId: v.optional(v.nullable(v.string())),
+  timestamp: v.optional(v.string()),
+  message: v.optional(messageSchema),
+});
+
+const piRecord = v.variant("type", [
+  sessionRecord,
+  sessionInfoRecord,
+  modelChangeRecord,
+  thinkingLevelRecord,
+  piMessageRecord,
+]);
+
+type PiRecord = v.InferOutput<typeof piRecord>;
+
 export function parsePiTranscript(text: string, opts: TranscriptReadOpts = {}): Transcript {
   const transcript: Transcript = {
     version: 3,
@@ -48,49 +139,49 @@ export function parsePiTranscript(text: string, opts: TranscriptReadOpts = {}): 
   for (const rawLine of text.split("\n")) {
     const line = rawLine.trim();
     if (line.length === 0) continue;
-    let record: Record<string, unknown>;
+    let raw: unknown;
     try {
-      record = JSON.parse(line) as Record<string, unknown>;
+      raw = JSON.parse(line);
     } catch {
       continue; // tolerate stray lines in a live-growing file
     }
+    const parsed = v.safeParse(piRecord, raw);
+    if (!parsed.success) continue; // custom or malformed records are not transcript entries
+    const rec: PiRecord = parsed.output;
 
-    const type = record.type;
-    if (type === "session") {
-      transcript.version = (record.version as number) ?? transcript.version;
-      transcript.id = (record.id as string) ?? "";
-      transcript.cwd = (record.cwd as string) ?? "";
-      transcript.timestamp = (record.timestamp as string) ?? "";
-      continue;
-    }
-    if (type === "session_info") {
-      if (typeof record.name === "string") {
-        transcript.title = collapseTranscriptText(record.name).slice(0, MAX_SESSION_TITLE_LENGTH) || null;
-      }
-      continue;
-    }
-    if (type === "message") {
-      const entry = parseMessageRecord(record);
-      if (entry) {
-        if (keepEntries) transcript.entries.push(entry);
-        transcript.lastEntryId = entry.entryId;
-        if (!transcript.preview && entry.role === "user") {
-          transcript.preview = collapseTranscriptText(joinContentBlocks(entry)).slice(0, 240);
+    switch (rec.type) {
+      case "session":
+        transcript.version = rec.version ?? transcript.version;
+        transcript.id = rec.id ?? "";
+        transcript.cwd = rec.cwd ?? "";
+        transcript.timestamp = rec.timestamp ?? "";
+        break;
+      case "session_info":
+        if (rec.name) {
+          transcript.title = collapseTranscriptText(rec.name).slice(0, MAX_SESSION_TITLE_LENGTH) || null;
         }
+        break;
+      case "model_change": {
+        const provider = rec.provider ?? "";
+        const modelId = rec.modelId ?? "";
+        transcript.model = provider && modelId ? `${provider}/${modelId}` : null;
+        break;
       }
-      continue;
+      case "thinking_level_change":
+        transcript.thinkingLevel = rec.thinkingLevel ?? null;
+        break;
+      case "message": {
+        const entry = parseMessageRecord(rec);
+        if (entry) {
+          if (keepEntries) transcript.entries.push(entry);
+          transcript.lastEntryId = entry.entryId;
+          if (!transcript.preview && entry.role === "user") {
+            transcript.preview = collapseTranscriptText(joinContentBlocks(entry)).slice(0, 240);
+          }
+        }
+        break;
+      }
     }
-    if (type === "model_change") {
-      const provider = typeof record.provider === "string" ? record.provider : "";
-      const modelId = typeof record.modelId === "string" ? record.modelId : "";
-      transcript.model = provider && modelId ? `${provider}/${modelId}` : null;
-      continue;
-    }
-    if (type === "thinking_level_change") {
-      transcript.thinkingLevel = typeof record.thinkingLevel === "string" ? record.thinkingLevel : null;
-      continue;
-    }
-    // Custom records are handled by feature-specific parsers, not the transcript.
   }
 
   if (opts.tail !== undefined && transcript.entries.length > opts.tail) {
@@ -99,46 +190,37 @@ export function parsePiTranscript(text: string, opts: TranscriptReadOpts = {}): 
   return transcript;
 }
 
-function parseMessageRecord(record: Record<string, unknown>): TranscriptEntry | null {
-  const entryId = typeof record.id === "string" ? record.id : "";
+function parseMessageRecord(rec: v.InferOutput<typeof piMessageRecord>): TranscriptEntry | null {
+  const entryId = rec.id ?? "";
   if (!entryId) return null;
-  const parentId = typeof record.parentId === "string" ? record.parentId : null;
-  const timestamp = typeof record.timestamp === "string" ? record.timestamp : "";
-  const message = record.message;
-  if (!message || typeof message !== "object" || Array.isArray(message)) return null;
-  const msg = message as Record<string, unknown>;
+  const parentId = rec.parentId ?? null;
+  const timestamp = rec.timestamp ?? "";
+  const message = rec.message;
+  if (!message) return null;
 
-  const role = typeof msg.role === "string" ? msg.role : "unknown";
+  const role = message.role ?? "unknown";
   const content = role === "user"
-    ? expandSkillInvocationContent(normalizeContent(msg.content))
-    : normalizeContent(msg.content);
-  const entry: TranscriptEntry = {
-    entryId,
-    parentId,
-    timestamp,
-    role,
-    content,
-  };
-  if (typeof msg.toolCallId === "string") entry.toolCallId = msg.toolCallId;
-  if (typeof msg.toolName === "string") entry.toolName = msg.toolName;
-  if (typeof msg.isError === "boolean") entry.isError = msg.isError;
-  if (msg.details && typeof msg.details === "object") {
-    entry.details = msg.details;
-    const edit = fileEditFromDetails(msg.details as Record<string, unknown>);
+    ? expandSkillInvocationContent(normalizeContent(message.content ?? []))
+    : normalizeContent(message.content ?? []);
+  const entry: TranscriptEntry = { entryId, parentId, timestamp, role, content };
+
+  if (message.toolCallId) entry.toolCallId = message.toolCallId;
+  if (message.toolName) entry.toolName = message.toolName;
+  if (message.isError !== undefined) entry.isError = message.isError;
+  if (message.details) {
+    entry.details = message.details;
+    const edit = fileEditFromDetails(message.details);
     if (edit) entry.content.push(edit);
   }
-  if (typeof msg.stopReason === "string") entry.stopReason = msg.stopReason;
-  if (typeof msg.model === "string") entry.model = msg.model;
-  if (msg.usage && typeof msg.usage === "object") {
-    const usage = msg.usage as Record<string, unknown>;
+  if (message.stopReason) entry.stopReason = message.stopReason;
+  if (message.model) entry.model = message.model;
+  if (message.usage) {
     entry.usage = {};
     for (const key of ["input", "output", "cacheRead", "cacheWrite", "totalTokens"] as const) {
-      const value = usage[key];
-      if (typeof value === "number") entry.usage[key] = value;
+      const value = message.usage[key];
+      if (value !== undefined) entry.usage[key] = value;
     }
-    if (usage.cost && typeof usage.cost === "object") {
-      entry.usage.cost = usage.cost as Record<string, number>;
-    }
+    if (message.usage.cost) entry.usage.cost = message.usage.cost;
   }
   return entry;
 }
@@ -149,42 +231,39 @@ function parseMessageRecord(record: Record<string, unknown>): TranscriptEntry | 
  * and takes its path from `details.snapshotId`. Any tool that writes either
  * field qualifies, extensions included — there is no tool-name list.
  */
-function fileEditFromDetails(details: Record<string, unknown>): FileEditBlock | null {
-  if (typeof details.patch === "string" && details.patch.trim()) {
+function fileEditFromDetails(details: v.InferOutput<typeof fileEditDetailsSchema>): FileEditBlock | null {
+  if (details.patch && details.patch.trim()) {
     const edit = fileEditFromUnifiedPatch(details.patch);
     if (edit) return edit;
   }
-  if (typeof details.diff === "string" && details.diff.trim()) {
+  if (details.diff && details.diff.trim()) {
     return fileEditFromAnchoredDiff(details.diff, pathFromSnapshotId(details.snapshotId));
   }
   return null;
 }
 
-function normalizeContent(content: unknown): TranscriptEntry["content"] {
-  if (typeof content === "string") {
-    return content.length > 0 ? [{ type: "text", text: content }] : [];
+function normalizeContent(content: string | DecodedBlock[]): ContentBlock[] {
+  if (Array.isArray(content)) return content.map(normalizeBlock);
+  return content.length > 0 ? [{ type: "text", text: content }] : [];
+}
+
+function normalizeBlock(block: DecodedBlock): ContentBlock {
+  const type = block.type;
+  if (type === "text") {
+    return { type: "text", text: String(block.text ?? "") };
   }
-  if (!Array.isArray(content)) return [];
-  return content
-    .filter((block): block is Record<string, unknown> => !!block && typeof block === "object")
-    .map((block) => {
-      const type = typeof block.type === "string" ? block.type : "unknown";
-      if (type === "text" && typeof block.text === "string") {
-        return { type, text: block.text } as TextBlock;
-      }
-      if (type === "thinking" && typeof block.thinking === "string") {
-        return { type, thinking: block.thinking } as ThinkingBlock;
-      }
-      if (type === "toolCall") {
-        return {
-          type,
-          id: typeof block.id === "string" ? block.id : "",
-          name: typeof block.name === "string" ? block.name : "",
-          arguments: block.arguments,
-        };
-      }
-      return block as TranscriptEntry["content"][number];
-    });
+  if (type === "thinking") {
+    return { type: "thinking", thinking: String(block.thinking ?? "") };
+  }
+  if (type === "toolCall") {
+    return {
+      type: "toolCall",
+      id: String(block.id ?? ""),
+      name: String(block.name ?? ""),
+      arguments: block.arguments,
+    };
+  }
+  return block;
 }
 
 /**

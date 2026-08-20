@@ -99,9 +99,9 @@ export async function installClaudeHook(
   } catch {
     settings = {}; // no settings file yet, or unreadable — write a fresh one
   }
-  const hooks = (settings.hooks && typeof settings.hooks === "object" && !Array.isArray(settings.hooks)
-    ? settings.hooks
-    : {}) as Record<string, unknown>;
+  const hooks = settings.hooks && typeof settings.hooks === "object" && !Array.isArray(settings.hooks)
+    ? (settings.hooks as Record<string, unknown>)
+    : {};
 
   let changed = false;
   for (const event of ["PreToolUse", "PostToolUse"]) {

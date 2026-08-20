@@ -9,6 +9,7 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
+    "lint": "oxlint --config oxlint.config.ts src test",
     "build": "tsc",
     "deploy": "npm run build && node ../scripts/bridge-service.mjs restart && npm run check:deployed",
     "check:deployed": "node scripts/check-deployed.mjs",
@@ -22,12 +23,15 @@
     "@earendil-works/pi-coding-agent": "0.84.1",
     "google-auth-library": "^11.0.2",
     "qrcode-terminal": "^0.12.0",
+    "valibot": "^1.4.2",
     "ws": "^8.18.0"
   },
   "devDependencies": {
+    "@oxlint/plugins": "^1.79.0",
     "@types/node": "^24.0.0",
     "@types/qrcode-terminal": "^0.12.2",
     "@types/ws": "^8.5.0",
+    "oxlint": "^1.79.0",
     "tsx": "^4.19.0",
     "typescript": "^5.6.0"
   },

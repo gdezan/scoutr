@@ -9,7 +9,7 @@ import { JsonDeviceRegistry } from "../src/push/devices.js";
 /** Capture every FCM request without touching the network. */
 function stubFetch(respond: (call: number) => { status: number; body?: string }) {
   const calls: Array<{ url: string; authorization: string; body: unknown }> = [];
-  const fetchImpl = (async (url: string | URL | Request, init?: RequestInit) => {
+  const fetchImpl: typeof fetch = async (url, init) => {
     const headers = new Headers(init?.headers);
     calls.push({
       url: String(url),
@@ -18,7 +18,7 @@ function stubFetch(respond: (call: number) => { status: number; body?: string })
     });
     const { status, body = "{}" } = respond(calls.length);
     return new Response(body, { status });
-  }) as unknown as typeof fetch;
+  };
   return { fetchImpl, calls };
 }
 

@@ -70,7 +70,7 @@ function requirePaneCount(value: unknown): number {
 }
 
 async function terminalHierarchy(ctx: RouteContext): Promise<RouteResult> {
-  const body = ctx.body as unknown as Record<string, unknown>;
+  const body = ctx.body as Record<string, unknown>;
   const operation = body.operation;
   if (typeof operation !== "string" || !OPERATIONS.has(operation)) {
     badRequest(`unknown hierarchy operation: ${String(operation)}`);

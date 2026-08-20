@@ -91,12 +91,15 @@ async function loadCommandsCatalog(
   });
   await resourceLoader.reload();
 
-  const promptCommands: PiCommandInfo[] = resourceLoader.getPrompts().prompts.map((prompt) => ({
-    name: prompt.name,
-    description: prompt.description,
-    source: "prompt",
-    ...(prompt.argumentHint ? { argumentHint: prompt.argumentHint } : {}),
-  }));
+  const promptCommands: PiCommandInfo[] = resourceLoader.getPrompts().prompts.map((prompt) => {
+    const command: PiCommandInfo = {
+      name: prompt.name,
+      description: prompt.description,
+      source: "prompt",
+    };
+    if (prompt.argumentHint) command.argumentHint = prompt.argumentHint;
+    return command;
+  });
   const builtinNames = new Set(BUILTIN_COMMANDS.map((command) => command.name));
   const extensionCommands = resolveExtensionCommands(resourceLoader.getExtensions().extensions)
     .filter((command) => !builtinNames.has(command.command.name))

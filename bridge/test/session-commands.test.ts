@@ -257,7 +257,7 @@ describe("shared session command operations", () => {
 
   test("a pane missing from the live topology is a 404 on every pane-addressed operation", async () => {
     const { herdr, deps } = makeDeps();
-    (deps.feed as unknown as { setSnapshot(next: SessionSnapshot | null): void }).setSnapshot({
+    deps.feed.setSnapshot({
       ...makeSnapshot(null),
       panes: [],
     });
@@ -271,7 +271,7 @@ describe("shared session command operations", () => {
 
   test("steer skips the pane check because agent.prompt accepts non-pane targets", async () => {
     const { herdr, deps } = makeDeps();
-    (deps.feed as unknown as { setSnapshot(next: SessionSnapshot | null): void }).setSnapshot({
+    deps.feed.setSnapshot({
       ...makeSnapshot(null),
       panes: [],
     });
@@ -283,7 +283,7 @@ describe("shared session command operations", () => {
 
   test("a null snapshot leaves herdr the judge instead of 404ing every command", async () => {
     const { herdr, deps } = makeDeps();
-    (deps.feed as unknown as { setSnapshot(next: SessionSnapshot | null): void }).setSnapshot(null);
+    deps.feed.setSnapshot(null);
     await runSlashCommand(deps, "p1", "/compact");
     assert.deepEqual(herdr.sent, [
       { method: "paneSendInput", params: { pane_id: "p1", text: "/compact", keys: ["Enter"] } },

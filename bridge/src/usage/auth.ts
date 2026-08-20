@@ -134,12 +134,13 @@ export async function persistOAuthAuth(
 ): Promise<void> {
   await updateJsonFile(path, (root) => {
     const entry = recordOf(root[providerKey]) ?? { type: "oauth" };
-    root[providerKey] = {
+    const result: OAuthAuth = {
       ...entry,
       access: auth.access,
-      ...(auth.refresh ? { refresh: auth.refresh } : {}),
-      ...(auth.expires !== undefined ? { expires: auth.expires } : {}),
     };
+    if (auth.refresh) result.refresh = auth.refresh;
+    if (auth.expires !== undefined) result.expires = auth.expires;
+    root[providerKey] = result;
     return root;
   });
 }

@@ -102,7 +102,8 @@ export async function probeTerminalCapability(
   target?: string,
 ): Promise<TerminalCapability> {
   const { bin, socketPath, handshakeTimeoutMs, env } = options;
-  const childEnv = { ...process.env, ...(socketPath ? { HERDR_SOCKET_PATH: socketPath } : {}), ...env };
+  const childEnv = { ...process.env, ...env };
+  if (socketPath) childEnv.HERDR_SOCKET_PATH = socketPath;
 
   // 1. Version check.
   const versionRun = await runBounded(bin, ["--version"], childEnv);

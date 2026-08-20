@@ -234,18 +234,16 @@ export class HerdrTerminalLauncher implements TerminalLauncher {
   constructor(options: HerdrTerminalLauncherOptions = {}) {
     this.bin = options.bin?.trim() || process.env.HERDR_BIN?.trim() || "herdr";
     this.socketPath = options.socketPath?.trim() || undefined;
-    this.childEnv = {
-      ...process.env,
-      ...(this.socketPath ? { HERDR_SOCKET_PATH: this.socketPath } : {}),
-      ...options.env,
-    };
-    this.limits = {
-      ...TERMINAL_LIMITS,
-      ...(options.handshakeTimeoutMs !== undefined ? { handshakeTimeoutMs: options.handshakeTimeoutMs } : {}),
-      ...(options.releaseGraceMs !== undefined ? { releaseGraceMs: options.releaseGraceMs } : {}),
-      ...(options.termGraceMs !== undefined ? { termGraceMs: options.termGraceMs } : {}),
-      ...(options.scrollbackTimeoutMs !== undefined ? { scrollbackTimeoutMs: options.scrollbackTimeoutMs } : {}),
-    } as typeof TERMINAL_LIMITS;
+    this.childEnv = { ...process.env, ...options.env };
+    if (this.socketPath) this.childEnv.HERDR_SOCKET_PATH = this.socketPath;
+    // TERMINAL_LIMITS is `as const`, so clone as a mutable record before
+    // applying optional overrides.
+    const limits: Record<string, number> = { ...TERMINAL_LIMITS };
+    if (options.handshakeTimeoutMs !== undefined) limits.handshakeTimeoutMs = options.handshakeTimeoutMs;
+    if (options.releaseGraceMs !== undefined) limits.releaseGraceMs = options.releaseGraceMs;
+    if (options.termGraceMs !== undefined) limits.termGraceMs = options.termGraceMs;
+    if (options.scrollbackTimeoutMs !== undefined) limits.scrollbackTimeoutMs = options.scrollbackTimeoutMs;
+    this.limits = limits as typeof TERMINAL_LIMITS;
   }
 
   probe(target?: string): Promise<TerminalCapability> {

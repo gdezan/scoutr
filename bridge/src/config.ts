@@ -62,7 +62,9 @@ export function normalizeExposure(parsed: Record<string, unknown>, path: string)
   const raw = parsed.exposure;
   if (raw === undefined || raw === null) {
     const legacy = typeof parsed.publicHost === "string" && parsed.publicHost ? parsed.publicHost : undefined;
-    return { kind: "tailscale", ...(legacy ? { publicUrl: legacy } : {}) };
+    const result: ExposureConfig = { kind: "tailscale" };
+    if (legacy) result.publicUrl = legacy;
+    return result;
   }
   if (typeof raw !== "object" || Array.isArray(raw)) {
     throw new ConfigError(`invalid "exposure" in ${path}: expected an object like {"kind":"tailscale"}`);
@@ -75,7 +77,9 @@ export function normalizeExposure(parsed: Record<string, unknown>, path: string)
     );
   }
   const publicUrl = typeof exposure.publicUrl === "string" && exposure.publicUrl ? exposure.publicUrl : undefined;
-  return { kind: kind as ExposureKind, ...(publicUrl ? { publicUrl } : {}) };
+  const result: ExposureConfig = { kind: kind as ExposureKind };
+  if (publicUrl) result.publicUrl = publicUrl;
+  return result;
 }
 
 /** Filename of the conventional FCM service-account key next to config.json. */

@@ -142,15 +142,14 @@ async function fetchCodexUsage({ store, authPath }: UsageContext): Promise<Usage
   if (!auth) throw new Error("openai-codex credentials are not configured in pi's auth.json");
   if (isExpiring(auth.expires)) auth = await refreshCodexAccess(authPath, auth);
 
-  const requestUsage = (signal: AbortSignal, access: string) =>
-    fetch(CODEX_USAGE_URL, {
-      signal,
-      headers: {
-        accept: "application/json",
-        authorization: `Bearer ${access}`,
-        ...(auth!.accountId ? { "chatgpt-account-id": auth!.accountId } : {}),
-      },
-    });
+  const requestUsage = (signal: AbortSignal, access: string) => {
+    const headers: Record<string, string> = {
+      accept: "application/json",
+      authorization: `Bearer ${access}`,
+    };
+    if (auth!.accountId) headers["chatgpt-account-id"] = auth!.accountId;
+    return fetch(CODEX_USAGE_URL, { signal, headers });
+  };
 
   const body = await withTimeout(async (signal) => {
     let response = await requestUsage(signal, auth!.access);

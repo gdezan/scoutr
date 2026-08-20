@@ -184,12 +184,13 @@ async function refreshClaudeCredentials(
 
   await updateJsonFile(path, (root) => {
     const oauth = recordOf(root.claudeAiOauth) ?? {};
-    root.claudeAiOauth = {
+    const claudeOauth: Record<string, unknown> = {
       ...oauth,
       accessToken: refreshed.access,
-      ...(refreshed.refresh ? { refreshToken: refreshed.refresh } : {}),
-      expiresAt: refreshed.expires,
     };
+    if (refreshed.refresh) claudeOauth.refreshToken = refreshed.refresh;
+    claudeOauth.expiresAt = refreshed.expires;
+    root.claudeAiOauth = claudeOauth;
     return root;
   });
 
