@@ -227,7 +227,7 @@ class HistoryScreenTest {
 
     private fun selectScope(label: String) {
         compose.onNodeWithTag("history_scope_filter").performClick()
-        compose.onNodeWithText(label).performClick()
+        compose.onNodeWithTag("history_scope_$label").performClick()
     }
 
     @Test
@@ -255,6 +255,8 @@ class HistoryScreenTest {
             compose.onAllNodes(androidx.compose.ui.test.hasTestTag("history_row_active-a")).fetchSemanticsNodes().isNotEmpty()
         }
 
+        compose.onNodeWithTag("history_row_done-b").assertIsDisplayed()
+        compose.onNodeWithTag("history_row_done-c").assertIsDisplayed()
         selectScope("Completed")
         compose.waitUntil(5_000) {
             compose.onAllNodes(androidx.compose.ui.test.hasTestTag("history_row_done-b")).fetchSemanticsNodes().isNotEmpty()
@@ -313,7 +315,7 @@ class HistoryScreenTest {
             compose.onAllNodes(androidx.compose.ui.test.hasTestTag("history_row_abc")).fetchSemanticsNodes().isNotEmpty()
         }
         compose.onNodeWithTag("history_scope_filter").performClick()
-        listOf("Active", "Completed", "Pinned", "Archived").forEach { scope ->
+        listOf("All", "Active", "Completed", "Pinned", "Archived").forEach { scope ->
             assertTrue(compose.onAllNodesWithText(scope).fetchSemanticsNodes().isNotEmpty())
         }
     }
@@ -490,7 +492,7 @@ class HistoryScreenTest {
 
         selectScope("Archived")
         compose.onNodeWithTag("history_empty").assertIsDisplayed()
-        selectScope("Active")
+        selectScope("All")
         compose.waitUntil(5_000) { firstVisibleSessionPath(listState) == activeAnchor }
     }
 

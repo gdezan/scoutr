@@ -25,7 +25,9 @@ data class HistoryItem(
     val archived: Boolean,
 )
 
+/** Which sessions the Sessions tab shows. Starts on All so today's work is visible without an Active-only cut. */
 enum class HistoryScope(val label: String) {
+    All("All"),
     Active("Active"),
     Completed("Completed"),
     Pinned("Pinned"),

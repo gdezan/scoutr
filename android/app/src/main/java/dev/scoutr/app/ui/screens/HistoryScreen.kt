@@ -135,7 +135,7 @@ fun HistoryScreen(
         onStopOrDispose { viewModel.stopPolling() }
     }
 
-    var scopeFilter by rememberSaveable { mutableStateOf(HistoryScope.Active) }
+    var scopeFilter by rememberSaveable { mutableStateOf(HistoryScope.All) }
     var repoFilter by rememberSaveable { mutableStateOf("All") }
     var query by rememberSaveable { mutableStateOf("") }
     var pendingClose by remember { mutableStateOf<HistoryItem?>(null) }
@@ -342,6 +342,7 @@ private fun ScopeFilterMenu(selected: HistoryScope, onSelect: (HistoryScope) -> 
                         expanded = false
                         onSelect(candidate)
                     },
+                    modifier = Modifier.testTag("history_scope_${candidate.name}"),
                 )
             }
         }
@@ -407,6 +408,7 @@ private fun HistoryList(
         Box(Modifier.fillMaxWidth().padding(vertical = 72.dp), contentAlignment = Alignment.Center) {
             Text(
                 when (scope) {
+                    HistoryScope.All -> "No sessions"
                     HistoryScope.Active -> "No active sessions"
                     HistoryScope.Completed -> "No completed sessions"
                     HistoryScope.Pinned -> "Nothing pinned yet"
@@ -521,6 +523,7 @@ private val HistoryAnchorMapSaver = Saver<Map<String, HistoryAnchor>, List<Strin
 
 internal fun sortedHistoryItems(items: List<HistoryItem>, scope: HistoryScope, repository: String): List<HistoryItem> {
     val scoped = when (scope) {
+        HistoryScope.All -> items.filter { !it.archived }
         HistoryScope.Active -> items.filter { it.session.active && !it.archived }
         HistoryScope.Completed -> items.filter { !it.session.active && !it.archived }
         HistoryScope.Pinned -> items.filter { it.pinned }

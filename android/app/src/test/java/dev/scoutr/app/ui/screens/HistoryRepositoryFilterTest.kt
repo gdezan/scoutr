@@ -58,11 +58,13 @@ class HistoryRepositoryFilterTest {
             history("archived-a", "/workspace/a", active = false, archived = true, updatedAt = 4.0),
         )
 
+        assertEquals(listOf("active-a", "done-a"), sortedHistoryItems(items, HistoryScope.All, "/workspace/a").map { it.session.id })
         assertEquals(listOf("active-a"), sortedHistoryItems(items, HistoryScope.Active, "/workspace/a").map { it.session.id })
         assertEquals(listOf("done-a"), sortedHistoryItems(items, HistoryScope.Completed, "/workspace/a").map { it.session.id })
         assertEquals(listOf("pinned-b"), sortedHistoryItems(items, HistoryScope.Pinned, "/workspace/b").map { it.session.id })
         assertEquals(listOf("archived-a"), sortedHistoryItems(items, HistoryScope.Archived, "/workspace/a").map { it.session.id })
         assertEquals(2, sortedHistoryItems(items, HistoryScope.Completed, "All").size)
+        assertEquals(listOf("pinned-b", "active-a", "done-a"), sortedHistoryItems(items, HistoryScope.All, "All").map { it.session.id })
     }
 
     private fun history(
