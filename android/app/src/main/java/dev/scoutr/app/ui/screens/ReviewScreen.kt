@@ -90,6 +90,9 @@ import java.util.Locale
 @Composable
 fun ReviewScreen(
     viewModel: ReviewViewModel,
+    // Wide windows have no bottom bar, so the screen owns the bottom inset;
+    // compact windows leave it to ScoutrBottomBar.
+    ownsBottomInset: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     val ui by viewModel.ui.collectAsState()
@@ -128,6 +131,7 @@ fun ReviewScreen(
                 )
             }
         },
+        ownsBottomInset = ownsBottomInset,
         modifier = modifier,
     ) { inner ->
         Box(Modifier.padding(inner)) {

@@ -6,7 +6,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotSelected
 import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.filter
+import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -30,8 +33,9 @@ import org.junit.Rule
 import org.junit.Test
 
 /**
- * The wide window's session panel: the live board list in 320dp, compact rows
- * with no swipe-to-reveal, and a highlight derived from the open chat route.
+ * The wide window's session panel: navigation row, the live board list in
+ * 320dp, compact rows with no swipe-to-reveal, and a highlight derived from
+ * the open chat route.
  */
 class SessionPanelTest {
 
@@ -58,6 +62,8 @@ class SessionPanelTest {
         selection: PanelSelection? = null,
         onOpenSession: (SessionDescriptor) -> Unit = {},
         onCloseAgent: (SessionDescriptor) -> Unit = {},
+        currentRoute: String? = null,
+        onSelectDestination: (String) -> Unit = {},
     ) {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val connection = ConnectionStore(context).apply { clear() }
@@ -86,6 +92,8 @@ class SessionPanelTest {
                         onSettings = {},
                         onTerminal = {},
                         onResolveCompatibility = {},
+                        currentRoute = currentRoute,
+                        onSelectDestination = onSelectDestination,
                     )
                 }
             }
@@ -101,6 +109,23 @@ class SessionPanelTest {
         compose.onNodeWithContentDescription("NEEDS YOU 1").assertIsDisplayed()
         compose.onNodeWithTag("panel_agent_card_p1").assertIsDisplayed()
         compose.onNodeWithTag("panel_new_session").assertIsDisplayed()
+    }
+
+    @Test
+    fun thePanelRowSwitchesDestinations() {
+        // Wide navigation lives in this row; tapping a destination reports
+        // the route instead of navigating, exactly like the compact bar.
+        var picked: String? = null
+        showPanel(
+            listOf(agent("p1", "Fix billing bug")),
+            currentRoute = "board",
+            onSelectDestination = { picked = it },
+        )
+
+        compose.onNodeWithText("Usage").assertIsDisplayed()
+        compose.onAllNodesWithText("Sessions").filter(hasClickAction())[0].performClick()
+        compose.waitForIdle()
+        assertEquals("sessions", picked)
     }
 
     @Test

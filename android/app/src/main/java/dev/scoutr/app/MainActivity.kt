@@ -7,47 +7,29 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.SystemBarStyle
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.union
-import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.systemBars
-import androidx.compose.foundation.layout.windowInsetsPadding
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.BarChart
-import androidx.compose.material.icons.filled.Code
-import androidx.compose.material.icons.filled.GridView
-import androidx.compose.material.icons.filled.History
-import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.animation.core.tween
@@ -63,11 +45,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
@@ -110,6 +89,7 @@ import dev.scoutr.app.ui.screens.terminal.TerminalScreen
 
 import dev.scoutr.app.ui.nav.CHAT_ROUTE
 import dev.scoutr.app.ui.nav.Destination
+import dev.scoutr.app.ui.nav.DestinationNavRow
 import dev.scoutr.app.ui.nav.TabScaffold
 import dev.scoutr.app.ui.nav.isShellRoute
 import dev.scoutr.app.ui.components.AppTopBar
@@ -299,11 +279,9 @@ private fun ScoutrAppNav(
         // a plain Boolean threaded from the shell is also directly testable.
         val isWide = maxWidth >= WIDE_WINDOW_BREAKPOINT
         val showPanel = isWide && isShellRoute(currentRoute) && compatible
-        val showBottomBar = compatible &&
-            (currentRoute in Destination.routes || (isWide && currentRoute == CHAT_ROUTE))
-        // The one case where the shell, not the screen, owns the bottom inset:
-        // Chat under a wide window's bottom bar.
-        val shellOwnsBottomInset = isWide && showBottomBar && currentRoute == CHAT_ROUTE
+        // Compact windows only. Wide navigation lives in the session panel's
+        // destination row, so nothing sits beneath the panes.
+        val showBottomBar = !isWide && compatible && currentRoute in Destination.routes
         // Derived from the back stack, never stored. Both arguments matter: a
         // chat entered by bootstrap has no sessionKey until the route rewrites.
         val selection = if (currentRoute == CHAT_ROUTE) {
@@ -316,30 +294,19 @@ private fun ScoutrAppNav(
             null
         }
 
-        Scaffold(
-        // Status/side bars only. Bottom is either the tab bar or each
-        // screen's ime.union(navigationBars) pad — including nav bars here
-        // stacks a nav-bar-tall gap above the keyboard.
+    Scaffold(
+        // Status/side bars only. Every screen owns its own bottom inset via
+        // imeOrNavigationBarsPadding — including nav bars here stacks a
+        // nav-bar-tall gap above the keyboard.
         contentWindowInsets = WindowInsets.systemBars.only(
             WindowInsetsSides.Horizontal + WindowInsetsSides.Top,
         ),
-        // Panel, detail pane and bar ride above the keyboard together. The
-        // shell takes the larger of the IME and the nav bar, and the bar drops
-        // its own nav-bar pad below — exactly one consumer, as fix 25df24f
-        // requires, and the same rule imeOrNavigationBarsPadding applies for
-        // a screen that owns its own bottom.
-        modifier = if (shellOwnsBottomInset) {
-            Modifier.windowInsetsPadding(WindowInsets.ime.union(WindowInsets.navigationBars))
-        } else {
-            Modifier
-        },
         bottomBar = {
             if (showBottomBar) {
                 ScoutrBottomBar(
                     currentRoute = currentRoute,
                     needsYouCount = rememberNeedsYouCount(boardViewModel),
                     onSelect = onTab,
-                    insetOwnedByShell = shellOwnsBottomInset,
                 )
             }
         },
@@ -365,6 +332,8 @@ private fun ScoutrAppNav(
                 onSettings = openSettings,
                 onTerminal = openTerminal,
                 onResolveCompatibility = openSettings,
+                currentRoute = currentRoute,
+                onSelectDestination = onTab,
                 modifier = Modifier.width(SESSION_PANEL_WIDTH).fillMaxHeight(),
             )
             VerticalDivider(color = MaterialTheme.colorScheme.outlineVariant)
@@ -465,6 +434,7 @@ private fun ScoutrAppNav(
                 TabScaffold(
                     title = "Sessions",
                     onSearch = openPalette,
+                    ownsBottomInset = isWide,
                 ) { innerSessions ->
                     HistoryScreen(
                         onOpenSession = { resumed ->
@@ -530,7 +500,6 @@ private fun ScoutrAppNav(
                 ChatScreen(
                     viewModel = chatViewModel,
                     onBack = { navController.popBackStack() },
-                    bottomInsetOwnedByShell = shellOwnsBottomInset,
                     onOpenTerminal = {
                         chatUi.livePaneId?.let { navController.navigate(Routes.terminal(it)) }
                     },
@@ -597,6 +566,7 @@ private fun ScoutrAppNav(
                 )
                 TabScaffold(
                     title = "Usage",
+                    ownsBottomInset = isWide,
                 ) { innerUsage ->
                     UsageScreen(
                         viewModel = usageViewModel,
@@ -608,7 +578,7 @@ private fun ScoutrAppNav(
                 // Shared with the Sessions swipe action; see the hoisted instance
                 // above. Review owns its own TabScaffold: the header carries the
                 // repo's mono facts and the commit/overflow actions (§9c).
-                ReviewScreen(viewModel = reviewViewModel)
+                ReviewScreen(viewModel = reviewViewModel, ownsBottomInset = isWide)
             }
             composable(
                 route = Routes.TERMINAL,
@@ -731,24 +701,22 @@ private fun rememberNeedsYouCount(boardViewModel: BoardViewModel): Int =
     boardViewModel.ui.collectAsState().value.board.needsYou.size
 
 /**
- * Compact premium phone bar: three destinations, strong selected state,
- * needs-you badge, and safe-area padding. Selection is interruption-safe
- * (single-top, no queued back stacks).
+ * Compact phone bar: the shared [DestinationNavRow] over a surface sheet with
+ * a top hairline and safe-area padding. Wide windows render the same row
+ * inside the session panel instead, so this bar never shows beside it.
+ * Selection is interruption-safe (single-top, no queued back stacks).
  */
 @Composable
 fun ScoutrBottomBar(
     currentRoute: String?,
     needsYouCount: Int,
     onSelect: (String) -> Unit,
-    // True when the shell already consumed the bottom inset for this route;
-    // padding again would stack a nav-bar-tall band under the bar.
-    insetOwnedByShell: Boolean = false,
 ) {
     Column(
         Modifier
             .fillMaxWidth()
             .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.97f))
-            .then(if (insetOwnedByShell) Modifier else Modifier.navigationBarsPadding()),
+            .navigationBarsPadding(),
     ) {
         Box(
             Modifier
@@ -756,79 +724,6 @@ fun ScoutrBottomBar(
                 .height(1.dp)
                 .background(MaterialTheme.colorScheme.outlineVariant),
         )
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Destination.entries.forEach { destination ->
-                val selected = currentRoute == destination.route
-                val badge = if (destination == Destination.Board && needsYouCount > 0) needsYouCount else 0
-                ScoutrTab(
-                    destination = destination,
-                    selected = selected,
-                    badge = badge,
-                    onClick = { onSelect(destination.route) },
-                    modifier = Modifier.weight(1f),
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun ScoutrTab(
-    destination: Destination,
-    selected: Boolean,
-    badge: Int,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-
-) {
-    val haptic = rememberHaptic()
-    Column(
-        modifier
-            .clip(RoundedCornerShape(6.dp))
-            .clickable {
-                haptic(HapticEvent.Select)
-                onClick()
-            }
-            .padding(vertical = 6.dp, horizontal = 4.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Box(contentAlignment = Alignment.TopEnd) {
-            Icon(
-                imageVector = destination.icon,
-                contentDescription = null,
-                tint = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(22.dp),
-            )
-            if (badge > 0) {
-                Box(
-                    // Offset (not padding) so the badge can straddle the icon's
-                    // corner: Compose padding rejects negative values and would
-                    // crash the app at startup whenever the badge renders.
-                    Modifier
-                        .offset(x = 6.dp, y = (-6).dp)
-                        .size(16.dp)
-                        .background(MaterialTheme.colorScheme.error, RoundedCornerShape(8.dp)),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(
-                        text = if (badge > 9) "9+" else badge.toString(),
-                        color = MaterialTheme.colorScheme.onError,
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.Bold,
-                    )
-                }
-            }
-        }
-        Spacer(Modifier.height(2.dp))
-        Text(
-            text = destination.label,
-            style = MaterialTheme.typography.labelSmall,
-            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
-            color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 1,
-        )
+        DestinationNavRow(currentRoute, needsYouCount, onSelect)
     }
 }

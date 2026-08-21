@@ -90,16 +90,18 @@ splits:
 - **Session panel, 320dp fixed**, on the left; the detail pane takes the
   remainder. The panel shows on the four tab destinations and on Chat, and is
   absent on Terminal, Files, File viewer, Settings and Connect.
-- **The panel is always the live board list.** It does not follow the
+- **Navigation lives in the session panel.** The four destinations render as
+  an icon row under the panel header (shared `DestinationNavRow`), stay
+  visible on Chat when wide, and keep the needs-you badge on Board. Nothing
+  sits beneath the panes, so the detail pane keeps the window's full height.
+- **The list is always the live board list.** It does not follow the
   destination — Sessions' history stays in the detail pane. It carries its own
   header (lockup, terminal, settings), the new-session FAB, pull-to-refresh and
   the disconnected / version-mismatch banners, so a mismatch is visible even
   mid-chat. The detail pane keeps each route's own top bar.
-- **Board means "no session selected."** It stays a bottom-bar destination and
+- **Board means "no session selected."** It stays a navigation destination and
   keeps its needs-you badge; its detail pane is a bare centered placeholder
   with no top bar, because the panel header already names the surface.
-- **The bottom bar is retained**, full width beneath both panes, and stays
-  visible on Chat when wide. Below 840dp the bar still hides on Chat.
 - **Selection is derived, never stored.** The highlighted row comes from the
   current back-stack entry (`sessionKey`, or `bootstrapPaneId` until a fresh
   session's route converges). Selection is a surface step only; the needs-you
@@ -111,11 +113,12 @@ splits:
 - **Chat reads at a 600dp prose measure** (`ChatProseMeasure`), centered, at
   every width — tighter than the 960dp scan measure that Board, Sessions and
   Review use, because Chat is prose. The chat header stays full-bleed.
-- **One inset owner under a visible bottom bar.** On wide the shell `Scaffold`
-  carries `imePadding()` and Chat's composer pads by nothing
-  (`bottomInsetOwnedByShell`); on compact, Chat keeps
-  `imeOrNavigationBarsPadding()` and the shell adds nothing. A second consumer
-  stacks into a nav-bar-tall dead band (fix 25df24f).
+- **One inset owner at the bottom.** The shell `Scaffold` consumes only the
+  horizontal and top system bars. Compact tabs leave the bottom to
+  ScoutrBottomBar; wide tabs own it via `TabScaffold(ownsBottomInset)`; Chat
+  and every non-shell screen apply `imeOrNavigationBarsPadding()` themselves,
+  and the panel FAB pads its own nav-bar clearance. A second consumer stacks
+  into a nav-bar-tall dead band (fix 25df24f).
 
 Folding is a plain config change: the activity recreates and Navigation restores
 the back stack, so an open chat survives fold and unfold with no persistence

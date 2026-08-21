@@ -195,12 +195,6 @@ fun ChatScreen(
     onOpenTerminal: (() -> Unit)? = null,
     onOpenFiles: ((String) -> Unit)? = null,
     onOpenReview: ((String) -> Unit)? = null,
-    /**
-     * True when the wide shell renders a bottom bar under this pane and has
-     * already consumed the IME and navigation-bar insets. A second consumer
-     * here would stack into a nav-bar-tall dead band (fix 25df24f).
-     */
-    bottomInsetOwnedByShell: Boolean = false,
 ) {
     val ui by viewModel.ui.collectAsState()
 
@@ -367,7 +361,7 @@ fun ChatScreen(
                 .align(Alignment.CenterHorizontally)
                 .widthIn(max = ChatProseMeasure)
                 .fillMaxWidth()
-                .then(if (bottomInsetOwnedByShell) Modifier else Modifier.imeOrNavigationBarsPadding()),
+                .imeOrNavigationBarsPadding()
         ) {
             val sendError = ui.sendError
             if (sendError != null) {

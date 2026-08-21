@@ -8,9 +8,11 @@ import androidx.compose.material.icons.filled.History
 import androidx.compose.ui.graphics.vector.ImageVector
 
 /**
- * Single source of truth for the phone bottom-bar destinations. The bar's
- * visibility rule is `currentRoute in Destination.routes` — adding a tab is
- * one entry here, and the bar check cannot drift from it.
+ * Single source of truth for the tab destinations. Both chrome shapes render
+ * it via [DestinationNavRow]: the compact bottom bar (visibility rule
+ * `!isWide && currentRoute in Destination.routes`) and the wide window's
+ * session-panel row. Adding a tab is one entry here, and neither chrome can
+ * drift from it.
  */
 enum class Destination(val route: String, val label: String, val icon: ImageVector) {
     Board("board", "Board", Icons.Default.GridView),
