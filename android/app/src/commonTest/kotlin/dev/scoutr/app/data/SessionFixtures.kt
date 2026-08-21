@@ -17,6 +17,7 @@ fun liveSessionFixture(
     latestActivity: String? = null,
     updatedAtMs: Double? = null,
     attention: AttentionSummary? = null,
+    doneSummary: DoneRepoSummary? = null,
 ): SessionDescriptor = SessionDescriptor(
     key = key,
     agentKind = agentKind,
@@ -28,6 +29,7 @@ fun liveSessionFixture(
     updatedAtMs = updatedAtMs,
     latestActivity = latestActivity,
     attention = attention,
+    doneSummary = doneSummary,
     live = SessionLiveAttachment(
         paneId = paneId,
         workspaceId = workspaceId,

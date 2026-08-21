@@ -6,6 +6,7 @@ import type { DeviceRegistry } from "../push/fcm.js";
 import type { FcmPublisher } from "../push/publisher.js";
 import type { StatusTracker } from "../status.js";
 import type { BoardDetailCache } from "../board-detail.js";
+import type { BoardRepoSummaryCache } from "../board-repo-summary.js";
 import type { TerminalLauncher } from "../terminal/types.js";
 import type { TerminalSessionBroker } from "../terminal/broker.js";
 import type { TerminalConnectionOptions } from "../terminal/websocket.js";
@@ -59,6 +60,8 @@ export interface ServerDeps {
 export interface RouteDeps extends ServerDeps {
   tracker: StatusTracker;
   boardDetail: BoardDetailCache;
+  /** TTL-bounded Done-card repo summaries, shared across polls. */
+  boardRepoSummary: BoardRepoSummaryCache;
   /** Server-owned terminal stream broker (health + upgrade path). */
   terminalBroker: TerminalSessionBroker;
 }

@@ -278,6 +278,39 @@ export async function gitRepoRoot(path: string): Promise<string | null> {
   }
 }
 
+/** Whether HEAD resolves — false for a repository with no commits yet. */
+export async function gitHasHead(path: string): Promise<boolean> {
+  try {
+    await runGit(path, ["rev-parse", "--verify", "--quiet", "HEAD"], 1024);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Overview for a repository with no commits yet: `git log` cannot run, but
+ * the porcelain status (dirty/untracked evidence) is still valid, so the
+ * log fields are simply empty instead of the whole overview failing.
+ */
+export async function reviewUnbornOverview(requestedPath: string, extraRoots: string[] = []): Promise<ReviewOverview> {
+  const path = resolveAllowedRepoPath(requestedPath, extraRoots);
+  if (!(await isRepo(path))) throw new ReviewError("not a git repository", 404);
+  const statusOut = await runGit(path, ["status", "--porcelain=v1", "--branch"], REVIEW_STATUS_MAX_ENTRIES * 256 + 4096);
+  const status = parsePorcelainStatus(statusOut);
+  return {
+    path,
+    root: realpathSync(path),
+    branch: status.branch,
+    upstream: status.upstream,
+    ahead: status.ahead,
+    behind: status.behind,
+    status: status.entries,
+    statusTruncated: status.truncated,
+    log: [],
+    logTruncated: false,
+  };
+}
 /** Branch name or null when detached. */
 async function currentBranch(path: string): Promise<string | null> {
   try {

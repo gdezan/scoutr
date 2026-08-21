@@ -197,8 +197,9 @@ export async function listSessionCatalog(options: ListSessionCatalogOptions = {}
         transcriptSize: file.size,
         latestActivity: parsed.preview || null,
         // The catalog is a history surface: it reads stored files, not the
-        // board's live ask state, so it never claims a session wants the user.
+        // board's live ask state or repo evidence, so it never claims either.
         attention: null,
+        doneSummary: null,
         live: active ? {
           paneId: active.paneId,
           workspaceId: active.workspaceId,

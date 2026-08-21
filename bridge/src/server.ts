@@ -6,6 +6,7 @@ import { WebSocketServer, WebSocket } from "ws";
 import { HerdrEventFeed, type FeedMessage } from "./herdr/feed.js";
 import { StatusTracker } from "./status.js";
 import { BoardDetailCache } from "./board-detail.js";
+import { BoardRepoSummaryCache } from "./board-repo-summary.js";
 
 import { handleLegacyWsCommand, type CommandMessage } from "./commands.js";
 import { RouteTable, dispatchRoute, isAuthorized } from "./routes/dispatcher.js";
@@ -93,6 +94,8 @@ export function createScoutrServer(deps: ServerDeps, options: CreateServerOption
   const tracker = new StatusTracker();
   // Bounded per-agent model/latest-activity detail, memoized by file mtime.
   const boardDetail = new BoardDetailCache();
+  // TTL-bounded repo summaries for Done cards; one git pass per repo per window.
+  const boardRepoSummary = new BoardRepoSummaryCache();
   // One terminal stream per connection, owned here (Slice 3).
   const terminalBroker = new TerminalSessionBroker({
     launcher: deps.terminal,
@@ -100,7 +103,7 @@ export function createScoutrServer(deps: ServerDeps, options: CreateServerOption
     graceMs: deps.terminalOptions?.graceMs,
     log: (message) => console.error(`terminal: ${message}`),
   });
-  const routeDeps: RouteDeps = { ...deps, metrics, tracker, boardDetail, terminalBroker };
+  const routeDeps: RouteDeps = { ...deps, metrics, tracker, boardDetail, boardRepoSummary, terminalBroker };
   // herdr streams some event kinds with underscores and some with dots;
   // both spellings must be matched, so membership lives in explicit sets.
   const STATUS_KINDS = new Set(["pane_agent_status_changed", "pane.agent_status_changed"]);

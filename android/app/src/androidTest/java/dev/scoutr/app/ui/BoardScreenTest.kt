@@ -26,6 +26,9 @@ import androidx.test.platform.app.InstrumentationRegistry
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.unit.dp
 import dev.scoutr.app.data.AttentionQuestion
+import dev.scoutr.app.data.DoneRepoSummary
+import androidx.compose.ui.test.performCustomAccessibilityActionWithLabel
+import androidx.compose.ui.test.onAllNodesWithTag
 import dev.scoutr.app.data.AttentionSummary
 import dev.scoutr.app.data.QuestionOption
 import dev.scoutr.app.data.SessionDescriptor
@@ -624,6 +627,176 @@ class BoardScreenTest {
         compose.waitForIdle()
         assertEquals("swipe actions survive the attention block", "/repo/a", reviewedCwd)
     }
+
+
+    @Test
+    fun doneCardShowsDirtyRepoEvidence() {
+        compose.setContent {
+            ScoutrTheme {
+                BoardScreen(
+                    viewModel = staticBoardViewModel(
+                        BoardUiState(
+                            board = BoardState.group(listOf(
+                                doneAgent("p1", "Ship notes", "/repo/a", null, null, dirtySummary()),
+                            )),
+                            connected = true,
+                        ),
+                    ),
+                )
+            }
+        }
+        compose.onNodeWithTag("board_done_summary_p1").assertIsDisplayed()
+        compose.onNodeWithText("2 files · +248 −91").assertIsDisplayed()
+        compose.onNodeWithText("main · uncommitted").assertIsDisplayed()
+    }
+
+    @Test
+    fun cleanDoneCardSaysWorkingTreeCleanNeverReady() {
+        compose.setContent {
+            ScoutrTheme {
+                BoardScreen(
+                    viewModel = staticBoardViewModel(
+                        BoardUiState(
+                            board = BoardState.group(listOf(
+                                doneAgent("p1", "Tidy up", "/repo/a", null, null, cleanSummary()),
+                            )),
+                            connected = true,
+                        ),
+                    ),
+                )
+            }
+        }
+        compose.onNodeWithTag("board_done_summary_p1").assertIsDisplayed()
+        compose.onNodeWithText("Working tree clean").assertIsDisplayed()
+        // The evidence labels facts; nothing may claim readiness or safety.
+        assertTrue(compose.onAllNodesWithText("ready", substring = true, ignoreCase = true)
+            .fetchSemanticsNodes().isEmpty())
+        assertTrue(compose.onAllNodesWithText("safe", substring = true, ignoreCase = true)
+            .fetchSemanticsNodes().isEmpty())
+    }
+
+    @Test
+    fun doneCardOmitsAheadBehindWithoutUpstreamAndShowsItWhenTracked() {
+        compose.setContent {
+            ScoutrTheme {
+                BoardScreen(
+                    viewModel = staticBoardViewModel(
+                        BoardUiState(
+                            board = BoardState.group(listOf(
+                                doneAgent("p1", "No upstream", "/repo/a", null, null, dirtySummary()),
+                                doneAgent("p2", "Tracked", "/repo/b", null, null,
+                                    dirtySummary(upstream = "origin/main", ahead = 2)),
+                            )),
+                            connected = true,
+                        ),
+                    ),
+                )
+            }
+        }
+        compose.onNodeWithText("main · uncommitted").assertIsDisplayed()
+        compose.onNodeWithText("main · uncommitted · 2 ahead · 0 behind").assertIsDisplayed()
+    }
+
+    @Test
+    fun truncatedSummaryShowsQuietIndicationInsteadOfFalseExactness() {
+        compose.setContent {
+            ScoutrTheme {
+                BoardScreen(
+                    viewModel = staticBoardViewModel(
+                        BoardUiState(
+                            board = BoardState.group(listOf(
+                                doneAgent("p1", "Huge diff", "/repo/a", null, null,
+                                    dirtySummary(statusTruncated = true)),
+                            )),
+                            connected = true,
+                        ),
+                    ),
+                )
+            }
+        }
+        compose.onNodeWithText("2 files · +248 −91 · summary truncated").assertIsDisplayed()
+    }
+
+    @Test
+    fun doneCardWithoutSummaryRendersNoEvidenceBlock() {
+        compose.setContent {
+            ScoutrTheme {
+                BoardScreen(
+                    viewModel = staticBoardViewModel(
+                        BoardUiState(
+                            board = BoardState.group(listOf(
+                                doneAgent("p1", "Non-repo work", "/not-a-repo", null, null, null),
+                            )),
+                            connected = true,
+                        ),
+                    ),
+                )
+            }
+        }
+        assertTrue(compose.onAllNodesWithTag("board_done_summary_p1").fetchSemanticsNodes().isEmpty())
+    }
+
+    @OptIn(androidx.compose.ui.test.ExperimentalTestApi::class)
+    @Test
+    fun doneSummaryExposesReviewThroughAccessibilityAction() {
+        var reviewedCwd: String? = null
+        compose.setContent {
+            ScoutrTheme {
+                BoardScreen(
+                    onReviewAgent = { reviewedCwd = it.cwd },
+                    viewModel = staticBoardViewModel(
+                        BoardUiState(
+                            board = BoardState.group(listOf(
+                                doneAgent("p1", "Ship notes", "/repo/a", null, null, dirtySummary()),
+                            )),
+                            connected = true,
+                        ),
+                    ),
+                )
+            }
+        }
+        val summary = compose.onNodeWithTag("board_done_summary_p1")
+        summary.assertContentDescriptionContains("uncommitted", substring = true)
+        summary.assertContentDescriptionContains("Review changes", substring = true)
+        summary.performCustomAccessibilityActionWithLabel("Review changes")
+        compose.waitForIdle()
+        assertEquals("the accessibility action drills into Review", "/repo/a", reviewedCwd)
+    }
+
+    private fun doneAgent(
+        paneId: String,
+        title: String,
+        cwd: String,
+        model: String?,
+        activity: String?,
+        summary: DoneRepoSummary?,
+    ) = blockedAgent(paneId, title, cwd, model, activity).let { descriptor ->
+        descriptor.copy(live = descriptor.live?.copy(status = "done"), doneSummary = summary)
+    }
+
+    private fun dirtySummary(
+        upstream: String? = null,
+        ahead: Int = 0,
+        behind: Int = 0,
+        statusTruncated: Boolean = false,
+    ) = DoneRepoSummary(
+        repoRoot = "/repo/a",
+        branch = "main",
+        upstream = upstream,
+        ahead = ahead,
+        behind = behind,
+        changedFiles = 2,
+        additions = 248,
+        deletions = 91,
+        dirty = true,
+        statusTruncated = statusTruncated,
+    )
+
+    private fun cleanSummary() = DoneRepoSummary(
+        repoRoot = "/repo/a",
+        branch = "main",
+        dirty = false,
+    )
 
     private fun staticBoardViewModel(ui: BoardUiState): BoardViewModel {
         val context = androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().targetContext

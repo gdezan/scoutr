@@ -64,10 +64,15 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -77,6 +82,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.scoutr.app.data.AttentionSummary
+import dev.scoutr.app.data.DoneRepoSummary
+import dev.scoutr.app.ui.theme.DiffPalette
 import dev.scoutr.app.data.QuestionOption
 import dev.scoutr.app.data.SessionDescriptor
 import dev.scoutr.app.data.AgentStatus
@@ -465,6 +472,7 @@ private fun AgentCardRow(
             selected = selected,
             compact = true,
             onClick = onClick,
+            onReview = onReview,
             onQuickAnswer = onQuickAnswer,
             modifier = modifier
                 .fillMaxWidth()
@@ -529,6 +537,7 @@ private fun AgentCardRow(
             selected = selected,
             compact = false,
             onClick = { if (reveal.currentValue == BoardReveal.Open) closeReveal() else onClick() },
+            onReview = onReview,
             onQuickAnswer = onQuickAnswer,
             modifier = Modifier
                 .offset { IntOffset(reveal.requireOffset().roundToInt(), 0) }
@@ -552,6 +561,7 @@ private fun AgentCardBody(
     selected: Boolean,
     compact: Boolean,
     onClick: () -> Unit,
+    onReview: () -> Unit,
     onQuickAnswer: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -614,6 +624,17 @@ private fun AgentCardBody(
                             overflow = TextOverflow.Ellipsis,
                         )
                     }
+                    // Deterministic git evidence for a settled agent: what
+                    // changed, and anything obviously risky about the repo state.
+                    if (status == AgentStatus.Done) {
+                        agent.doneSummary?.let { summary ->
+                            DoneSummaryBlock(
+                                summary = summary,
+                                paneId = agent.live?.paneId.orEmpty(),
+                                onReview = onReview,
+                            )
+                        }
+                    }
                     if (isNeedsYou) {
                         AttentionBlock(
                             attention = agent.attention,
@@ -673,6 +694,87 @@ private fun AgentCardBody(
                     }
                 }
             }
+        }
+    }
+}
+
+/**
+ * Tracking state as git reports it: shown only when an upstream exists and
+ * the branch has actually diverged, so no invented zeros pose as evidence.
+ */
+internal fun doneTrackingLabel(summary: DoneRepoSummary): String? {
+    // No upstream means the counts are meaningless, so they are omitted
+    // rather than invented; a known upstream always reports both counts,
+    // including synchronized "0 ahead · 0 behind".
+    if (summary.upstream == null) return null
+    return "${summary.ahead} ahead · ${summary.behind} behind"
+}
+
+/**
+ * Deterministic repo evidence on a Done card: what changed and the branch
+ * state, straight from git facts. It labels facts only — never "safe" or
+ * "tests passed" — and offers Review as the drill-down through an accessibility
+ * action rather than making the stats individually interactive.
+ */
+@Composable
+private fun DoneSummaryBlock(
+    summary: DoneRepoSummary,
+    paneId: String,
+    onReview: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val metaColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f)
+    val truncated = summary.statusTruncated || summary.diffTruncated
+    val stats = buildAnnotatedString {
+        if (summary.dirty) {
+            append("${summary.changedFiles} files · ")
+            withStyle(SpanStyle(color = DiffPalette.Added)) { append("+${summary.additions}") }
+            append(" ")
+            withStyle(SpanStyle(color = DiffPalette.Deleted)) { append("−${summary.deletions}") }
+            if (truncated) append(" · summary truncated")
+        } else {
+            append("Working tree clean")
+        }
+    }
+    val metadata = listOfNotNull(
+        summary.branch,
+        if (summary.dirty) "uncommitted" else null,
+        doneTrackingLabel(summary),
+    ).joinToString(" · ")
+    val description = when {
+        summary.dirty ->
+            "${stats.text}: ${metadata ?: "no branch"}. Review changes for details."
+        else -> "${stats.text}. ${doneTrackingLabel(summary)?.let { "$it. " } ?: ""}Review changes for details."
+    }
+    Column(
+        modifier = modifier
+            .padding(top = 3.dp)
+            .semantics(mergeDescendants = true) {
+                contentDescription = description
+                customActions = listOf(
+                    CustomAccessibilityAction("Review changes") {
+                        onReview()
+                        true
+                    },
+                )
+            }
+            .testTag("board_done_summary_$paneId"),
+    ) {
+        Text(
+            text = stats,
+            style = ScoutrType.monoMeta,
+            color = metaColor,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        if (metadata.isNotEmpty()) {
+            Text(
+                text = metadata,
+                style = ScoutrType.monoMeta,
+                color = metaColor,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
     }
 }

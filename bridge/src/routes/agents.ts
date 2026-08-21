@@ -1,4 +1,5 @@
 import type { BoardDetailCache } from "../board-detail.js";
+import type { BoardRepoSummaryCache } from "../board-repo-summary.js";
 import type { SessionSnapshot } from "../herdr/types.js";
 import { backendForAgentSessionInfo, getBackendOrNull, knownBackends } from "../agents/registry.js";
 import {
@@ -29,6 +30,22 @@ export async function deriveSessionDescriptors(
   }));
 }
 
+/**
+ * Attach deterministic repo summaries to Done cards, best-effort. Only Done
+ * agents with a cwd incur git work; a summary failure degrades that one card
+ * to no summary instead of failing the Board response.
+ */
+export async function attachDoneSummaries(
+  sessions: SessionDescriptor[],
+  cache: BoardRepoSummaryCache,
+): Promise<SessionDescriptor[]> {
+  return Promise.all(sessions.map(async (session) => {
+    if (session.live?.status !== "done" || !session.cwd) return session;
+    const doneSummary = await cache.summaryFor(session.cwd).catch(() => null);
+    return doneSummary ? { ...session, doneSummary } : session;
+  }));
+}
+
 async function agents(ctx: RouteContext): Promise<RouteResult> {
   const current = ctx.deps.feed.snapshot;
   if (!current) {
@@ -39,7 +56,8 @@ async function agents(ctx: RouteContext): Promise<RouteResult> {
     (paneId) => ctx.deps.tracker.since(paneId),
     ctx.deps.boardDetail,
   );
-  return { status: 200, body: { ok: true, agents: sessions } };
+  const enriched = await attachDoneSummaries(sessions, ctx.deps.boardRepoSummary);
+  return { status: 200, body: { ok: true, agents: enriched } };
 }
 
 async function agentKinds(_ctx: RouteContext): Promise<RouteResult> {

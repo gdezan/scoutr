@@ -4,7 +4,9 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { deriveSessionDescriptors } from "../src/routes/agents.js";
+import { attachDoneSummaries, deriveSessionDescriptors } from "../src/routes/agents.js";
+import type { BoardRepoSummaryCache } from "../src/board-repo-summary.js";
+import type { SessionDescriptor } from "../src/session-model.js";
 import { sessionWorkspaceRoots } from "../src/routes/review.js";
 import { snapshotPaths } from "../src/server.js";
 import type { AgentInfo, SessionSnapshot } from "../src/herdr/types.js";
@@ -60,6 +62,7 @@ describe("deriveSessionDescriptors", () => {
       transcriptSize: null,
       latestActivity: null,
       attention: { kind: "prompt", callId: null, questionCount: 0, currentQuestion: null, canQuickAnswer: false },
+      doneSummary: null,
       live: {
         paneId: "p1",
         workspaceId: "ws1",
@@ -141,5 +144,85 @@ describe("sessionWorkspaceRoots", () => {
     assert.deepEqual(fromCatalog, [repoA]);
     const empty = await sessionWorkspaceRoots(null);
     assert.deepEqual(empty, []);
+  });
+});
+
+describe("attachDoneSummaries", () => {
+  const summary = {
+    repoRoot: "/repo",
+    branch: "main",
+    upstream: null,
+    ahead: 0,
+    behind: 0,
+    changedFiles: 1,
+    additions: 2,
+    deletions: 3,
+    dirty: true,
+    statusTruncated: false,
+    diffTruncated: false,
+  };
+
+  /** Records which cwds were asked for and can fail on demand. */
+  function stubCache(behavior: (cwd: string) => Promise<typeof summary>) {
+    const requested: string[] = [];
+    return {
+      requested,
+      cache: {
+        summaryFor: (cwd: string) => {
+          requested.push(cwd);
+          return behavior(cwd);
+        },
+      } as unknown as BoardRepoSummaryCache,
+    };
+  }
+
+  function descriptor(status: string, cwd: string | null) {
+    return {
+      key: null,
+      agentKind: "pi",
+      displayName: "Pi",
+      title: "t",
+      cwd,
+      model: null,
+      thinkingLevel: null,
+      capabilities: [],
+      updatedAtMs: null,
+      transcriptMtimeMs: null,
+      transcriptSize: null,
+      latestActivity: null,
+      attention: null,
+      doneSummary: null,
+      live: { paneId: "p1", workspaceId: "ws1", tabId: "t1", status, statusSinceMs: null },
+    } as SessionDescriptor;
+  }
+
+  test("asks only for Done agents that carry a cwd", async () => {
+    const { cache, requested } = stubCache(() => Promise.resolve(summary));
+    const enriched = await attachDoneSummaries(
+      [
+        descriptor("done", "/repo"),
+        descriptor("working", "/repo"),
+        descriptor("blocked", "/repo"),
+        descriptor("idle", "/repo"),
+        descriptor("unknown", "/repo"),
+        descriptor("done", null),
+      ],
+      cache,
+    );
+    assert.deepEqual(requested, ["/repo"]);
+    assert.ok(enriched[0]?.doneSummary);
+    for (const card of enriched.slice(1)) assert.equal(card.doneSummary, null);
+  });
+
+  test("one failing repo degrades only its own card", async () => {
+    const { cache } = stubCache((cwd) =>
+      cwd === "/bad" ? Promise.reject(new Error("git blew up")) : Promise.resolve(summary),
+    );
+    const [good, bad] = await attachDoneSummaries(
+      [descriptor("done", "/good"), descriptor("done", "/bad")],
+      cache,
+    );
+    assert.ok(good?.doneSummary);
+    assert.equal(bad?.doneSummary, null);
   });
 });

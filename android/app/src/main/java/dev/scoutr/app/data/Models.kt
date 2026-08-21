@@ -141,6 +141,28 @@ data class AttentionQuestion(
     val options: List<QuestionOption> = emptyList(),
     val multiSelect: Boolean = false,
 )
+/**
+ * Deterministic git evidence for a Done Board card (mirrors `DoneRepoSummary` in
+ * bridge/src/board-repo-summary.ts). Every field is a git fact; nothing here
+ * claims tests passed or code is safe to ship.
+ */
+@Serializable
+data class DoneRepoSummary(
+    val repoRoot: String = "",
+    val branch: String? = null,
+    /** Upstream tracking branch when known; ahead/behind are meaningful only then. */
+    val upstream: String? = null,
+    val ahead: Int = 0,
+    val behind: Int = 0,
+    /** Union of status and diff paths, so untracked files count. */
+    val changedFiles: Int = 0,
+    val additions: Int = 0,
+    val deletions: Int = 0,
+    /** Porcelain status has entries (includes untracked files). */
+    val dirty: Boolean = false,
+    val statusTruncated: Boolean = false,
+    val diffTruncated: Boolean = false,
+)
 
 /** The one session model shared by Board, history, palette, and Chat. */
 @Serializable
@@ -159,6 +181,8 @@ data class SessionDescriptor(
     val transcriptSize: Double? = null,
     val latestActivity: String? = null,
     val attention: AttentionSummary? = null,
+    /** Git evidence for Done cards; the bridge fills it only for done agents. */
+    val doneSummary: DoneRepoSummary? = null,
     val live: SessionLiveAttachment? = null,
 ) {
     val status: String get() = live?.status ?: "done"
