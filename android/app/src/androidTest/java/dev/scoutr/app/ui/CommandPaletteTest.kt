@@ -126,7 +126,7 @@ class CommandPaletteTest {
         val connection = ConnectionStore(
             androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().targetContext,
         )
-        connection.save(server.url("/").toString().trimEnd('/'), "test-token", null, null)
+        connection.save(server.url("/").toString().trimEnd('/'), "test-token")
         val bridge = BridgeClient(OkHttpClient.Builder().readTimeout(5, TimeUnit.SECONDS).build(), connection)
         return CommandPaletteViewModel(bridge, connection)
     }

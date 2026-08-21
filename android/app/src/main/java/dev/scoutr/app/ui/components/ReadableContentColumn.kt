@@ -15,6 +15,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 
+/**
+ * Chat is prose, so it reads tighter than [ReadableContentColumn]'s 960dp scan
+ * measure. Applied at every width, and it caps the wide window's detail pane too.
+ */
+val ChatProseMeasure = 600.dp
+
 /** Centers scan-oriented screen content at 960dp on expanded windows and 12dp on phones. */
 @Composable
 fun ReadableContentColumn(

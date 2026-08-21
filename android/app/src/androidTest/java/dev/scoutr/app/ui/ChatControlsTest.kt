@@ -9,6 +9,7 @@ import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
@@ -45,6 +46,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
 import java.util.concurrent.TimeUnit
+import kotlin.math.abs
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.CopyOnWriteArrayList
 class ChatControlsTest {
@@ -148,10 +150,37 @@ class ChatControlsTest {
         return """{"ok":true,"catalog":{"providers":[{"name":"alpha","models":[${models("alpha", "model", 20)}]},{"name":"omega","models":[${models("omega", "model", 15)}]}]}}"""
     }
 
+    /**
+     * Chat is prose: the transcript stops at the 600dp prose measure and fills
+     * anything narrower. Asserted against the live window so it is meaningful
+     * on a phone-width emulator and on the wide window acceptance resizes to.
+     */
+    @Test
+    fun transcriptStopsAtTheProseMeasure() {
+        val store = ConnectionStore(InstrumentationRegistry.getInstrumentation().targetContext)
+        store.save(server.url("/").toString().trimEnd('/'), "t")
+        val bridge = BridgeClient(OkHttpClient.Builder().readTimeout(5, TimeUnit.SECONDS).build(), store)
+        val vm = ChatViewModel(bridge, null, "w1:p1", "working")
+        compose.setContent { ChatScreen(viewModel = vm, onBack = {}) }
+        compose.waitUntil(timeoutMillis = 10_000) {
+            compose.onAllNodesWithTag("chat_list").fetchSemanticsNodes().isNotEmpty()
+        }
+
+        val window = compose.onRoot().getUnclippedBoundsInRoot()
+            .let { (it.right - it.left).value }
+        val transcript = compose.onNodeWithTag("chat_list").getUnclippedBoundsInRoot()
+            .let { (it.right - it.left).value }
+        val expected = minOf(window, 600f)
+        assertTrue(
+            "transcript should be ${expected}dp in a ${window}dp window, was ${transcript}dp",
+            abs(transcript - expected) <= 1f,
+        )
+    }
+
     @Test
     fun controlsMenuShowsLifecycleActionsAndOpensRenameDialog() {
         val store = ConnectionStore(InstrumentationRegistry.getInstrumentation().targetContext)
-        store.save(server.url("/").toString().trimEnd('/'), "t", null, null)
+        store.save(server.url("/").toString().trimEnd('/'), "t")
         val bridge = BridgeClient(OkHttpClient.Builder().readTimeout(5, TimeUnit.SECONDS).build(), store)
         val vm = ChatViewModel(bridge, null, "w1:p1", "working")
 
@@ -184,7 +213,7 @@ class ChatControlsTest {
         // the overflow menu shows exactly the verbs the backend advertises,
         // unknown verbs are dropped, and an empty set leaves an empty menu.
         val store = ConnectionStore(InstrumentationRegistry.getInstrumentation().targetContext)
-        store.save(server.url("/").toString().trimEnd('/'), "t", null, null)
+        store.save(server.url("/").toString().trimEnd('/'), "t")
         val bridge = BridgeClient(OkHttpClient.Builder().readTimeout(5, TimeUnit.SECONDS).build(), store)
         val vm = ChatViewModel(bridge, null, "w1:p1", "working")
 
@@ -232,7 +261,7 @@ class ChatControlsTest {
     fun headerTogglesIndependentlyControlThinkingAndToolCalls() {
         richEntries = true
         val store = ConnectionStore(InstrumentationRegistry.getInstrumentation().targetContext)
-        store.save(server.url("/").toString().trimEnd('/'), "t", null, null)
+        store.save(server.url("/").toString().trimEnd('/'), "t")
         val bridge = BridgeClient(OkHttpClient.Builder().readTimeout(5, TimeUnit.SECONDS).build(), store)
         val vm = ChatViewModel(bridge, null, "w1:p1", "working")
 
@@ -301,7 +330,7 @@ class ChatControlsTest {
 
         richEntries = true
         val store = ConnectionStore(InstrumentationRegistry.getInstrumentation().targetContext)
-        store.save(server.url("/").toString().trimEnd('/'), "t", null, null)
+        store.save(server.url("/").toString().trimEnd('/'), "t")
         val bridge = BridgeClient(OkHttpClient.Builder().readTimeout(5, TimeUnit.SECONDS).build(), store)
         val vm = ChatViewModel(bridge, null, "w1:p1", "working")
 
@@ -324,7 +353,7 @@ class ChatControlsTest {
     @Test
     fun closeSessionRequiresConfirmationBeforeStoppingTheWorkspace() {
         val store = ConnectionStore(InstrumentationRegistry.getInstrumentation().targetContext)
-        store.save(server.url("/").toString().trimEnd('/'), "t", null, null)
+        store.save(server.url("/").toString().trimEnd('/'), "t")
         val bridge = BridgeClient(OkHttpClient.Builder().readTimeout(5, TimeUnit.SECONDS).build(), store)
         val vm = ChatViewModel(bridge, null, "w1:p1", "working")
         val backCalls = AtomicInteger()
@@ -348,7 +377,7 @@ class ChatControlsTest {
     @Test
     fun configurationSheetShowsAndSelectsExactThinkingAndModel() {
         val store = ConnectionStore(InstrumentationRegistry.getInstrumentation().targetContext)
-        store.save(server.url("/").toString().trimEnd('/'), "t", null, null)
+        store.save(server.url("/").toString().trimEnd('/'), "t")
         val bridge = BridgeClient(OkHttpClient.Builder().readTimeout(5, TimeUnit.SECONDS).build(), store)
         val vm = ChatViewModel(bridge, null, "w1:p1", "working")
 
@@ -371,7 +400,7 @@ class ChatControlsTest {
     @Test
     fun configurationSheetGroupsProvidersAndScrollsWithoutSheetDrag() {
         val store = ConnectionStore(InstrumentationRegistry.getInstrumentation().targetContext)
-        store.save(server.url("/").toString().trimEnd('/'), "t", null, null)
+        store.save(server.url("/").toString().trimEnd('/'), "t")
         val bridge = BridgeClient(OkHttpClient.Builder().readTimeout(5, TimeUnit.SECONDS).build(), store)
         val vm = ChatViewModel(bridge, null, "w1:p1", "working")
         compose.setContent { ChatScreen(viewModel = vm, onBack = {}) }
@@ -412,7 +441,7 @@ class ChatControlsTest {
     fun configurationSearchChangesResetToFirstProviderWithoutChangingSelection() {
         modelCatalogJson = longModelCatalog()
         val store = ConnectionStore(InstrumentationRegistry.getInstrumentation().targetContext)
-        store.save(server.url("/").toString().trimEnd('/'), "t", null, null)
+        store.save(server.url("/").toString().trimEnd('/'), "t")
         val bridge = BridgeClient(OkHttpClient.Builder().readTimeout(5, TimeUnit.SECONDS).build(), store)
         val vm = ChatViewModel(bridge, null, "w1:p1", "working")
         compose.setContent { ChatScreen(viewModel = vm, onBack = {}) }
@@ -452,7 +481,7 @@ class ChatControlsTest {
             capabilities = listOf("abort", "compact", "close", "set_model"),
         )
         val store = ConnectionStore(InstrumentationRegistry.getInstrumentation().targetContext)
-        store.save(server.url("/").toString().trimEnd('/'), "t", null, null)
+        store.save(server.url("/").toString().trimEnd('/'), "t")
         val bridge = BridgeClient(OkHttpClient.Builder().readTimeout(5, TimeUnit.SECONDS).build(), store)
         val vm = ChatViewModel(bridge, null, "w1:p1", "working")
 

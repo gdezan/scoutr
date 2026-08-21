@@ -208,7 +208,7 @@ class HistoryScreenTest {
     private fun viewModel(store: SessionCatalogStore = RecordingStore()): SessionHistoryViewModel {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val connection = ConnectionStore(context)
-        connection.save(server.url("/").toString().trimEnd('/'), "test_token", null, null)
+        connection.save(server.url("/").toString().trimEnd('/'), "test_token")
         val bridge = BridgeClient(OkHttpClient.Builder().readTimeout(5, TimeUnit.SECONDS).build(), connection)
         return SessionHistoryViewModel(bridge, connection, store)
     }

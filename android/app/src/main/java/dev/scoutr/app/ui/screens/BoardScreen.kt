@@ -66,6 +66,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
@@ -81,6 +82,7 @@ import dev.scoutr.app.data.SessionDescriptor
 import dev.scoutr.app.data.AgentStatus
 import dev.scoutr.app.data.ScoutrApiCompatibility
 import dev.scoutr.app.data.formatScoutrApiIncompatibility
+import dev.scoutr.app.state.BoardUiState
 import dev.scoutr.app.state.BoardViewModel
 import dev.scoutr.app.state.viewModelFactory
 import dev.scoutr.app.ui.components.AgentMark
@@ -179,41 +181,78 @@ fun BoardScreen(
                 // large font scales.
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 96.dp),
             ) {
-                val incompatible = ui.apiCompatibility as? ScoutrApiCompatibility.Incompatible
-                if (incompatible != null) {
-                    item {
-                        CompatibilityBanner(
-                            message = formatScoutrApiIncompatibility(incompatible),
-                            onRetry = { viewModel.connect("", "") },
-                            onOpenSettings = onResolveCompatibility,
-                        )
-                    }
-                } else if (!ui.connected) {
-                    item { DisconnectedBanner(error = ui.error, onRetry = { viewModel.connect("", "") }) }
-                }
-
-                if (incompatible == null) {
-                    if (ui.board.total == 0) {
-                        item {
-                            Box(
-                                Modifier.fillMaxWidth().padding(vertical = 80.dp),
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                Text("No agents running", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            }
-                        }
-                    } else {
-                        boardSection("Needs you", ui.board.needsYou, onOpenAgent, reduceMotion, onReviewAgent, { pendingClose = it }, onQuickAnswer)
-                        boardSection("Working", ui.board.working, onOpenAgent, reduceMotion, onReviewAgent, { pendingClose = it })
-                        boardSection("Done", ui.board.done, onOpenAgent, reduceMotion, onReviewAgent, { pendingClose = it })
-                        boardSection("Idle", ui.board.idle, onOpenAgent, reduceMotion, onReviewAgent, { pendingClose = it })
-                        boardSection("Other", ui.board.unknown, onOpenAgent, reduceMotion, onReviewAgent, { pendingClose = it })
-                    }
-                }
-                item { Spacer(Modifier.height(24.dp)) }
+                boardListContent(
+                    ui = ui,
+                    compact = false,
+                    reduceMotion = reduceMotion,
+                    selectedPaneId = null,
+                    onOpenAgent = onOpenAgent,
+                    onReviewAgent = onReviewAgent,
+                    onCloseAgent = { pendingClose = it },
+                    onQuickAnswer = onQuickAnswer,
+                    onRetry = { viewModel.connect("", "") },
+                    onResolveCompatibility = onResolveCompatibility,
+                )
             }
         }
     }
+}
+
+/**
+ * The board's list body: banners, the empty state, and the five status
+ * sections. [BoardScreen] and the wide-window session panel share it and
+ * supply their own PullToRefreshBox and LazyColumn, because their padding
+ * differs — the Board clears its own FAB, the panel clears the panel's.
+ *
+ * Close is not confirmed here: each caller gates it the way its own surface
+ * does, so [onCloseAgent] receives the raw request.
+ */
+internal fun LazyListScope.boardListContent(
+    ui: BoardUiState,
+    compact: Boolean,
+    reduceMotion: Boolean,
+    selectedPaneId: String?,
+    onOpenAgent: (SessionDescriptor) -> Unit,
+    onReviewAgent: (SessionDescriptor) -> Unit,
+    onCloseAgent: (SessionDescriptor) -> Unit,
+    onQuickAnswer: (SessionDescriptor, String) -> Unit,
+    onRetry: () -> Unit,
+    onResolveCompatibility: () -> Unit,
+) {
+    val incompatible = ui.apiCompatibility as? ScoutrApiCompatibility.Incompatible
+    if (incompatible != null) {
+        item {
+            CompatibilityBanner(
+                message = formatScoutrApiIncompatibility(incompatible),
+                onRetry = onRetry,
+                onOpenSettings = onResolveCompatibility,
+            )
+        }
+    } else if (!ui.connected) {
+        item { DisconnectedBanner(error = ui.error, onRetry = onRetry) }
+    }
+
+    if (incompatible == null) {
+        if (ui.board.total == 0) {
+            item {
+                Box(
+                    Modifier.fillMaxWidth().padding(vertical = 80.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text("No agents running", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        } else {
+            // Only needs-you cards carry quick answers; the other sections take
+            // the default no-op, as they did before the body was shared.
+            boardSection("Needs you", ui.board.needsYou, compact, selectedPaneId, onOpenAgent, reduceMotion, onReviewAgent, onCloseAgent, onQuickAnswer)
+            boardSection("Working", ui.board.working, compact, selectedPaneId, onOpenAgent, reduceMotion, onReviewAgent, onCloseAgent)
+            boardSection("Done", ui.board.done, compact, selectedPaneId, onOpenAgent, reduceMotion, onReviewAgent, onCloseAgent)
+            boardSection("Idle", ui.board.idle, compact, selectedPaneId, onOpenAgent, reduceMotion, onReviewAgent, onCloseAgent)
+            boardSection("Other", ui.board.unknown, compact, selectedPaneId, onOpenAgent, reduceMotion, onReviewAgent, onCloseAgent)
+        }
+    }
+    item { Spacer(Modifier.height(24.dp)) }
 }
 
 @Composable
@@ -276,6 +315,8 @@ private fun CompatibilityBanner(
 private fun LazyListScope.boardSection(
     title: String,
     agents: List<SessionDescriptor>,
+    compact: Boolean,
+    selectedPaneId: String?,
     onOpenAgent: (SessionDescriptor) -> Unit,
     reduceMotion: Boolean,
     onReviewAgent: (SessionDescriptor) -> Unit,
@@ -314,6 +355,8 @@ private fun LazyListScope.boardSection(
         AgentCardRow(
             agent,
             onClick = { onOpenAgent(agent) },
+            compact = compact,
+            selected = selectedPaneId != null && selectedPaneId == agent.live?.paneId,
             onReview = { onReviewAgent(agent) },
             onClose = { onCloseAgent(agent) },
             onQuickAnswer = { label -> onQuickAnswer(agent, label) },
@@ -363,7 +406,7 @@ private fun DisconnectedBanner(error: String?, onRetry: () -> Unit) {
 }
 
 /** The name the card shows, so the close confirmation names the same thing. */
-private fun SessionDescriptor.cardTitle(): String =
+internal fun SessionDescriptor.cardTitle(): String =
     agentDisplayTitle(title).takeIf { it.isNotBlank() } ?: agentKind
 
 /** Swipe-to-reveal anchor values for a board card. */
@@ -378,23 +421,27 @@ private data class BoardAction(
     val onClick: () -> Unit,
 )
 
+/**
+ * A board card. The compact form is the 320dp session panel's row: same
+ * anatomy, one line of activity, and no swipe-to-reveal — 156dp of reveal does
+ * not fit a 320dp column, so Review / Copy path / Close stay in the overflow
+ * menu only.
+ */
 @Composable
 private fun AgentCardRow(
     agent: SessionDescriptor,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    compact: Boolean = false,
+    selected: Boolean = false,
     onReview: () -> Unit = {},
     onClose: () -> Unit = {},
     onQuickAnswer: (String) -> Unit = {},
 ) {
-    val status = AgentStatus.fromWire(agent.status)
-    val isNeedsYou = status == AgentStatus.NeedsYou
-    val accent = statusColor(status)
     val scheme = MaterialTheme.colorScheme
     val clipboard = LocalClipboardManager.current
     val haptic = rememberHaptic()
     val context = LocalContext.current
-    var menuOpen by remember { mutableStateOf(false) }
     val copyPath = {
         clipboard.setText(AnnotatedString(agent.cwd ?: agent.live?.workspaceId.orEmpty()))
         haptic(HapticEvent.Confirm)
@@ -411,6 +458,24 @@ private fun AgentCardRow(
         add(BoardAction("copy", "Copy path", Icons.Outlined.ContentCopy, scheme.onSurfaceVariant, copyPath))
         add(BoardAction("close", "Close", Icons.Outlined.Close, scheme.onSurfaceVariant, onClose))
     }
+    if (compact) {
+        AgentCardBody(
+            agent = agent,
+            actions = actions,
+            selected = selected,
+            compact = true,
+            onClick = onClick,
+            onQuickAnswer = onQuickAnswer,
+            modifier = modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(4.dp))
+                .testTag("panel_agent_card_${agent.live?.paneId}"),
+        )
+        return
+    }
+
+    // A drag anchor that can never be reached is dead state, so the reveal is
+    // built only on the path that renders it.
     val density = LocalDensity.current
     val revealWidthPx = with(density) { (actions.size * 52).dp.toPx() }
     val reveal = remember {
@@ -458,117 +523,152 @@ private fun AgentCardRow(
             }
         }
         // Foreground card slides left on a horizontal drag.
-        PressTintSurface(
+        AgentCardBody(
+            agent = agent,
+            actions = actions,
+            selected = selected,
+            compact = false,
             onClick = { if (reveal.currentValue == BoardReveal.Open) closeReveal() else onClick() },
-            shape = RoundedCornerShape(4.dp),
-            color = MaterialTheme.colorScheme.surfaceContainer,
-            pressedColor = MaterialTheme.colorScheme.surfaceVariant,
+            onQuickAnswer = onQuickAnswer,
             modifier = Modifier
                 .offset { IntOffset(reveal.requireOffset().roundToInt(), 0) }
                 .anchoredDraggable(reveal, reverseDirection = false, orientation = Orientation.Horizontal)
                 .fillMaxWidth()
                 .testTag("agent_card_${agent.live?.paneId}"),
+        )
+    }
+}
+
+/**
+ * The card itself: ring, title, activity, needs-you block, machine facts, time
+ * in state and the overflow menu. The caller supplies the outer [modifier], so
+ * the full-window row hangs its swipe offset there and the compact row does
+ * not have to carry one.
+ */
+@Composable
+private fun AgentCardBody(
+    agent: SessionDescriptor,
+    actions: List<BoardAction>,
+    selected: Boolean,
+    compact: Boolean,
+    onClick: () -> Unit,
+    onQuickAnswer: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val status = AgentStatus.fromWire(agent.status)
+    val isNeedsYou = status == AgentStatus.NeedsYou
+    val accent = statusColor(status)
+    val scheme = MaterialTheme.colorScheme
+    var menuOpen by remember { mutableStateOf(false) }
+    PressTintSurface(
+        onClick = onClick,
+        shape = RoundedCornerShape(4.dp),
+        // Selection is a surface step, never a border: the needs-you border
+        // stays status-owned.
+        color = if (selected) MaterialTheme.colorScheme.surfaceContainerHigh
+        else MaterialTheme.colorScheme.surfaceContainer,
+        pressedColor = MaterialTheme.colorScheme.surfaceVariant,
+        modifier = modifier.semantics { this.selected = selected },
+    ) {
+        Card(
+            colors = CardDefaults.cardColors(containerColor = Color.Transparent),
+            shape = RoundedCornerShape(4.dp),
+            border = androidx.compose.foundation.BorderStroke(
+                width = if (isNeedsYou) 1.dp else 0.dp,
+                color = if (isNeedsYou) accent else Color.Transparent,
+            ),
         ) {
-            Card(
-                colors = CardDefaults.cardColors(containerColor = Color.Transparent),
-                shape = RoundedCornerShape(4.dp),
-                border = androidx.compose.foundation.BorderStroke(
-                    width = if (isNeedsYou) 1.dp else 0.dp,
-                    color = if (isNeedsYou) accent else Color.Transparent,
-                ),
+            // Tile anatomy per reference §8b: ring, then a text column of
+            // title / latest activity / machine facts, then time in state.
+            Row(
+                Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.Top,
             ) {
-                // Tile anatomy per reference §8b: ring, then a text column of
-                // title / latest activity / machine facts, then time in state.
-                Row(
-                    Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
-                    verticalAlignment = Alignment.Top,
-                ) {
-                    StatusRing(
-                        color = accent,
-                        animation = ringAnimation(status),
-                        modifier = Modifier.padding(top = 5.dp),
-                    )
-                    Spacer(Modifier.width(12.dp))
-                    Column(Modifier.weight(1f)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            AgentMark(agent.agentKind)
-                            Spacer(Modifier.width(6.dp))
-                            Text(
-                                text = agent.cardTitle(),
-                                style = MaterialTheme.typography.titleMedium,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
-                        // A needs-you agent's question is prose addressed to the
-                        // user; everything else is the machine's own last move.
-                        agent.latestActivity?.takeIf { it.isNotBlank() }?.let { activity ->
-                            Spacer(Modifier.height(2.dp))
-                            Text(
-                                text = if (isNeedsYou) activity else "▸ $activity",
-                                style = if (isNeedsYou) MaterialTheme.typography.bodySmall else ScoutrType.monoMeta,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    .copy(alpha = if (isNeedsYou) 1f else 0.65f),
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
-                        if (isNeedsYou) {
-                            AttentionBlock(
-                                attention = agent.attention,
-                                paneId = agent.live?.paneId.orEmpty(),
-                                cardTitle = agent.cardTitle(),
-                                onQuickAnswer = onQuickAnswer,
-                                onOpen = onClick,
-                            )
-                        }
-                        Spacer(Modifier.height(2.dp))
-                        // Machine facts: which project, on which model. The project
-                        // name is what the user recognises the card by, so it reads
-                        // above the transcript line's weight, not below it.
+                StatusRing(
+                    color = accent,
+                    animation = ringAnimation(status),
+                    modifier = Modifier.padding(top = 5.dp),
+                )
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        AgentMark(agent.agentKind)
+                        Spacer(Modifier.width(6.dp))
                         Text(
-                            text = listOfNotNull(
-                                projectFolderName(agent.cwd) ?: agent.live?.workspaceId.orEmpty(),
-                                agent.model?.let { shortModel(it) },
-                            ).joinToString(" · "),
-                            style = ScoutrType.monoMeta,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
+                            text = agent.cardTitle(),
+                            style = MaterialTheme.typography.titleMedium,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
                     }
-                    Spacer(Modifier.width(12.dp))
-                    TimeInState(status, agent.statusSinceMs ?: agent.updatedAtMs)
-                    Box {
-                        androidx.compose.material3.IconButton(
-                            onClick = { menuOpen = true },
-                            modifier = Modifier
-                                .size(28.dp)
-                                .testTag("agent_actions_${agent.live?.paneId}")
-                                .semantics { contentDescription = "Agent actions for ${agent.cardTitle()}" },
-                        ) {
-                            Icon(
-                                Icons.Default.MoreVert,
-                                contentDescription = null,
-                                tint = scheme.onSurfaceVariant.copy(alpha = 0.5f),
-                                modifier = Modifier.size(16.dp),
+                    // A needs-you agent's question is prose addressed to the
+                    // user; everything else is the machine's own last move.
+                    agent.latestActivity?.takeIf { it.isNotBlank() }?.let { activity ->
+                        Spacer(Modifier.height(2.dp))
+                        Text(
+                            text = if (isNeedsYou) activity else "▸ $activity",
+                            style = if (isNeedsYou) MaterialTheme.typography.bodySmall else ScoutrType.monoMeta,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                .copy(alpha = if (isNeedsYou) 1f else 0.65f),
+                            maxLines = if (compact) 1 else 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    if (isNeedsYou) {
+                        AttentionBlock(
+                            attention = agent.attention,
+                            paneId = agent.live?.paneId.orEmpty(),
+                            cardTitle = agent.cardTitle(),
+                            onQuickAnswer = onQuickAnswer,
+                            onOpen = onClick,
+                        )
+                    }
+                    Spacer(Modifier.height(2.dp))
+                    // Machine facts: which project, on which model. The project
+                    // name is what the user recognises the card by, so it reads
+                    // above the transcript line's weight, not below it.
+                    Text(
+                        text = listOfNotNull(
+                            projectFolderName(agent.cwd) ?: agent.live?.workspaceId.orEmpty(),
+                            agent.model?.let { shortModel(it) },
+                        ).joinToString(" · "),
+                        style = ScoutrType.monoMeta,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                Spacer(Modifier.width(12.dp))
+                TimeInState(status, agent.statusSinceMs ?: agent.updatedAtMs)
+                Box {
+                    androidx.compose.material3.IconButton(
+                        onClick = { menuOpen = true },
+                        modifier = Modifier
+                            .size(28.dp)
+                            .testTag("agent_actions_${agent.live?.paneId}")
+                            .semantics { contentDescription = "Agent actions for ${agent.cardTitle()}" },
+                    ) {
+                        Icon(
+                            Icons.Default.MoreVert,
+                            contentDescription = null,
+                            tint = scheme.onSurfaceVariant.copy(alpha = 0.5f),
+                            modifier = Modifier.size(16.dp),
+                        )
+                    }
+                    DropdownMenu(
+                        expanded = menuOpen,
+                        onDismissRequest = { menuOpen = false },
+                    ) {
+                        actions.forEach { action ->
+                            DropdownMenuItem(
+                                text = { Text(action.label) },
+                                onClick = {
+                                    menuOpen = false
+                                    action.onClick()
+                                },
+                                leadingIcon = { Icon(action.icon, contentDescription = null) },
+                                modifier = Modifier.testTag("board_menu_${action.key}_${agent.live?.paneId}"),
                             )
-                        }
-                        DropdownMenu(
-                            expanded = menuOpen,
-                            onDismissRequest = { menuOpen = false },
-                        ) {
-                            actions.forEach { action ->
-                                DropdownMenuItem(
-                                    text = { Text(action.label) },
-                                    onClick = {
-                                        menuOpen = false
-                                        action.onClick()
-                                    },
-                                    leadingIcon = { Icon(action.icon, contentDescription = null) },
-                                    modifier = Modifier.testTag("board_menu_${action.key}_${agent.live?.paneId}"),
-                                )
-                            }
                         }
                     }
                 }

@@ -114,6 +114,7 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.withStyle
+import dev.scoutr.app.ui.components.ChatProseMeasure
 import dev.scoutr.app.ui.components.AgentMark
 import dev.scoutr.app.ui.agentDisplayTitle
 import dev.scoutr.app.ui.theme.DiffPalette
@@ -190,6 +191,12 @@ fun ChatScreen(
     onOpenTerminal: (() -> Unit)? = null,
     onOpenFiles: ((String) -> Unit)? = null,
     onOpenReview: ((String) -> Unit)? = null,
+    /**
+     * True when the wide shell renders a bottom bar under this pane and has
+     * already consumed the IME and navigation-bar insets. A second consumer
+     * here would stack into a nav-bar-tall dead band (fix 25df24f).
+     */
+    bottomInsetOwnedByShell: Boolean = false,
 ) {
     val ui by viewModel.ui.collectAsState()
 
@@ -261,8 +268,13 @@ fun ChatScreen(
         PullToRefreshBox(
             isRefreshing = ui.isRefreshing,
             onRefresh = viewModel::onPullRefresh,
+            // The transcript is prose: it reads at ChatProseMeasure and centers
+            // in whatever is left. The header stays full-bleed so the bar still
+            // reads as chrome.
             modifier = Modifier
                 .weight(1f)
+                .align(Alignment.CenterHorizontally)
+                .widthIn(max = ChatProseMeasure)
                 .fillMaxWidth()
                 .pullRefreshSemantics(viewModel::onPullRefresh)
                 .testTag("chat_refresh_root"),
@@ -345,7 +357,13 @@ fun ChatScreen(
             }
         }
 
-        Column(Modifier.fillMaxWidth().imeOrNavigationBarsPadding()) {
+        Column(
+            Modifier
+                .align(Alignment.CenterHorizontally)
+                .widthIn(max = ChatProseMeasure)
+                .fillMaxWidth()
+                .then(if (bottomInsetOwnedByShell) Modifier else Modifier.imeOrNavigationBarsPadding()),
+        ) {
             val sendError = ui.sendError
             if (sendError != null) {
                 Text(

@@ -78,6 +78,52 @@ status metadata and controls.
   workspace › tab › pane breadcrumb selector above the grid and hierarchy and
   modifier rows kept out of the transcript.
 
+## Expanded windows
+
+Below 840dp the app is single-pane and behaves exactly as it always has. At or
+above 840dp — an unfolded Fold, a tablet, a large freeform window — the shell
+splits:
+
+- **Breakpoint 840dp**, read from `BoxWithConstraints` in `ScoutrAppNav`. No
+  window-size-class dependency; `ReadableContentColumn` already reads width the
+  same way.
+- **Session panel, 320dp fixed**, on the left; the detail pane takes the
+  remainder. The panel shows on the four tab destinations and on Chat, and is
+  absent on Terminal, Files, File viewer, Settings and Connect.
+- **The panel is always the live board list.** It does not follow the
+  destination — Sessions' history stays in the detail pane. It carries its own
+  header (lockup, terminal, settings), the new-session FAB, pull-to-refresh and
+  the disconnected / version-mismatch banners, so a mismatch is visible even
+  mid-chat. The detail pane keeps each route's own top bar.
+- **Board means "no session selected."** It stays a bottom-bar destination and
+  keeps its needs-you badge; its detail pane is a bare centered placeholder
+  with no top bar, because the panel header already names the surface.
+- **The bottom bar is retained**, full width beneath both panes, and stays
+  visible on Chat when wide. Below 840dp the bar still hides on Chat.
+- **Selection is derived, never stored.** The highlighted row comes from the
+  current back-stack entry (`sessionKey`, or `bootstrapPaneId` until a fresh
+  session's route converges). Selection is a surface step only; the needs-you
+  border stays status-owned.
+- **The compact card** is the same anatomy with one line of latest activity and
+  no swipe-to-reveal: 156dp of reveal does not fit a 320dp column, so Review /
+  Copy path / Close live in the overflow menu there. The full-window Board keeps
+  its swipe.
+- **Chat reads at a 600dp prose measure** (`ChatProseMeasure`), centered, at
+  every width — tighter than the 960dp scan measure that Board, Sessions and
+  Review use, because Chat is prose. The chat header stays full-bleed.
+- **One inset owner under a visible bottom bar.** On wide the shell `Scaffold`
+  carries `imePadding()` and Chat's composer pads by nothing
+  (`bottomInsetOwnedByShell`); on compact, Chat keeps
+  `imeOrNavigationBarsPadding()` and the shell adds nothing. A second consumer
+  stacks into a nav-bar-tall dead band (fix 25df24f).
+
+Folding is a plain config change: the activity recreates and Navigation restores
+the back stack, so an open chat survives fold and unfold with no persistence
+mechanism of its own. Checked on the emulator at 932x704dp: with a chat open,
+resizing to a compact window kept the chat (full window, no panel, no bottom
+bar) and resizing back returned it to the detail pane beside the panel, still
+highlighted.
+
 ## Behavior and motion
 
 Agent-busy motion uses `WorkingIndicator`; no unrelated screen animation is

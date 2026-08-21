@@ -9,17 +9,23 @@ import androidx.activity.SystemBarStyle
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.union
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.systemBars
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -42,6 +48,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeOut
@@ -59,6 +66,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -85,6 +93,8 @@ import dev.scoutr.app.state.savedStateViewModelFactory
 import dev.scoutr.app.state.viewModelFactory
 import dev.scoutr.app.ui.screens.BoardScreen
 import dev.scoutr.app.ui.screens.NewSessionSheet
+import dev.scoutr.app.ui.screens.PanelSelection
+import dev.scoutr.app.ui.screens.SessionPanel
 import dev.scoutr.app.ui.screens.ChatScreen
 import dev.scoutr.app.ui.screens.FileBrowserScreen
 import dev.scoutr.app.ui.screens.FileViewerScreen
@@ -98,8 +108,10 @@ import dev.scoutr.app.ui.screens.SettingsScreen
 import dev.scoutr.app.state.TerminalViewModel
 import dev.scoutr.app.ui.screens.terminal.TerminalScreen
 
+import dev.scoutr.app.ui.nav.CHAT_ROUTE
 import dev.scoutr.app.ui.nav.Destination
 import dev.scoutr.app.ui.nav.TabScaffold
+import dev.scoutr.app.ui.nav.isShellRoute
 import dev.scoutr.app.ui.components.AppTopBar
 import dev.scoutr.app.ui.motion.ScoutrMotion
 import dev.scoutr.app.ui.motion.HapticEvent
@@ -111,7 +123,8 @@ import dev.scoutr.app.ui.theme.ScoutrTheme
 /** Non-tab routes; the tab routes live in [Destination]. */
 private object Routes {
     const val CONNECT = "connect"
-    const val CHAT = "chat?sessionKey={sessionKey}&bootstrapPaneId={bootstrapPaneId}&status={status}"
+    /** One source with the shell predicate; see ui/nav/ShellRoute.kt. */
+    const val CHAT = CHAT_ROUTE
     const val FILE_BROWSER = "files?cwd={cwd}"
     const val FILE_VIEWER = "file-viewer?cwd={cwd}&file={file}"
     const val SETTINGS = "settings"
@@ -141,12 +154,25 @@ private object Routes {
         "terminal?paneId=${paneId?.let { java.net.URLEncoder.encode(it, "UTF-8") } ?: ""}"
 }
 
+/** A session's chat route: by canonical key, or by its pane until a fresh launch converges. */
+private fun chatRoute(key: SessionKey?, bootstrapPaneId: String?, status: String): String? =
+    key?.let { Routes.chat(it, status) } ?: bootstrapPaneId?.let { Routes.bootstrapChat(it, status) }
+
 /** Open a session by canonical key, or by its pane until a fresh launch converges. */
 private fun NavController.navigateToChat(key: SessionKey?, bootstrapPaneId: String?, status: String) {
-    val route = key?.let { Routes.chat(it, status) }
-        ?: bootstrapPaneId?.let { Routes.bootstrapChat(it, status) }
-        ?: return
-    navigate(route)
+    navigate(chatRoute(key, bootstrapPaneId, status) ?: return)
+}
+
+/**
+ * Open a session from the wide window's session panel. Switching rows replaces
+ * the detail pane rather than stacking chats, so repeated selection cannot grow
+ * the back stack or leak per-session ChatViewModels.
+ */
+private fun NavController.navigateToChatFromPanel(key: SessionKey?, bootstrapPaneId: String?, status: String) {
+    navigate(chatRoute(key, bootstrapPaneId, status) ?: return) {
+        popUpTo(Destination.Board.route) { inclusive = false }
+        launchSingleTop = true
+    }
 }
 
 class MainActivity : ComponentActivity() {
@@ -260,7 +286,36 @@ private fun ScoutrAppNav(
         navController.navigate(Routes.terminal()) { launchSingleTop = true }
     }
 
-    Box {
+    // The new-session sheet is hoisted so the wide window's panel FAB opens the
+    // same sheet from any destination, not only from the Board route.
+    val newSessionViewModel: NewSessionViewModel = viewModel(
+        factory = NewSessionViewModel.factory(container.bridge, container.launcherSettingsStore),
+    )
+    var showNewSession by remember { mutableStateOf(false) }
+
+    BoxWithConstraints {
+        val compatible = boardUi.apiCompatibility == ScoutrApiCompatibility.Compatible
+        // Read straight off the window, as ReadableContentColumn already does;
+        // a plain Boolean threaded from the shell is also directly testable.
+        val isWide = maxWidth >= WIDE_WINDOW_BREAKPOINT
+        val showPanel = isWide && isShellRoute(currentRoute) && compatible
+        val showBottomBar = compatible &&
+            (currentRoute in Destination.routes || (isWide && currentRoute == CHAT_ROUTE))
+        // The one case where the shell, not the screen, owns the bottom inset:
+        // Chat under a wide window's bottom bar.
+        val shellOwnsBottomInset = isWide && showBottomBar && currentRoute == CHAT_ROUTE
+        // Derived from the back stack, never stored. Both arguments matter: a
+        // chat entered by bootstrap has no sessionKey until the route rewrites.
+        val selection = if (currentRoute == CHAT_ROUTE) {
+            val args = backStack?.arguments
+            PanelSelection(
+                sessionKey = args?.getString("sessionKey")?.takeIf(String::isNotBlank),
+                paneId = args?.getString("bootstrapPaneId")?.takeIf(String::isNotBlank),
+            )
+        } else {
+            null
+        }
+
         Scaffold(
         // Status/side bars only. Bottom is either the tab bar or each
         // screen's ime.union(navigationBars) pad — including nav bars here
@@ -268,24 +323,56 @@ private fun ScoutrAppNav(
         contentWindowInsets = WindowInsets.systemBars.only(
             WindowInsetsSides.Horizontal + WindowInsetsSides.Top,
         ),
+        // Panel, detail pane and bar ride above the keyboard together. The
+        // shell takes the larger of the IME and the nav bar, and the bar drops
+        // its own nav-bar pad below — exactly one consumer, as fix 25df24f
+        // requires, and the same rule imeOrNavigationBarsPadding applies for
+        // a screen that owns its own bottom.
+        modifier = if (shellOwnsBottomInset) {
+            Modifier.windowInsetsPadding(WindowInsets.ime.union(WindowInsets.navigationBars))
+        } else {
+            Modifier
+        },
         bottomBar = {
-            if (
-                currentRoute in Destination.routes &&
-                boardUi.apiCompatibility == ScoutrApiCompatibility.Compatible
-            ) {
+            if (showBottomBar) {
                 ScoutrBottomBar(
                     currentRoute = currentRoute,
                     needsYouCount = rememberNeedsYouCount(boardViewModel),
                     onSelect = onTab,
+                    insetOwnedByShell = shellOwnsBottomInset,
                 )
             }
         },
     ) { inner ->
         val motion = useReduceMotion()
+        Row(Modifier.fillMaxSize().padding(inner)) {
+        if (showPanel) {
+            SessionPanel(
+                viewModel = boardViewModel,
+                selection = selection,
+                onOpenSession = { agent ->
+                    agent.live?.let { navController.navigateToChatFromPanel(agent.key, it.paneId, it.status) }
+                },
+                onReviewAgent = { agent ->
+                    agent.cwd?.let { cwd ->
+                        reviewViewModel.selectRepo(cwd)
+                        onTab(Destination.Review.route)
+                    }
+                },
+                onCloseAgent = { agent -> agent.live?.let { boardViewModel.closeAgent(it.paneId) } },
+                onQuickAnswer = { agent, label -> boardViewModel.quickAnswer(agent, label) },
+                onNewSession = { showNewSession = true },
+                onSettings = openSettings,
+                onTerminal = openTerminal,
+                onResolveCompatibility = openSettings,
+                modifier = Modifier.width(SESSION_PANEL_WIDTH).fillMaxHeight(),
+            )
+            VerticalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        }
         NavHost(
             navController = navController,
             startDestination = startDestination,
-            modifier = Modifier.padding(inner),
+            modifier = Modifier.weight(1f),
             // Destination changes are a short fade only; rows own their own
             // 140ms arrival and never shift the list with placement animation.
             enterTransition = {
@@ -317,25 +404,25 @@ private fun ScoutrAppNav(
                 )
             }
             composable(Destination.Board.route) {
-                val newSessionViewModel: NewSessionViewModel = viewModel(
-                    factory = NewSessionViewModel.factory(
-                        container.bridge,
-                        container.launcherSettingsStore,
-                    ),
-                )
-                var showNewSession by remember { mutableStateOf(false) }
+                if (showPanel) {
+                    // The panel header already names the surface, so the detail
+                    // pane carries no second "Board" bar — Board on wide simply
+                    // means no session is selected. Without the panel (compact,
+                    // or an incompatible bridge) this route stays the board
+                    // itself, which is what polls and what shows the banner.
+                    BoardDetailPlaceholder()
+                    return@composable
+                }
                 TabScaffold(
                     // Header composition is per-screen in the reference: the board
                     // carries terminal + settings, and search belongs to Sessions
                     // (§8b, §9c) — not a uniform action row on every tab.
                     title = "Board",
                     onSettings = openSettings,
-                    onTerminal = openTerminal.takeIf {
-                        boardUi.apiCompatibility == ScoutrApiCompatibility.Compatible
-                    },
+                    onTerminal = openTerminal.takeIf { compatible },
                     showLockup = true,
                     floatingActionButton = {
-                        if (boardUi.apiCompatibility == ScoutrApiCompatibility.Compatible) {
+                        if (compatible) {
                             FloatingActionButton(
                                 onClick = { showNewSession = true },
                                 containerColor = MaterialTheme.colorScheme.primary,
@@ -362,16 +449,6 @@ private fun ScoutrAppNav(
                         onResolveCompatibility = openSettings,
                         viewModel = boardViewModel,
                         modifier = Modifier.padding(innerBoard),
-                    )
-                }
-                if (showNewSession) {
-                    NewSessionSheet(
-                        viewModel = newSessionViewModel,
-                        onDismiss = { showNewSession = false },
-                        onCreated = { paneId ->
-                            showNewSession = false
-                            navController.navigate(Routes.bootstrapChat(paneId, "working"))
-                        },
                     )
                 }
             }
@@ -453,6 +530,7 @@ private fun ScoutrAppNav(
                 ChatScreen(
                     viewModel = chatViewModel,
                     onBack = { navController.popBackStack() },
+                    bottomInsetOwnedByShell = shellOwnsBottomInset,
                     onOpenTerminal = {
                         chatUi.livePaneId?.let { navController.navigate(Routes.terminal(it)) }
                     },
@@ -588,7 +666,18 @@ private fun ScoutrAppNav(
             }
         }
         }
+        }
 
+        if (showNewSession) {
+            NewSessionSheet(
+                viewModel = newSessionViewModel,
+                onDismiss = { showNewSession = false },
+                onCreated = { paneId ->
+                    showNewSession = false
+                    navController.navigate(Routes.bootstrapChat(paneId, "working"))
+                },
+            )
+        }
 
         if (paletteOpen) {
 
@@ -615,6 +704,27 @@ private fun ScoutrAppNav(
     }
 }
 
+/** Above this window width the shell shows the session panel beside the detail pane. */
+private val WIDE_WINDOW_BREAKPOINT = 840.dp
+
+/** The session panel's fixed width; the detail pane takes the remainder. */
+private val SESSION_PANEL_WIDTH = 320.dp
+
+/** What the detail pane shows on wide until a session is chosen. */
+@Composable
+private fun BoardDetailPlaceholder() {
+    Box(
+        Modifier.fillMaxSize().testTag("board_detail_placeholder"),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            "Select a session",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
 /** Number of agents that currently need the user, for the Board tab badge. */
 @Composable
 private fun rememberNeedsYouCount(boardViewModel: BoardViewModel): Int =
@@ -630,12 +740,15 @@ fun ScoutrBottomBar(
     currentRoute: String?,
     needsYouCount: Int,
     onSelect: (String) -> Unit,
+    // True when the shell already consumed the bottom inset for this route;
+    // padding again would stack a nav-bar-tall band under the bar.
+    insetOwnedByShell: Boolean = false,
 ) {
     Column(
         Modifier
             .fillMaxWidth()
             .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.97f))
-            .navigationBarsPadding(),
+            .then(if (insetOwnedByShell) Modifier else Modifier.navigationBarsPadding()),
     ) {
         Box(
             Modifier

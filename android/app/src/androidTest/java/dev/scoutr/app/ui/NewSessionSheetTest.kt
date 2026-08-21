@@ -103,7 +103,7 @@ class NewSessionSheetTest {
     private fun bridge(readTimeoutSeconds: Long = 5): BridgeClient {
         val store = ConnectionStore(InstrumentationRegistry.getInstrumentation().targetContext)
         val host = server.url("/").toString().trimEnd('/')
-        store.save(host, "test_token", null, null)
+        store.save(host, "test_token")
         return BridgeClient(
             OkHttpClient.Builder().readTimeout(readTimeoutSeconds, TimeUnit.SECONDS).build(),
             store,
