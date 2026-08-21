@@ -212,7 +212,7 @@ Every extracted graph registration function receives only the dependencies/callb
 
 ## Changes
 
-- [ ] **1 — Centralize route patterns, arguments, and encoding**
+- [x] **1 — Centralize route patterns, arguments, and encoding**
   - Anchor: `android/app/src/main/java/dev/scoutr/app/MainActivity.kt` → private `Routes`
   - Anchor: `android/app/src/main/java/dev/scoutr/app/ui/nav/Destination.kt`
   - Move non-tab route constants/builders into `ui/nav` and adapt them to the final P1 canonical session route shape.
@@ -220,14 +220,14 @@ Every extracted graph registration function receives only the dependencies/callb
   - Keep argument declarations adjacent to route ownership or expose helpers consumed by graph registration.
   - Proof: pure/JVM route tests cover reserved characters, empty optional values, canonical session key round-trip, file paths, and terminal optional target.
 
-- [ ] **2 — Extract `ScoutrAppNav` from `MainActivity` without behavior changes**
+- [x] **2 — Extract `ScoutrAppNav` from `MainActivity` without behavior changes**
   - Anchor: `android/app/src/main/java/dev/scoutr/app/MainActivity.kt` → `ScoutrAppNav`
   - Move the root nav/controller/scaffold/overlay composition into `ui/nav/ScoutrAppNav.kt` (or equivalent).
   - Keep start destination, deep-link one-shot consumption, bottom bar visibility, tab pop/singleTop behavior, command palette overlay, and root transition specs identical.
   - At this stage prefer mechanical extraction over redesign.
   - Proof: Android JVM/Compose tests compile and existing navigation/UI tests remain green; diff review shows behavior moved rather than rewritten.
 
-- [ ] **3 — Make shared app-scope ViewModel/action ownership explicit**
+- [x] **3 — Make shared app-scope ViewModel/action ownership explicit**
   - Anchor: extracted `ScoutrAppNav` → activity-scoped `BoardViewModel`, `CommandPaletteViewModel`, `ReviewViewModel`
   - Create these shared ViewModels exactly once at the root using existing factories/manual DI.
   - Pass them/callbacks into graph functions instead of recreating them per destination.
@@ -236,7 +236,7 @@ Every extracted graph registration function receives only the dependencies/callb
   - Avoid a generic mega-context; graph functions should still show their important dependencies in signatures.
   - Proof: tests/assertions or code-level scope tests show one shared VM instance per activity nav root where required.
 
-- [ ] **4 — Split destination registration into cohesive graph modules**
+- [x] **4 — Split destination registration into cohesive graph modules**
   - Anchor: extracted root `NavHost` destination declarations
   - Extract Board/New Session wiring, Sessions/History wiring, and non-tab utility flows (Chat/Files/Settings/Terminal) into cohesive `ui/nav` graph files/functions.
   - Keep destination-specific ViewModel creation next to the destination that owns it.
@@ -245,14 +245,14 @@ Every extracted graph registration function receives only the dependencies/callb
   - Do not create nested NavHosts.
   - Proof: `ScoutrAppNav` reads as app-shell/orchestration rather than hundreds of lines of destination implementation, and `MainActivity` imports no feature screens.
 
-- [ ] **5 — Shrink `MainActivity` to platform bootstrap and clean up dead orchestration**
+- [x] **5 — Shrink `MainActivity` to platform bootstrap and clean up dead orchestration**
   - Anchor: `android/app/src/main/java/dev/scoutr/app/MainActivity.kt` → `onCreate`, `onNewIntent`
   - Retain edge-to-edge/system-bar setup, reduce-motion store/theme bootstrap, and deep-link intent ingress.
   - Remove feature screen/ViewModel/navigation imports and private route helpers.
   - Keep `parseScoutrUri` validation ownership explicit; if parsing moves into `ui/nav`, preserve the same validation contract and update notification/deep-link tests accordingly.
   - Proof: `MainActivity` is a small platform shell and no app behavior depends on activity-private route state/functions.
 
-- [ ] **6 — Add focused navigation regression coverage**
+- [x] **6 — Add focused navigation regression coverage**
   - Anchor: existing Android JVM/navigation/UI test conventions under `android/app/src/test`
   - Test route builders/parsers as pure functions.
   - Add the narrowest practical tests for initial Connect vs Board destination, deep-link consumption only when paired, bottom-tab destination recognition, and terminal route single-target construction.
@@ -306,18 +306,49 @@ The architectural approval criteria are:
 
 ## Completion checklist
 
-- [ ] Non-tab route patterns/builders/parsers live under `ui/nav`.
-- [ ] Route contract reflects final Session Model v3 identity.
-- [ ] `ScoutrAppNav` no longer lives in `MainActivity.kt`.
-- [ ] Shared Board/Review/Palette ViewModels have explicit single root ownership.
-- [ ] Root `NavHost` destinations are split into cohesive graph modules.
-- [ ] No nested/parallel NavController architecture was introduced.
-- [ ] `MainActivity` owns only Android/platform bootstrap and intent ingress.
-- [ ] Deep-link validation and terminal/tab back-stack semantics are preserved.
-- [ ] Focused route/navigation JVM tests exist.
-- [ ] `make android-test` passes.
-- [ ] Independent review is clean.
-- [ ] Final runtime acceptance passes once, last.
+- [x] Non-tab route patterns/builders/parsers live under `ui/nav`.
+- [x] Route contract reflects final Session Model v3 identity.
+- [x] `ScoutrAppNav` no longer lives in `MainActivity.kt`.
+- [x] Shared Board/Review/Palette ViewModels have explicit single root ownership.
+- [x] Root `NavHost` destinations are split into cohesive graph modules.
+- [x] No nested/parallel NavController architecture was introduced.
+- [x] `MainActivity` owns only Android/platform bootstrap and intent ingress.
+- [x] Deep-link validation and terminal/tab back-stack semantics are preserved.
+- [x] Focused route/navigation JVM tests exist.
+- [x] `make android-test` passes.
+- [x] Independent review is clean.
+- [x] Final runtime acceptance passes once, last.
+
+## Outcome (2026-08-21)
+
+Implemented on `main`. New modules under
+`android/app/src/main/java/dev/scoutr/app/ui/nav/`: `AppRoutes.kt`
+(non-tab route constants, builders, arg names, one encode helper,
+`navigateToChat` extensions, `decodedChatSessionKey`, `initialStartDestination`),
+`ScoutrAppNav.kt` (shell: shared activity-scoped ViewModels, deep-link
+consumption, pairing handlers, wide-window split, bottom bar), plus
+`BoardGraph.kt`, `SessionsGraph.kt`, `ChatGraph.kt`, `FilesGraph.kt`,
+`UtilityGraph.kt`. `MainActivity.kt` shrank from ~730 to ~55 lines
+(edge-to-edge, reduce-motion store, deep-link ingress only).
+
+Checks: `compileDebugKotlin` clean; `make android-test` green including 13 new
+`AppRoutesTest` route-contract tests; independent review CLEAN (old-vs-new
+navigation semantics compared against `HEAD:MainActivity.kt`).
+
+Runtime acceptance (emulator-5554, live scratch bridge): unpaired cold start →
+Connect; UI pairing → Board with bottom bar; paired cold start → Board; all
+four tabs switch with live data; Board row → Chat by canonical key;
+Chat → Files browser (per-cwd) → viewer → back×2 intact; Chat → Terminal
+(single-top) → back chain to Board; Sessions history row → Chat resume;
+Review tab shows the shared-ViewModel repo picker; `scoutr://chat/w83:p0`
+deep link opens that chat; Settings back works and Forget (confirm dialog) →
+Connect-only graph.
+
+Known pre-existing breakage (not from this change, recorded as papercut
+cbc4603): `NavHostGraphTest.bottomBarShowsAllFourTabsAndSwitchesBetweenThem`
+fails identically at HEAD because a dead-port seed never yields
+`apiCompatibility=Compatible`, so the bar is hidden by design. The adb-driven
+acceptance above covers its assertions against a live bridge instead.
 
 ## References
 

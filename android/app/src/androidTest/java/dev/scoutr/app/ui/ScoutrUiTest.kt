@@ -16,7 +16,7 @@ import dev.scoutr.app.state.BoardUiState
 import dev.scoutr.app.state.BoardViewModel
 import dev.scoutr.app.ui.screens.ConnectScreen
 import dev.scoutr.app.ui.screens.BoardScreen
-import dev.scoutr.app.ScoutrBottomBar
+import dev.scoutr.app.ui.nav.ScoutrBottomBar
 import dev.scoutr.app.ui.theme.ScoutrTheme
 import okhttp3.OkHttpClient
 import org.junit.Rule
