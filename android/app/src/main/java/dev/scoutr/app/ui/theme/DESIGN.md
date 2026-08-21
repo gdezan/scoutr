@@ -91,9 +91,10 @@ splits:
   remainder. The panel shows on the four tab destinations and on Chat, and is
   absent on Terminal, Files, File viewer, Settings and Connect.
 - **Navigation lives in the session panel.** The four destinations render as
-  an icon row under the panel header (shared `DestinationNavRow`), stay
-  visible on Chat when wide, and keep the needs-you badge on Board. Nothing
-  sits beneath the panes, so the detail pane keeps the window's full height.
+  an icon row at the panel's foot, below a hairline divider (shared
+  `DestinationNavRow`); the row stays visible on Chat when wide and keeps
+  the needs-you badge on Board. Nothing sits beneath the panes, so the detail
+  pane keeps the window's full height.
 - **The list is always the live board list.** It does not follow the
   destination — Sessions' history stays in the detail pane. It carries its own
   header (lockup, terminal, settings), the new-session FAB, pull-to-refresh and
@@ -117,7 +118,8 @@ splits:
   horizontal and top system bars. Compact tabs leave the bottom to
   ScoutrBottomBar; wide tabs own it via `TabScaffold(ownsBottomInset)`; Chat
   and every non-shell screen apply `imeOrNavigationBarsPadding()` themselves,
-  and the panel FAB pads its own nav-bar clearance. A second consumer stacks
+  On wide windows the panel's destination row clears the nav bar and the FAB
+  keeps only its 16dp stand-off above it. A second consumer stacks
   into a nav-bar-tall dead band (fix 25df24f).
 
 Folding is a plain config change: the activity recreates and Navigation restores

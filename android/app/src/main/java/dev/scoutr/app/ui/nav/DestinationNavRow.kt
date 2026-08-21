@@ -25,7 +25,7 @@ import dev.scoutr.app.ui.motion.rememberHaptic
 /**
  * The four destinations as one row of selectable items. Both chrome shapes
  * embed it — the compact bottom bar and the wide window's session panel,
- * beneath its header — so anatomy, badge rule and selection coloring cannot
+ * at its foot — so anatomy, badge rule and selection coloring cannot
  * drift between them. Selection is derived from the current route; on Chat no
  * item is selected, exactly as the old wide bottom bar behaved.
  */

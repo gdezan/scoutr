@@ -52,10 +52,11 @@ import dev.scoutr.app.ui.nav.DestinationNavRow
 data class PanelSelection(val sessionKey: String? = null, val paneId: String? = null)
 
 /**
- * The wide window's left panel: navigation plus the live board list at 320dp,
- * on every shell destination. The destination row replaces the old full-width
- * bottom bar, so nothing sits beneath the panes and the detail pane keeps
- * every vertical dp. It does not follow the destination — Sessions' history
+ * The wide window's left panel: the live board list at 320dp with the
+ * destination row anchored at its foot, on every shell destination. The row
+ * replaces the old full-width bottom bar, so nothing sits beneath the panes
+ * and the detail pane keeps every vertical dp. It does not follow the
+ * destination — Sessions' history
  * stays in the detail pane — so the list remains the app's standing view of
  * what is running.
  *
@@ -119,15 +120,6 @@ fun SessionPanel(
             onTerminal = onTerminal.takeIf { compatible },
             onSettings = onSettings,
         )
-        // The wide window's navigation: same row the compact bottom bar
-        // renders, embedded here so the detail pane keeps its full height.
-        DestinationNavRow(
-            currentRoute = currentRoute,
-            needsYouCount = ui.board.needsYou.size,
-            onSelect = onSelectDestination,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         // weight, not fillMaxSize: fillMaxSize resolves to the whole window
         // height and pushes the list — and its FAB — below the header.
         Box(Modifier.weight(1f).fillMaxWidth()) {
@@ -174,9 +166,8 @@ fun SessionPanel(
                     contentColor = MaterialTheme.colorScheme.onPrimary,
                     modifier = Modifier
                         .align(Alignment.BottomEnd)
-                        // No bottom bar anymore: the FAB owns the nav-bar
-                        // clearance the old bar used to provide.
-                        .navigationBarsPadding()
+                        // The destination row at the panel's foot clears the
+                        // nav bar; the FAB keeps only its 16dp stand-off.
                         .padding(16.dp)
                         .testTag("panel_new_session"),
                 ) {
@@ -184,6 +175,16 @@ fun SessionPanel(
                 }
             }
         }
+        // The wide window's navigation: same row the compact bottom bar
+        // renders, anchored at the panel's foot so the detail pane keeps its
+        // full height. It owns the panel's nav-bar clearance.
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        DestinationNavRow(
+            currentRoute = currentRoute,
+            needsYouCount = ui.board.needsYou.size,
+            onSelect = onSelectDestination,
+            modifier = Modifier.fillMaxWidth().navigationBarsPadding(),
+        )
     }
 }
 
