@@ -7,7 +7,7 @@ import { CommandError } from "./errors.js";
 import { readSession } from "./routes/sessions.js";
 import { MAX_PROMPT_LENGTH, PROMPT_FORBIDDEN_CHAR } from "./sessions.js";
 import type { SessionSnapshot } from "./herdr/types.js";
-import type { ServerDeps } from "./routes/types.js";
+import type { ServerDeps, JsonValue } from "./routes/types.js";
 
 /**
  * Session command semantics, independent of how the command arrived.
@@ -39,6 +39,8 @@ import type { ServerDeps } from "./routes/types.js";
  * is gone; in that case the command proceeds and herdr remains the judge.
  */
 function requireLivePane(deps: ServerDeps, paneId: string): void {
+  // SAFETY: the feed snapshot is either a SessionSnapshot or absent; we only
+  // read pane/agent ids from it, which the snapshot type guarantees.
   const snapshot = deps.feed.snapshot as SessionSnapshot | null;
   if (!snapshot) return;
   if (!snapshot.panes.some((candidate) => candidate.pane_id === paneId)) {
@@ -65,12 +67,11 @@ export interface AnswerAskRequest {
 }
 
 /** Steer a running agent with a (possibly multi-line) prompt. */
-export async function steerSession(deps: ServerDeps, target: string, text: unknown): Promise<unknown> {
+export async function steerSession(deps: ServerDeps, target: string, text: string): Promise<JsonValue> {
   if (!target) throw new CommandError("steer requires target and text");
   // Newlines are legal (multi-line prompts); anything that could alter
   // submission into a PTY is not.
   if (
-    typeof text !== "string" ||
     text.length === 0 ||
     text.length > MAX_PROMPT_LENGTH ||
     PROMPT_FORBIDDEN_CHAR.test(text)
@@ -92,32 +93,29 @@ export async function steerSession(deps: ServerDeps, target: string, text: unkno
 export async function answerSessionAsk(deps: ServerDeps, request: AnswerAskRequest): Promise<string> {
   const { paneId, callId, answers, text } = request;
   if (!paneId) throw new CommandError("answer_ask requires paneId");
-  if (callId !== undefined && (typeof callId !== "string" || callId.length > 200)) {
+  if (callId !== undefined && callId.length > 200) {
     throw new CommandError("answer_ask callId must be a tool call id");
   }
   // MAX_ASK_QUESTIONS bounds the round; the tool itself caps at 4, and a
   // client claiming more is not describing an ask this bridge can deliver.
-  if (answers !== undefined && (!Array.isArray(answers) || answers.length > MAX_ASK_QUESTIONS)) {
+  if (answers !== undefined && answers.length > MAX_ASK_QUESTIONS) {
     throw new CommandError("answer_ask answers must be a bounded list");
   }
   const parsed = (answers ?? []).map((answer) => {
-    if (!answer || typeof answer !== "object") throw new CommandError("answer_ask answer must be an object");
-    const { questionId, selectedLabels } = answer;
-    if (typeof questionId !== "string" || !questionId || questionId.length > 200) {
+    if (!answer.questionId || answer.questionId.length > 200) {
       throw new CommandError("answer_ask answer needs a question card id");
     }
     if (
-      selectedLabels !== undefined &&
-      (!Array.isArray(selectedLabels) ||
-        selectedLabels.length > 32 ||
-        selectedLabels.some((label) => typeof label !== "string" || label.length > MAX_ANSWER_LENGTH))
+      answer.selectedLabels !== undefined &&
+      (answer.selectedLabels.length > 32 ||
+        answer.selectedLabels.some((label) => label.length > MAX_ANSWER_LENGTH))
     ) {
       throw new CommandError("answer_ask selectedLabels must be a bounded list of option labels");
     }
     return {
-      questionId,
+      questionId: answer.questionId,
       text: sanitizeAnswerText(answer.text ?? ""),
-      selectedLabels: selectedLabels ?? [],
+      selectedLabels: answer.selectedLabels ?? [],
     };
   });
   // An ask names live state of its own, so a missing pane already surfaces as
@@ -140,7 +138,7 @@ export async function dismissSessionAsk(deps: ServerDeps, paneId: string): Promi
 }
 
 /** Type a `/command [args]` into the pane and submit it. Returns the command sent. */
-export async function runSlashCommand(deps: ServerDeps, paneId: string, text: unknown): Promise<string> {
+export async function runSlashCommand(deps: ServerDeps, paneId: string, text: string): Promise<string> {
   if (!paneId) throw new CommandError("slash_command requires paneId");
   const slashCommand = validateSlashCommand(text);
   requireLivePane(deps, paneId);
@@ -149,13 +147,12 @@ export async function runSlashCommand(deps: ServerDeps, paneId: string, text: un
 }
 
 /** Type raw single-line text into the pane without submitting it. */
-export async function sendSessionText(deps: ServerDeps, paneId: string, text: unknown): Promise<void> {
+export async function sendSessionText(deps: ServerDeps, paneId: string, text: string): Promise<void> {
   if (!paneId) throw new CommandError("send_text requires paneId");
   // Same one-line/no-control-characters contract as answers: the text goes
   // into a PTY, but unlike answer text it must not be silently altered — the
   // caller sees a rejection instead.
   if (
-    typeof text !== "string" ||
     text.length === 0 ||
     text.length > MAX_ANSWER_LENGTH ||
     sanitizeAnswerText(text) !== text
@@ -175,8 +172,7 @@ export async function sendSessionText(deps: ServerDeps, paneId: string, text: un
  * can type a request — often after Enter. Flattening keeps one PTY submit
  * without rejecting the request.
  */
-export function validateSlashCommand(text: unknown): string {
-  if (typeof text !== "string") throw new CommandError("slash command text must be a string");
+export function validateSlashCommand(text: string): string {
   if (text.length === 0 || text.length > 10_000) {
     throw new CommandError("slash command text must be 1 to 10000 characters");
   }
@@ -193,6 +189,8 @@ export function validateSlashCommand(text: unknown): string {
  * costs a stat in the steady state.
  */
 function answerDeps(deps: ServerDeps): AnswerDeps {
+  // SAFETY: feed snapshot is a SessionSnapshot or absent; we read only the
+  // pane/agent ids it carries, which the snapshot type guarantees.
   const snapshot = deps.feed.snapshot as SessionSnapshot | null;
   return {
     herdr: deps.herdr,
@@ -279,7 +277,7 @@ export async function handleLegacyWsCommand(
       await sendSessionText(deps, command.paneId, command.text);
       return { type: "sent", paneId: command.paneId };
     default: {
-      const exhaustive: never = command as never;
+      const exhaustive: never = command;
       throw new CommandError(`unknown command ${JSON.stringify(exhaustive)}`);
     }
   }

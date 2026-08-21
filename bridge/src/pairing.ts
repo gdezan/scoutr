@@ -1,4 +1,5 @@
 import type { ResolvedExposure } from "./exposure.js";
+import * as v from "valibot";
 
 /**
  * QR pairing payload — the single object a phone scans to connect.
@@ -58,11 +59,19 @@ export function buildPairingPayload(config: PairingConfig): string {
   return JSON.stringify(payload);
 }
 
-function parseExposureKind(value: unknown): PairingExposureKind | null {
-  if (typeof value !== "object" || value === null) return null;
-  const kind = (value as Record<string, unknown>).kind;
-  return kind === "cloudflare" || kind === "custom" ? kind : null;
-}
+const pairingPayloadSchema = v.variant("v", [
+  v.looseObject({
+    v: v.literal(1),
+    host: v.pipe(v.string(), v.minLength(1)),
+    token: v.pipe(v.string(), v.minLength(1)),
+  }),
+  v.looseObject({
+    v: v.literal(2),
+    host: v.pipe(v.string(), v.minLength(1)),
+    token: v.pipe(v.string(), v.minLength(1)),
+    exposure: v.object({ kind: v.picklist(["cloudflare", "custom"]) }),
+  }),
+]);
 
 /**
  * Decodes a scanned payload. Returns null for anything that is not a v1 or v2
@@ -70,16 +79,12 @@ function parseExposureKind(value: unknown): PairingExposureKind | null {
  */
 export function parsePairingPayload(raw: string): PairingPayload | null {
   try {
-    const parsed: unknown = JSON.parse(raw);
-    if (typeof parsed !== "object" || parsed === null) return null;
-    const p = parsed as Record<string, unknown>;
-    if (p.v !== 1 && p.v !== 2) return null;
-    if (typeof p.host !== "string" || p.host.length === 0) return null;
-    if (typeof p.token !== "string" || p.token.length === 0) return null;
-    if (p.v === 1) return { v: 1, host: p.host, token: p.token };
-    const kind = parseExposureKind(p.exposure);
-    if (!kind) return null;
-    return { v: 2, host: p.host, token: p.token, exposure: { kind } };
+    const parsed = v.safeParse(pairingPayloadSchema, JSON.parse(raw));
+    if (!parsed.success) return null;
+    const payload = parsed.output;
+    return payload.v === 1
+      ? { v: 1, host: payload.host, token: payload.token }
+      : { v: 2, host: payload.host, token: payload.token, exposure: { kind: payload.exposure.kind } };
   } catch {
     return null;
   }

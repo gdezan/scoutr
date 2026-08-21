@@ -65,7 +65,8 @@ export type ContentBlock =
   | ToolCallBlock
   | FileEditBlock
   | SkillBlock
-  | { type: string; [key: string]: unknown };
+  // oxlint-disable-next-line anti-slop/no-unsafe-dictionary-type -- catch-all preserves unknown agent block types on the wire
+  | { type: string; [key: string]: unknown }; // oxlint-disable-line anti-slop(no-unsafe-dictionary-type)
 export interface TokenUsage {
   input?: number;
   output?: number;
@@ -254,14 +255,20 @@ export function entryText(entry: TranscriptEntry, maxLength = 280): string {
 export function joinContentBlocks(entry: TranscriptEntry): string {
   const parts: string[] = [];
   for (const block of entry.content) {
-    if (block.type === "skill" && "name" in block && typeof block.name === "string") {
-      parts.push(skillInvocationPreview(block.name));
+    if (block.type === "skill" && "name" in block) {
+      parts.push(skillInvocationPreview(String(block.name)));
       continue;
     }
-    if (block.type === "text" && "text" in block) parts.push((block as TextBlock).text);
+    if (block.type === "text" && "text" in block) {
+      // SAFETY: a text block carries `text`; the cast reads that known field.
+      const text = (block as TextBlock).text;
+      parts.push(text);
+    }
     if (block.type === "thinking") continue;
     if (block.type === "toolCall" && "name" in block) {
-      parts.push(`[${(block as ToolCallBlock).name}]`);
+      // SAFETY: a toolCall block carries `name`; the cast reads that known field.
+      const name = (block as ToolCallBlock).name;
+      parts.push(`[${name}]`);
     }
   }
   return parts.join("\n");

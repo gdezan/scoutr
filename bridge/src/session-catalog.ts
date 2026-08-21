@@ -107,7 +107,7 @@ export async function resolveCatalogSessionPath(path: string): Promise<{ path: s
 
 /** Resolve a client-supplied durable key through both its path and backend namespace. */
 export async function resolveCatalogSessionKey(key: SessionKey): Promise<{ path: string; backend: NonNullable<ReturnType<typeof backendForSessionPath>> }> {
-  if (typeof key?.agentKind !== "string" || !key.agentKind || typeof key?.path !== "string" || !key.path) {
+  if (!key.agentKind || !key.path) {
     throw new SessionCatalogError("session key is required");
   }
   const resolved = await resolveCatalogSessionPath(key.path);

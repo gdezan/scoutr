@@ -17,6 +17,7 @@ import { basename, dirname, resolve } from "node:path";
  * express a thinking level simply never receive one (capability gated).
  */
 export const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
+const THINKING_LEVEL_SET = new Set<string>(THINKING_LEVELS);
 export type ThinkingLevel = (typeof THINKING_LEVELS)[number];
 
 export interface CreateSessionParams {
@@ -67,12 +68,11 @@ function assertNoControlChars(field: string, value: string): void {
  * pi's documented set. Runs before any herdr call.
  */
 export function validateCreateSessionParams(params: CreateSessionParams): void {
-  if (typeof params.cwd !== "string" || params.cwd === "") {
+  if (params.cwd === "") {
     throw new SessionsError("cwd is required");
   }
   assertNoControlChars("cwd", params.cwd);
   if (params.model !== undefined && params.model !== "") {
-    if (typeof params.model !== "string") throw new SessionsError("model must be a string");
     if (params.model.length > MAX_MODEL_LENGTH) {
       throw new SessionsError(`model is too long (max ${MAX_MODEL_LENGTH} characters)`);
     }
@@ -80,13 +80,12 @@ export function validateCreateSessionParams(params: CreateSessionParams): void {
   }
 
   if (params.thinkingLevel !== undefined) {
-    if (typeof params.thinkingLevel !== "string" || !(THINKING_LEVELS as readonly string[]).includes(params.thinkingLevel)) {
+    if (!THINKING_LEVEL_SET.has(params.thinkingLevel)) {
       throw new SessionsError(`unknown thinking level: ${String(params.thinkingLevel)}`);
     }
   }
 
   if (params.name !== undefined && params.name !== "") {
-    if (typeof params.name !== "string") throw new SessionsError("name must be a string");
     if (params.name.length > MAX_NAME_LENGTH) {
       throw new SessionsError(`name is too long (max ${MAX_NAME_LENGTH} characters)`);
     }
@@ -94,7 +93,6 @@ export function validateCreateSessionParams(params: CreateSessionParams): void {
   }
 
   if (params.initialPrompt !== undefined && params.initialPrompt !== "") {
-    if (typeof params.initialPrompt !== "string") throw new SessionsError("initialPrompt must be a string");
     if (params.initialPrompt.length > MAX_PROMPT_LENGTH) {
       throw new SessionsError(`initialPrompt is too long (max ${MAX_PROMPT_LENGTH} characters)`);
     }

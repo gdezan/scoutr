@@ -7,6 +7,7 @@ import {
   type Extension,
   type RegisteredCommand,
 } from "@earendil-works/pi-coding-agent";
+import type { JsonValue } from "../../herdr/types.js";
 
 export interface PiCommandInfo {
   name: string;
@@ -58,6 +59,8 @@ export async function readCommandsCatalog(
 ): Promise<CommandsCatalog> {
   const agentDir = resolve(expandHome(piAgentDir));
   const resolvedCwd = resolve(cwd ?? process.cwd());
+  // SAFETY: settings.json is written by pi itself; the cast reads the trusted
+  // PiSettings shape, falling back to null when the file is absent.
   const globalSettings = readJson(join(agentDir, "settings.json")) as PiSettings | null;
   const projectTrusted = cwd
     ? (new ProjectTrustStore(agentDir).get(resolvedCwd) ?? globalSettings?.defaultProjectTrust === "always")
@@ -138,9 +141,11 @@ function resolveExtensionCommands(extensions: Extension[]): Array<{ command: Reg
 }
 
 
-function readJson(path: string): unknown | null {
+function readJson(path: string): JsonValue | null {
   try {
-    return JSON.parse(readFileSync(path, "utf8"));
+    // SAFETY: the file is a herdr/pi settings document; readJson only
+    // forwards it to a caller that decodes it, so JsonValue is the boundary type.
+    return JSON.parse(readFileSync(path, "utf8")) as JsonValue;
   } catch {
     return null;
   }

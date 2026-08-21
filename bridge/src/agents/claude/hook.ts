@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { shellQuote } from "../../shell.js";
 import { claudeConfigDir } from "./index.js";
 import { clearPendingAsk, writePendingAsk } from "./pending-asks.js";
-
+import * as v from "valibot";
 /**
  * The Claude Code hook that makes a pending ask visible to Scoutr.
  *
@@ -36,14 +36,23 @@ export function defaultHookCommand(): string {
   return `${shellQuote(process.execPath)} ${shellQuote(cli)} hook claude`;
 }
 
-interface HookInput {
-  hook_event_name?: string;
-  session_id?: string;
-  transcript_path?: string;
-  tool_name?: string;
-  tool_use_id?: string;
-  tool_input?: { questions?: unknown };
-}
+const hookInputSchema = v.looseObject({
+  hook_event_name: v.optional(v.string()),
+  session_id: v.optional(v.string()),
+  transcript_path: v.optional(v.string()),
+  tool_name: v.optional(v.string()),
+  tool_use_id: v.optional(v.string()),
+  tool_input: v.optional(v.looseObject({ questions: v.optional(v.unknown()) })),
+});
+
+const hookEntrySchema = v.looseObject({
+  matcher: v.optional(v.string()),
+  hooks: v.optional(v.array(v.looseObject({ type: v.optional(v.string()), command: v.optional(v.string()) }))),
+});
+
+const settingsSchema = v.looseObject({
+  hooks: v.optional(v.record(v.string(), v.array(hookEntrySchema))),
+});
 
 /**
  * Handle one hook invocation. Returns what it did, for the CLI's own output;
@@ -51,13 +60,16 @@ interface HookInput {
  * hook would disrupt the agent it is only supposed to observe.
  */
 export function handleClaudeHook(raw: string): string {
-  let input: HookInput;
+  let json: unknown;
   try {
-    input = JSON.parse(raw) as HookInput;
+    json = JSON.parse(raw);
   } catch {
     return "ignored: unparseable hook input";
   }
-  const sessionId = typeof input.session_id === "string" ? input.session_id : "";
+  const parsed = v.safeParse(hookInputSchema, json);
+  if (!parsed.success) return "ignored: unparseable hook input";
+  const input = parsed.output;
+  const sessionId = input.session_id ?? "";
   if (!sessionId) return "ignored: no session id";
   if (input.tool_name !== CLAUDE_ASK_TOOL_MATCHER) return "ignored: not an ask";
 
@@ -66,9 +78,9 @@ export function handleClaudeHook(raw: string): string {
     if (!Array.isArray(questions) || questions.length === 0) return "ignored: no questions";
     writePendingAsk({
       sessionId,
-      toolUseId: typeof input.tool_use_id === "string" ? input.tool_use_id : "",
+      toolUseId: input.tool_use_id ?? "",
       timestamp: new Date().toISOString(),
-      transcriptPath: typeof input.transcript_path === "string" ? input.transcript_path : "",
+      transcriptPath: input.transcript_path ?? "",
       questions,
     });
     return `recorded ask for session ${sessionId}`;
@@ -77,11 +89,6 @@ export function handleClaudeHook(raw: string): string {
   // transcript now owns the answers.
   clearPendingAsk(sessionId);
   return `cleared ask for session ${sessionId}`;
-}
-
-interface HookEntry {
-  matcher?: string;
-  hooks?: Array<{ type?: string; command?: string }>;
 }
 
 /**
@@ -93,19 +100,18 @@ export async function installClaudeHook(
   command = defaultHookCommand(),
   settingsPath = join(claudeConfigDir(), "settings.json"),
 ): Promise<{ path: string; command: string; changed: boolean }> {
-  let settings: Record<string, unknown> = {};
+  let rawSettings: string | undefined;
   try {
-    settings = JSON.parse(await readFile(settingsPath, "utf8")) as Record<string, unknown>;
+    rawSettings = await readFile(settingsPath, "utf8");
   } catch {
-    settings = {}; // no settings file yet, or unreadable — write a fresh one
+    rawSettings = undefined; // no settings file yet, or unreadable — write a fresh one
   }
-  const hooks = settings.hooks && typeof settings.hooks === "object" && !Array.isArray(settings.hooks)
-    ? (settings.hooks as Record<string, unknown>)
-    : {};
-
+  const settingsParsed = v.safeParse(settingsSchema, rawSettings ? JSON.parse(rawSettings) : {});
+  const settings = settingsParsed.success ? settingsParsed.output : { hooks: undefined };
+  const hooks = settings.hooks ?? {};
   let changed = false;
   for (const event of ["PreToolUse", "PostToolUse"]) {
-    const existing = Array.isArray(hooks[event]) ? (hooks[event] as HookEntry[]) : [];
+    const existing = Array.isArray(hooks[event]) ? hooks[event] : [];
     const already = existing.some((entry) =>
       entry?.hooks?.some((hook) => hook?.command === command),
     );

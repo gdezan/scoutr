@@ -1,3 +1,4 @@
+import * as v from "valibot";
 import type { FileEditBlock, FileEditHunk } from "../transcript.js";
 
 /**
@@ -22,52 +23,56 @@ export const MAX_FILE_EDIT_LINES = 200;
 export const MAX_FILE_EDIT_BYTES = 8 * 1024;
 
 /** A `structuredPatch` hunk as Claude Code writes it. */
-interface StructuredPatchHunk {
-  oldStart?: unknown;
-  oldLines?: unknown;
-  newStart?: unknown;
-  newLines?: unknown;
-  lines?: unknown;
-}
+const structuredPatchHunkSchema = v.looseObject({
+  oldStart: v.optional(v.number()),
+  oldLines: v.optional(v.number()),
+  newStart: v.optional(v.number()),
+  newLines: v.optional(v.number()),
+  lines: v.optional(v.array(v.string())),
+});
+
+type StructuredPatchHunk = v.InferOutput<typeof structuredPatchHunkSchema>;
+
+export const claudeFileEditResultSchema = v.looseObject({
+  filePath: v.optional(v.string()),
+  type: v.optional(v.string()),
+  structuredPatch: v.optional(v.unknown()),
+});
+
+type ClaudeFileEditResult = v.InferOutput<typeof claudeFileEditResultSchema>;
 
 /**
  * Claude Code: `toolUseResult` on the tool-result record. `type: "create"` marks
  * a Write of a new file; an Edit has no `type` and carries old/new strings
  * alongside the same `structuredPatch`.
  */
-export function fileEditFromClaudeResult(result: unknown): FileEditBlock | null {
-  if (!result || typeof result !== "object" || Array.isArray(result)) return null;
-  const record = result as Record<string, unknown>;
-  const path = typeof record.filePath === "string" ? record.filePath : "";
+export function fileEditFromClaudeResult(result: ClaudeFileEditResult | undefined): FileEditBlock | null {
+  if (!result) return null;
+  const path = result.filePath ?? "";
   if (!path) return null;
-  const patch = record.structuredPatch;
+  const patch = result.structuredPatch;
   if (!Array.isArray(patch) || patch.length === 0) return null;
 
   const hunks: FileEditHunk[] = [];
   for (const raw of patch) {
-    if (!raw || typeof raw !== "object") continue;
-    const hunk = raw as StructuredPatchHunk;
-    const lines = Array.isArray(hunk.lines)
-      ? hunk.lines.filter((line): line is string => typeof line === "string")
-      : [];
+    const hunkParsed = v.safeParse(structuredPatchHunkSchema, raw);
+    if (!hunkParsed.success) continue;
+    const hunk = hunkParsed.output;
+    const lines = hunk.lines ?? [];
     if (lines.length === 0) continue;
     hunks.push({ header: structuredPatchHeader(hunk), lines });
   }
   if (hunks.length === 0) return null;
-  return finalizeFileEdit(path, record.type === "create" ? "create" : "edit", hunks);
+  return finalizeFileEdit(path, result.type === "create" ? "create" : "edit", hunks);
 }
 
 function structuredPatchHeader(hunk: StructuredPatchHunk): string | null {
-  const oldStart = numberOrNull(hunk.oldStart);
-  const newStart = numberOrNull(hunk.newStart);
+  const oldStart = hunk.oldStart ?? null;
+  const newStart = hunk.newStart ?? null;
   if (oldStart === null || newStart === null) return null;
-  const oldLines = numberOrNull(hunk.oldLines) ?? 0;
-  const newLines = numberOrNull(hunk.newLines) ?? 0;
+  const oldLines = hunk.oldLines ?? 0;
+  const newLines = hunk.newLines ?? 0;
   return `@@ -${oldStart},${oldLines} +${newStart},${newLines} @@`;
-}
-
-function numberOrNull(value: unknown): number | null {
-  return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
 /**
@@ -163,8 +168,8 @@ export function fileEditFromAnchoredDiff(diff: string, path: string): FileEditBl
  * pi's `replace` records the file in `details.snapshotId`, a `|`-delimited
  * token whose second field is the absolute path.
  */
-export function pathFromSnapshotId(snapshotId: unknown): string {
-  if (typeof snapshotId !== "string") return "";
+export function pathFromSnapshotId(snapshotId: string | undefined): string {
+  if (!snapshotId) return "";
   const parts = snapshotId.split("|");
   return parts.length > 1 ? (parts[1] ?? "") : "";
 }
@@ -214,7 +219,7 @@ function truncateUtf8(value: string, maxBytes: number): string {
   return result;
 }
 
-function capHunks(hunks: FileEditHunk[]): { hunks: FileEditHunk[]; truncated: boolean } {
+function capHunks(hunks: FileEditHunk[]) {
   const capped: FileEditHunk[] = [];
   let lines = 0;
   let bytes = 0;

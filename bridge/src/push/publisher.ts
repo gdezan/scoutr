@@ -11,8 +11,13 @@
 
 import type { FeedEvent } from "../herdr/feed.js";
 import type { DeviceRegistry, FcmSender, PingKind } from "./fcm.js";
+import * as v from "valibot";
 
 // herdr emits status events in both dot-form and snake_case across versions.
+const statusEventSchema = v.looseObject({
+  pane_id: v.optional(v.string()),
+  agent_status: v.optional(v.string()),
+});
 const STATUS_KINDS = new Set(["pane_agent_status_changed", "pane.agent_status_changed"]);
 
 export class FcmPublisher {
@@ -26,10 +31,11 @@ export class FcmPublisher {
   /** Handle one feed event; returns true when a ping was attempted. */
   async handleEvent(event: FeedEvent): Promise<boolean> {
     if (!STATUS_KINDS.has(event.kind)) return false;
-    const data = event.data;
-    const paneId = typeof data.pane_id === "string" ? data.pane_id : "";
+    const parsed = v.safeParse(statusEventSchema, event.data);
+    if (!parsed.success) return false;
+    const paneId = parsed.output.pane_id ?? "";
     if (!paneId) return false;
-    const status = typeof data.agent_status === "string" ? data.agent_status : "";
+    const status = parsed.output.agent_status ?? "";
 
     if (status === "blocked") {
       if (this.blockedPanes.has(paneId)) return false;

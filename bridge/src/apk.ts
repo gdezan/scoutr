@@ -118,7 +118,7 @@ export class ApkBuilder {
     this.error = null;
     void this.run(root)
       .then(() => this.finish(join(root, APK_RELATIVE_PATH), identity))
-      .catch((error: unknown) => this.fail(error instanceof Error ? error.message : String(error)));
+      .catch((error) => this.fail(error instanceof Error ? error.message : String(error)));
     return this.buildId;
   }
 

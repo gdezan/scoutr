@@ -6,7 +6,7 @@ import { backendForSessionPath } from "../agents/registry.js";
 import type { ControlAction } from "../agents/types.js";
 import { createSession, controlSession, SessionsError } from "../sessions.js";
 import type { Route, RouteContext, RouteResult } from "./types.js";
-
+import * as v from "valibot";
 export const sessionsRoutes: Route[] = [
   { method: "GET", path: "/api/sessions", handle: readSessionRoute },
   { method: "POST", path: "/api/sessions", handle: createSessionRoute },
@@ -67,6 +67,20 @@ const CONTROL_ACTIONS = [
   "set_thinking",
 ] as const satisfies readonly ControlAction[];
 
+const createSessionBodySchema = v.looseObject({
+  cwd: v.optional(v.string()),
+  model: v.optional(v.string()),
+  name: v.optional(v.string()),
+  thinkingLevel: v.optional(v.string()),
+  initialPrompt: v.optional(v.string()),
+  agent: v.optional(v.string()),
+});
+
+const controlBodySchema = v.looseObject({
+  action: v.picklist(CONTROL_ACTIONS),
+  text: v.optional(v.string()),
+});
+
 async function readTranscriptMemoized(
   target: string,
   backend: NonNullable<ReturnType<typeof backendForSessionPath>>,
@@ -94,6 +108,9 @@ async function readTranscriptMemoized(
   // A continuously growing transcript cannot be made perfectly stable; keep
   // the read tied to the revision from immediately before its parse and do
   // not memoize it, so the next poll will retry.
+  // SAFETY: readTranscript returns a Transcript on success; a null here means
+  // every attempt failed to parse, and we surface the last attempt as best
+  // effort rather than retry-and-stall the 2.5s poll.
   return { transcript: lastTranscript as Transcript, info: before };
 }
 
@@ -162,9 +179,13 @@ export async function readSession(pathParam: string, since: string | null, agent
 }
 
 async function createSessionRoute(ctx: RouteContext): Promise<RouteResult> {
-  const body = ctx.body;
-  // createSession validates; one authenticated call creates the pane and
-  // delivers the first prompt (optional initialPrompt, thinkingLevel).
+  const parsed = v.safeParse(createSessionBodySchema, ctx.body);
+  if (!parsed.success) {
+    return { status: 400, body: { ok: false, error: parsed.issues[0]?.message ?? "invalid create-session body" } };
+  }
+  const body = parsed.output;
+  // createSession validates domain rules (length, control chars, thinking
+  // level); the schema above guarantees every field is a string or absent.
   const created = await createSession(ctx.deps.herdr, {
     cwd: body.cwd ?? "",
     model: body.model ?? "",
@@ -183,10 +204,11 @@ async function controlRoute(ctx: RouteContext): Promise<RouteResult> {
   } catch {
     return { status: 400, body: { ok: false, error: "invalid pane id" } };
   }
-  const body = ctx.body;
-  if (typeof body.action !== "string" || !(CONTROL_ACTIONS as readonly string[]).includes(body.action)) {
-    return { status: 400, body: { ok: false, error: `unknown control action: ${String(body.action)}` } };
+  const parsed = v.safeParse(controlBodySchema, ctx.body);
+  if (!parsed.success) {
+    return { status: 400, body: { ok: false, error: "unknown control action" } };
   }
-  await controlSession(ctx.deps.herdr, { paneId, action: body.action as ControlAction, text: body.text });
+  const body = parsed.output;
+  await controlSession(ctx.deps.herdr, { paneId, action: body.action, text: body.text });
   return { status: 200, body: { ok: true } };
 }

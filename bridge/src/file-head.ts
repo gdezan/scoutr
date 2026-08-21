@@ -19,12 +19,23 @@ export interface FilePage extends FileHead {
   totalBytes: number;
 }
 
-export function capUtf8(text: string, maxBytes: number): { text: string; truncated: boolean } {
+interface CappedText {
+  text: string;
+  truncated: boolean;
+}
+
+interface CappedBuffer {
+  text: string;
+  bytes: number;
+  truncated: boolean;
+}
+
+export function capUtf8(text: string, maxBytes: number): CappedText {
   const capped = capUtf8Buffer(Buffer.from(text, "utf8"), maxBytes);
   return { text: capped.text, truncated: capped.truncated };
 }
 
-function capUtf8Buffer(data: Buffer, maxBytes: number): { text: string; bytes: number; truncated: boolean } {
+function capUtf8Buffer(data: Buffer, maxBytes: number): CappedBuffer {
   if (data.length <= maxBytes) return { text: data.toString("utf8"), bytes: data.length, truncated: false };
   const bytes = completeUtf8Prefix(data, maxBytes);
   return { text: data.subarray(0, bytes).toString("utf8"), bytes, truncated: true };
@@ -128,6 +139,9 @@ function missingFilePage(offset: number): FilePage {
   return { content: "", truncated: false, binary: false, exists: false, offset, nextOffset: null, totalBytes: 0 };
 }
 
-export function isMissingFileError(error: unknown): boolean {
-  return error instanceof Error && "code" in error && ((error as NodeJS.ErrnoException).code === "ENOENT" || (error as NodeJS.ErrnoException).code === "ENOTDIR");
+export function isMissingFileError(cause: unknown): boolean {
+  // SAFETY: only Error instances carry the node errno `code`; checking the
+  // code after the instanceof guard is what distinguishes a missing file
+  // (ENOENT/ENOTDIR) from any other filesystem failure.
+  return cause instanceof Error && "code" in cause && ((cause as NodeJS.ErrnoException).code === "ENOENT" || (cause as NodeJS.ErrnoException).code === "ENOTDIR");
 }

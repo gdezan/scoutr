@@ -387,6 +387,8 @@ export class TerminalConnection {
 class WsTerminalSocket implements TerminalSocketLike {
   constructor(private readonly ws: WebSocket) {
     ws.on("message", (data, isBinary) => {
+      // SAFETY: ws delivers message data as Buffer or ArrayBuffer; Buffer.from
+      // on an ArrayBuffer yields the bytes unchanged, so the cast is sound.
       const buffer = Array.isArray(data) ? Buffer.concat(data) : Buffer.from(data as ArrayBuffer);
       this.handler(buffer, isBinary);
     });

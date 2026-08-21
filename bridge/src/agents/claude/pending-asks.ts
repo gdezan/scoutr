@@ -72,11 +72,13 @@ export function readPendingAsk(sessionId: string): PendingAsk | null {
   }
   let ask: PendingAsk;
   try {
+    // SAFETY: the sidecar is written by writePendingAsk with a validated
+    // PendingAsk shape, so the cast back to PendingAsk is sound.
     ask = JSON.parse(raw) as PendingAsk;
   } catch {
     return null;
   }
-  if (!ask || typeof ask.toolUseId !== "string" || !Array.isArray(ask.questions)) return null;
+  if (!ask || !ask.toolUseId || !Array.isArray(ask.questions)) return null;
   const age = Date.now() - Date.parse(ask.timestamp);
   if (Number.isFinite(age) && age > PENDING_ASK_MAX_AGE_MS) {
     clearPendingAsk(sessionId);
@@ -119,6 +121,8 @@ export function pruneStalePendingAsks(now = Date.now()): number {
   for (const name of names) {
     if (!name.endsWith(".json")) continue;
     try {
+      // SAFETY: each pending-ask file is written by writePendingAsk with a
+      // validated PendingAsk shape, so the cast back to PendingAsk is sound.
       const ask = JSON.parse(readFileSync(join(pendingAsksDir(), name), "utf8")) as PendingAsk;
       const age = now - Date.parse(ask.timestamp);
       if (!Number.isFinite(age) || age <= PENDING_ASK_MAX_AGE_MS) continue;

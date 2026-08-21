@@ -15,6 +15,8 @@ import { BridgeMetrics } from "./metrics.js";
 import { type SessionSnapshot } from "./herdr/types.js";
 import { TerminalSessionBroker } from "./terminal/broker.js";
 import { attachTerminalSocket } from "./terminal/websocket.js";
+import * as v from "valibot";
+import type { JsonValue } from "./routes/types.js";
 /**
  * Scoutr bridge HTTP + WebSocket API.
  *
@@ -45,7 +47,7 @@ export interface CreateServerOptions {
   listen?: boolean;
 }
 
-function sendJson(response: ServerResponse, status: number, body: unknown): void {
+function sendJson(response: ServerResponse, status: number, body: JsonValue): void {
   const payload = JSON.stringify(body);
   response.writeHead(status, {
     "content-type": "application/json; charset=utf-8",
@@ -106,9 +108,12 @@ export function createScoutrServer(deps: ServerDeps, options: CreateServerOption
   feed.onMessage((message) => {
     if (!("kind" in message)) return;
     if (STATUS_KINDS.has(message.kind)) {
-      const data = message.data;
-      const paneId = typeof data.pane_id === "string" ? data.pane_id : "";
-      const status = typeof data.agent_status === "string" ? data.agent_status : "";
+      const data = v.safeParse(
+        v.looseObject({ pane_id: v.optional(v.string()), agent_status: v.optional(v.string()) }),
+        message.data,
+      );
+      const paneId = data.success && data.output.pane_id ? data.output.pane_id : "";
+      const status = data.success && data.output.agent_status ? data.output.agent_status : "";
       if (paneId && status) tracker.note(paneId, status);
     } else if (CLOSE_KINDS.has(message.kind)) {
       // A closed pane leaves a stale "closed" status entry behind; prune all
@@ -178,7 +183,7 @@ export function createScoutrServer(deps: ServerDeps, options: CreateServerOption
   const terminalWss = new WebSocketServer({ noServer: true });
 
   /** Reject an upgrade attempt with a bare HTTP response. */
-  function rejectUpgrade(socket: Duplex, status: number, body?: unknown): void {
+  function rejectUpgrade(socket: Duplex, status: number, body?: JsonValue): void {
     const payload = body === undefined ? "" : JSON.stringify(body);
     socket.write(
       `HTTP/1.1 ${status} ${status === 401 ? "Unauthorized" : "Service Unavailable"}\r\n` +
@@ -305,6 +310,10 @@ export function createScoutrServer(deps: ServerDeps, options: CreateServerOption
       void (async () => {
         let command: CommandMessage;
         try {
+          // SAFETY: the frame arrives from a bearer-authenticated client; the
+          // downstream `command.type` switch handles every shape (unknown
+          // types fall through to the legacy adapter), so reading it as a
+          // CommandMessage does not crash on malformed input.
           command = JSON.parse(data.toString()) as CommandMessage;
         } catch {
           ws.send(JSON.stringify({ type: "error", error: "invalid JSON" }));

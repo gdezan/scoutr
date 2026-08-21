@@ -10,12 +10,13 @@
 const HOUR = 60 * 60;
 const DAY = 24 * HOUR;
 
-const FIXED_WINDOW_SECONDS: Record<string, number> = {
-  "5h": 5 * HOUR,
-  "7d": 7 * DAY,
-  day: DAY,
-  wk: 7 * DAY,
-};
+const FIXED_WINDOW_SECONDS = new Map<string, number>([
+  ["5h", 5 * HOUR],
+  ["7d", 7 * DAY],
+  ["day", DAY],
+  ["wk", 7 * DAY],
+]);
+
 
 /**
  * Seconds in the calendar month ending at `resetAt`.
@@ -39,7 +40,7 @@ export function calendarMonthSeconds(resetAt: number): number {
 /** Span of a labeled quota window, or undefined when it cannot be known. */
 export function windowSecondsFor(label: string, resetAt?: number): number | undefined {
   const key = label.trim().toLowerCase();
-  const fixed = FIXED_WINDOW_SECONDS[key];
+  const fixed = FIXED_WINDOW_SECONDS.get(key);
   if (fixed !== undefined) return fixed;
   if (key === "mo" && resetAt !== undefined) return calendarMonthSeconds(resetAt);
   return undefined;

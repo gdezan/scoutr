@@ -162,6 +162,8 @@ export async function agyControl(herdr: HerdrPort, params: ControlParams): Promi
       return;
     }
     default: {
+      // SAFETY: exhaustive switch — every other ControlAction is handled above;
+      // the default branch is unreachable, so narrowing `action` to never is sound.
       const exhaustive: never = action as never;
       throw new Error(`unsupported control action for agy: ${String(exhaustive)}`);
     }

@@ -1,5 +1,5 @@
 import { HerdrClient, type SubscriptionHandle } from "./client.js";
-import type { SessionSnapshot, Subscription } from "./types.js";
+import type { HerdrValue, SessionSnapshot, Subscription } from "./types.js";
 
 /**
  * Long-lived event feed over the herdr socket.
@@ -13,7 +13,7 @@ import type { SessionSnapshot, Subscription } from "./types.js";
 export interface FeedEvent {
   /** Event kind as streamed by herdr, e.g. "pane_agent_status_changed". */
   kind: string;
-  data: Record<string, unknown>;
+  data: Record<string, HerdrValue>;
 }
 
 export interface FeedSnapshot {

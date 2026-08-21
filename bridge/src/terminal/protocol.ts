@@ -35,7 +35,7 @@
 
 import { TERMINAL_LIMITS } from "./process.js";
 import type { TerminalMode } from "./types.js";
-
+import * as v from "valibot";
 /** Wire protocol version; the only version this server speaks. */
 export const TERMINAL_PROTOCOL_VERSION = 1;
 /** One client JSON control message (hello/resize/release), bytes on the wire. */
@@ -115,51 +115,61 @@ function gridInBounds(cols: number, rows: number): boolean {
  * protocol violation message on failure; the caller closes with
  * error(protocol_error).
  */
+const clientMessageSchema = v.variant("type", [
+  v.looseObject({
+    type: v.literal("hello"),
+    version: v.number(),
+    paneId: v.string(),
+    cols: v.number(),
+    rows: v.number(),
+    intent: v.picklist(["auto", "takeover"]),
+  }),
+  v.looseObject({
+    type: v.literal("resize"),
+    cols: v.number(),
+    rows: v.number(),
+  }),
+  v.looseObject({
+    type: v.literal("release"),
+  }),
+]);
+
 export function parseClientMessage(
   text: string,
 ): { ok: true; message: TerminalClientMessage } | { ok: false; message: string } {
-  let parsed: unknown;
+  let json: unknown;
   try {
-    parsed = JSON.parse(text);
+    json = JSON.parse(text);
   } catch {
     return { ok: false, message: "invalid JSON" };
   }
-  if (typeof parsed !== "object" || parsed === null) {
-    return { ok: false, message: "message must be a JSON object" };
-  }
-  const message = parsed as Record<string, unknown>;
+  const parsed = v.safeParse(clientMessageSchema, json);
+  if (!parsed.success) return { ok: false, message: "invalid terminal message" };
+  const message = parsed.output;
   switch (message.type) {
     case "hello": {
-      const { version, paneId, cols, rows, intent } = message;
-      if (version !== TERMINAL_PROTOCOL_VERSION) {
-        return { ok: false, message: `unsupported protocol version ${String(version)}` };
+      if (message.version !== TERMINAL_PROTOCOL_VERSION) {
+        return { ok: false, message: `unsupported protocol version ${String(message.version)}` };
       }
       if (
-        typeof paneId !== "string" ||
-        paneId.length === 0 ||
-        paneId.length > TERMINAL_PANE_ID_MAX_LENGTH ||
-        paneId.includes("\n")
+        message.paneId.length === 0 ||
+        message.paneId.length > TERMINAL_PANE_ID_MAX_LENGTH ||
+        message.paneId.includes("\n")
       ) {
         return { ok: false, message: "invalid paneId" };
       }
-      if (typeof cols !== "number" || typeof rows !== "number" || !gridInBounds(cols, rows)) {
+      if (!gridInBounds(message.cols, message.rows)) {
         return { ok: false, message: "grid out of bounds" };
       }
-      if (intent !== "auto" && intent !== "takeover") {
-        return { ok: false, message: "invalid intent" };
-      }
-      return { ok: true, message: { type: "hello", version, paneId, cols, rows, intent } };
+      return { ok: true, message };
     }
     case "resize": {
-      const { cols, rows } = message;
-      if (typeof cols !== "number" || typeof rows !== "number" || !gridInBounds(cols, rows)) {
+      if (!gridInBounds(message.cols, message.rows)) {
         return { ok: false, message: "grid out of bounds" };
       }
-      return { ok: true, message: { type: "resize", cols, rows } };
+      return { ok: true, message };
     }
     case "release":
-      return { ok: true, message: { type: "release" } };
-    default:
-      return { ok: false, message: `unknown message type ${String(message.type)}` };
+      return { ok: true, message };
   }
 }

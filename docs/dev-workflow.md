@@ -5,24 +5,29 @@ Use this for bridge deployment, scratch-bridge validation, emulator operation,
 Android test diagnostics, notification validation, and failure recovery. The
 verification phase boundary and check selection live in
 `skills/scoutr-verification/SKILL.md`.
+
 ## The two halves
 
 - **Bridge** (`bridge/`): Node/TS daemon. Run `npm run typecheck && npm test`;
   the daemon entry is `src/cli.ts serve` and `src/server.ts` only exports
   `createScoutrServer`.
 - **Android** (`android/`): Compose app. Unit tests: `./gradlew
-  testDebugUnitTest`. Emulator (Gradle Managed Device): `./gradlew
-  pixel2api36DebugAndroidTest`. APK: `./gradlew assembleDebug`.
+testDebugUnitTest`. Emulator (Gradle Managed Device): `./gradlew
+pixel2api36DebugAndroidTest`. APK: `./gradlew assembleDebug`.
 
 ## Emulator runtime loop
 
-There is usually an emulator already running (`adb devices`). If not, boot
-the `scoutr` AVD (the only one installed):
+Emulator is **on-demand, not always-on**. `artemis` is an always-on laptop-server — the `cockpit` AVD costs ~2.2 GB RAM and pushes into ZRAM swap if left running. Boot only for final acceptance, kill when done.
 
 ```bash
-$ANDROID_HOME/emulator/emulator -avd scoutr &
+# boot
+$ANDROID_HOME/emulator/emulator -avd cockpit -no-window -no-audio -gpu swiftshader_indirect &
 # boot takes ~25-60s; confirm with:
 adb devices && adb -s emulator-5554 shell getprop sys.boot_completed   # prints 1 when done
+
+# kill when final acceptance is done / verification is green
+adb -s emulator-5554 emu kill
+# fallback if adb hangs: pkill -f "qemu.*cockpit"
 ```
 
 Instrumentation suites and test APKs go only on `emulator-5554` or the
@@ -31,7 +36,6 @@ only for an explicitly requested integration walk.
 
 The app on the interactive emulator is a real build with a saved connection.
 
-
 1. **Build + install**:
    ```bash
    cd android && ANDROID_HOME=$HOME/Android/sdk ./gradlew assembleDebug -q
@@ -39,7 +43,7 @@ The app on the interactive emulator is a real build with a saved connection.
    adb -s emulator-5554 shell am force-stop dev.scoutr.app && adb -s emulator-5554 shell am start -n dev.scoutr.app/.MainActivity
    ```
 2. **Drive it**: `adb -s emulator-5554 shell input tap X Y`, `input text
-   "..."` (use `%s` for spaces), `input keyevent 4` (back) / `66` (enter) / `3`
+"..."` (use `%s` for spaces), `input keyevent 4` (back) / `66` (enter) / `3`
    (home) / `111` (esc). Read the current screen with:
    ```bash
    adb -s emulator-5554 shell uiautomator dump /sdcard/ui.xml && adb -s emulator-5554 shell cat /sdcard/ui.xml
@@ -140,7 +144,7 @@ launchd cannot look up for itself **at install time** and bakes it into
 - `HERDR_BIN`, from `$HERDR_BIN` if exported, else `which herdr`. A LaunchAgent
   gets no login shell, so an unresolved herdr would fail at pane-create time
   rather than at install time. The systemd unit pins the same value as
-  `Environment=HERDR_BIN=…`: systemd --user *does* inherit the session PATH, and
+  `Environment=HERDR_BIN=…`: systemd --user _does_ inherit the session PATH, and
   a stale version-manager shim ahead of the real herdr fails the terminal
   capability probe and takes the terminal route down;
 - an explicit `PATH`: the Node dir, the herdr dir, then
@@ -263,7 +267,7 @@ shows nothing from it. When a managed-device test fails:
   that evidence and use `--rerun-tasks` for the diagnostic rerun.
 - To see in-test state, dump the semantics tree from the test itself:
   `onRoot(useUnmergedTree = true).printToLog("DIAG")` (or `Thread.sleep`
-  + printToLog) and read it from the per-test logcat file above.
+  - printToLog) and read it from the per-test logcat file above.
 
 ### ChatList / LazyColumn test traps
 

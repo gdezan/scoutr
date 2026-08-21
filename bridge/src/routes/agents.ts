@@ -30,7 +30,7 @@ export async function deriveSessionDescriptors(
 }
 
 async function agents(ctx: RouteContext): Promise<RouteResult> {
-  const current = ctx.deps.feed.snapshot as SessionSnapshot | null;
+  const current = ctx.deps.feed.snapshot;
   if (!current) {
     return { status: 503, body: { ok: false, error: "no herdr snapshot yet" } };
   }

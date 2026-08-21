@@ -1,10 +1,10 @@
-import { fileEditFromClaudeResult } from "../file-edit.js";
-import { claudeQuestionAnswers } from "./questions.js";
+import * as v from "valibot";
+import { claudeFileEditResultSchema, fileEditFromClaudeResult } from "../file-edit.js";
+import { claudeAnswersSchema, claudeQuestionAnswers } from "./questions.js";
 import {
   collapseTranscriptText,
   MAX_SESSION_TITLE_LENGTH,
-  type TextBlock,
-  type ThinkingBlock,
+  type ContentBlock,
   type Transcript,
   type TranscriptEntry,
   type TranscriptReadOpts,
@@ -25,7 +25,56 @@ import { peelClaudeCommandInvocation, skillInvocationPreview } from "../../skill
  *
  * Unlike pi there is no session header record; identity comes from per-record
  * `sessionId`/`cwd` fields (first record wins for the transcript envelope).
+ *
+ * Every record is decoded at this single I/O boundary with valibot schemas,
+ * so downstream code branches on typed domain values instead of narrowing
+ * `unknown` with `typeof`.
  */
+
+const blockSchema = v.looseObject({ type: v.string() });
+type DecodedBlock = v.InferOutput<typeof blockSchema>;
+
+const contentSchema = v.union([v.string(), v.array(blockSchema)]);
+
+const toolResultContentSchema = v.union([v.string(), v.array(blockSchema)]);
+
+const messageSchema = v.looseObject({
+  role: v.optional(v.string()),
+  content: v.optional(v.unknown()),
+  model: v.optional(v.string()),
+  stop_reason: v.optional(v.string()),
+  usage: v.optional(v.unknown()),
+});
+
+const toolResultBlockSchema = v.looseObject({
+  type: v.literal("tool_result"),
+  tool_use_id: v.optional(v.string()),
+  is_error: v.optional(v.boolean()),
+  content: v.optional(v.unknown()),
+});
+
+const usageSchema = v.looseObject({
+  input_tokens: v.optional(v.number()),
+  output_tokens: v.optional(v.number()),
+  cache_read_input_tokens: v.optional(v.number()),
+  cache_creation_input_tokens: v.optional(v.number()),
+});
+
+const claudeRecord = v.looseObject({
+  type: v.optional(v.string()),
+  timestamp: v.optional(v.string()),
+  sessionId: v.optional(v.string()),
+  cwd: v.optional(v.string()),
+  uuid: v.optional(v.string()),
+  parentUuid: v.optional(v.nullable(v.string())),
+  aiTitle: v.optional(v.string()),
+  customTitle: v.optional(v.string()),
+  message: v.optional(v.unknown()),
+  toolUseResult: v.optional(v.unknown()),
+});
+
+type DecodedClaudeRecord = v.InferOutput<typeof claudeRecord>;
+
 export function parseClaudeTranscript(text: string, opts: TranscriptReadOpts = {}): Transcript {
   const transcript: Transcript = {
     version: 3,
@@ -44,27 +93,25 @@ export function parseClaudeTranscript(text: string, opts: TranscriptReadOpts = {
   for (const rawLine of text.split("\n")) {
     const line = rawLine.trim();
     if (line.length === 0) continue;
-    let record: Record<string, unknown>;
+    let raw: unknown;
     try {
-      record = JSON.parse(line) as Record<string, unknown>;
+      raw = JSON.parse(line);
     } catch {
       continue; // tolerate stray lines in a live-growing file
     }
+    const parsed = v.safeParse(claudeRecord, raw);
+    if (!parsed.success) continue;
+    const rec: DecodedClaudeRecord = parsed.output;
 
-    const type = record.type;
-    const timestamp = typeof record.timestamp === "string" ? record.timestamp : "";
-
+    const type = rec.type ?? "";
+    const timestamp = rec.timestamp ?? "";
     if (!transcript.timestamp && timestamp) transcript.timestamp = timestamp;
-    if (!transcript.id && typeof record.sessionId === "string") transcript.id = record.sessionId;
-    if (!transcript.cwd && typeof record.cwd === "string") transcript.cwd = record.cwd;
+    if (!transcript.id && rec.sessionId) transcript.id = rec.sessionId;
+    if (!transcript.cwd && rec.cwd) transcript.cwd = rec.cwd;
 
     // Session display names arrive as `custom-title` / `aiTitle` records.
-    if (type === "custom-title" || (type === "user" && record.aiTitle)) {
-      const title = typeof record.aiTitle === "string"
-        ? record.aiTitle
-        : typeof (record as { customTitle?: unknown }).customTitle === "string"
-          ? ((record as { customTitle: string }).customTitle)
-          : "";
+    if (type === "custom-title" || (type === "user" && rec.aiTitle)) {
+      const title = rec.aiTitle ?? (rec.customTitle ?? "");
       if (title) {
         transcript.title = collapseTranscriptText(title).slice(0, MAX_SESSION_TITLE_LENGTH) || null;
       }
@@ -72,7 +119,7 @@ export function parseClaudeTranscript(text: string, opts: TranscriptReadOpts = {
     }
 
     if (type === "user") {
-      const entry = parseUserRecord(record);
+      const entry = parseUserRecord(rec);
       if (entry) {
         if (keepEntries) transcript.entries.push(entry);
         transcript.lastEntryId = entry.entryId;
@@ -84,7 +131,7 @@ export function parseClaudeTranscript(text: string, opts: TranscriptReadOpts = {
     }
 
     if (type === "assistant") {
-      const entry = parseAssistantRecord(record);
+      const entry = parseAssistantRecord(rec);
       if (entry) {
         if (keepEntries) transcript.entries.push(entry);
         transcript.lastEntryId = entry.entryId;
@@ -108,82 +155,87 @@ export function parseClaudeTranscript(text: string, opts: TranscriptReadOpts = {
 }
 
 /** A real user prompt (content is a string) or a tool result (tool_result block). */
-function parseUserRecord(record: Record<string, unknown>): TranscriptEntry | null {
-  const entryId = typeof record.uuid === "string" ? record.uuid : "";
+function parseUserRecord(rec: DecodedClaudeRecord): TranscriptEntry | null {
+  const entryId = rec.uuid ?? "";
   if (!entryId) return null;
-  const parentId = typeof record.parentUuid === "string" ? record.parentUuid : null;
-  const timestamp = typeof record.timestamp === "string" ? record.timestamp : "";
-  const message = record.message;
-  if (!message || typeof message !== "object" || Array.isArray(message)) return null;
-  const content = (message as Record<string, unknown>).content;
+  const parentId = rec.parentUuid ?? null;
+  const timestamp = rec.timestamp ?? "";
+  const messageParsed = v.safeParse(messageSchema, rec.message);
+  if (!messageParsed.success) return null;
+  const msg = messageParsed.output;
+  const contentParsed = v.safeParse(contentSchema, msg.content);
+  if (!contentParsed.success) return null;
+  const rawContent = contentParsed.output;
 
   // Real prompt: bare string. A slash command arrives as the CLI's own
   // `<command-name>` markup, which chat shows as a chip instead of the dump.
-  if (typeof content === "string") {
-    if (!content.trim()) return null;
-    const blocks = peelClaudeCommandInvocation(content) ?? [{ type: "text", text: content }];
+  if (!Array.isArray(rawContent)) {
+    if (!rawContent.trim()) return null;
+    const blocks = peelClaudeCommandInvocation(rawContent) ?? [{ type: "text", text: rawContent }];
     return { entryId, parentId, timestamp, role: "user", content: blocks };
   }
 
   // Tool result: array with a tool_result block.
-  if (Array.isArray(content)) {
-    const blocks = normalizeBlocks(content);
-    const result = blocks.find((block) => block.type === "toolResult") as
-      | { type: "toolResult"; toolCallId?: string; content?: unknown; isError?: boolean }
-      | undefined;
-    if (result) {
-      const entry: TranscriptEntry = {
-        entryId,
-        parentId,
-        timestamp,
-        role: "toolResult",
-        content: [],
-        toolCallId: result.toolCallId,
-        isError: result.isError ?? false,
-        // Only the AskUserQuestion answers are kept as structured details;
-        // the rest of `toolUseResult` (file contents, command output) would
-        // ride along on every transcript poll for no reader.
-        details: claudeQuestionAnswers(record.toolUseResult) ?? undefined,
-      };
-      const text = blockText(result.content);
-      if (text) entry.content = [{ type: "text", text }];
-      // `toolUseResult` sits on the record, not inside the message: Edit and
-      // Write report the change they made as a `structuredPatch` there, which
-      // the tool_result text only summarizes in prose.
-      const edit = fileEditFromClaudeResult(record.toolUseResult);
-      if (edit) entry.content.push(edit);
-      return entry;
-    }
-  }
-  return null;
+  const toolResultBlock = rawContent.find((block) => block.type === "tool_result");
+  if (!toolResultBlock) return null;
+  const resultParsed = v.safeParse(toolResultBlockSchema, toolResultBlock);
+  if (!resultParsed.success) return null;
+  const result = resultParsed.output;
+
+  const answersParsed = v.safeParse(claudeAnswersSchema, rec.toolUseResult);
+  const entry: TranscriptEntry = {
+    entryId,
+    parentId,
+    timestamp,
+    role: "toolResult",
+    content: [],
+    toolCallId: result.tool_use_id,
+    isError: result.is_error ?? false,
+    // Only the AskUserQuestion answers are kept as structured details;
+    // the rest of `toolUseResult` (file contents, command output) would
+    // ride along on every transcript poll for no reader.
+    details: claudeQuestionAnswers(answersParsed.success ? answersParsed.output : undefined) ?? undefined,
+  };
+  const textRaw = v.safeParse(toolResultContentSchema, result.content);
+  const text = textRaw.success ? toolResultText(textRaw.output) : "";
+  if (text) entry.content = [{ type: "text", text }];
+  // `toolUseResult` sits on the record, not inside the message: Edit and
+  // Write report the change they made as a `structuredPatch` there, which
+  // the tool_result text only summarizes in prose.
+  const editParsed = v.safeParse(claudeFileEditResultSchema, rec.toolUseResult);
+  const edit = fileEditFromClaudeResult(editParsed.success ? editParsed.output : undefined);
+  if (edit) entry.content.push(edit);
+  return entry;
 }
 
-function parseAssistantRecord(record: Record<string, unknown>): TranscriptEntry | null {
-  const entryId = typeof record.uuid === "string" ? record.uuid : "";
+function parseAssistantRecord(rec: DecodedClaudeRecord): TranscriptEntry | null {
+  const entryId = rec.uuid ?? "";
   if (!entryId) return null;
-  const parentId = typeof record.parentUuid === "string" ? record.parentUuid : null;
-  const timestamp = typeof record.timestamp === "string" ? record.timestamp : "";
-  const message = record.message;
-  if (!message || typeof message !== "object" || Array.isArray(message)) return null;
-  const msg = message as Record<string, unknown>;
-  if (!Array.isArray(msg.content)) return null;
+  const parentId = rec.parentUuid ?? null;
+  const timestamp = rec.timestamp ?? "";
+  const messageParsed = v.safeParse(messageSchema, rec.message);
+  if (!messageParsed.success) return null;
+  const msg = messageParsed.output;
+  const contentParsed = v.safeParse(v.array(blockSchema), msg.content);
+  if (!contentParsed.success) return null;
 
   const entry: TranscriptEntry = {
     entryId,
     parentId,
     timestamp,
     role: "assistant",
-    content: normalizeBlocks(msg.content),
-    model: typeof msg.model === "string" ? msg.model : undefined,
-    stopReason: typeof msg.stop_reason === "string" ? msg.stop_reason : undefined,
+    content: normalizeBlocks(contentParsed.output),
+    model: msg.model,
+    stopReason: msg.stop_reason,
   };
-  const usage = msg.usage as Record<string, unknown> | undefined;
-  if (usage && typeof usage === "object") {
+  const usageParsed = v.safeParse(usageSchema, msg.usage);
+  if (usageParsed.success) {
+    const usage = usageParsed.output;
     entry.usage = {};
-    if (typeof usage.input_tokens === "number") entry.usage.input = usage.input_tokens;
-    if (typeof usage.output_tokens === "number") entry.usage.output = usage.output_tokens;
-    if (typeof usage.cache_read_input_tokens === "number") entry.usage.cacheRead = usage.cache_read_input_tokens;
-    if (typeof usage.cache_creation_input_tokens === "number") {
+    if (usage.input_tokens !== undefined) entry.usage.input = usage.input_tokens;
+    if (usage.output_tokens !== undefined) entry.usage.output = usage.output_tokens;
+    if (usage.cache_read_input_tokens !== undefined) entry.usage.cacheRead = usage.cache_read_input_tokens;
+    if (usage.cache_creation_input_tokens !== undefined) {
       entry.usage.cacheWrite = usage.cache_creation_input_tokens;
     }
   }
@@ -191,54 +243,62 @@ function parseAssistantRecord(record: Record<string, unknown>): TranscriptEntry 
 }
 
 /** Claude content blocks → shared block vocabulary (tool_use → toolCall). */
-function normalizeBlocks(blocks: unknown[]): TranscriptEntry["content"] {
-  return blocks
-    .filter((block): block is Record<string, unknown> => !!block && typeof block === "object")
-    .map((block) => {
-      const type = typeof block.type === "string" ? block.type : "unknown";
-      if (type === "text" && typeof block.text === "string") {
-        return { type: "text", text: block.text } as TextBlock;
-      }
-      if (type === "thinking" && typeof block.thinking === "string") {
-        return { type: "thinking", thinking: block.thinking } as ThinkingBlock;
-      }
-      if (type === "tool_use") {
-        return {
-          type: "toolCall" as const,
-          id: typeof block.id === "string" ? block.id : "",
-          name: typeof block.name === "string" ? block.name : "",
-          arguments: block.input,
-        };
-      }
-      if (type === "tool_result") {
-        return {
-          type: "toolResult" as const,
-          toolCallId: typeof block.tool_use_id === "string" ? block.tool_use_id : "",
-          isError: block.is_error === true,
-          content: block.content,
-        };
-      }
-      return block as TranscriptEntry["content"][number];
-    });
+function normalizeBlocks(blocks: DecodedBlock[]): ContentBlock[] {
+  return blocks.map(normalizeBlock);
 }
 
-function blockText(content: unknown): string {
-  if (typeof content === "string") return content;
+function normalizeBlock(block: DecodedBlock): ContentBlock {
+  const type = block.type;
+  if (type === "text") {
+    return { type: "text", text: String(block.text ?? "") };
+  }
+  if (type === "thinking") {
+    return { type: "thinking", thinking: String(block.thinking ?? "") };
+  }
+  if (type === "tool_use") {
+    return {
+      type: "toolCall",
+      id: String(block.id ?? ""),
+      name: String(block.name ?? ""),
+      arguments: block.input,
+    };
+  }
+  if (type === "tool_result") {
+    return {
+      type: "toolResult",
+      toolCallId: String(block.tool_use_id ?? ""),
+      isError: block.is_error === true,
+      content: block.content,
+    };
+  }
+  return block;
+}
+
+function toolResultText(content: v.InferOutput<typeof toolResultContentSchema>): string {
   if (Array.isArray(content)) {
     return content
-      .filter((block): block is Record<string, unknown> => !!block && typeof block === "object")
-      .map((block) => (typeof block.text === "string" ? block.text : ""))
+      .map((block) => block.text ?? "")
       .join("\n");
   }
-  return "";
+  return content;
 }
 
 function entryTextOf(entry: TranscriptEntry): string {
   const parts: string[] = [];
   for (const block of entry.content) {
-    if (block.type === "text" && "text" in block) parts.push((block as TextBlock).text);
-    if (block.type === "toolCall" && "name" in block) parts.push(`[${(block as { name: string }).name}]`);
-    if (block.type === "skill" && "name" in block) parts.push(skillInvocationPreview((block as { name: string }).name));
+    switch (block.type) {
+      case "text":
+        parts.push(String(block.text));
+        break;
+      case "toolCall":
+        parts.push(`[${String(block.name)}]`);
+        break;
+      case "skill":
+        parts.push(skillInvocationPreview(String(block.name)));
+        break;
+      default:
+        break;
+    }
   }
   return parts.join("\n");
 }

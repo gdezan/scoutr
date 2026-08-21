@@ -17,7 +17,7 @@ export const devicesRoutes: Route[] = [
 async function registerDevice(ctx: RouteContext): Promise<RouteResult> {
   const { devices } = ctx.deps;
   const token = ctx.body.fcmToken;
-  if (typeof token !== "string" || !token.trim()) {
+  if (!token?.trim()) {
     return { status: 400, body: { ok: false, error: "fcmToken is required" } };
   }
   if (token.length > MAX_TOKEN_LENGTH) {

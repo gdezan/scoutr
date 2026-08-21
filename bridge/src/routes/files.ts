@@ -21,7 +21,7 @@ async function files(ctx: RouteContext): Promise<RouteResult> {
   if (cwd.length > 4096 || /[\u0000-\u001f\u007f]/.test(cwd)) {
     return { status: 400, body: { ok: false, error: "invalid cwd" } };
   }
-  const cwds = activeAgentCwds(ctx.deps.feed.snapshot as SessionSnapshot | null);
+  const cwds = activeAgentCwds(ctx.deps.feed.snapshot);
   if (!cwds.includes(canonicalPath(cwd))) {
     return { status: 403, body: { ok: false, error: "cwd is not attached to an active agent" } };
   }
@@ -50,7 +50,7 @@ async function file(ctx: RouteContext): Promise<RouteResult> {
   const options: FileReadOptions | undefined = offset === undefined && limit === undefined
     ? undefined
     : { offset: offset ?? 0, limit: limit ?? FILE_HEAD_MAX_BYTES };
-  const cwds = activeAgentCwds(ctx.deps.feed.snapshot as SessionSnapshot | null);
+  const cwds = activeAgentCwds(ctx.deps.feed.snapshot);
   try {
     return { status: 200, body: { ok: true, ...readWorkspaceFile(requested, cwds, options) } };
   } catch (error) {

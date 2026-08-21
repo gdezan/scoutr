@@ -27,6 +27,9 @@ export interface JsonBody {
   fcmToken?: string;
 }
 
+/** Any JSON-serializable value a route may return as its response body. */
+import type { JsonValue } from "../herdr/types.js";
+export type { JsonValue };
 /** Everything the HTTP + WS layers need beyond the caller-provided wiring. */
 export interface ServerDeps {
   herdr: HerdrPort;
@@ -106,7 +109,7 @@ export interface RouteFile {
 
 export interface RouteResult {
   status: number;
-  body: unknown;
+  body: JsonValue;
   /** When set, the server streams this file and ignores `body`. */
   file?: RouteFile;
 }

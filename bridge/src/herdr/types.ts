@@ -3,6 +3,16 @@
  * Grounding artifact: `herdr api schema --json` captured at bridge/reference/herdr-schema.json.
  */
 
+export type JsonValue = string | number | boolean | null | JsonValue[] | object;
+
+/**
+ * Arbitrary JSON value as sent by herdr: primitives, arrays, and nested
+ * objects. Used for protocol maps (pane/workspace tokens, event payloads)
+ * whose shape herdr leaves open.
+ */
+export type HerdrValue = string | number | boolean | null | HerdrValue[] | { [key: string]: HerdrValue };
+
+
 export type AgentStatus = "idle" | "working" | "blocked" | "done" | "unknown";
 
 export interface AgentSessionInfo {
@@ -39,7 +49,7 @@ export interface PaneInfo {
   scroll: PaneScrollInfo | null;
   state_change_seq?: number;
   screen_detection_skipped?: boolean;
-  tokens?: Record<string, unknown>;
+  tokens?: Record<string, HerdrValue>;
 }
 
 export interface WorkspaceInfo {
@@ -52,7 +62,7 @@ export interface WorkspaceInfo {
   active_tab_id: string;
   agent_status: AgentStatus;
   worktree: unknown | null;
-  tokens?: Record<string, unknown>;
+  tokens?: Record<string, HerdrValue>;
 }
 
 export interface TabInfo {
@@ -130,17 +140,7 @@ export type Subscription =
 /** Envelope pushed after a successful subscribe. */
 export interface SubscriptionEventEnvelope {
   event: string;
-  data: {
-    type?: string;
-    pane_id?: string;
-    workspace_id?: string;
-    agent_status?: AgentStatus;
-    agent?: string | null;
-    display_agent?: string | null;
-    title?: string | null;
-    state_labels?: Record<string, string>;
-    [key: string]: unknown;
-  };
+  data: Record<string, HerdrValue>;
 }
 
 export interface HerdrPong {

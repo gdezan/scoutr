@@ -12,6 +12,7 @@ import {
 import { deriveSessionDescriptors } from "./agents.js";
 import type { SessionDescriptor } from "../session-model.js";
 import type { Route, RouteContext, RouteResult } from "./types.js";
+import * as v from "valibot";
 
 export const catalogRoutes: Route[] = [
   { method: "GET", path: "/api/session-catalog", handle: listCatalog },
@@ -20,8 +21,13 @@ export const catalogRoutes: Route[] = [
 
 const CATALOG_ACTIONS = new Set(["resume", "fork", "rename", "delete"]);
 
+const catalogActionBodySchema = v.looseObject({
+  key: v.object({ agentKind: v.string(), path: v.string() }),
+  text: v.optional(v.string()),
+});
+
 async function listCatalog(ctx: RouteContext): Promise<RouteResult> {
-  const snapshot = ctx.deps.feed.snapshot as SessionSnapshot | null;
+  const snapshot = ctx.deps.feed.snapshot;
   const active = await activeSessionRefs(snapshot);
   try {
     const limitValue = ctx.query.get("limit");
@@ -49,16 +55,15 @@ async function listCatalog(ctx: RouteContext): Promise<RouteResult> {
 async function storedSessionAction(ctx: RouteContext): Promise<RouteResult> {
   const action = ctx.params.action ?? "";
   if (!CATALOG_ACTIONS.has(action)) {
-    // The old if-chain only matched the four verbs; anything else fell
-    // through to the 404 fallback.
     return { status: 404, body: { ok: false, error: "not found" } };
   }
-  const body = ctx.body;
-  if (!body.key || typeof body.key !== "object") {
-    return { status: 400, body: { ok: false, error: "session key is required" } };
+  const parsed = v.safeParse(catalogActionBodySchema, ctx.body);
+  if (!parsed.success) {
+    return { status: 400, body: { ok: false, error: parsed.issues[0]?.message ?? "invalid catalog action body" } };
   }
-  const { path: target } = await resolveCatalogSessionKey(body.key as { agentKind: string; path: string });
-  const snapshot = ctx.deps.feed.snapshot as SessionSnapshot | null;
+  const body = parsed.output;
+  const { path: target } = await resolveCatalogSessionKey(body.key);
+  const snapshot = ctx.deps.feed.snapshot;
   // Id-kind session references (live claude panes) resolve through their
   // backend, so resume/rename/delete see the running session as active
   // instead of launching a duplicate workspace or unlinking a live transcript.
@@ -82,7 +87,7 @@ async function storedSessionAction(ctx: RouteContext): Promise<RouteResult> {
     return { status: 201, body: { ok: true, ...created } };
   }
   if (action === "rename") {
-    if (typeof body.text !== "string") throw new SessionCatalogError("name is required");
+    if (body.text === undefined) throw new SessionCatalogError("name is required");
     if (active) {
       await controlSession(ctx.deps.herdr, { paneId: active.live!.paneId, action: "rename", text: body.text });
     } else {

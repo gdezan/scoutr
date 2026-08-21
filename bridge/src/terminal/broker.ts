@@ -374,15 +374,15 @@ export class TerminalSessionBroker {
     return this.probeFlight;
   }
 
-  private openError(error: unknown): TerminalHelloError {
-    if (error instanceof TerminalOwnershipConflictError) {
+  private openError(cause: unknown): TerminalHelloError {
+    if (cause instanceof TerminalOwnershipConflictError) {
       return {
         code: "ownership_conflict",
         message: "the pane already has another writable controller; release it or retry with takeover",
         retryable: true,
       };
     }
-    const message = error instanceof Error ? error.message : String(error);
+    const message = cause instanceof Error ? cause.message : String(cause);
     return { code: "startup_error", message, retryable: true };
   }
 }

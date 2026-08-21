@@ -1,4 +1,5 @@
-import type { TranscriptEntry, ToolCallBlock } from "./transcript.js";
+import * as v from "valibot";
+import type { ContentBlock, TranscriptEntry, ToolCallBlock } from "./transcript.js";
 
 /**
  * Structured questions from pi session events.
@@ -58,6 +59,29 @@ interface RawAnswer {
   selected?: string[];
 }
 
+const questionContainerSchema = v.looseObject({ questions: v.optional(v.unknown()) });
+const questionSchema = v.looseObject({
+  id: v.optional(v.string()),
+  question: v.string(),
+  header: v.string(),
+  multiSelect: v.optional(v.boolean()),
+  options: v.optional(v.unknown()),
+});
+const optionSchema = v.looseObject({
+  label: v.string(),
+  description: v.optional(v.string()),
+});
+const answersContainerSchema = v.looseObject({ answers: v.optional(v.unknown()) });
+const answerSchema = v.looseObject({
+  questionIndex: v.optional(v.number()),
+  question: v.optional(v.string()),
+  kind: v.optional(v.string()),
+  answer: v.optional(v.union([v.string(), v.null()])),
+  selected: v.optional(v.array(v.string())),
+});
+
+type QuestionContainer = v.InferOutput<typeof questionContainerSchema>;
+
 /** Extract all pending/answered questions from a session's message entries. */
 export function extractQuestions(entries: TranscriptEntry[]): QuestionEntry[] {
   const calls: Array<{ entryId: string; timestamp: string; call: ToolCallBlock }> = [];
@@ -65,10 +89,9 @@ export function extractQuestions(entries: TranscriptEntry[]): QuestionEntry[] {
 
   for (const entry of entries) {
     for (const block of entry.content) {
-      if (block.type !== "toolCall") continue;
-      const call = block as ToolCallBlock;
-      if (call.name !== ASK_USER_QUESTION_TOOL) continue;
-      calls.push({ entryId: entry.entryId, timestamp: entry.timestamp, call });
+      if (!isToolCallBlock(block)) continue;
+      if (block.name !== ASK_USER_QUESTION_TOOL) continue;
+      calls.push({ entryId: entry.entryId, timestamp: entry.timestamp, call: block });
     }
     if (entry.role === "toolResult" && entry.toolCallId) {
       const answers = readToolResultAnswers(entry);
@@ -78,13 +101,14 @@ export function extractQuestions(entries: TranscriptEntry[]): QuestionEntry[] {
 
   const questions: QuestionEntry[] = [];
   for (const { entryId, timestamp, call } of calls) {
-    const raw = parseQuestions(call.arguments);
+    const parsedArgs = v.safeParse(questionContainerSchema, call.arguments);
+    const raw = parseQuestions(parsedArgs.success ? parsedArgs.output : undefined);
     const answers = answersByCallId.get(call.id) ?? [];
     // Answers carry their position (`questionIndex`) when the transcript
     // records it; positional pairing is only a fallback for old transcripts
     // where no answer in the call has an index (a partially-indexed call
     // must not misalign — unindexed positions stay unanswered).
-    const byIndex = new Map<number, (typeof answers)[number]>();
+    const byIndex = new Map<number, RawAnswer>();
     for (const a of answers) {
       if (a.questionIndex !== undefined) byIndex.set(a.questionIndex, a);
     }
@@ -114,49 +138,55 @@ export function extractQuestions(entries: TranscriptEntry[]): QuestionEntry[] {
   return questions;
 }
 
-function parseQuestions(argumentsValue: unknown): RawQuestion[] {
-  const args = argumentsValue as { questions?: unknown } | null | undefined;
-  if (!args || !Array.isArray(args.questions)) return [];
+function parseQuestions(container: QuestionContainer | undefined): RawQuestion[] {
+  const questionsValue = container?.questions;
+  if (!Array.isArray(questionsValue)) return [];
   const questions: RawQuestion[] = [];
-  for (const item of args.questions) {
-    const q = item as Partial<RawQuestion> | null | undefined;
-    if (!q || typeof q !== "object") continue;
-    if (typeof q.question !== "string" || typeof q.header !== "string") continue;
-    if (!Array.isArray(q.options)) continue;
+  for (const item of questionsValue) {
+    const parsed = v.safeParse(questionSchema, item);
+    if (!parsed.success) continue;
+    const question = parsed.output;
+    if (!Array.isArray(question.options)) continue;
     const options: RawOption[] = [];
-    for (const raw of q.options) {
-      const option = raw as Partial<RawOption> | null | undefined;
-      if (!option || typeof option.label !== "string") continue;
-      options.push({ label: option.label, description: option.description ?? "" });
+    for (const raw of question.options) {
+      const option = v.safeParse(optionSchema, raw);
+      if (!option.success) continue;
+      options.push({ label: option.output.label, description: option.output.description ?? "" });
     }
-    if (options.length === 0 && !q.multiSelect) continue; // free-text needs no options
+    if (options.length === 0 && !question.multiSelect) continue; // free-text needs no options
     questions.push({
-      id: typeof q.id === "string" ? q.id : undefined,
-      question: q.question,
-      header: q.header,
+      id: question.id,
+      question: question.question,
+      header: question.header,
       options,
-      multiSelect: q.multiSelect === true,
+      multiSelect: question.multiSelect === true,
     });
   }
   return questions;
 }
 
 function readToolResultAnswers(entry: TranscriptEntry): RawAnswer[] | null {
-  const details = entry.details as { answers?: unknown } | null | undefined;
-  if (!details || !Array.isArray(details.answers)) return null;
+  const parsed = v.safeParse(answersContainerSchema, entry.details);
+  const answersValue = parsed.success ? parsed.output.answers : undefined;
+  if (!Array.isArray(answersValue)) return null;
   const answers: RawAnswer[] = [];
-  for (const item of details.answers) {
-    const a = item as Partial<RawAnswer> | null | undefined;
-    if (!a || typeof a !== "object") continue;
+  for (const item of answersValue) {
+    const answer = v.safeParse(answerSchema, item);
+    if (!answer.success) continue;
+    const output = answer.output;
     answers.push({
-      questionIndex: typeof a.questionIndex === "number" ? a.questionIndex : undefined,
-      question: typeof a.question === "string" ? a.question : undefined,
-      kind: typeof a.kind === "string" ? a.kind : undefined,
-      answer: typeof a.answer === "string" ? a.answer : null,
-      selected: Array.isArray(a.selected) ? a.selected.filter((s): s is string => typeof s === "string") : undefined,
+      questionIndex: output.questionIndex,
+      question: output.question,
+      kind: output.kind,
+      answer: output.answer ?? null,
+      selected: output.selected,
     });
   }
   return answers;
+}
+
+function isToolCallBlock(block: ContentBlock): block is ToolCallBlock {
+  return block.type === "toolCall";
 }
 
 function kindIsAnswer(kind: string | undefined): boolean {

@@ -1,5 +1,6 @@
+import * as v from "valibot";
 import type { QuestionEntry } from "../../questions.js";
-import type { ToolCallBlock, Transcript, TranscriptEntry } from "../../transcript.js";
+import type { ContentBlock, ToolCallBlock, Transcript, TranscriptEntry } from "../../transcript.js";
 import { clearPendingAsk, readPendingAsk, type PendingAsk } from "./pending-asks.js";
 
 /**
@@ -24,6 +25,22 @@ interface RawQuestion {
   options: Array<{ label: string; description?: string }>;
   multiSelect?: boolean;
 }
+
+const questionContainerSchema = v.looseObject({ questions: v.optional(v.unknown()) });
+const questionSchema = v.looseObject({
+  question: v.string(),
+  header: v.string(),
+  multiSelect: v.optional(v.boolean()),
+  options: v.optional(v.unknown()),
+});
+const optionSchema = v.looseObject({
+  label: v.string(),
+  description: v.optional(v.string()),
+});
+export const claudeAnswersSchema = v.looseObject({ answers: v.optional(v.record(v.string(), v.string())) });
+
+type QuestionContainer = v.InferOutput<typeof questionContainerSchema>;
+type ClaudeAnswersInput = v.InferOutput<typeof claudeAnswersSchema>;
 
 /**
  * Every question card of a session: the asks the transcript records, plus the
@@ -64,26 +81,31 @@ function pendingQuestions(pending: PendingAsk): QuestionEntry[] {
   }));
 }
 
+function isToolCallBlock(block: ContentBlock): block is ToolCallBlock {
+  return block.type === "toolCall";
+}
+
 export function extractClaudeQuestions(entries: TranscriptEntry[]): QuestionEntry[] {
   const calls: Array<{ entryId: string; timestamp: string; call: ToolCallBlock }> = [];
   const answersByCallId = new Map<string, Record<string, string>>();
 
   for (const entry of entries) {
     for (const block of entry.content) {
-      if (block.type !== "toolCall") continue;
-      const call = block as ToolCallBlock;
-      if (call.name !== CLAUDE_ASK_TOOL) continue;
-      calls.push({ entryId: entry.entryId, timestamp: entry.timestamp, call });
+      if (!isToolCallBlock(block)) continue;
+      if (block.name !== CLAUDE_ASK_TOOL) continue;
+      calls.push({ entryId: entry.entryId, timestamp: entry.timestamp, call: block });
     }
     if (entry.role === "toolResult" && entry.toolCallId) {
-      const answers = readAnswers(entry.details);
+      const parsed = v.safeParse(claudeAnswersSchema, entry.details);
+      const answers = parsed.success ? parsed.output.answers : undefined;
       if (answers) answersByCallId.set(entry.toolCallId, answers);
     }
   }
 
   const questions: QuestionEntry[] = [];
   for (const { entryId, timestamp, call } of calls) {
-    const raw = parseQuestions(call.arguments);
+    const parsedArgs = v.safeParse(questionContainerSchema, call.arguments);
+    const raw = parseQuestions(parsedArgs.success ? parsedArgs.output : undefined);
     const answers = answersByCallId.get(call.id);
     raw.forEach((question, index) => {
       const answer = answers?.[question.question];
@@ -156,52 +178,41 @@ function skipSeparator(list: string, at: number): number {
   return match ? at + match[0].length : at;
 }
 
-function parseQuestions(argumentsValue: unknown): RawQuestion[] {
-  const args = argumentsValue as { questions?: unknown } | null | undefined;
-  if (!args || !Array.isArray(args.questions)) return [];
+function parseQuestions(container: QuestionContainer | undefined): RawQuestion[] {
+  const questionsValue = container?.questions;
+  if (!Array.isArray(questionsValue)) return [];
   const questions: RawQuestion[] = [];
-  for (const item of args.questions) {
-    const q = item as Partial<RawQuestion> | null | undefined;
-    if (!q || typeof q !== "object") continue;
-    if (typeof q.question !== "string" || typeof q.header !== "string") continue;
+  for (const item of questionsValue) {
+    const parsed = v.safeParse(questionSchema, item);
+    if (!parsed.success) continue;
+    const question = parsed.output;
+    if (!Array.isArray(question.options)) continue;
     const options: RawQuestion["options"] = [];
-    if (Array.isArray(q.options)) {
-      for (const rawOption of q.options) {
-        const option = rawOption as { label?: unknown; description?: unknown } | null | undefined;
-        if (!option || typeof option.label !== "string") continue;
-        options.push({
-          label: option.label,
-          description: typeof option.description === "string" ? option.description : "",
-        });
-      }
+    for (const raw of question.options) {
+      const option = v.safeParse(optionSchema, raw);
+      if (!option.success) continue;
+      options.push({ label: option.output.label, description: option.output.description ?? "" });
     }
     questions.push({
-      question: q.question,
-      header: q.header,
+      question: question.question,
+      header: question.header,
       options,
-      multiSelect: q.multiSelect === true,
+      multiSelect: question.multiSelect === true,
     });
   }
   return questions;
 }
 
-/** `details` carries only what [claudeQuestionAnswers] kept: `{ answers }`. */
-function readAnswers(details: unknown): Record<string, string> | null {
-  const value = (details as { answers?: unknown } | null | undefined)?.answers;
-  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-  const answers: Record<string, string> = {};
-  for (const [question, answer] of Object.entries(value as Record<string, unknown>)) {
-    if (typeof answer === "string") answers[question] = answer;
-  }
-  return Object.keys(answers).length > 0 ? answers : null;
-}
 
 /**
  * The AskUserQuestion answers of a Claude tool-result record, or null for
  * every other tool. Only this slice of `toolUseResult` is kept on the entry:
  * the rest (file contents, command output) would bloat every transcript poll.
  */
-export function claudeQuestionAnswers(toolUseResult: unknown): { answers: Record<string, string> } | null {
-  const answers = readAnswers(toolUseResult);
-  return answers ? { answers } : null;
+export function claudeQuestionAnswers(
+  toolUseResult: ClaudeAnswersInput | undefined,
+): { answers: Record<string, string> } | null {
+  if (!toolUseResult?.answers) return null;
+  const answers = toolUseResult.answers;
+  return Object.keys(answers).length > 0 ? { answers } : null;
 }

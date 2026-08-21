@@ -53,7 +53,7 @@ type MutableSocketMetrics = {
  */
 export class BridgeMetrics {
   private readonly routeMetrics = new Map<string, MutableRouteMetrics>();
-  private readonly socketMetrics: Record<BridgeSocketKind, MutableSocketMetrics> = {
+  private readonly socketMetrics = {
     feed: { opened: 0, closed: 0, active: 0 },
     terminal: { opened: 0, closed: 0, active: 0 },
   };

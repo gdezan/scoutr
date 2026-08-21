@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { BridgeError } from "../errors.js";
 import { join } from "node:path";
 import type { HerdrPort } from "./port.js";
-import type { HerdrPong, SessionSnapshot, Subscription, SubscriptionEventEnvelope } from "./types.js";
+import type { HerdrPong, JsonValue, SessionSnapshot, Subscription, SubscriptionEventEnvelope } from "./types.js";
 
 /**
  * Minimal JSONL-RPC client for the herdr socket.
@@ -44,6 +44,14 @@ interface RpcEnvelope {
   error?: { code?: string; message?: string };
 }
 
+interface AgentReadParams {
+  target: string;
+  source: string;
+  lines?: number;
+  format?: string;
+  strip_ansi?: boolean;
+}
+
 function splitLines(buffer: string): string[] {
   return buffer.split("\n").map((line) => (line.endsWith("\r") ? line.slice(0, -1) : line));
 }
@@ -56,9 +64,9 @@ function splitLines(buffer: string): string[] {
 export async function herdrRequest(
   socketPath: string,
   method: string,
-  params: unknown,
+  params: JsonValue,
   timeoutMs = 10_000,
-): Promise<unknown> {
+): Promise<JsonValue> {
   const id = `bridge:${method}:${Date.now()}:${Math.random().toString(36).slice(2, 10)}`;
   const request = JSON.stringify({ id, method, params }) + "\n";
 
@@ -88,12 +96,17 @@ export async function herdrRequest(
           reject(new HerdrError("herdr closed the connection without responding"));
           return;
         }
+        // SAFETY: a complete line that parses as the response envelope is the
+        // herdr result or error; RpcEnvelope is the documented wire shape.
         const envelope = JSON.parse(first) as RpcEnvelope;
         if (envelope.error) {
           reject(new HerdrError(envelope.error.message ?? "herdr request failed", envelope.error.code));
           return;
         }
-        resolve(envelope.result);
+        // SAFETY: herdr's RPC result is opaque JSON; the bridge either forwards
+        // it (agent.prompt) or discards it (mutating RPCs), so narrowing to
+        // JsonValue at this single boundary is sound.
+        resolve(envelope.result as JsonValue);
       } catch {
         reject(new HerdrError(`invalid JSON response from herdr socket: ${buffer.slice(0, 300)}`));
       }
@@ -112,7 +125,9 @@ export async function herdrRequest(
       if (newlineIndex !== -1 && !method.startsWith("events.")) {
         const first = buffer.slice(0, newlineIndex);
         try {
-          const parsed = JSON.parse(first) as RpcEnvelope;
+          // SAFETY: a complete line that parses as the response envelope is the
+        // herdr result or error; RpcEnvelope is the documented wire shape.
+        const parsed = JSON.parse(first) as RpcEnvelope;
           if (parsed.id === id || parsed.error) {
             finish();
           }
@@ -201,7 +216,9 @@ export async function herdrSubscribe(
           continue;
         }
         if (!started) {
-          const ack = envelope as { id?: string; result?: { type?: string }; error?: { message?: string } };
+          // SAFETY: the ack is the first envelope on the subscribe socket; its
+        // id/type/error fields are the documented subscription-started shape.
+        const ack = envelope as { id?: string; result?: { type?: string }; error?: { message?: string } };
           if (ack.error) {
             fail(new HerdrError(ack.error.message ?? "subscribe failed"));
             return;
@@ -221,6 +238,8 @@ export async function herdrSubscribe(
           resolve(handle);
           continue;
         }
+        // SAFETY: every post-ack line on the subscribe socket is a typed
+        // event envelope; SubscriptionEventEnvelope is the documented shape.
         const event = envelope as SubscriptionEventEnvelope;
         callbacks.onEvent?.(event.event, event.data);
       }
@@ -283,7 +302,9 @@ export class HerdrClient implements HerdrPort {
     return this.socketPath;
   }
 
-  async request<T>(method: string, params: unknown = {}, timeoutMs = this.timeoutMs): Promise<T> {
+  async request<T>(method: string, params: JsonValue = {}, timeoutMs = this.timeoutMs): Promise<T> {
+    // SAFETY: herdrRequest already narrowed the result to JsonValue; this cast
+    // only applies the caller's expected schema type (HerdrPong, AgentReadResponse, ...).
     return (await herdrRequest(this.socketPath, method, params, timeoutMs)) as T;
   }
 
@@ -301,13 +322,13 @@ export class HerdrClient implements HerdrPort {
   }
 
   /** Inject a prompt into an agent's pane (types the text + Enter). */
-  async agentPrompt(target: string, text: string): Promise<unknown> {
-    return this.request("agent.prompt", { target, text });
+  async agentPrompt(target: string, text: string): Promise<JsonValue> {
+    return this.request<JsonValue>("agent.prompt", { target, text });
   }
 
   /** Verify and return a live agent target. */
-  async agentGet(target: string, timeoutMs = this.timeoutMs): Promise<unknown> {
-    return this.request("agent.get", { target }, timeoutMs);
+  async agentGet(target: string, timeoutMs = this.timeoutMs): Promise<JsonValue> {
+    return this.request<JsonValue>("agent.get", { target }, timeoutMs);
   }
 
   /** Read a bounded terminal snapshot for an agent pane. */
@@ -316,23 +337,23 @@ export class HerdrClient implements HerdrPort {
     source: string,
     options: { lines?: number; format?: string; stripAnsi?: boolean; requestTimeoutMs?: number } = {},
   ): Promise<AgentReadResponse> {
-    const params: Record<string, unknown> = { target, source };
+    const params: AgentReadParams = { target, source };
     if (options.lines !== undefined) params.lines = options.lines;
     if (options.format) params.format = options.format;
     if (options.stripAnsi !== undefined) params.strip_ansi = options.stripAnsi;
     return this.request<AgentReadResponse>("agent.read", params, options.requestTimeoutMs);
   }
 
-  async paneSendText(pane_id: string, text: string): Promise<unknown> {
-    return this.request("pane.send_text", { pane_id, text });
+  async paneSendText(pane_id: string, text: string): Promise<void> {
+    await this.request("pane.send_text", { pane_id, text });
   }
 
-  async paneSendKeys(pane_id: string, keys: string[]): Promise<unknown> {
-    return this.request("pane.send_keys", { pane_id, keys });
+  async paneSendKeys(pane_id: string, keys: string[]): Promise<void> {
+    await this.request("pane.send_keys", { pane_id, keys });
   }
 
-  async paneSendInput(pane_id: string, text: string, keys: string[] = []): Promise<unknown> {
-    return this.request("pane.send_input", { pane_id, text, keys });
+  async paneSendInput(pane_id: string, text: string, keys: string[] = []): Promise<void> {
+    await this.request("pane.send_input", { pane_id, text, keys });
   }
 
   /** Create a workspace. herdr pre-creates one root pane in it. */
@@ -350,27 +371,27 @@ export class HerdrClient implements HerdrPort {
     return this.request("tab.create", params);
   }
 
-  async tabRename(tab_id: string, label: string): Promise<unknown> {
-    return this.request("tab.rename", { tab_id, label });
+  async tabRename(tab_id: string, label: string): Promise<void> {
+    await this.request("tab.rename", { tab_id, label });
   }
 
-  async tabClose(tab_id: string): Promise<unknown> {
-    return this.request("tab.close", { tab_id });
+  async tabClose(tab_id: string): Promise<void> {
+    await this.request("tab.close", { tab_id });
   }
 
-  async paneRename(pane_id: string, label: string): Promise<unknown> {
-    return this.request("pane.rename", { pane_id, label });
+  async paneRename(pane_id: string, label: string): Promise<void> {
+    await this.request("pane.rename", { pane_id, label });
   }
 
-  async paneClose(pane_id: string): Promise<unknown> {
-    return this.request("pane.close", { pane_id });
+  async paneClose(pane_id: string): Promise<void> {
+    await this.request("pane.close", { pane_id });
   }
 
-  async workspaceClose(workspace_id: string): Promise<unknown> {
-    return this.request("workspace.close", { workspace_id });
+  async workspaceClose(workspace_id: string): Promise<void> {
+    await this.request("workspace.close", { workspace_id });
   }
 
-  async workspaceRename(workspace_id: string, label: string): Promise<unknown> {
-    return this.request("workspace.rename", { workspace_id, label });
+  async workspaceRename(workspace_id: string, label: string): Promise<void> {
+    await this.request("workspace.rename", { workspace_id, label });
   }
 }

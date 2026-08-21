@@ -75,7 +75,11 @@ async function main(): Promise<void> {
         }
         const { handleClaudeHook } = await import("./agents/claude/hook.js");
         const chunks: Buffer[] = [];
-        for await (const chunk of process.stdin) chunks.push(chunk as Buffer);
+        for await (const chunk of process.stdin) {
+          // SAFETY: process.stdin yields Buffer chunks; the cast preserves the Buffer type.
+          const buffer = chunk as Buffer;
+          chunks.push(buffer);
+        }
         try {
           console.error(handleClaudeHook(Buffer.concat(chunks).toString("utf8")));
         } catch (error) {

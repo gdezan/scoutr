@@ -16,6 +16,7 @@
  *            not found".
  */
 import { spawn, type ChildProcess } from "node:child_process";
+import * as v from "valibot";
 import type {
   TerminalCapability,
   TerminalClosedCode,
@@ -56,6 +57,7 @@ export const TERMINAL_LIMITS = {
   scrollbackTimeoutMs: 3_000,
 } as const;
 
+type TerminalLimits = { -readonly [K in keyof typeof TERMINAL_LIMITS]: number };
 /**
  * Outcome of feeding one pipe chunk to {@link NdjsonLineReader}. Both bound failures are fatal
  * `line-too-long` conditions; they are distinguished only so the message can say whether the
@@ -197,33 +199,20 @@ function classifyClosedReason(reason: string): TerminalClosedCode {
   return "unknown";
 }
 
-function isFrame(v: unknown): v is {
-  type: "terminal.frame";
-  bytes: string;
-  encoding: string;
-  full: boolean;
-  height: number;
-  seq: number;
-  width: number;
-} {
-  if (typeof v !== "object" || v === null) return false;
-  const r = v as Record<string, unknown>;
-  return (
-    r.type === "terminal.frame" &&
-    typeof r.bytes === "string" &&
-    r.encoding === "ansi" &&
-    typeof r.full === "boolean" &&
-    typeof r.height === "number" &&
-    typeof r.seq === "number" &&
-    typeof r.width === "number"
-  );
-}
+const frameSchema = v.looseObject({
+  type: v.literal("terminal.frame"),
+  bytes: v.string(),
+  encoding: v.literal("ansi"),
+  full: v.boolean(),
+  height: v.number(),
+  seq: v.number(),
+  width: v.number(),
+});
 
-function isClosed(v: unknown): v is { type: "terminal.closed"; reason?: string } {
-  if (typeof v !== "object" || v === null) return false;
-  const r = v as Record<string, unknown>;
-  return r.type === "terminal.closed" && (r.reason === undefined || typeof r.reason === "string");
-}
+const closedSchema = v.looseObject({
+  type: v.literal("terminal.closed"),
+  reason: v.optional(v.string()),
+});
 
 export class HerdrTerminalLauncher implements TerminalLauncher {
   private readonly bin: string;
@@ -238,11 +227,15 @@ export class HerdrTerminalLauncher implements TerminalLauncher {
     if (this.socketPath) this.childEnv.HERDR_SOCKET_PATH = this.socketPath;
     // TERMINAL_LIMITS is `as const`, so clone as a mutable record before
     // applying optional overrides.
-    const limits: Record<string, number> = { ...TERMINAL_LIMITS };
+    // TERMINAL_LIMITS is `as const`, so clone as a mutable record before
+    // applying optional overrides.
+    const limits: TerminalLimits = { ...TERMINAL_LIMITS };
     if (options.handshakeTimeoutMs !== undefined) limits.handshakeTimeoutMs = options.handshakeTimeoutMs;
     if (options.releaseGraceMs !== undefined) limits.releaseGraceMs = options.releaseGraceMs;
     if (options.termGraceMs !== undefined) limits.termGraceMs = options.termGraceMs;
     if (options.scrollbackTimeoutMs !== undefined) limits.scrollbackTimeoutMs = options.scrollbackTimeoutMs;
+    // SAFETY: limits is the mutable clone typed with plain numbers; the field keeps the
+    // `as const` literal shape of TERMINAL_LIMITS, so this cast only drops readonly.
     this.limits = limits as typeof TERMINAL_LIMITS;
   }
 
@@ -370,7 +363,6 @@ export function openTerminalProcess(
     let settled = false;
     if (
       !options.target ||
-      typeof options.target !== "string" ||
       options.target.length > 256 ||
       options.target.includes("\n")
     ) {
@@ -635,10 +627,11 @@ class HerdrTerminalProcess implements TerminalProcess {
       this.fatal("invalid-json", "terminal record is not valid JSON");
       return;
     }
-    if (isFrame(parsed)) {
+    const frame = v.safeParse(frameSchema, parsed);
+    if (frame.success) {
       let bytes: Buffer;
       try {
-        bytes = decodeBase64Strict(parsed.bytes, "terminal.frame bytes");
+        bytes = decodeBase64Strict(frame.output.bytes, "terminal.frame bytes");
       } catch (error) {
         this.fatal("invalid-base64", error instanceof Error ? error.message : "invalid base64");
         return;
@@ -648,26 +641,27 @@ class HerdrTerminalProcess implements TerminalProcess {
         return;
       }
       if (
-        !Number.isInteger(parsed.seq) ||
-        parsed.seq < 0 ||
-        !Number.isInteger(parsed.width) ||
-        parsed.width < this.limits.minCols ||
-        parsed.width > this.limits.maxCols ||
-        !Number.isInteger(parsed.height) ||
-        parsed.height < this.limits.minRows ||
-        parsed.height > this.limits.maxRows
+        !Number.isInteger(frame.output.seq) ||
+        frame.output.seq < 0 ||
+        !Number.isInteger(frame.output.width) ||
+        frame.output.width < this.limits.minCols ||
+        frame.output.width > this.limits.maxCols ||
+        !Number.isInteger(frame.output.height) ||
+        frame.output.height < this.limits.minRows ||
+        frame.output.height > this.limits.maxRows
       ) {
-        this.fatal("frame-bounds", `terminal.frame grid/seq out of bounds (${parsed.width}x${parsed.height} seq ${parsed.seq})`);
+        this.fatal("frame-bounds", `terminal.frame grid/seq out of bounds (${frame.output.width}x${frame.output.height} seq ${frame.output.seq})`);
         return;
       }
-      this.emit({ type: "bytes", bytes, seq: parsed.seq, full: parsed.full, width: parsed.width, height: parsed.height });
+      this.emit({ type: "bytes", bytes, seq: frame.output.seq, full: frame.output.full, width: frame.output.width, height: frame.output.height });
       return;
     }
-    if (isClosed(parsed)) {
-      const code = classifyClosedReason(parsed.reason ?? "");
+    const closed = v.safeParse(closedSchema, parsed);
+    if (closed.success) {
+      const code = classifyClosedReason(closed.output.reason ?? "");
       if (!this.closedEmitted) {
         this.closedEmitted = true;
-          this.emit({ type: "closed", code, reason: parsed.reason });
+        this.emit({ type: "closed", code, reason: closed.output.reason });
       }
       return;
     }

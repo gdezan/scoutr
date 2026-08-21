@@ -4,6 +4,7 @@
  * Each provider differs only in endpoint, client id, and body encoding, so the
  * request/response handling lives here and the providers supply the rest.
  */
+import * as v from "valibot";
 
 export interface RefreshedToken {
   access: string;
@@ -12,6 +13,12 @@ export interface RefreshedToken {
   /** Absolute epoch ms, already skew-adjusted. */
   expires: number;
 }
+
+const tokenResponseSchema = v.looseObject({
+  access_token: v.optional(v.string()),
+  refresh_token: v.optional(v.string()),
+  expires_in: v.optional(v.union([v.number(), v.string()])),
+});
 
 export interface RefreshRequest {
   /** Tried in order; the first that does not 404 wins. Lets an endpoint migration roll out gracefully. */
@@ -36,7 +43,7 @@ export const TOKEN_SKEW_MS = 5 * 60 * 1000;
  * guess is worse than letting the 401 retry path handle it.
  */
 export function isExpiring(expires: number | undefined): boolean {
-  if (typeof expires !== "number" || !Number.isFinite(expires)) return false;
+  if (expires === undefined || !Number.isFinite(expires)) return false;
   return expires - TOKEN_SKEW_MS <= Date.now();
 }
 
@@ -75,13 +82,17 @@ export async function requestTokenRefresh(request: RefreshRequest): Promise<Refr
       throw new Error(`${request.label} token refresh returned ${response.status}`);
     }
 
-    const body = (await response.json()) as Record<string, unknown>;
-    const access = typeof body.access_token === "string" ? body.access_token : undefined;
+    const parsed = v.safeParse(tokenResponseSchema, await response.json());
+    if (!parsed.success) {
+      throw new Error(`${request.label} token refresh returned no access token`);
+    }
+    const token = parsed.output;
+    const access = token.access_token;
     if (!access) throw new Error(`${request.label} token refresh returned no access token`);
-    const expiresIn = typeof body.expires_in === "number" && Number.isFinite(body.expires_in) ? body.expires_in : 3600;
+    const expiresIn = Number.isFinite(Number(token.expires_in)) ? Number(token.expires_in) : 3600;
     return {
       access,
-      refresh: typeof body.refresh_token === "string" ? body.refresh_token : request.refreshToken,
+      refresh: token.refresh_token ?? request.refreshToken,
       expires: Date.now() + expiresIn * 1000,
     };
   }

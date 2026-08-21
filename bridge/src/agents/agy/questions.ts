@@ -1,14 +1,40 @@
+import * as v from "valibot";
 import type { QuestionEntry, QuestionOption } from "../../questions.js";
-import type { ToolCallBlock, TranscriptEntry } from "../../transcript.js";
+import type { ContentBlock, TextBlock, ToolCallBlock, TranscriptEntry } from "../../transcript.js";
 
 export const AGY_ASK_QUESTION_TOOL = "ask_question";
 
-interface RawAgyQuestion {
-  question: string;
-  header?: string;
-  options?: Array<string | { label: string; description?: string }>;
-  is_multi_select?: boolean;
-  multiSelect?: boolean;
+const rawQuestionSchema = v.looseObject({
+  question: v.string(),
+  header: v.optional(v.string()),
+  options: v.optional(
+    v.array(v.union([v.string(), v.looseObject({ label: v.string(), description: v.optional(v.string()) })])),
+  ),
+  is_multi_select: v.optional(v.boolean()),
+  multiSelect: v.optional(v.boolean()),
+});
+type RawAgyQuestion = v.InferOutput<typeof rawQuestionSchema>;
+
+const rawArgsSchema = v.union([
+  v.pipe(
+    v.string(),
+    v.transform((raw): { questions?: unknown } | undefined => {
+      try {
+        return JSON.parse(raw);
+      } catch {
+        return undefined;
+      }
+    }),
+  ),
+  v.looseObject({ questions: v.optional(v.unknown()) }),
+]);
+
+function isToolCallBlock(block: ContentBlock): block is ToolCallBlock {
+  return block.type === "toolCall";
+}
+
+function isTextBlock(block: ContentBlock): block is TextBlock {
+  return block.type === "text";
 }
 
 export function extractAgyQuestions(entries: TranscriptEntry[]): QuestionEntry[] {
@@ -17,10 +43,9 @@ export function extractAgyQuestions(entries: TranscriptEntry[]): QuestionEntry[]
 
   for (const entry of entries) {
     for (const block of entry.content) {
-      if (block.type !== "toolCall") continue;
-      const call = block as ToolCallBlock;
-      if (call.name === AGY_ASK_QUESTION_TOOL || call.name === "ask_user_question") {
-        calls.push({ entryId: entry.entryId, timestamp: entry.timestamp, call });
+      if (!isToolCallBlock(block)) continue;
+      if (block.name === AGY_ASK_QUESTION_TOOL || block.name === "ask_user_question") {
+        calls.push({ entryId: entry.entryId, timestamp: entry.timestamp, call: block });
       }
     }
     if (entry.role === "toolResult" && entry.toolCallId) {
@@ -30,18 +55,26 @@ export function extractAgyQuestions(entries: TranscriptEntry[]): QuestionEntry[]
 
   const questions: QuestionEntry[] = [];
   for (const { entryId, timestamp, call } of calls) {
-    const rawQuestions = parseAgyQuestions(call.arguments);
+    const argsParsed = v.safeParse(rawArgsSchema, call.arguments);
+    let rawQuestions: RawAgyQuestion[] = [];
+    if (argsParsed.success && argsParsed.output !== undefined) {
+      const nested = argsParsed.output.questions;
+      if (nested !== undefined && Array.isArray(nested)) {
+        rawQuestions = decodeRawQuestions(nested);
+      }
+    }
     const result = resultsByCallId.get(call.id);
     const resultText = result ? extractResultText(result) : "";
     const parsedAnswers = parseResultAnswers(resultText);
 
     rawQuestions.forEach((q, index) => {
-      const answer = parsedAnswers.get(index + 1) ?? (rawQuestions.length === 1 && resultText ? resultText : undefined);
+      const answer =
+        parsedAnswers.get(index + 1) ?? (rawQuestions.length === 1 && resultText ? resultText : undefined);
       const isMulti = q.is_multi_select === true || q.multiSelect === true;
       const isAnswered = Boolean(result);
 
       const options: QuestionOption[] = (q.options ?? []).map((opt) => {
-        if (typeof opt === "string") return { label: opt, description: "" };
+        if (!(opt instanceof Object)) return { label: opt, description: "" };
         return { label: opt.label, description: opt.description ?? "" };
       });
 
@@ -64,29 +97,20 @@ export function extractAgyQuestions(entries: TranscriptEntry[]): QuestionEntry[]
   return questions;
 }
 
-function parseAgyQuestions(argsValue: unknown): RawAgyQuestion[] {
-  let args = argsValue as { questions?: unknown } | null | undefined;
-  if (typeof argsValue === "string") {
-    try {
-      args = JSON.parse(argsValue) as { questions?: unknown };
-    } catch {
-      return [];
-    }
-  }
-  if (!args || !Array.isArray(args.questions)) return [];
+function decodeRawQuestions(questions: unknown[]): RawAgyQuestion[] {
   const list: RawAgyQuestion[] = [];
-  for (const item of args.questions) {
-    if (!item || typeof item !== "object") continue;
-    const q = item as RawAgyQuestion;
-    if (typeof q.question !== "string" || !q.question.trim()) continue;
-    list.push(q);
+  for (const item of questions) {
+    const parsed = v.safeParse(rawQuestionSchema, item);
+    if (!parsed.success) continue;
+    if (!parsed.output.question.trim()) continue;
+    list.push(parsed.output);
   }
   return list;
 }
 
 function extractResultText(entry: TranscriptEntry): string {
   for (const block of entry.content) {
-    if (block.type === "text" && "text" in block) return (block as { text: string }).text;
+    if (isTextBlock(block)) return block.text;
   }
   return "";
 }

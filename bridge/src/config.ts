@@ -1,3 +1,4 @@
+import * as v from "valibot";
 import { randomBytes } from "node:crypto";
 import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import { constants } from "node:fs";
@@ -42,6 +43,19 @@ export class ConfigError extends Error {
   }
 }
 
+const bridgeConfigSchema = v.looseObject({
+  token: v.string(),
+  port: v.number(),
+  fcmServiceAccountPath: v.optional(v.string()),
+  exposure: v.optional(v.unknown()),
+  publicHost: v.optional(v.string()),
+});
+const exposureSchema = v.looseObject({
+  kind: v.string(),
+  publicUrl: v.optional(v.string()),
+});
+type BridgeConfigParsed = v.InferOutput<typeof bridgeConfigSchema>;
+
 export function defaultConfigPath(): string {
   return join(process.env.XDG_CONFIG_HOME?.trim() || join(homedir(), ".config"), "scoutr", "config.json");
 }
@@ -55,38 +69,46 @@ export function generateToken(): string {
  *
  * Configs written before exposure existed carry a bare `publicHost`; they are
  * Tailscale deployments, so that value becomes the Tailscale URL override.
- * An unknown kind is a configuration error: silently serving it as Tailscale
- * would shell out to a provider the operator did not choose.
+ * An unknown kind is a configuration error: silently serving it as something
+ * else would shell out to a provider the operator did not choose.
  */
-export function normalizeExposure(parsed: Record<string, unknown>, path: string): ExposureConfig {
+export function normalizeExposure(parsed: BridgeConfigParsed, path: string): ExposureConfig {
   const raw = parsed.exposure;
   if (raw === undefined || raw === null) {
-    const legacy = typeof parsed.publicHost === "string" && parsed.publicHost ? parsed.publicHost : undefined;
     const result: ExposureConfig = { kind: "tailscale" };
-    if (legacy) result.publicUrl = legacy;
+    if (parsed.publicHost) result.publicUrl = parsed.publicHost;
     return result;
   }
-  if (typeof raw !== "object" || Array.isArray(raw)) {
+  const exposureParsed = v.safeParse(exposureSchema, raw);
+  if (!exposureParsed.success) {
     throw new ConfigError(`invalid "exposure" in ${path}: expected an object like {"kind":"tailscale"}`);
   }
-  const exposure = raw as Record<string, unknown>;
-  const kind = exposure.kind;
-  if (typeof kind !== "string" || !EXPOSURE_KINDS.includes(kind as ExposureKind)) {
+  const exposure = exposureParsed.output;
+  let matched: ExposureKind | undefined;
+  for (const kind of EXPOSURE_KINDS) {
+    if (kind === exposure.kind) {
+      matched = kind;
+      break;
+    }
+  }
+  if (!matched) {
     throw new ConfigError(
-      `unknown exposure kind ${JSON.stringify(kind)} in ${path}: expected one of ${EXPOSURE_KINDS.join(", ")}`,
+      `unknown exposure kind ${JSON.stringify(exposure.kind)} in ${path}: expected one of ${EXPOSURE_KINDS.join(", ")}`,
     );
   }
-  const publicUrl = typeof exposure.publicUrl === "string" && exposure.publicUrl ? exposure.publicUrl : undefined;
-  const result: ExposureConfig = { kind: kind as ExposureKind };
-  if (publicUrl) result.publicUrl = publicUrl;
+  const result: ExposureConfig = { kind: matched };
+  if (exposure.publicUrl) result.publicUrl = exposure.publicUrl;
   return result;
 }
 
 /** Filename of the conventional FCM service-account key next to config.json. */
 export const FCM_SERVICE_ACCOUNT_FILENAME = "fcm-service-account.json";
 
-async function resolveFcmServiceAccountPath(explicit: unknown, configDir: string): Promise<string | undefined> {
-  if (typeof explicit === "string" && explicit) return explicit;
+async function resolveFcmServiceAccountPath(
+  explicit: string | undefined,
+  configDir: string,
+): Promise<string | undefined> {
+  if (explicit) return explicit;
   const conventional = join(configDir, FCM_SERVICE_ACCOUNT_FILENAME);
   try {
     await access(conventional, constants.R_OK);
@@ -100,19 +122,18 @@ export async function loadOrCreateConfig(path = defaultConfigPath()): Promise<Br
   let config: BridgeConfig | null = null;
   let readOk = false;
   try {
-    const raw = await readFile(path, "utf8");
-    const parsed = JSON.parse(raw) as Record<string, unknown>;
-    if (typeof parsed.token !== "string" || parsed.token.length < 16 || typeof parsed.port !== "number") {
+    const parsed = v.safeParse(bridgeConfigSchema, JSON.parse(await readFile(path, "utf8")));
+    if (!parsed.success || parsed.output.token.length < 16) {
       throw new Error("invalid scoutr config (token or port missing)");
     }
-    const exposure = normalizeExposure(parsed, path);
+    const exposure = normalizeExposure(parsed.output, path);
     readOk = true;
     const configDir = join(path, "..");
     config = {
       configDir,
-      token: parsed.token,
-      port: parsed.port,
-      fcmServiceAccountPath: await resolveFcmServiceAccountPath(parsed.fcmServiceAccountPath, configDir),
+      token: parsed.output.token,
+      port: parsed.output.port,
+      fcmServiceAccountPath: await resolveFcmServiceAccountPath(parsed.output.fcmServiceAccountPath, configDir),
       exposure,
     };
   } catch (error) {

@@ -1,5 +1,6 @@
+import * as v from "valibot";
 import { BridgeError } from "../errors.js";
-import type { DispatchRequest, Route, RouteContext, RouteDeps, RouteResult } from "./types.js";
+import type { DispatchRequest, JsonBody, Route, RouteContext, RouteDeps, RouteResult } from "./types.js";
 
 export interface Match {
   route: Route;
@@ -16,7 +17,7 @@ function parsePath(path: string): Segment[] {
 }
 
 function isPattern(segments: Segment[]): boolean {
-  return segments.some((segment) => typeof segment !== "string");
+  return segments.some((segment) => segment instanceof Object);
 }
 
 /**
@@ -55,7 +56,7 @@ export class RouteTable {
       let matches = true;
       for (let i = 0; i < pattern.length; i++) {
         const expected = pattern[i]!;
-        if (typeof expected === "string") {
+        if (!(expected instanceof Object)) {
           if (expected !== segments[i]) {
             matches = false;
             break;
@@ -88,7 +89,7 @@ export function isAuthorized(
   opts: { allowQueryToken?: boolean } = {},
 ): boolean {
   const header = request.authorization;
-  if (typeof header === "string" && header.startsWith("Bearer ")) {
+  if (header?.startsWith("Bearer ")) {
     return timingSafeEqual(header.slice(7), token);
   }
   if (opts.allowQueryToken === true) {
@@ -142,16 +143,17 @@ export async function dispatchRoute(
       rawBody = request.body;
     } else if (request.method === "POST") {
       const raw = (await readBoundedBody(request.body ?? noBody(), JSON_BODY_MAX_BYTES)).toString("utf8");
-      let parsed: unknown = {};
+      let parsed: JsonBody = {};
       try {
         parsed = raw ? JSON.parse(raw) : {};
       } catch {
         return { status: 400, body: { ok: false, error: "request body must be valid JSON" } };
       }
-      if (parsed === null || Array.isArray(parsed) || typeof parsed !== "object") {
+      const decoded = v.safeParse(v.looseObject({}), parsed);
+      if (!decoded.success || Array.isArray(parsed)) {
         return { status: 400, body: { ok: false, error: "request body must be a JSON object" } };
       }
-      body = parsed as RouteContext["body"];
+      body = decoded.output;
     }
     return await route.handle({ params, query: request.search, body, rawBody, contentType: request.contentType, deps });
   } catch (error) {
@@ -180,7 +182,7 @@ function assertNoShadowing(routes: Route[]): void {
       const a = patterns[i]!;
       const b = patterns[j]!;
       if (a.method !== b.method || a.segments.length !== b.segments.length) continue;
-      if (a.segments.every((segment, k) => shapesEqual(segment, b.segments[k]!))) {
+      if (a.segments.every((segment, k) => segmentPatternsEqual(segment, b.segments[k]!))) {
         throw new Error(`routes shadow each other: ${a.path} and ${b.path}`);
       }
     }
@@ -194,7 +196,7 @@ function assertNoShadowing(routes: Route[]): void {
       if (pattern.method !== literal.method || pattern.segments.length !== literal.segments.length) continue;
       if (
         pattern.segments.every(
-          (segment, k) => typeof segment !== "string" || segment === literal.segments[k],
+          (segment, k) => segment instanceof Object || segment === literal.segments[k]!,
         )
       ) {
         throw new Error(`route ${pattern.path} shadows literal ${literal.path}`);
@@ -203,7 +205,7 @@ function assertNoShadowing(routes: Route[]): void {
   }
 }
 
-function shapesEqual(a: Segment, b: Segment): boolean {
-  if (typeof a === "string" || typeof b === "string") return a === b;
+function segmentPatternsEqual(a: Segment, b: Segment): boolean {
+  if (!(a instanceof Object) || !(b instanceof Object)) return a === b;
   return true; // both params
 }

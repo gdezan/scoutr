@@ -4,6 +4,7 @@
 
 - Work directly on `main` and commit there unless the user explicitly specifies another branch or workflow.
 - When committing, push the branch and its release tags together (`git push --follow-tags`) so a new `vX.Y.Z` tag always travels with the commit.
+- Never add "Co-authored-by" lines to commits; the user is the only author of record.
 
 ## Project map
 
@@ -31,6 +32,7 @@ API; the Android app talks only to that API.
 - **Diagnose infrastructure first:** AAPT2, packaging, missing-dex, emulator-focus, socket, and harness failures are not evidence that product behavior is wrong.
 - **Use completion signals:** recognized agents use Herdr lifecycle waits; ordinary long-running commands use a sibling pane and an explicit completion condition. Timeouts are safety ceilings, not completion mechanisms.
 - **Keep Android verification serial:** one Gradle invocation per checkout and one instrumentation run on `emulator-5554` at a time.
+- **Emulator is on-demand (artemis is always-on):** boot `emulator-5554` (`cockpit` AVD) only for final acceptance; kill with `adb -s emulator-5554 emu kill` when done. See `docs/dev-workflow.md` for boot/kill recipes.
 - **Deploy finalized bridge work:** when the phone or live app would only see the change through the supervised service, run the deploy recipe in `docs/dev-workflow.md`. Source-green is not live.
 
 ## Verification boundary
@@ -52,7 +54,7 @@ skipped Gradle output.
 - Android is always-dark Material 3. The design contract, tokens, typography, status colors, and motion rules live in `android/app/src/main/java/dev/scoutr/app/ui/theme/DESIGN.md`; follow it for UI work.
 - The terminal is one full-screen Herdr pane with an overlay hierarchy selector; raw terminal output never returns to Chat. Current terminal ownership, lifecycle, and limitations live in `docs/terminal.md`.
 - ViewModels talk to `ScoutrApi`; `BridgeClient` implements it; unit tests use `FakeScoutrApi`.
-- Instrumentation runs only on an emulator, never a physical Pixel. If `emulator-5554` is absent, boot the `scoutr` AVD and verify the target with `adb devices`.
+- Instrumentation runs only on an emulator, never a physical Pixel. If `emulator-5554` is absent, boot the `cockpit` AVD per `docs/dev-workflow.md` and verify with `adb devices`.
 - Composer Enter inserts a newline and never sends. Keep multiline input, `ImeAction.None`, and no-op `KeyboardActions`.
 - Question answers travel as intent (`questionId`, `selectedLabels`, `text`); the adapter owns each TUI's questionnaire grammar, not the app. Claude's live ask hook and transcript timing are documented by ADR 0006.
 

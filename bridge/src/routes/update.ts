@@ -4,6 +4,7 @@ import { ApkBuilder } from "../apk.js";
 import { BridgeError } from "../errors.js";
 import { gitRepoRoot } from "../review.js";
 import type { Route, RouteContext, RouteResult } from "./types.js";
+import * as v from "valibot";
 
 /**
  * Phone-triggered self-update, over the exposed API only — no adb, so no
@@ -45,11 +46,16 @@ function execCapture(cmd: string, args: string[]): Promise<string> {
       { encoding: "utf8", maxBuffer: 1024 * 1024, timeout: EXEC_TIMEOUT_MS, env: process.env },
       (error, stdout, stderr) => {
         if (error) {
+          // SAFETY: a missing binary surfaces as the ENOENT errno; execFile's
+          // error carries that code, so the cast to read it is sound.
           const code = (error as NodeJS.ErrnoException).code;
+          // SAFETY: execFile only yields Error (with `killed` on timeout);
+          // widening to read `killed` is safe here.
+          const killed = (error as Error & { killed?: boolean }).killed;
           const detail =
             code === "ENOENT"
               ? `${cmd} not found`
-              : (error as Error & { killed?: boolean }).killed
+              : killed
                 ? `${cmd} timed out`
                 : (stderr.trim() || error.message || `${cmd} failed`);
           reject(new BridgeError(detail, 502));
@@ -67,6 +73,14 @@ async function checkoutRoot(): Promise<string> {
   return root;
 }
 
+const identitySchema = v.looseObject({
+  version: v.optional(v.unknown()),
+  versionCode: v.optional(v.unknown()),
+  commit: v.optional(v.unknown()),
+  dirty: v.optional(v.unknown()),
+  buildTime: v.optional(v.unknown()),
+});
+
 async function hostIdentity(): Promise<HostIdentity> {
   const root = await checkoutRoot();
   const stdout = await execCapture(process.execPath, [join(root, VERSION_SCRIPT), "--json"]);
@@ -76,7 +90,9 @@ async function hostIdentity(): Promise<HostIdentity> {
   } catch {
     throw new BridgeError("version script returned invalid JSON", 502);
   }
-  const identity = parsed as Partial<Record<keyof HostIdentity, unknown>>;
+  const decoded = v.safeParse(identitySchema, parsed);
+  if (!decoded.success) throw new BridgeError("version script returned an invalid identity", 502);
+  const identity = decoded.output;
   return {
     version: String(identity.version ?? "0.0.0"),
     versionCode: Number(identity.versionCode ?? 0),

@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import * as v from "valibot";
 import { updateJsonFile } from "./auth.js";
 import { isExpiring } from "./oauth.js";
 import type { UsageSnapshot, UsageWindow } from "./providers.js";
@@ -18,6 +19,51 @@ import { windowSecondsFor } from "./windows.js";
 const ANTIGRAVITY_TIMEOUT_MS = 10_000;
 const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
 
+const clientSchema = v.array(v.object({ id: v.string(), secret: v.string() }));
+
+const tokenFileSchema = v.looseObject({
+  token: v.optional(
+    v.looseObject({
+      access_token: v.optional(v.string()),
+      refresh_token: v.optional(v.string()),
+      expiry: v.optional(v.string()),
+    }),
+  ),
+});
+
+const tokenSchema = v.looseObject({
+  access_token: v.optional(v.string()),
+  refresh_token: v.optional(v.string()),
+  expiry: v.optional(v.string()),
+});
+
+const refreshBodySchema = v.looseObject({
+  access_token: v.optional(v.string()),
+  refresh_token: v.optional(v.string()),
+  expires_in: v.optional(v.number()),
+});
+
+const quotaBucketSchema = v.looseObject({
+  window: v.optional(v.string()),
+  displayName: v.optional(v.string()),
+  bucketId: v.optional(v.string()),
+  remainingFraction: v.optional(v.number()),
+  resetTime: v.optional(v.union([v.string(), v.number()])),
+});
+
+const quotaGroupSchema = v.looseObject({
+  displayName: v.optional(v.string()),
+  buckets: v.optional(v.array(quotaBucketSchema)),
+});
+
+const quotaSchema = v.looseObject({
+  groups: v.optional(v.array(quotaGroupSchema)),
+  response: v.optional(v.looseObject({ groups: v.optional(v.array(quotaGroupSchema)) })),
+});
+
+type AntigravityQuota = v.InferOutput<typeof quotaSchema>;
+type AntigravityBucket = v.InferOutput<typeof quotaBucketSchema>;
+
 /**
  * `agy` uses two OAuth clients — one per auth_method (consumer vs managed).
  * Keep these credentials outside the repository and pass them as a JSON array:
@@ -27,22 +73,9 @@ function antigravityClients(): Array<{ id: string; secret: string }> {
   const raw = process.env.SCOUTR_ANTIGRAVITY_CLIENTS?.trim();
   if (!raw) throw new Error("SCOUTR_ANTIGRAVITY_CLIENTS is required to refresh Antigravity credentials");
   try {
-    const clients: unknown = JSON.parse(raw);
-    if (
-      !Array.isArray(clients) ||
-      clients.length === 0 ||
-      clients.some((client) => {
-        if (client === null || typeof client !== "object") return true;
-        const value = client as Record<string, unknown>;
-        return typeof value.id !== "string" || typeof value.secret !== "string";
-      })
-    ) {
-      throw new Error("invalid client list");
-    }
-    return clients.map((client) => {
-      const value = client as { id: string; secret: string };
-      return { id: value.id, secret: value.secret };
-    });
+    const parsed = v.safeParse(clientSchema, JSON.parse(raw));
+    if (!parsed.success || parsed.output.length === 0) throw new Error("invalid client list");
+    return parsed.output;
   } catch {
     throw new Error("SCOUTR_ANTIGRAVITY_CLIENTS must be a JSON array of {id, secret} objects");
   }
@@ -53,26 +86,21 @@ let workingClientIndex = 0;
 const QUOTA_HOSTS = ["https://daily-cloudcode-pa.googleapis.com", "https://cloudcode-pa.googleapis.com"];
 const QUOTA_PATH = "/v1internal:retrieveUserQuotaSummary";
 
-type JsonRecord = Record<string, unknown>;
-
-function recordOf(value: unknown): JsonRecord | undefined {
-  return value !== null && typeof value === "object" && !Array.isArray(value) ? (value as JsonRecord) : undefined;
-}
-
-function finite(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+function finite(value: number | undefined): number | undefined {
+  return value !== undefined && Number.isFinite(value) ? value : undefined;
 }
 
 function clampPercent(value: number): number {
   return Math.max(0, Math.min(100, value));
 }
 
-function resetAtFrom(value: unknown): number | undefined {
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return Math.round(value > 10_000_000_000 ? value / 1000 : value);
+function resetAtFrom(value: string | number | undefined): number | undefined {
+  if (value === undefined) return undefined;
+  if (Number.isFinite(value)) {
+    const num = Number(value);
+    return Math.round(num > 10_000_000_000 ? num / 1000 : num);
   }
-  if (typeof value !== "string" || value.trim() === "") return undefined;
-  const parsed = Date.parse(value.trim());
+  const parsed = Date.parse(String(value).trim());
   return Number.isFinite(parsed) ? Math.floor(parsed / 1000) : undefined;
 }
 
@@ -89,17 +117,20 @@ interface AntigravityToken {
 
 async function readAntigravityToken(path: string): Promise<AntigravityToken | undefined> {
   try {
-    const root = recordOf(JSON.parse(await readFile(path, "utf8")));
-    const token = recordOf(root?.token);
-    const access = typeof token?.access_token === "string" ? token.access_token : "";
+    const parsed = v.safeParse(tokenFileSchema, JSON.parse(await readFile(path, "utf8")));
+    if (!parsed.success) return undefined;
+    const token = parsed.output.token;
+    const access = token?.access_token ?? "";
     if (access === "") return undefined;
-    const expiry = typeof token?.expiry === "string" ? Date.parse(token.expiry) : Number.NaN;
+    const expiry = token?.expiry !== undefined ? Date.parse(token.expiry) : Number.NaN;
     return {
       access,
-      refresh: typeof token?.refresh_token === "string" ? token.refresh_token : undefined,
+      refresh: token?.refresh_token,
       expires: Number.isFinite(expiry) ? expiry : undefined,
     };
   } catch (error) {
+    // SAFETY: readFile only throws ENOENT for a missing token file, which means the
+    // user has not signed in yet; any other error is a real read failure.
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
     throw error;
   }
@@ -116,6 +147,7 @@ async function refreshAntigravityToken(path: string, token: AntigravityToken): P
   if (!token.refresh) {
     throw new Error("Antigravity OAuth token expired and no refresh token is stored; run `agy` to sign in");
   }
+  const refresh = token.refresh;
   const clients = antigravityClients();
 
   const attempt = async (client: { id: string; secret: string }) =>
@@ -125,7 +157,7 @@ async function refreshAntigravityToken(path: string, token: AntigravityToken): P
       headers: { "content-type": "application/x-www-form-urlencoded", accept: "application/json" },
       body: new URLSearchParams({
         grant_type: "refresh_token",
-        refresh_token: token.refresh!,
+        refresh_token: refresh,
         client_id: client.id,
         client_secret: client.secret,
       }),
@@ -140,16 +172,19 @@ async function refreshAntigravityToken(path: string, token: AntigravityToken): P
   for (const index of order) {
     const response = await attempt(clients[index]!);
     if (response.ok) {
-      const body = (await response.json()) as JsonRecord;
-      const access = typeof body.access_token === "string" ? body.access_token : undefined;
+      const bodyParsed = v.safeParse(refreshBodySchema, await response.json());
+      if (!bodyParsed.success) throw new Error("Antigravity token refresh returned no access token");
+      const body = bodyParsed.output;
+      const access = body.access_token;
       if (!access) throw new Error("Antigravity token refresh returned no access token");
       const expiresIn = finite(body.expires_in) ?? 3600;
       const expires = Date.now() + expiresIn * 1000;
-      const refresh = typeof body.refresh_token === "string" ? body.refresh_token : token.refresh;
+      const refresh = body.refresh_token ?? token.refresh;
       workingClientIndex = index;
 
       await updateJsonFile(path, (root) => {
-        const stored = recordOf(root.token) ?? {};
+        const storedParsed = v.safeParse(tokenSchema, root.token);
+        const stored = storedParsed.success ? storedParsed.output : {};
         root.token = {
           ...stored,
           access_token: access,
@@ -176,24 +211,17 @@ async function refreshAntigravityToken(path: string, token: AntigravityToken): P
  * models") and each carries `buckets[]` per window. `remainingFraction` counts
  * down from 1.0, so it inverts into the used-percent the rest of the app shows.
  */
-export function parseAntigravityUsage(value: unknown): UsageSnapshot {
-  const root = recordOf(value);
-  const groups = root?.groups ?? recordOf(root?.response)?.groups;
+export function parseAntigravityUsage(root: AntigravityQuota): UsageSnapshot {
+  const groups = root.groups ?? root.response?.groups;
   if (!Array.isArray(groups)) throw new Error("Antigravity quota response contained no groups");
 
   const windows: UsageWindow[] = [];
-  for (const rawGroup of groups) {
-    const group = recordOf(rawGroup);
-    if (!group) continue;
-    const groupName = typeof group.displayName === "string" ? group.displayName : "";
-    const buckets = group.buckets;
-    if (!Array.isArray(buckets)) continue;
-
-    for (const rawBucket of buckets) {
-      const bucket = recordOf(rawBucket);
-      if (!bucket) continue;
-      const remaining = finite(bucket.remainingFraction);
-      if (remaining === undefined) continue;
+  for (const group of groups) {
+    const groupName = group.displayName ?? "";
+    const buckets = group.buckets ?? [];
+    for (const bucket of buckets) {
+      const remaining = bucket.remainingFraction;
+      if (remaining === undefined || !Number.isFinite(remaining)) continue;
       const resetAt = resetAtFrom(bucket.resetTime);
       const name = windowName(bucket);
       windows.push({
@@ -215,12 +243,6 @@ function shortGroup(name: string): string {
   return name.replace(/\s*models?\s*$/i, "").replace(/\s+and\s+/gi, "+").trim() || name;
 }
 
-const WINDOW_NAMES: Record<string, string> = {
-  daily: "day",
-  weekly: "wk",
-  monthly: "mo",
-};
-
 /**
  * The window part of a bar label, e.g. "wk" — the group prefix is added by the
  * caller, which also needs this part alone to resolve the window's span.
@@ -229,11 +251,12 @@ const WINDOW_NAMES: Record<string, string> = {
  * long to sit beside Codex's "5h"/"7d" on a phone, so the machine-readable
  * `window` is preferred and the prose is only a fallback.
  */
-function windowName(bucket: JsonRecord): string {
-  const window = typeof bucket.window === "string" ? WINDOW_NAMES[bucket.window.toLowerCase()] : undefined;
-  if (window !== undefined) return window;
-  if (typeof bucket.displayName === "string" && bucket.displayName.trim() !== "") return bucket.displayName.trim();
-  return typeof bucket.bucketId === "string" ? bucket.bucketId : "quota";
+function windowName(bucket: AntigravityBucket): string {
+  if (bucket.window === "daily") return "day";
+  if (bucket.window === "weekly") return "wk";
+  if (bucket.window === "monthly") return "mo";
+  if (bucket.displayName !== undefined && bucket.displayName.trim() !== "") return bucket.displayName.trim();
+  return bucket.bucketId ?? "quota";
 }
 
 async function requestQuota(host: string, access: string): Promise<Response> {
@@ -265,7 +288,11 @@ export async function fetchAntigravityUsage(): Promise<UsageSnapshot> {
       token = await refreshAntigravityToken(path, token);
       response = await requestQuota(host, token.access);
     }
-    if (response.ok) return parseAntigravityUsage(await response.json());
+    if (response.ok) {
+      const parsed = v.safeParse(quotaSchema, await response.json());
+      if (!parsed.success) throw new Error("Antigravity quota response contained no groups");
+      return parseAntigravityUsage(parsed.output);
+    }
     lastStatus = response.status;
     void response.body?.cancel().catch(() => undefined);
     // 404 means this channel does not serve the RPC; anything else is a real failure.

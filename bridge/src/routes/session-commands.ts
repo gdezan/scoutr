@@ -4,11 +4,10 @@ import {
   runSlashCommand,
   sendSessionText,
   steerSession,
-  type AnswerAskRequest,
-  type AskAnswerInput,
 } from "../commands.js";
 import { CommandError } from "../errors.js";
 import type { Route, RouteContext, RouteResult } from "./types.js";
+import * as v from "valibot";
 
 /**
  * One-shot session commands over ordinary authenticated HTTP — the
@@ -48,11 +47,13 @@ function decodeParam(ctx: RouteContext, name: string): string {
   }
 }
 
+const bodyTextSchema = v.looseObject({ text: v.string() });
+
 /** `{ text }` bodies: present and a string, or an actionable 400. */
 function bodyText(ctx: RouteContext): string {
-  const { text } = ctx.body;
-  if (typeof text !== "string") throw new CommandError("text must be a string");
-  return text;
+  const parsed = v.safeParse(bodyTextSchema, ctx.body);
+  if (!parsed.success) throw new CommandError("text must be a string");
+  return parsed.output.text;
 }
 
 async function steerRoute(ctx: RouteContext): Promise<RouteResult> {
@@ -85,22 +86,23 @@ async function answerPromptRoute(ctx: RouteContext): Promise<RouteResult> {
  * Both answer routes deliver the same normalized request; only where the ask
  * identity comes from differs (path segment vs "there is no ask").
  */
+const askAnswerInputSchema = v.looseObject({
+  questionId: v.string(),
+  text: v.optional(v.string()),
+  selectedLabels: v.optional(v.array(v.string())),
+});
+const answerBodySchema = v.looseObject({
+  answers: v.optional(v.array(askAnswerInputSchema, "answers must be an array")),
+  text: v.optional(v.string()),
+});
+
 async function answer(ctx: RouteContext, callId: string | undefined): Promise<RouteResult> {
   const paneId = decodeParam(ctx, "paneId");
-  const body = ctx.body as { answers?: unknown; text?: unknown };
-  if (body.answers !== undefined && !Array.isArray(body.answers)) {
-    throw new CommandError("answers must be an array");
+  const parsed = v.safeParse(answerBodySchema, ctx.body);
+  if (!parsed.success) {
+    throw new CommandError(parsed.issues[0]?.message ?? "invalid answer body");
   }
-  if (body.text !== undefined && typeof body.text !== "string") {
-    throw new CommandError("text must be a string");
-  }
-  const request: AnswerAskRequest = {
-    paneId,
-    callId,
-    answers: body.answers as AskAnswerInput[] | undefined,
-    text: body.text as string | undefined,
-  };
-  const answered = await answerSessionAsk(ctx.deps, request);
+  const answered = await answerSessionAsk(ctx.deps, { paneId, callId, ...parsed.output });
   return { status: 200, body: { ok: true, paneId, callId: answered } };
 }
 

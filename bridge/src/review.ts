@@ -176,8 +176,12 @@ function runGit(path: string, args: string[], maxBytes: number): Promise<string>
       },
       (error, stdout) => {
         if (error) {
+          // SAFETY: a non-Error exit (ENOENT) means git is absent; the ExecFileError
+          // carries the node errno code after the failure, so the cast is sound here.
           const code = (error as NodeJS.ErrnoException).code;
           if (code === "ENOENT") return reject(new ReviewError("git is not installed", 500));
+          // SAFETY: a rejected child reports a timeout through `killed`; Error is the
+          // only shape execFile yields here, so widening to read `killed` is safe.
           const message = (error as Error & { killed?: boolean }).killed
             ? "git command timed out"
             : (error.message ?? "git failed");
@@ -285,14 +289,16 @@ async function currentBranch(path: string): Promise<string | null> {
   }
 }
 
-function parsePorcelainStatus(output: string): {
+interface ParsedStatus {
   entries: ReviewStatusEntry[];
   truncated: boolean;
   branch: string | null;
   upstream: string | null;
   ahead: number;
   behind: number;
-} {
+}
+
+function parsePorcelainStatus(output: string): ParsedStatus {
   const entries: ReviewStatusEntry[] = [];
   let branch: string | null = null;
   let upstream: string | null = null;
@@ -370,7 +376,9 @@ export async function reviewOverview(requestedPath: string, extraRoots: string[]
   };
 }
 
-function capLines(text: string, maxLines: number): { text: string; truncated: boolean } {
+interface CappedLines { text: string; truncated: boolean; }
+
+function capLines(text: string, maxLines: number): CappedLines {
   const lines = text.split("\n");
   if (lines.length <= maxLines) return { text, truncated: false };
   return { text: lines.slice(0, maxLines).join("\n"), truncated: true };

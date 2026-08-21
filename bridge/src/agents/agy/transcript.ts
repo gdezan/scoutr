@@ -2,18 +2,50 @@ import {
   collapseTranscriptText,
   MAX_SESSION_TITLE_LENGTH,
   type ContentBlock,
-  type TextBlock,
-  type ThinkingBlock,
-  type ToolCallBlock,
   type Transcript,
-  type TranscriptEntry,
   type TranscriptReadOpts,
 } from "../../transcript.js";
+import * as v from "valibot";
 
 /**
  * The Antigravity CLI (`agy`) JSONL transcript parser.
  * (~/.gemini/antigravity-cli/brain/<conversation-id>/.system_generated/logs/transcript.jsonl)
  */
+
+const toolCallSchema = v.looseObject({
+  name: v.optional(v.string()),
+  id: v.optional(v.string()),
+  args: v.optional(v.unknown()),
+});
+
+const cwdArgsSchema = v.looseObject({
+  Cwd: v.optional(v.string()),
+  DirectoryPath: v.optional(v.string()),
+  SearchPath: v.optional(v.string()),
+});
+
+const agyRecordSchema = v.looseObject({
+  type: v.optional(v.string()),
+  source: v.optional(v.string()),
+  created_at: v.optional(v.string()),
+  step_index: v.optional(v.number()),
+  content: v.optional(v.string()),
+  thinking: v.optional(v.string()),
+  tool_calls: v.optional(v.array(toolCallSchema)),
+  status: v.optional(v.string()),
+});
+
+type AgyRecord = v.InferOutput<typeof agyRecordSchema>;
+
+function parseAgyLine(line: string): AgyRecord | null {
+  try {
+    const parsed = v.safeParse(agyRecordSchema, JSON.parse(line));
+    return parsed.success ? parsed.output : null;
+  } catch {
+    return null; // tolerate partial/malformed lines in a growing file
+  }
+}
+
 export function parseAgyTranscript(text: string, opts: TranscriptReadOpts = {}): Transcript {
   const transcript: Transcript = {
     version: 3,
@@ -35,17 +67,13 @@ export function parseAgyTranscript(text: string, opts: TranscriptReadOpts = {}):
   for (const rawLine of text.split("\n")) {
     const line = rawLine.trim();
     if (line.length === 0) continue;
-    let record: Record<string, unknown>;
-    try {
-      record = JSON.parse(line) as Record<string, unknown>;
-    } catch {
-      continue; // tolerate partial/malformed lines in a growing file
-    }
+    const record = parseAgyLine(line);
+    if (!record) continue;
 
-    const type = typeof record.type === "string" ? record.type : "";
-    const source = typeof record.source === "string" ? record.source : "";
-    const createdAt = typeof record.created_at === "string" ? record.created_at : "";
-    const stepIndex = typeof record.step_index === "number" ? record.step_index : 0;
+    const type = record.type ?? "";
+    const source = record.source ?? "";
+    const createdAt = record.created_at ?? "";
+    const stepIndex = record.step_index ?? 0;
     const entryId = `step-${stepIndex}`;
 
     if (!transcript.timestamp && createdAt) {
@@ -54,7 +82,7 @@ export function parseAgyTranscript(text: string, opts: TranscriptReadOpts = {}):
 
     // Parse User Input
     if (type === "USER_INPUT" || source === "USER_EXPLICIT") {
-      const rawContent = typeof record.content === "string" ? record.content : "";
+      const rawContent = record.content ?? "";
       const userText = extractUserPrompt(rawContent);
 
       // Check for user settings change (e.g. Model Selection or Effort)
@@ -99,46 +127,40 @@ export function parseAgyTranscript(text: string, opts: TranscriptReadOpts = {}):
         const blocks: ContentBlock[] = [];
 
         // Assistant thinking
-        if (typeof record.thinking === "string" && record.thinking.trim()) {
-          blocks.push({ type: "thinking", thinking: record.thinking } as ThinkingBlock);
+        if (record.thinking?.trim()) {
+          blocks.push({ type: "thinking", thinking: record.thinking });
         }
 
         // Assistant content
-        if (typeof record.content === "string" && record.content.trim()) {
-          blocks.push({ type: "text", text: record.content } as TextBlock);
+        if (record.content?.trim()) {
+          blocks.push({ type: "text", text: record.content });
         }
 
         // Tool calls
         if (Array.isArray(record.tool_calls)) {
           record.tool_calls.forEach((tc, idx) => {
-            const tool = tc as { name?: string; args?: unknown; id?: string };
-            const toolName = typeof tool.name === "string" ? tool.name : "unknown_tool";
-            const callId = tool.id || `${entryId}-call-${idx}`;
+            const toolName = tc.name ?? "unknown_tool";
+            const callId = tc.id || `${entryId}-call-${idx}`;
             lastToolCallId = callId;
             lastToolName = toolName;
 
-            let args = tool.args;
-            if (typeof args === "string") {
-              try {
-                args = JSON.parse(args) as unknown;
-              } catch {
-                // keep string if unparseable
-              }
-            }
-
+            const args = tc.args;
             blocks.push({
               type: "toolCall",
               id: callId,
               name: toolName,
               arguments: args,
-            } as ToolCallBlock);
+            });
 
             // Extract cwd from tool calls if not yet set
-            if (!transcript.cwd && args && typeof args === "object") {
-              const obj = args as Record<string, unknown>;
-              if (typeof obj.Cwd === "string") transcript.cwd = obj.Cwd;
-              else if (typeof obj.DirectoryPath === "string") transcript.cwd = obj.DirectoryPath;
-              else if (typeof obj.SearchPath === "string") transcript.cwd = obj.SearchPath;
+            if (!transcript.cwd && args !== undefined) {
+              const cwdParsed = v.safeParse(cwdArgsSchema, args);
+              if (cwdParsed.success) {
+                const obj = cwdParsed.output;
+                if (obj.Cwd) transcript.cwd = obj.Cwd;
+                else if (obj.DirectoryPath) transcript.cwd = obj.DirectoryPath;
+                else if (obj.SearchPath) transcript.cwd = obj.SearchPath;
+              }
             }
           });
         }
@@ -159,7 +181,7 @@ export function parseAgyTranscript(text: string, opts: TranscriptReadOpts = {}):
       }
 
       // Tool Results (e.g. LIST_DIRECTORY, RUN_COMMAND, VIEW_FILE, etc.)
-      const resultContent = typeof record.content === "string" ? record.content : "";
+      const resultContent = record.content ?? "";
       const isError = record.status === "ERROR";
       const toolCallId = lastToolCallId || `${entryId}-call-0`;
       const toolName = lastToolName || type.toLowerCase();
@@ -182,7 +204,7 @@ export function parseAgyTranscript(text: string, opts: TranscriptReadOpts = {}):
 
     // Parse Checkpoints or Session Summary
     if (type === "CHECKPOINT" || type === "CONVERSATION_HISTORY") {
-      const rawContent = typeof record.content === "string" ? record.content : "";
+      const rawContent = record.content ?? "";
       if (!transcript.title) {
         const objectiveMatch = rawContent.match(/# USER Objective:\s*([^\r\n]+)/i);
         if (objectiveMatch && objectiveMatch[1]) {

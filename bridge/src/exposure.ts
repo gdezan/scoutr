@@ -40,6 +40,8 @@ export function discoverTailscaleUrl(): Promise<string | null> {
     execFile("tailscale", ["status", "--json"], { timeout: 5000 }, (err, stdout) => {
       if (err) return resolve(null);
       try {
+        // SAFETY: tailscale status JSON always carries Self.DNSName when online;
+        // the cast reads only that optional field from a trusted local command.
         const dns = (JSON.parse(stdout) as { Self?: { DNSName?: string } }).Self?.DNSName;
         resolve(dns ? dns.replace(/\.$/, "") || null : null);
       } catch {

@@ -1,3 +1,4 @@
+import * as v from "valibot";
 import { resolveAllowedDir } from "../dirs.js";
 import { BridgeError } from "../errors.js";
 import type { SessionSnapshot } from "../herdr/types.js";
@@ -22,10 +23,8 @@ type TerminalHierarchyCommand =
   | { operation: "close_pane"; paneId: string; selectedPaneId?: string }
   | { operation: "close_tab"; tabId: string; selectedPaneId?: string; expectedPaneCount: number }
   | { operation: "close_workspace"; workspaceId: string; selectedPaneId?: string; expectedPaneCount: number };
-
 type CloseTarget = { kind: "pane" | "tab" | "workspace"; targetId: string };
-
-const OPERATIONS = new Set([
+const OPERATIONS = new Set<unknown>([
   "create_tab",
   "create_workspace",
   "rename_pane",
@@ -35,6 +34,29 @@ const OPERATIONS = new Set([
   "close_tab",
   "close_workspace",
 ]);
+
+const terminalHierarchyBodySchema = v.looseObject({
+  operation: v.optional(v.unknown()),
+  workspaceId: v.optional(v.string()),
+  cwd: v.optional(v.string()),
+  label: v.optional(v.string()),
+  paneId: v.optional(v.string()),
+  tabId: v.optional(v.string()),
+  selectedPaneId: v.optional(v.string()),
+  expectedPaneCount: v.optional(v.number("expectedPaneCount must be a non-negative integer")),
+});
+
+interface TabCreateParams {
+  workspace_id: string;
+  cwd?: string;
+  focus: boolean;
+}
+
+interface WorkspaceCreateParams {
+  cwd: string;
+  label?: string;
+  focus: boolean;
+}
 const MAX_ID_LENGTH = 1024;
 const MAX_LABEL_LENGTH = 200;
 
@@ -42,39 +64,37 @@ function badRequest(message: string): never {
   throw new BridgeError(message, 400);
 }
 
-function requireId(value: unknown, name: string): string {
-  if (typeof value !== "string" || value.trim().length === 0) badRequest(`missing ${name}`);
-  const id = value.trim();
-  if (id.length > MAX_ID_LENGTH) badRequest(`${name} too long`);
-  return id;
-}
-
-function requireLabel(value: unknown): string {
-  if (typeof value !== "string" || value.trim().length === 0) badRequest("label must be a non-empty string");
-  const label = value.trim();
-  if (label.length > MAX_LABEL_LENGTH) badRequest("label too long");
-  return label;
-}
-
-function optionalSelection(value: unknown): string | undefined {
-  if (value === undefined || value === null) return undefined;
-  if (typeof value !== "string" || value.trim().length === 0) badRequest("selectedPaneId must be a string");
+function requireId(value: string | undefined, name: string): string {
+  if (value === undefined || value.trim().length === 0) badRequest(`missing ${name}`);
+  if (value.length > MAX_ID_LENGTH) badRequest(`${name} too long`);
   return value;
 }
 
-function requirePaneCount(value: unknown): number {
-  if (typeof value !== "number" || !Number.isInteger(value) || value < 0) {
+function requireLabel(value: string | undefined): string {
+  if (value === undefined || value.trim().length === 0) badRequest("label must be a non-empty string");
+  if (value.length > MAX_LABEL_LENGTH) badRequest("label too long");
+  return value;
+}
+
+function optionalSelection(value: string | undefined): string | undefined {
+  if (value === undefined) return undefined;
+  if (value.trim().length === 0) badRequest("selectedPaneId must be a string");
+  return value;
+}
+
+function requirePaneCount(value: number | undefined): number {
+  if (value === undefined || !Number.isInteger(value) || value < 0) {
     badRequest("expectedPaneCount must be a non-negative integer");
   }
   return value;
 }
 
 async function terminalHierarchy(ctx: RouteContext): Promise<RouteResult> {
-  const body = ctx.body as Record<string, unknown>;
+  const parsed = v.safeParse(terminalHierarchyBodySchema, ctx.body);
+  if (!parsed.success) badRequest(parsed.issues[0]?.message ?? "invalid hierarchy body");
+  const body = parsed.output;
   const operation = body.operation;
-  if (typeof operation !== "string" || !OPERATIONS.has(operation)) {
-    badRequest(`unknown hierarchy operation: ${String(operation)}`);
-  }
+  if (!OPERATIONS.has(operation)) badRequest(`unknown hierarchy operation: ${String(operation)}`);
   const selectedPaneId = optionalSelection(body.selectedPaneId);
   const herdr = ctx.deps.herdr;
 
@@ -86,19 +106,19 @@ async function terminalHierarchy(ctx: RouteContext): Promise<RouteResult> {
         throw new BridgeError("workspace not found", 404);
       }
       const cwd = resolveCreateTabCwd(pre, workspaceId, selectedPaneId);
-      const params: { workspace_id: string; cwd?: string; focus: boolean } = { workspace_id: workspaceId, focus: false };
+      const params: TabCreateParams = { workspace_id: workspaceId, focus: false };
       if (cwd !== undefined) params.cwd = cwd;
       const created = await herdr.tabCreate(params);
       const post = await herdr.snapshot();
       return hierarchyResult(selectAfterMutation({ requested: selectedPaneId, pre, post, createdPaneId: created.root_pane?.pane_id }), post);
     }
     case "create_workspace": {
-      if (typeof body.cwd !== "string" || body.cwd.trim().length === 0) badRequest("cwd must be a non-empty string");
-      const label = body.label === undefined || body.label === null ? undefined : requireLabel(body.label);
+      if (body.cwd === undefined || body.cwd.trim().length === 0) badRequest("cwd must be a non-empty string");
+      const label = body.label === undefined ? undefined : requireLabel(body.label);
       // Directory contract matches the existing picker: only paths inside home.
       const cwd = resolveAllowedDir(body.cwd.trim());
       const pre = await herdr.snapshot();
-      const workspaceParams: { cwd: string; label?: string; focus: boolean } = { cwd, focus: false };
+      const workspaceParams: WorkspaceCreateParams = { cwd, focus: false };
       if (label !== undefined) workspaceParams.label = label;
       const created = await herdr.workspaceCreate(workspaceParams);
       const post = await herdr.snapshot();

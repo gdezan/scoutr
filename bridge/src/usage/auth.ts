@@ -1,6 +1,7 @@
 import { readFile, rename, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import * as v from "valibot";
 
 /**
  * Access to pi's auth store (~/.pi/agent/auth.json) and Claude Code's
@@ -16,6 +17,12 @@ import { dirname, join } from "node:path";
  * writing and merges into whatever is on disk, so fields the bridge does not
  * understand (idToken, scopes, subscriptionType, …) always survive.
  */
+
+/** Arbitrary JSON object, as read from or written to a credential file. */
+const jsonObjectSchema = v.record(v.string(), v.unknown());
+type JsonObject = v.InferOutput<typeof jsonObjectSchema>;
+
+export type AuthStore = JsonObject;
 
 export interface CodexAuth {
   type?: string;
@@ -38,7 +45,25 @@ export interface OAuthAuth {
   expires?: number;
 }
 
-export type AuthStore = Record<string, unknown>;
+const codexAuthSchema = v.looseObject({
+  type: v.optional(v.string()),
+  access: v.string(),
+  refresh: v.optional(v.string()),
+  expires: v.optional(v.number()),
+  accountId: v.optional(v.string()),
+});
+
+const oauthAuthSchema = v.looseObject({
+  type: v.optional(v.string()),
+  access: v.string(),
+  refresh: v.optional(v.string()),
+  expires: v.optional(v.number()),
+});
+
+const apiKeyAuthSchema = v.looseObject({
+  type: v.optional(v.string()),
+  key: v.string(),
+});
 
 export function defaultAuthPath(): string {
   const agentDir = process.env.PI_CODING_AGENT_DIR?.trim() || join(homedir(), ".pi", "agent");
@@ -46,46 +71,28 @@ export function defaultAuthPath(): string {
 }
 
 export async function readAuthStore(path = defaultAuthPath()): Promise<AuthStore> {
-  return JSON.parse(await readFile(path, "utf8")) as AuthStore;
+  const parsed = v.safeParse(jsonObjectSchema, JSON.parse(await readFile(path, "utf8")));
+  return parsed.success ? parsed.output : {};
 }
 
 export function getCodexAuth(store: AuthStore): CodexAuth | undefined {
-  const entry = store["openai-codex"];
-  if (!entry || typeof entry !== "object" || Array.isArray(entry)) return undefined;
-  const auth = entry as Record<string, unknown>;
-  if (typeof auth.access !== "string") return undefined;
-  return {
-    type: typeof auth.type === "string" ? auth.type : undefined,
-    access: auth.access,
-    refresh: typeof auth.refresh === "string" ? auth.refresh : undefined,
-    expires: typeof auth.expires === "number" ? auth.expires : undefined,
-    accountId: typeof auth.accountId === "string" ? auth.accountId : undefined,
-  };
+  const parsed = v.safeParse(codexAuthSchema, store["openai-codex"]);
+  if (!parsed.success) return undefined;
+  const out = parsed.output;
+  return { type: out.type, access: out.access, refresh: out.refresh, expires: out.expires, accountId: out.accountId };
 }
 
 export function getOAuthAuth(store: AuthStore, providerKey: string): OAuthAuth | undefined {
-  const entry = store[providerKey];
-  if (!entry || typeof entry !== "object" || Array.isArray(entry)) return undefined;
-  const auth = entry as Record<string, unknown>;
-  if (typeof auth.access !== "string") return undefined;
-  return {
-    type: typeof auth.type === "string" ? auth.type : undefined,
-    access: auth.access,
-    refresh: typeof auth.refresh === "string" ? auth.refresh : undefined,
-    expires: typeof auth.expires === "number" ? auth.expires : undefined,
-  };
+  const parsed = v.safeParse(oauthAuthSchema, store[providerKey]);
+  if (!parsed.success) return undefined;
+  const out = parsed.output;
+  return { type: out.type, access: out.access, refresh: out.refresh, expires: out.expires };
 }
 
 // ── Write-back ────────────────────────────────────────────────────────
 
 /** Serializes this process's writes per path so two providers can't clobber each other. */
 const writeQueues = new Map<string, Promise<unknown>>();
-
-function recordOf(value: unknown): Record<string, unknown> | undefined {
-  return value !== null && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : undefined;
-}
 
 /**
  * Read-modify-write a JSON credential file atomically.
@@ -98,20 +105,23 @@ function recordOf(value: unknown): Record<string, unknown> | undefined {
  */
 export async function updateJsonFile(
   path: string,
-  mutate: (root: Record<string, unknown>) => Record<string, unknown> | undefined,
+  mutate: (root: JsonObject) => JsonObject | undefined,
 ): Promise<void> {
   const previous = writeQueues.get(path) ?? Promise.resolve();
   const next = previous
     .catch(() => undefined)
     .then(async () => {
-      let root: Record<string, unknown> = {};
+      let root: JsonObject = {};
       let mode = 0o600;
       try {
-        root = recordOf(JSON.parse(await readFile(path, "utf8"))) ?? {};
+        const parsed = v.safeParse(jsonObjectSchema, JSON.parse(await readFile(path, "utf8")));
+        if (parsed.success) root = parsed.output;
         mode = (await stat(path)).mode & 0o777;
       } catch (error) {
         // A missing file is a fresh store; anything else (corrupt JSON,
         // permissions) must not be papered over by writing a truncated store.
+        // SAFETY: this catch is only reached by a thrown NodeJS error, which always
+        // carries a string `code`; reading it to split ENOENT from real failures is sound.
         if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
       }
 
@@ -133,22 +143,19 @@ export async function persistOAuthAuth(
   auth: Pick<OAuthAuth, "access" | "refresh" | "expires">,
 ): Promise<void> {
   await updateJsonFile(path, (root) => {
-    const entry = recordOf(root[providerKey]) ?? { type: "oauth" };
-    const result: OAuthAuth = {
-      ...entry,
-      access: auth.access,
-    };
-    if (auth.refresh) result.refresh = auth.refresh;
-    if (auth.expires !== undefined) result.expires = auth.expires;
-    root[providerKey] = result;
+    const parsed = v.safeParse(oauthAuthSchema, root[providerKey]);
+    const entry: JsonObject = parsed.success ? parsed.output : { type: "oauth" };
+    entry.access = auth.access;
+    if (auth.refresh) entry.refresh = auth.refresh;
+    if (auth.expires !== undefined) entry.expires = auth.expires;
+    root[providerKey] = entry;
     return root;
   });
 }
 
 export function getApiKeyAuth(store: AuthStore, key: string): ApiKeyAuth | undefined {
-  const entry = store[key];
-  if (!entry || typeof entry !== "object" || Array.isArray(entry)) return undefined;
-  const auth = entry as Record<string, unknown>;
-  if (typeof auth.key !== "string") return undefined;
-  return { type: typeof auth.type === "string" ? auth.type : undefined, key: auth.key };
+  const parsed = v.safeParse(apiKeyAuthSchema, store[key]);
+  if (!parsed.success) return undefined;
+  const out = parsed.output;
+  return { type: out.type, key: out.key };
 }

@@ -62,8 +62,8 @@ export function expandSkillInvocationContent(content: ContentBlock[]): ContentBl
   const expanded: ContentBlock[] = [];
   let tookSkill = false;
   for (const block of content) {
-    if (block.type === "text" && "text" in block && typeof block.text === "string") {
-      const pieces = peelPiSkillInvocation(block.text);
+    if (block.type === "text" && "text" in block) {
+      const pieces = peelPiSkillInvocation(String(block.text));
       const skill = pieces.find((piece) => piece.type === "skill");
       if (skill && !tookSkill) {
         tookSkill = true;

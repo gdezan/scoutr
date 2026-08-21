@@ -130,8 +130,10 @@ export async function probeTerminalCapability(
   let protocol = 0;
   if (!statusRun.spawnError && !statusRun.timedOut && statusRun.code === 0) {
     try {
-      const parsed = JSON.parse(statusRun.stdout) as { version?: string; protocol?: unknown };
-      if (typeof parsed.protocol === "number" && Number.isInteger(parsed.protocol)) protocol = parsed.protocol;
+      // SAFETY: `herdr status client --json` emits a fixed shape; the cast reads
+      // version and the numeric protocol level from a trusted local command.
+      const parsed = JSON.parse(statusRun.stdout) as { version?: string; protocol?: number };
+      if (parsed.protocol !== undefined && Number.isInteger(parsed.protocol)) protocol = parsed.protocol;
     } catch {
       // fall through to unsupported below
     }
@@ -151,10 +153,13 @@ export async function probeTerminalCapability(
   // 4. With a target: complete a bounded read-only observer handshake.
   if (target) {
     try {
-      const proc = await openTerminalProcess(bin, childEnv, {
+      // SAFETY: the spread already matches TERMINAL_LIMITS; the cast only narrows
+      // the literal to the exact readonly shape openTerminalProcess expects.
+      const limits = {
         ...TERMINAL_LIMITS,
         handshakeTimeoutMs: handshakeTimeoutMs ?? TERMINAL_LIMITS.handshakeTimeoutMs,
-      } as typeof TERMINAL_LIMITS, {
+      } as typeof TERMINAL_LIMITS;
+      const proc = await openTerminalProcess(bin, childEnv, limits, {
         target,
         mode: "observe",
         takeover: false,

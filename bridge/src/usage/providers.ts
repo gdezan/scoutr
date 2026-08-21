@@ -7,8 +7,14 @@
  *   - claude: rate-limit windows from Claude Code's OAuth usage endpoint.
  *   - deepseek: wallet balance from the DeepSeek API.
  *   - xai: weekly credit usage via Grok CLI OAuth (access/refresh in auth.json).
+ *
+ * Each provider's JSON response is decoded once at the fetch boundary with a
+ * valibot schema, so the extraction logic below branches on typed domain values
+ * instead of narrowing `unknown` with `typeof` or casting through
+ * `Record<string, unknown>`.
  */
 
+import * as v from "valibot";
 import { fetchAntigravityUsage } from "./antigravity.js";
 import { fetchClaudeUsage } from "./claude.js";
 import {
@@ -25,6 +31,88 @@ import { isExpiring, requestTokenRefresh } from "./oauth.js";
 import { windowSecondsFor } from "./windows.js";
 import { homedir } from "node:os";
 import { join } from "node:path";
+
+// ── Response schemas ───────────────────────────────────────────────────
+
+const finiteNumber = v.optional(v.pipe(v.number(), v.finite()));
+
+const codexWindowSchema = v.looseObject({
+  used_percent: finiteNumber,
+  limit_window_seconds: finiteNumber,
+  reset_at: finiteNumber,
+});
+const codexUsageSchema = v.looseObject({
+  rate_limit: v.optional(
+    v.looseObject({
+      primary_window: v.optional(codexWindowSchema),
+      secondary_window: v.optional(codexWindowSchema),
+    }),
+  ),
+});
+
+const deepseekBalanceSchema = v.looseObject({
+  balance_infos: v.optional(
+    v.array(
+      v.looseObject({
+        currency: v.optional(v.string()),
+        total_balance: v.optional(v.union([v.string(), v.number()])),
+      }),
+    ),
+  ),
+});
+
+const opencodeGoWindowSchema = v.looseObject({
+  percent: finiteNumber,
+  resetsAt: v.optional(v.string()),
+});
+const opencodeGoUsageSchema = v.looseObject({
+  usage: v.optional(
+    v.looseObject({
+      rolling: v.optional(opencodeGoWindowSchema),
+      weekly: v.optional(opencodeGoWindowSchema),
+      monthly: v.optional(opencodeGoWindowSchema),
+    }),
+  ),
+});
+
+const xaiPeriodSchema = v.looseObject({
+  type: v.optional(v.string()),
+  start: v.optional(v.string()),
+  end: v.optional(v.string()),
+});
+const xaiAmountSchema = v.looseObject({ val: finiteNumber });
+const xaiFieldsSchema = v.looseObject({
+  creditUsagePercent: finiteNumber,
+  monthlyLimit: v.optional(xaiAmountSchema),
+  used: v.optional(xaiAmountSchema),
+  productUsage: v.optional(v.array(v.looseObject({ usagePercent: finiteNumber }))),
+  currentPeriod: v.optional(xaiPeriodSchema),
+  billingPeriodEnd: v.optional(v.string()),
+  billingPeriodStart: v.optional(v.string()),
+  resetAt: v.optional(v.string()),
+  reset_at: v.optional(v.string()),
+});
+const xaiIdentitySchema = v.looseObject({ userId: v.optional(v.string()) });
+// xAI nests the usage fields under `config` *or* places them at the top level.
+const xaiUsageSchema = v.looseObject({
+  config: v.optional(xaiFieldsSchema),
+  creditUsagePercent: finiteNumber,
+  monthlyLimit: v.optional(xaiAmountSchema),
+  used: v.optional(xaiAmountSchema),
+  productUsage: v.optional(v.array(v.looseObject({ usagePercent: finiteNumber }))),
+  currentPeriod: v.optional(xaiPeriodSchema),
+  billingPeriodEnd: v.optional(v.string()),
+  billingPeriodStart: v.optional(v.string()),
+  resetAt: v.optional(v.string()),
+  reset_at: v.optional(v.string()),
+});
+
+type CodexWindow = v.InferOutput<typeof codexWindowSchema>;
+type DeepseekBalance = v.InferOutput<typeof deepseekBalanceSchema>;
+type OpencodeGoUsage = v.InferOutput<typeof opencodeGoUsageSchema>;
+type XaiUsage = v.InferOutput<typeof xaiUsageSchema>;
+
+// ── Shared types ───────────────────────────────────────────────────────
 
 export interface UsageWindow {
   label: string;
@@ -55,32 +143,36 @@ const XAI_USER_URL = "https://cli-chat-proxy.grok.com/v1/user";
 const XAI_TOKEN_URL = "https://auth.x.ai/oauth2/token";
 const XAI_CLIENT_ID = "b1a00492-073a-47ea-816f-4c329264a828";
 
-function finite(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
-}
-
 function clampPercent(value: number): number {
   return Math.max(0, Math.min(100, value));
 }
 
-function normalizeResetAt(value: unknown): number | undefined {
-  const number = finite(value);
-  if (number === undefined) return undefined;
-  return number > 10_000_000_000 ? Math.round(number / 1000) : Math.round(number);
+/** Seconds-since-epoch from a provider reset timestamp that may be in ms or s. */
+function normalizeResetAt(value: number | undefined): number | undefined {
+  if (value === undefined) return undefined;
+  return value > 10_000_000_000 ? Math.round(value / 1000) : Math.round(value);
 }
 
-function resetAtFromIso(value: unknown): number | undefined {
-  if (typeof value !== "string" || value.trim() === "") return undefined;
+/** Seconds-since-epoch from an ISO-8601 timestamp. */
+function resetAtFromIso(value: string | undefined): number | undefined {
+  if (value === undefined || value.trim() === "") return undefined;
   const ms = Date.parse(value);
   return Number.isFinite(ms) ? Math.floor(ms / 1000) : undefined;
 }
 
-function snapshot(provider: string, label: string, windows: Array<UsageWindow | undefined>): UsageSnapshot {
+function snapshot(
+  provider: string,
+  label: string,
+  windows: Array<UsageWindow | undefined>,
+): UsageSnapshot {
   const valid = windows.filter((w): w is UsageWindow => w !== undefined);
   return { provider, label, windows: valid, updatedAt: Date.now() };
 }
 
-async function withTimeout<T>(work: (signal: AbortSignal) => Promise<T>, ms = FETCH_TIMEOUT_MS): Promise<T> {
+async function withTimeout<T>(
+  work: (signal: AbortSignal) => Promise<T>,
+  ms = FETCH_TIMEOUT_MS,
+): Promise<T> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), ms);
   try {
@@ -92,12 +184,13 @@ async function withTimeout<T>(work: (signal: AbortSignal) => Promise<T>, ms = FE
 
 // ── Codex ─────────────────────────────────────────────────────────────
 
-function parseCodexWindow(value: unknown, fallbackLabel: string): UsageWindow | undefined {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
-  const record = value as Record<string, unknown>;
-  const usedPercent = finite(record.used_percent);
+function parseCodexWindow(
+  value: CodexWindow | undefined,
+  fallbackLabel: string,
+): UsageWindow | undefined {
+  const usedPercent = value?.used_percent;
   if (usedPercent === undefined) return undefined;
-  const windowSeconds = finite(record.limit_window_seconds);
+  const windowSeconds = value?.limit_window_seconds;
   let label = fallbackLabel;
   if (windowSeconds === 5 * 60 * 60) label = "5h";
   else if (windowSeconds === 7 * 24 * 60 * 60) label = "7d";
@@ -105,7 +198,7 @@ function parseCodexWindow(value: unknown, fallbackLabel: string): UsageWindow | 
     label,
     usedPercent: clampPercent(usedPercent),
     windowSeconds,
-    resetAt: normalizeResetAt(record.reset_at),
+    resetAt: normalizeResetAt(value?.reset_at),
   };
 }
 
@@ -120,12 +213,13 @@ async function refreshCodexAccess(authPath: string, auth: CodexAuth): Promise<Co
   if (!auth.refresh) {
     throw new Error("Codex OAuth token expired and no refresh token is stored; run `pi /login` and select Codex");
   }
+  const refreshToken = auth.refresh;
 
   const refreshed = await withTimeout((signal) =>
     requestTokenRefresh({
       urls: [CODEX_TOKEN_URL],
       clientId: CODEX_CLIENT_ID,
-      refreshToken: auth.refresh!,
+      refreshToken,
       encoding: "json",
       label: "Codex",
       reauthHint: "run `pi /login` and select Codex",
@@ -142,36 +236,39 @@ async function fetchCodexUsage({ store, authPath }: UsageContext): Promise<Usage
   if (!auth) throw new Error("openai-codex credentials are not configured in pi's auth.json");
   if (isExpiring(auth.expires)) auth = await refreshCodexAccess(authPath, auth);
 
-  const requestUsage = (signal: AbortSignal, access: string) => {
-    const headers: Record<string, string> = {
-      accept: "application/json",
-      authorization: `Bearer ${access}`,
-    };
-    if (auth!.accountId) headers["chatgpt-account-id"] = auth!.accountId;
+  let access = auth.access;
+  let accountId = auth.accountId;
+  const baseHeaders = {
+    accept: "application/json",
+    authorization: `Bearer ${access}`,
+  };
+  const requestUsage = (signal: AbortSignal) => {
+    const headers = accountId
+      ? { ...baseHeaders, "chatgpt-account-id": accountId }
+      : baseHeaders;
     return fetch(CODEX_USAGE_URL, { signal, headers });
   };
 
-  const body = await withTimeout(async (signal) => {
-    let response = await requestUsage(signal, auth!.access);
-    // A 401 despite a live-looking expiry means the token was revoked or the
-    // clock drifted; one refresh distinguishes that from a real auth failure.
-    if (response.status === 401) {
-      void response.body?.cancel().catch(() => undefined);
-      auth = await refreshCodexAccess(authPath, auth!);
-      response = await requestUsage(signal, auth.access);
-    }
-    if (!response.ok) throw new Error(`Codex usage request returned ${response.status}`);
-    return (await response.json()) as Record<string, unknown>;
-  });
-
-  const rateLimit = body.rate_limit;
-  if (!rateLimit || typeof rateLimit !== "object" || Array.isArray(rateLimit)) {
-    throw new Error("Codex usage response contained no recognized windows");
+  let response = await withTimeout(requestUsage);
+  // A 401 despite a live-looking expiry means the token was revoked or the
+  // clock drifted; one refresh distinguishes that from a real auth failure.
+  if (response.status === 401) {
+    void response.body?.cancel().catch(() => undefined);
+    const refreshed = await refreshCodexAccess(authPath, auth);
+    access = refreshed.access;
+    accountId = refreshed.accountId;
+    response = await withTimeout(requestUsage);
   }
-  const bucket = rateLimit as Record<string, unknown>;
+  if (!response.ok) throw new Error(`Codex usage request returned ${response.status}`);
+  const body: unknown = await response.json();
+
+  const parsed = v.safeParse(codexUsageSchema, body);
+  if (!parsed.success) throw new Error("Codex usage response contained no recognized windows");
+  const rateLimit = parsed.output.rate_limit;
+  if (!rateLimit) throw new Error("Codex usage response contained no recognized windows");
   const result = snapshot("openai-codex", "Codex", [
-    parseCodexWindow(bucket.primary_window, "primary"),
-    parseCodexWindow(bucket.secondary_window, "secondary"),
+    parseCodexWindow(rateLimit.primary_window, "primary"),
+    parseCodexWindow(rateLimit.secondary_window, "secondary"),
   ]);
   if (result.windows.length === 0) throw new Error("Codex usage response contained no recognized windows");
   return result;
@@ -179,17 +276,14 @@ async function fetchCodexUsage({ store, authPath }: UsageContext): Promise<Usage
 
 // ── DeepSeek ──────────────────────────────────────────────────────────
 
-function parseDeepseekBalance(value: unknown): UsageWindow[] {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return [];
-  const root = value as Record<string, unknown>;
-  const infos = root.balance_infos;
+function parseDeepseekBalance(value: DeepseekBalance): UsageWindow[] {
+  const infos = value.balance_infos;
   if (!Array.isArray(infos)) return [];
   const windows: UsageWindow[] = [];
   for (const info of infos) {
-    if (!info || typeof info !== "object" || Array.isArray(info)) continue;
-    const record = info as Record<string, unknown>;
-    const currency = typeof record.currency === "string" ? record.currency.toUpperCase() : undefined;
-    const totalBalance = parseFloat(typeof record.total_balance === "string" ? record.total_balance : "");
+    const currency = info.currency?.toUpperCase();
+    const raw = info.total_balance;
+    const totalBalance = raw === "" ? Number.NaN : Number(raw);
     if (!Number.isFinite(totalBalance)) continue;
     windows.push({ label: currency ?? "???", usedPercent: 0, amount: totalBalance, currency });
   }
@@ -200,16 +294,18 @@ async function fetchDeepseekUsage({ store }: UsageContext): Promise<UsageSnapsho
   const auth = getApiKeyAuth(store, "deepseek");
   if (!auth) throw new Error("deepseek credentials are not configured in pi's auth.json");
 
-  const body = await withTimeout(async (signal) => {
+  const body: unknown = await withTimeout(async (signal) => {
     const response = await fetch(DEEPSEEK_BALANCE_URL, {
       signal,
       headers: { accept: "application/json", authorization: `Bearer ${auth.key}` },
     });
     if (!response.ok) throw new Error(`DeepSeek balance request returned ${response.status}`);
-    return (await response.json()) as Record<string, unknown>;
+    return (await response.json());
   });
 
-  const windows = parseDeepseekBalance(body);
+  const parsed = v.safeParse(deepseekBalanceSchema, body);
+  if (!parsed.success) throw new Error("DeepSeek balance response contained no data");
+  const windows = parseDeepseekBalance(parsed.output);
   if (windows.length === 0) throw new Error("DeepSeek balance response contained no data");
   return { ...snapshot("deepseek", "DeepSeek", windows), updatedAt: Date.now() };
 }
@@ -220,29 +316,25 @@ async function fetchDeepseekUsage({ store }: UsageContext): Promise<UsageSnapsho
  * The Go plan's three spend caps, in the order the console shows them.
  * Zen (pay-as-you-go credits) has no equivalent endpoint — only Go reports usage.
  */
-const OPENCODE_GO_WINDOWS: Array<{ key: string; label: string }> = [
+const OPENCODE_GO_WINDOWS = [
   { key: "rolling", label: "5h" },
   { key: "weekly", label: "wk" },
   // Monthly rides the billing anchor, so its span comes from the reset date.
   { key: "monthly", label: "mo" },
-];
+] as const;
 
-export function parseOpencodeGoUsage(value: unknown): UsageSnapshot {
-  const root = value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined;
-  const usage = root?.usage;
-  if (!usage || typeof usage !== "object" || Array.isArray(usage)) {
-    throw new Error("OpenCode Go usage response was not an object");
-  }
-  const buckets = usage as Record<string, unknown>;
+export function parseOpencodeGoUsage(value: OpencodeGoUsage): UsageSnapshot {
+  const usage = value.usage;
+  if (!usage) throw new Error("OpenCode Go usage response was not an object");
+  const buckets = usage;
 
   const windows: UsageWindow[] = [];
   for (const { key, label } of OPENCODE_GO_WINDOWS) {
     const bucket = buckets[key];
-    if (!bucket || typeof bucket !== "object" || Array.isArray(bucket)) continue;
-    const record = bucket as Record<string, unknown>;
-    const percent = finite(record.percent);
+    if (!bucket) continue;
+    const percent = bucket.percent;
     if (percent === undefined) continue;
-    const resetAt = resetAtFromIso(record.resetsAt);
+    const resetAt = resetAtFromIso(bucket.resetsAt);
     windows.push({
       label,
       usedPercent: clampPercent(percent),
@@ -259,7 +351,7 @@ async function fetchOpencodeGoUsage({ store }: UsageContext): Promise<UsageSnaps
   const auth = getApiKeyAuth(store, "opencode-go");
   if (!auth) throw new Error("opencode-go credentials are not configured in pi's auth.json");
 
-  const body = await withTimeout(async (signal) => {
+  const body: unknown = await withTimeout(async (signal) => {
     const response = await fetch(OPENCODE_GO_USAGE_URL, {
       signal,
       headers: {
@@ -272,37 +364,27 @@ async function fetchOpencodeGoUsage({ store }: UsageContext): Promise<UsageSnaps
       },
     });
     if (!response.ok) throw new Error(`OpenCode Go usage request returned ${response.status}`);
-    return (await response.json()) as Record<string, unknown>;
+    return (await response.json());
   });
 
-  return parseOpencodeGoUsage(body);
+  const parsed = v.safeParse(opencodeGoUsageSchema, body);
+  if (!parsed.success) throw new Error("OpenCode Go usage response was not an object");
+  return parseOpencodeGoUsage(parsed.output);
 }
 
 // ── xAI ───────────────────────────────────────────────────────────────
 
-function centsVal(value: unknown): number | undefined {
-  if (typeof value === "number" && Number.isFinite(value)) return value;
-  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
-  return finite((value as Record<string, unknown>).val);
+/** Cents-style `{ val: number }` amount, or a bare number, to a number. */
+function centsVal(value: { val?: number } | undefined): number | undefined {
+  return value?.val;
 }
 
-export function parseXaiUsage(value: unknown): UsageSnapshot {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error("xAI usage response was not an object");
-  }
-  const root = value as Record<string, unknown>;
-  const config =
-    root.config && typeof root.config === "object" && !Array.isArray(root.config)
-      ? (root.config as Record<string, unknown>)
-      : root;
+export function parseXaiUsage(value: XaiUsage): UsageSnapshot {
+  const config = value.config ?? value;
+  const period = config.currentPeriod;
+  const periodType = period?.type ?? "";
 
-  const period =
-    config.currentPeriod && typeof config.currentPeriod === "object" && !Array.isArray(config.currentPeriod)
-      ? (config.currentPeriod as Record<string, unknown>)
-      : undefined;
-  const periodType = typeof period?.type === "string" ? period.type : "";
-
-  let usedPercent = finite(config.creditUsagePercent);
+  let usedPercent = config.creditUsagePercent;
   if (usedPercent === undefined) {
     const monthlyLimit = centsVal(config.monthlyLimit);
     const used = centsVal(config.used);
@@ -314,8 +396,7 @@ export function parseXaiUsage(value: unknown): UsageSnapshot {
     const products = config.productUsage;
     if (Array.isArray(products)) {
       for (const product of products) {
-        if (!product || typeof product !== "object" || Array.isArray(product)) continue;
-        const pct = finite((product as Record<string, unknown>).usagePercent);
+        const pct = product.usagePercent;
         if (pct !== undefined) {
           usedPercent = pct;
           break;
@@ -357,7 +438,7 @@ export function parseXaiUsage(value: unknown): UsageSnapshot {
  * written back to pi's auth.json.
  */
 async function refreshXaiAccess(authPath: string, auth: OAuthAuth): Promise<OAuthAuth> {
-  const expires = finite(auth.expires);
+  const expires = auth.expires;
   if (!isExpiring(expires)) return auth;
   if (!auth.refresh) {
     if (expires !== undefined && expires <= Date.now()) {
@@ -365,12 +446,13 @@ async function refreshXaiAccess(authPath: string, auth: OAuthAuth): Promise<OAut
     }
     return auth;
   }
+  const refreshToken = auth.refresh;
 
   const refreshed = await withTimeout((signal) =>
     requestTokenRefresh({
       urls: [XAI_TOKEN_URL],
       clientId: XAI_CLIENT_ID,
-      refreshToken: auth.refresh!,
+      refreshToken,
       encoding: "form",
       label: "xAI",
       reauthHint: "run `pi /login` and select xAI",
@@ -388,29 +470,33 @@ async function fetchXaiUsage({ store, authPath }: UsageContext): Promise<UsageSn
 
   const auth = await refreshXaiAccess(authPath, stored);
 
-  const headers: Record<string, string> = {
+  const baseHeaders = {
     accept: "application/json",
     authorization: `Bearer ${auth.access}`,
     "X-XAI-Token-Auth": "xai-grok-cli",
   };
-  const body = await withTimeout(async (signal) => {
+  const body: unknown = await withTimeout(async (signal) => {
+    let userId: string | undefined;
     try {
-      const identityResponse = await fetch(XAI_USER_URL, { signal, headers, redirect: "error" });
+      const identityResponse = await fetch(XAI_USER_URL, { signal, headers: baseHeaders, redirect: "error" });
       if (identityResponse.ok) {
-        const identity = (await identityResponse.json()) as Record<string, unknown>;
-        const userId = typeof identity.userId === "string" ? identity.userId : undefined;
-        if (userId) headers["x-userid"] = userId;
+        const identity = await identityResponse.json();
+        const identityParsed = v.safeParse(xaiIdentitySchema, identity);
+        userId = identityParsed.success ? identityParsed.output.userId : undefined;
       } else {
         void identityResponse.body?.cancel().catch(() => undefined);
       }
     } catch {
       // Billing often works with bearer alone.
     }
+    const headers = userId ? { ...baseHeaders, "x-userid": userId } : baseHeaders;
     const response = await fetch(XAI_BILLING_URL, { signal, headers, redirect: "error" });
     if (!response.ok) throw new Error(`xAI usage request returned ${response.status}`);
-    return (await response.json()) as Record<string, unknown>;
+    return (await response.json());
   });
-  return parseXaiUsage(body);
+  const parsed = v.safeParse(xaiUsageSchema, body);
+  if (!parsed.success) throw new Error("xAI usage response was not an object");
+  return parseXaiUsage(parsed.output);
 }
 
 // ── Registry ──────────────────────────────────────────────────────────

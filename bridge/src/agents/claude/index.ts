@@ -295,6 +295,8 @@ export async function claudeControl(herdr: HerdrPort, params: ControlParams): Pr
       return;
     }
     default: {
+      // SAFETY: exhaustive switch — every other ControlAction is handled above;
+      // the default branch is unreachable, so narrowing `action` to never is sound.
       const exhaustive: never = action as never;
       throw new Error(`unsupported control action for claude: ${String(exhaustive)}`);
     }

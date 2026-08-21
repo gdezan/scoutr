@@ -11,7 +11,7 @@ async function commands(ctx: RouteContext): Promise<RouteResult> {
     return { status: 400, body: { ok: false, error: "invalid cwd" } };
   }
   if (cwd) {
-    const snapshot = ctx.deps.feed.snapshot as SessionSnapshot | null;
+    const snapshot = ctx.deps.feed.snapshot;
     const requestedCwd = canonicalPath(cwd);
     const belongsToActiveAgent = snapshot && snapshot.agents.some((agent) => (
       agent.cwd !== null && canonicalPath(agent.cwd) === requestedCwd

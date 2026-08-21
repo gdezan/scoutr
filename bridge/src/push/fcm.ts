@@ -40,7 +40,7 @@ const SEND_TIMEOUT_MS = 10_000;
  * `resolve` only clears a notification, so it rides normal priority and lives
  * long enough to catch a phone that was off the network.
  */
-const DELIVERY: Record<PingKind, { priority: "high" | "normal"; ttl: string }> = {
+const DELIVERY = {
   blocked: { priority: "high", ttl: "900s" },
   resolve: { priority: "normal", ttl: "3600s" },
 };
@@ -121,8 +121,8 @@ function isUnregistered(status: number, body: string): boolean {
   return status === 404 || body.includes("UNREGISTERED");
 }
 
-function describe(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+function describe(cause: unknown): string {
+  return cause instanceof Error ? cause.message : String(cause);
 }
 
 /**
@@ -131,8 +131,10 @@ function describe(error: unknown): string {
  * here at startup instead of on the first blocked agent.
  */
 export async function createFcmSender(serviceAccountPath: string): Promise<FcmSender> {
-  const parsed = JSON.parse(await readFile(serviceAccountPath, "utf8")) as { project_id?: unknown };
-  if (typeof parsed.project_id !== "string" || !parsed.project_id) {
+  // SAFETY: the service-account JSON is validated by google-auth-library; the
+  // cast reads only the required `project_id` string field.
+  const parsed = JSON.parse(await readFile(serviceAccountPath, "utf8")) as { project_id?: string };
+  if (!parsed.project_id) {
     throw new Error(`${serviceAccountPath} has no "project_id"; is it a Firebase service-account key?`);
   }
   const { GoogleAuth } = await import("google-auth-library");

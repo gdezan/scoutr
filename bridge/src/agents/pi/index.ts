@@ -191,6 +191,8 @@ export async function piControl(herdr: HerdrPort, params: ControlParams): Promis
       return;
     }
     case "set_thinking": {
+      // SAFETY: THINKING_LEVELS is a readonly tuple of string literals; widening
+      // to readonly string[] lets Array.includes() accept the user-supplied text.
       if (!text || !(THINKING_LEVELS as readonly string[]).includes(text)) {
         throw new Error(`unknown thinking level: ${String(text)}`);
       }
@@ -210,6 +212,8 @@ export async function piControl(herdr: HerdrPort, params: ControlParams): Promis
       return;
     }
     default: {
+      // SAFETY: exhaustive switch — every other ControlAction is handled above;
+      // the default branch is unreachable, so narrowing `action` to never is sound.
       const exhaustive: never = action as never;
       throw new Error(`unsupported control action: ${String(exhaustive)}`);
     }

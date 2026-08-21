@@ -10,6 +10,7 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { DeviceRegistry, PushDevice } from "./fcm.js";
+import * as v from "valibot";
 
 /** FCM tokens are ~163 chars today; the cap only rejects obvious junk. */
 export const MAX_TOKEN_LENGTH = 4096;
@@ -55,15 +56,19 @@ export class JsonDeviceRegistry implements DeviceRegistry {
   }
 }
 
+const deviceEntrySchema = v.looseObject({
+  token: v.string(),
+  updatedAtMs: v.optional(v.number()),
+});
+
 async function load(path: string): Promise<PushDevice[]> {
   try {
     const parsed: unknown = JSON.parse(await readFile(path, "utf8"));
     if (!Array.isArray(parsed)) return [];
     return parsed.flatMap((entry) => {
-      if (typeof entry !== "object" || entry === null) return [];
-      const { token, updatedAtMs } = entry as Record<string, unknown>;
-      if (typeof token !== "string" || !token) return [];
-      return [{ token, updatedAtMs: typeof updatedAtMs === "number" ? updatedAtMs : 0 }];
+      const decoded = v.safeParse(deviceEntrySchema, entry);
+      if (!decoded.success || !decoded.output.token) return [];
+      return [{ token: decoded.output.token, updatedAtMs: decoded.output.updatedAtMs ?? 0 }];
     });
   } catch {
     // Missing or corrupt: start empty. The app re-registers on next launch.

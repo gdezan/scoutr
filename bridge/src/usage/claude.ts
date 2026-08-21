@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import * as v from "valibot";
 import { claudeConfigDir } from "../agents/claude/index.js";
 import { updateJsonFile } from "./auth.js";
 import { isExpiring, requestTokenRefresh } from "./oauth.js";
@@ -25,70 +26,118 @@ const CLAUDE_TOKEN_URLS = [
 ];
 const CLAUDE_CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
 
-type JsonRecord = Record<string, unknown>;
+const oauthSchema = v.looseObject({
+  accessToken: v.optional(v.string()),
+  refreshToken: v.optional(v.string()),
+  expiresAt: v.optional(v.number()),
+});
 
-function recordOf(value: unknown): JsonRecord | undefined {
-  return value !== null && typeof value === "object" && !Array.isArray(value)
-    ? (value as JsonRecord)
-    : undefined;
-}
+const windowRecordSchema = v.looseObject({
+  utilization: v.optional(v.number()),
+  used_percentage: v.optional(v.number()),
+  percent: v.optional(v.number()),
+  resets_at: v.optional(v.union([v.string(), v.number()])),
+});
 
-function finite(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+const limitScopeSchema = v.looseObject({
+  model: v.optional(
+    v.looseObject({
+      display_name: v.optional(v.string()),
+      displayName: v.optional(v.string()),
+    }),
+  ),
+});
+
+const limitSchema = v.looseObject({
+  kind: v.optional(v.string()),
+  scope: v.optional(limitScopeSchema),
+  percent: v.optional(v.number()),
+  resets_at: v.optional(v.union([v.string(), v.number()])),
+});
+
+const usageSchema = v.looseObject({
+  five_hour: v.optional(windowRecordSchema),
+  seven_day: v.optional(windowRecordSchema),
+  seven_day_opus: v.optional(windowRecordSchema),
+  seven_day_sonnet: v.optional(windowRecordSchema),
+  limits: v.optional(v.array(limitSchema)),
+});
+
+const stateFileSchema = v.looseObject({
+  lastOnboardingVersion: v.optional(v.string()),
+  cachedUsageUtilization: v.optional(
+    v.looseObject({
+      fetchedAtMs: v.optional(v.number()),
+      utilization: v.optional(v.unknown()),
+    }),
+  ),
+});
+
+const errorBodySchema = v.looseObject({
+  error: v.optional(v.looseObject({ message: v.optional(v.string()) })),
+});
+
+type OauthRecord = v.InferOutput<typeof oauthSchema>;
+type WindowRecord = v.InferOutput<typeof windowRecordSchema>;
+type LimitRecord = v.InferOutput<typeof limitSchema>;
+type UsageRecord = v.InferOutput<typeof usageSchema>;
+
+function finite(value: number | undefined): number | undefined {
+  return value !== undefined && Number.isFinite(value) ? value : undefined;
 }
 
 function clampPercent(value: number): number {
   return Math.max(0, Math.min(100, value));
 }
 
-function claudeResetAt(value: unknown): number | undefined {
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return Math.round(value > 10_000_000_000 ? value / 1000 : value);
+function claudeResetAt(value: string | number | undefined): number | undefined {
+  if (value === undefined) return undefined;
+  if (Number.isFinite(value)) {
+    const num = Number(value);
+    return Math.round(num > 10_000_000_000 ? num / 1000 : num);
   }
-  if (typeof value !== "string" || value.trim() === "") return undefined;
-  const trimmed = value.trim();
+  const trimmed = String(value).trim();
   if (/^\d+(?:\.\d+)?$/.test(trimmed)) return claudeResetAt(Number(trimmed));
   const parsed = Date.parse(trimmed);
   return Number.isFinite(parsed) ? Math.floor(parsed / 1000) : undefined;
 }
+
 function claudeWindowSeconds(label: string): number | undefined {
   if (label === "5h") return 5 * 60 * 60;
   if (label === "7d" || label.startsWith("7d ")) return 7 * 24 * 60 * 60;
   return undefined;
 }
 
+type PercentKey = "utilization" | "percent";
+
 function claudeWindow(
-  value: unknown,
+  window: WindowRecord | undefined,
   label: string,
-  percentKey = "utilization",
+  percentKey: PercentKey = "utilization",
   windowSeconds = claudeWindowSeconds(label),
 ): UsageWindow | undefined {
-  const record = recordOf(value);
-  if (!record) return undefined;
-  const usedPercent = finite(record[percentKey]) ?? finite(record.used_percentage);
+  if (!window) return undefined;
+  const usedPercent = finite(window[percentKey]) ?? finite(window.used_percentage);
   if (usedPercent === undefined) return undefined;
   return {
     label,
     usedPercent: clampPercent(usedPercent),
     windowSeconds,
-    resetAt: claudeResetAt(record.resets_at),
+    resetAt: claudeResetAt(window.resets_at),
   };
 }
 
-function scopedClaudeLabel(limit: JsonRecord): string {
-  const model = recordOf(recordOf(limit.scope)?.model);
+function scopedClaudeLabel(limit: LimitRecord): string {
+  const model = limit.scope?.model;
   const displayName = model?.display_name ?? model?.displayName;
-  return typeof displayName === "string" && displayName.trim() !== ""
-    ? `7d ${displayName.trim()}`
-    : "7d scoped";
+  return displayName && displayName.trim() !== "" ? `7d ${displayName.trim()}` : "7d scoped";
 }
 
-function windowsFromClaudeLimits(value: unknown): UsageWindow[] {
-  if (!Array.isArray(value)) return [];
+function windowsFromClaudeLimits(limits: LimitRecord[] | undefined): UsageWindow[] {
+  if (!limits) return [];
   const windows: UsageWindow[] = [];
-  for (const item of value) {
-    const limit = recordOf(item);
-    if (!limit || typeof limit.kind !== "string") continue;
+  for (const limit of limits) {
+    if (limit.kind === undefined) continue;
     const label = limit.kind === "session"
       ? "5h"
       : limit.kind === "weekly_all"
@@ -104,10 +153,7 @@ function windowsFromClaudeLimits(value: unknown): UsageWindow[] {
 }
 
 /** Convert Claude Code's OAuth usage response into the shared quota-window model. */
-export function parseClaudeUsage(value: unknown): UsageSnapshot {
-  const root = recordOf(value);
-  if (!root) throw new Error("Claude usage response was not an object");
-
+export function parseClaudeUsage(root: UsageRecord): UsageSnapshot {
   const legacyWindows = [
     claudeWindow(root.five_hour, "5h"),
     claudeWindow(root.seven_day, "7d"),
@@ -142,16 +188,19 @@ interface ClaudeCredentials {
 
 async function readClaudeCredentials(path: string): Promise<ClaudeCredentials | undefined> {
   try {
-    const root = recordOf(JSON.parse(await readFile(path, "utf8")));
-    const oauth = recordOf(root?.claudeAiOauth);
-    const accessToken = typeof oauth?.accessToken === "string" ? oauth.accessToken : "";
+    const parsed = v.safeParse(v.looseObject({ claudeAiOauth: v.optional(oauthSchema) }), JSON.parse(await readFile(path, "utf8")));
+    if (!parsed.success) return undefined;
+    const oauth = parsed.output.claudeAiOauth;
+    const accessToken = oauth?.accessToken ?? "";
     if (accessToken === "") return undefined;
     return {
       accessToken,
-      refreshToken: typeof oauth?.refreshToken === "string" ? oauth.refreshToken : undefined,
+      refreshToken: oauth?.refreshToken,
       expiresAt: finite(oauth?.expiresAt),
     };
   } catch (error) {
+    // SAFETY: readFile only throws ENOENT for a missing credential file, which means the
+    // user has not signed in yet; any other error is a real read failure.
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
     throw error;
   }
@@ -171,11 +220,12 @@ async function refreshClaudeCredentials(
   if (!credentials.refreshToken) {
     throw new Error("Claude Code OAuth token expired and no refresh token is stored; run `claude` to sign in");
   }
+  const refreshToken = credentials.refreshToken;
 
   const refreshed = await requestTokenRefresh({
     urls: CLAUDE_TOKEN_URLS,
     clientId: CLAUDE_CLIENT_ID,
-    refreshToken: credentials.refreshToken,
+    refreshToken,
     encoding: "json",
     label: "Claude",
     reauthHint: "run `claude` and sign in again",
@@ -183,11 +233,10 @@ async function refreshClaudeCredentials(
   });
 
   await updateJsonFile(path, (root) => {
-    const oauth = recordOf(root.claudeAiOauth) ?? {};
-    const claudeOauth: Record<string, unknown> = {
-      ...oauth,
-      accessToken: refreshed.access,
-    };
+    const stored = v.safeParse(oauthSchema, root.claudeAiOauth);
+    const claudeOauth: OauthRecord = stored.success
+      ? { ...stored.output, accessToken: refreshed.access }
+      : { accessToken: refreshed.access };
     if (refreshed.refresh) claudeOauth.refreshToken = refreshed.refresh;
     claudeOauth.expiresAt = refreshed.expires;
     root.claudeAiOauth = claudeOauth;
@@ -200,9 +249,10 @@ async function refreshClaudeCredentials(
 /** Claude Code records the version it last onboarded with; it is the closest thing to "installed version". */
 async function claudeUserAgent(statePath: string): Promise<string> {
   try {
-    const root = recordOf(JSON.parse(await readFile(statePath, "utf8")));
-    const version = root?.lastOnboardingVersion;
-    if (typeof version === "string" && /^\d+\.\d+/.test(version)) return `claude-code/${version}`;
+    const parsed = v.safeParse(stateFileSchema, JSON.parse(await readFile(statePath, "utf8")));
+    if (!parsed.success) return `claude-code/${CLAUDE_FALLBACK_VERSION}`;
+    const version = parsed.output.lastOnboardingVersion;
+    if (version !== undefined && /^\d+\.\d+/.test(version)) return `claude-code/${version}`;
   } catch {
     // Fall through to the pinned version; a plausible UA still beats none.
   }
@@ -223,11 +273,14 @@ async function requestClaudeUsage(accessToken: string, userAgent: string): Promi
 
 async function readCachedClaudeUsage(path: string): Promise<UsageSnapshot | undefined> {
   try {
-    const root = recordOf(JSON.parse(await readFile(path, "utf8")));
-    const cached = recordOf(root?.cachedUsageUtilization);
+    const parsed = v.safeParse(stateFileSchema, JSON.parse(await readFile(path, "utf8")));
+    if (!parsed.success) return undefined;
+    const cached = parsed.output.cachedUsageUtilization;
     const updatedAt = finite(cached?.fetchedAtMs);
     if (updatedAt === undefined) return undefined;
-    return { ...parseClaudeUsage(cached?.utilization), updatedAt };
+    const utilParsed = v.safeParse(usageSchema, cached?.utilization);
+    if (!utilParsed.success) return undefined;
+    return { ...parseClaudeUsage(utilParsed.output), updatedAt };
   } catch {
     return undefined;
   }
@@ -236,9 +289,9 @@ async function readCachedClaudeUsage(path: string): Promise<UsageSnapshot | unde
 async function claudeUsageError(response: Response): Promise<Error> {
   let detail: string | undefined;
   try {
-    const body = recordOf(await response.json());
-    const error = recordOf(body?.error);
-    if (typeof error?.message === "string") detail = error.message;
+    const bodyParsed = v.safeParse(errorBodySchema, await response.json());
+    const message = bodyParsed.success ? bodyParsed.output.error?.message : undefined;
+    if (message !== undefined) detail = message;
   } catch {
     // The status still gives the user a searchable failure when the body is not JSON.
   }
@@ -282,7 +335,9 @@ export async function fetchClaudeUsage(): Promise<UsageSnapshot> {
     }
 
     if (!response.ok) throw await claudeUsageError(response);
-    return parseClaudeUsage(await response.json());
+    const parsed = v.safeParse(usageSchema, await response.json());
+    if (!parsed.success) throw new Error("Claude usage response contained no recognized windows");
+    return parseClaudeUsage(parsed.output);
   } catch (error) {
     if (!cached) throw error;
     return {

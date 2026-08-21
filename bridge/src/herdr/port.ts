@@ -1,5 +1,5 @@
 import type { AgentReadResponse } from "./client.js";
-import type { HerdrPong, SessionSnapshot } from "./types.js";
+import type { HerdrPong, JsonValue, SessionSnapshot } from "./types.js";
 
 /**
  * The herdr surface the bridge actually calls. Every agent backend (pi today,
@@ -23,17 +23,17 @@ export interface HerdrPort {
     label?: string | null;
     focus?: boolean;
   }): Promise<{ tab: { tab_id?: string }; root_pane?: { pane_id?: string } }>;
-  tabRename(tab_id: string, label: string): Promise<unknown>;
-  tabClose(tab_id: string): Promise<unknown>;
-  paneRename(pane_id: string, label: string): Promise<unknown>;
-  paneClose(pane_id: string): Promise<unknown>;
-  workspaceRename(workspace_id: string, label: string): Promise<unknown>;
-  workspaceClose(workspace_id: string): Promise<unknown>;
-  paneSendInput(pane_id: string, text: string, keys?: string[]): Promise<unknown>;
-  paneSendKeys(pane_id: string, keys: string[]): Promise<unknown>;
-  paneSendText(pane_id: string, text: string): Promise<unknown>;
-  agentPrompt(target: string, text: string): Promise<unknown>;
-  agentGet(target: string, timeoutMs?: number): Promise<unknown>;
+  tabRename(tab_id: string, label: string): Promise<void>;
+  tabClose(tab_id: string): Promise<void>;
+  paneRename(pane_id: string, label: string): Promise<void>;
+  paneClose(pane_id: string): Promise<void>;
+  workspaceRename(workspace_id: string, label: string): Promise<void>;
+  workspaceClose(workspace_id: string): Promise<void>;
+  paneSendInput(pane_id: string, text: string, keys?: string[]): Promise<void>;
+  paneSendKeys(pane_id: string, keys: string[]): Promise<void>;
+  paneSendText(pane_id: string, text: string): Promise<void>;
+  agentPrompt(target: string, text: string): Promise<JsonValue>;
+  agentGet(target: string, timeoutMs?: number): Promise<JsonValue>;
   agentRead(
     target: string,
     source: string,

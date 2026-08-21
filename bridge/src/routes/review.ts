@@ -132,7 +132,7 @@ async function computeReviewRoots(ctx: RouteContext): Promise<string[]> {
   } catch {
     // A catalog failure must not take down review; live roots still apply.
   }
-  return sessionWorkspaceRoots(ctx.deps.feed.snapshot as SessionSnapshot | null, catalogCwds);
+  return sessionWorkspaceRoots(ctx.deps.feed.snapshot, catalogCwds);
 }
 
 async function repoOverview(ctx: RouteContext): Promise<RouteResult> {
@@ -197,10 +197,10 @@ async function repoArtifacts(ctx: RouteContext): Promise<RouteResult> {
   }
 }
 
-function reviewError(error: unknown): RouteResult {
-  const status = error instanceof ReviewError ? error.status : 500;
+function reviewError(cause: unknown): RouteResult {
+  const status = cause instanceof ReviewError ? cause.status : 500;
   return {
     status,
-    body: { ok: false, error: error instanceof Error ? error.message : String(error) },
+    body: { ok: false, error: cause instanceof Error ? cause.message : String(cause) },
   };
 }
