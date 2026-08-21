@@ -27,54 +27,54 @@ const CLAUDE_TOKEN_URLS = [
 const CLAUDE_CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
 
 const oauthSchema = v.looseObject({
-  accessToken: v.optional(v.string()),
-  refreshToken: v.optional(v.string()),
-  expiresAt: v.optional(v.number()),
+  accessToken: v.nullish(v.string()),
+  refreshToken: v.nullish(v.string()),
+  expiresAt: v.nullish(v.number()),
 });
 
 const windowRecordSchema = v.looseObject({
-  utilization: v.optional(v.number()),
-  used_percentage: v.optional(v.number()),
-  percent: v.optional(v.number()),
-  resets_at: v.optional(v.union([v.string(), v.number()])),
+  utilization: v.nullish(v.number()),
+  used_percentage: v.nullish(v.number()),
+  percent: v.nullish(v.number()),
+  resets_at: v.nullish(v.union([v.string(), v.number()])),
 });
 
 const limitScopeSchema = v.looseObject({
-  model: v.optional(
+  model: v.nullish(
     v.looseObject({
-      display_name: v.optional(v.string()),
-      displayName: v.optional(v.string()),
+      display_name: v.nullish(v.string()),
+      displayName: v.nullish(v.string()),
     }),
   ),
 });
 
 const limitSchema = v.looseObject({
-  kind: v.optional(v.string()),
-  scope: v.optional(limitScopeSchema),
-  percent: v.optional(v.number()),
-  resets_at: v.optional(v.union([v.string(), v.number()])),
+  kind: v.nullish(v.string()),
+  scope: v.nullish(limitScopeSchema),
+  percent: v.nullish(v.number()),
+  resets_at: v.nullish(v.union([v.string(), v.number()])),
 });
 
 const usageSchema = v.looseObject({
-  five_hour: v.optional(windowRecordSchema),
-  seven_day: v.optional(windowRecordSchema),
-  seven_day_opus: v.optional(windowRecordSchema),
-  seven_day_sonnet: v.optional(windowRecordSchema),
-  limits: v.optional(v.array(limitSchema)),
+  five_hour: v.nullish(windowRecordSchema),
+  seven_day: v.nullish(windowRecordSchema),
+  seven_day_opus: v.nullish(windowRecordSchema),
+  seven_day_sonnet: v.nullish(windowRecordSchema),
+  limits: v.nullish(v.array(limitSchema)),
 });
 
 const stateFileSchema = v.looseObject({
-  lastOnboardingVersion: v.optional(v.string()),
-  cachedUsageUtilization: v.optional(
+  lastOnboardingVersion: v.nullish(v.string()),
+  cachedUsageUtilization: v.nullish(
     v.looseObject({
-      fetchedAtMs: v.optional(v.number()),
-      utilization: v.optional(v.unknown()),
+      fetchedAtMs: v.nullish(v.number()),
+      utilization: v.nullish(v.unknown()),
     }),
   ),
 });
 
 const errorBodySchema = v.looseObject({
-  error: v.optional(v.looseObject({ message: v.optional(v.string()) })),
+  error: v.nullish(v.looseObject({ message: v.nullish(v.string()) })),
 });
 
 type OauthRecord = v.InferOutput<typeof oauthSchema>;
@@ -82,16 +82,16 @@ type WindowRecord = v.InferOutput<typeof windowRecordSchema>;
 type LimitRecord = v.InferOutput<typeof limitSchema>;
 type UsageRecord = v.InferOutput<typeof usageSchema>;
 
-function finite(value: number | undefined): number | undefined {
-  return value !== undefined && Number.isFinite(value) ? value : undefined;
+function finite(value: number | null | undefined): number | undefined {
+  return value != null && Number.isFinite(value) ? value : undefined;
 }
 
 function clampPercent(value: number): number {
   return Math.max(0, Math.min(100, value));
 }
 
-function claudeResetAt(value: string | number | undefined): number | undefined {
-  if (value === undefined) return undefined;
+function claudeResetAt(value: string | number | null | undefined): number | undefined {
+  if (value == null) return undefined;
   if (Number.isFinite(value)) {
     const num = Number(value);
     return Math.round(num > 10_000_000_000 ? num / 1000 : num);
@@ -111,7 +111,7 @@ function claudeWindowSeconds(label: string): number | undefined {
 type PercentKey = "utilization" | "percent";
 
 function claudeWindow(
-  window: WindowRecord | undefined,
+  window: WindowRecord | null | undefined,
   label: string,
   percentKey: PercentKey = "utilization",
   windowSeconds = claudeWindowSeconds(label),
@@ -133,11 +133,11 @@ function scopedClaudeLabel(limit: LimitRecord): string {
   return displayName && displayName.trim() !== "" ? `7d ${displayName.trim()}` : "7d scoped";
 }
 
-function windowsFromClaudeLimits(limits: LimitRecord[] | undefined): UsageWindow[] {
+function windowsFromClaudeLimits(limits: LimitRecord[] | null | undefined): UsageWindow[] {
   if (!limits) return [];
   const windows: UsageWindow[] = [];
   for (const limit of limits) {
-    if (limit.kind === undefined) continue;
+    if (limit.kind == null) continue;
     const label = limit.kind === "session"
       ? "5h"
       : limit.kind === "weekly_all"
@@ -188,14 +188,14 @@ interface ClaudeCredentials {
 
 async function readClaudeCredentials(path: string): Promise<ClaudeCredentials | undefined> {
   try {
-    const parsed = v.safeParse(v.looseObject({ claudeAiOauth: v.optional(oauthSchema) }), JSON.parse(await readFile(path, "utf8")));
+    const parsed = v.safeParse(v.looseObject({ claudeAiOauth: v.nullish(oauthSchema) }), JSON.parse(await readFile(path, "utf8")));
     if (!parsed.success) return undefined;
     const oauth = parsed.output.claudeAiOauth;
     const accessToken = oauth?.accessToken ?? "";
     if (accessToken === "") return undefined;
     return {
       accessToken,
-      refreshToken: oauth?.refreshToken,
+      refreshToken: oauth?.refreshToken ?? undefined,
       expiresAt: finite(oauth?.expiresAt),
     };
   } catch (error) {
@@ -252,7 +252,7 @@ async function claudeUserAgent(statePath: string): Promise<string> {
     const parsed = v.safeParse(stateFileSchema, JSON.parse(await readFile(statePath, "utf8")));
     if (!parsed.success) return `claude-code/${CLAUDE_FALLBACK_VERSION}`;
     const version = parsed.output.lastOnboardingVersion;
-    if (version !== undefined && /^\d+\.\d+/.test(version)) return `claude-code/${version}`;
+    if (typeof version === "string" && /^\d+\.\d+/.test(version)) return `claude-code/${version}`;
   } catch {
     // Fall through to the pinned version; a plausible UA still beats none.
   }
@@ -290,8 +290,8 @@ async function claudeUsageError(response: Response): Promise<Error> {
   let detail: string | undefined;
   try {
     const bodyParsed = v.safeParse(errorBodySchema, await response.json());
-    const message = bodyParsed.success ? bodyParsed.output.error?.message : undefined;
-    if (message !== undefined) detail = message;
+    const message = bodyParsed.success ? (bodyParsed.output.error?.message ?? undefined) : undefined;
+    if (message != null) detail = message;
   } catch {
     // The status still gives the user a searchable failure when the body is not JSON.
   }

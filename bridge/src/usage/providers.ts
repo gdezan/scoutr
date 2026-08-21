@@ -34,7 +34,7 @@ import { join } from "node:path";
 
 // ── Response schemas ───────────────────────────────────────────────────
 
-const finiteNumber = v.optional(v.pipe(v.number(), v.finite()));
+const finiteNumber = v.nullish(v.pipe(v.number(), v.finite()));
 
 const codexWindowSchema = v.looseObject({
   used_percent: finiteNumber,
@@ -42,20 +42,20 @@ const codexWindowSchema = v.looseObject({
   reset_at: finiteNumber,
 });
 const codexUsageSchema = v.looseObject({
-  rate_limit: v.optional(
+  rate_limit: v.nullish(
     v.looseObject({
-      primary_window: v.optional(codexWindowSchema),
-      secondary_window: v.optional(codexWindowSchema),
+      primary_window: v.nullish(codexWindowSchema),
+      secondary_window: v.nullish(codexWindowSchema),
     }),
   ),
 });
 
 const deepseekBalanceSchema = v.looseObject({
-  balance_infos: v.optional(
+  balance_infos: v.nullish(
     v.array(
       v.looseObject({
-        currency: v.optional(v.string()),
-        total_balance: v.optional(v.union([v.string(), v.number()])),
+        currency: v.nullish(v.string()),
+        total_balance: v.nullish(v.union([v.string(), v.number()])),
       }),
     ),
   ),
@@ -63,48 +63,48 @@ const deepseekBalanceSchema = v.looseObject({
 
 const opencodeGoWindowSchema = v.looseObject({
   percent: finiteNumber,
-  resetsAt: v.optional(v.string()),
+  resetsAt: v.nullish(v.string()),
 });
 const opencodeGoUsageSchema = v.looseObject({
-  usage: v.optional(
+  usage: v.nullish(
     v.looseObject({
-      rolling: v.optional(opencodeGoWindowSchema),
-      weekly: v.optional(opencodeGoWindowSchema),
-      monthly: v.optional(opencodeGoWindowSchema),
+      rolling: v.nullish(opencodeGoWindowSchema),
+      weekly: v.nullish(opencodeGoWindowSchema),
+      monthly: v.nullish(opencodeGoWindowSchema),
     }),
   ),
 });
 
 const xaiPeriodSchema = v.looseObject({
-  type: v.optional(v.string()),
-  start: v.optional(v.string()),
-  end: v.optional(v.string()),
+  type: v.nullish(v.string()),
+  start: v.nullish(v.string()),
+  end: v.nullish(v.string()),
 });
 const xaiAmountSchema = v.looseObject({ val: finiteNumber });
 const xaiFieldsSchema = v.looseObject({
   creditUsagePercent: finiteNumber,
-  monthlyLimit: v.optional(xaiAmountSchema),
-  used: v.optional(xaiAmountSchema),
-  productUsage: v.optional(v.array(v.looseObject({ usagePercent: finiteNumber }))),
-  currentPeriod: v.optional(xaiPeriodSchema),
-  billingPeriodEnd: v.optional(v.string()),
-  billingPeriodStart: v.optional(v.string()),
-  resetAt: v.optional(v.string()),
-  reset_at: v.optional(v.string()),
+  monthlyLimit: v.nullish(xaiAmountSchema),
+  used: v.nullish(xaiAmountSchema),
+  productUsage: v.nullish(v.array(v.looseObject({ usagePercent: finiteNumber }))),
+  currentPeriod: v.nullish(xaiPeriodSchema),
+  billingPeriodEnd: v.nullish(v.string()),
+  billingPeriodStart: v.nullish(v.string()),
+  resetAt: v.nullish(v.string()),
+  reset_at: v.nullish(v.string()),
 });
-const xaiIdentitySchema = v.looseObject({ userId: v.optional(v.string()) });
+const xaiIdentitySchema = v.looseObject({ userId: v.nullish(v.string()) });
 // xAI nests the usage fields under `config` *or* places them at the top level.
 const xaiUsageSchema = v.looseObject({
-  config: v.optional(xaiFieldsSchema),
+  config: v.nullish(xaiFieldsSchema),
   creditUsagePercent: finiteNumber,
-  monthlyLimit: v.optional(xaiAmountSchema),
-  used: v.optional(xaiAmountSchema),
-  productUsage: v.optional(v.array(v.looseObject({ usagePercent: finiteNumber }))),
-  currentPeriod: v.optional(xaiPeriodSchema),
-  billingPeriodEnd: v.optional(v.string()),
-  billingPeriodStart: v.optional(v.string()),
-  resetAt: v.optional(v.string()),
-  reset_at: v.optional(v.string()),
+  monthlyLimit: v.nullish(xaiAmountSchema),
+  used: v.nullish(xaiAmountSchema),
+  productUsage: v.nullish(v.array(v.looseObject({ usagePercent: finiteNumber }))),
+  currentPeriod: v.nullish(xaiPeriodSchema),
+  billingPeriodEnd: v.nullish(v.string()),
+  billingPeriodStart: v.nullish(v.string()),
+  resetAt: v.nullish(v.string()),
+  reset_at: v.nullish(v.string()),
 });
 
 type CodexWindow = v.InferOutput<typeof codexWindowSchema>;
@@ -148,14 +148,14 @@ function clampPercent(value: number): number {
 }
 
 /** Seconds-since-epoch from a provider reset timestamp that may be in ms or s. */
-function normalizeResetAt(value: number | undefined): number | undefined {
-  if (value === undefined) return undefined;
+function normalizeResetAt(value: number | null | undefined): number | undefined {
+  if (value == null) return undefined;
   return value > 10_000_000_000 ? Math.round(value / 1000) : Math.round(value);
 }
 
 /** Seconds-since-epoch from an ISO-8601 timestamp. */
-function resetAtFromIso(value: string | undefined): number | undefined {
-  if (value === undefined || value.trim() === "") return undefined;
+function resetAtFromIso(value: string | null | undefined): number | undefined {
+  if (value == null || value.trim() === "") return undefined;
   const ms = Date.parse(value);
   return Number.isFinite(ms) ? Math.floor(ms / 1000) : undefined;
 }
@@ -185,11 +185,11 @@ async function withTimeout<T>(
 // ── Codex ─────────────────────────────────────────────────────────────
 
 function parseCodexWindow(
-  value: CodexWindow | undefined,
+  value: CodexWindow | null | undefined,
   fallbackLabel: string,
 ): UsageWindow | undefined {
-  const usedPercent = value?.used_percent;
-  if (usedPercent === undefined) return undefined;
+  const usedPercent = value?.used_percent ?? undefined;
+  if (usedPercent == null) return undefined;
   const windowSeconds = value?.limit_window_seconds;
   let label = fallbackLabel;
   if (windowSeconds === 5 * 60 * 60) label = "5h";
@@ -197,8 +197,8 @@ function parseCodexWindow(
   return {
     label,
     usedPercent: clampPercent(usedPercent),
-    windowSeconds,
-    resetAt: normalizeResetAt(value?.reset_at),
+    windowSeconds: windowSeconds ?? undefined,
+    resetAt: normalizeResetAt(value?.reset_at ?? undefined),
   };
 }
 
@@ -283,7 +283,7 @@ function parseDeepseekBalance(value: DeepseekBalance): UsageWindow[] {
   for (const info of infos) {
     const currency = info.currency?.toUpperCase();
     const raw = info.total_balance;
-    const totalBalance = raw === "" ? Number.NaN : Number(raw);
+    const totalBalance = raw == null || raw === "" ? Number.NaN : Number(raw);
     if (!Number.isFinite(totalBalance)) continue;
     windows.push({ label: currency ?? "???", usedPercent: 0, amount: totalBalance, currency });
   }
@@ -333,8 +333,8 @@ export function parseOpencodeGoUsage(value: OpencodeGoUsage): UsageSnapshot {
     const bucket = buckets[key];
     if (!bucket) continue;
     const percent = bucket.percent;
-    if (percent === undefined) continue;
-    const resetAt = resetAtFromIso(bucket.resetsAt);
+    if (percent == null) continue;
+    const resetAt = resetAtFromIso(bucket.resetsAt ?? undefined);
     windows.push({
       label,
       usedPercent: clampPercent(percent),
@@ -375,8 +375,8 @@ async function fetchOpencodeGoUsage({ store }: UsageContext): Promise<UsageSnaps
 // ── xAI ───────────────────────────────────────────────────────────────
 
 /** Cents-style `{ val: number }` amount, or a bare number, to a number. */
-function centsVal(value: { val?: number } | undefined): number | undefined {
-  return value?.val;
+function centsVal(value: { val?: number | null } | null | undefined): number | undefined {
+  return value?.val ?? undefined;
 }
 
 export function parseXaiUsage(value: XaiUsage): UsageSnapshot {
@@ -384,20 +384,20 @@ export function parseXaiUsage(value: XaiUsage): UsageSnapshot {
   const period = config.currentPeriod;
   const periodType = period?.type ?? "";
 
-  let usedPercent = config.creditUsagePercent;
-  if (usedPercent === undefined) {
+  let usedPercent = config.creditUsagePercent ?? undefined;
+  if (usedPercent == null) {
     const monthlyLimit = centsVal(config.monthlyLimit);
     const used = centsVal(config.used);
-    if (monthlyLimit !== undefined && monthlyLimit > 0 && used !== undefined) {
+    if (monthlyLimit != null && monthlyLimit > 0 && used != null) {
       usedPercent = clampPercent((used / monthlyLimit) * 100);
     }
   }
-  if (usedPercent === undefined) {
+  if (usedPercent == null) {
     const products = config.productUsage;
     if (Array.isArray(products)) {
       for (const product of products) {
-        const pct = product.usagePercent;
-        if (pct !== undefined) {
+        const pct = product.usagePercent ?? undefined;
+        if (pct != null) {
           usedPercent = pct;
           break;
         }
@@ -406,8 +406,8 @@ export function parseXaiUsage(value: XaiUsage): UsageSnapshot {
   }
   // Endpoint omits creditUsagePercent at a fresh period start; treat as 0% used
   // when a typed period is present (matches grok-cli / official credits config).
-  if (usedPercent === undefined && periodType.length > 0) usedPercent = 0;
-  if (usedPercent === undefined) throw new Error("xAI usage response contained no recognized windows");
+  if (usedPercent == null && periodType.length > 0) usedPercent = 0;
+  if (usedPercent == null) throw new Error("xAI usage response contained no recognized windows");
 
   const label = periodType.includes("WEEKLY")
     ? "wk"
@@ -418,11 +418,11 @@ export function parseXaiUsage(value: XaiUsage): UsageSnapshot {
         : "plan";
 
   const resetAt =
-    resetAtFromIso(period?.end) ??
-    resetAtFromIso(config.billingPeriodEnd) ??
-    resetAtFromIso(config.resetAt) ??
-    resetAtFromIso(config.reset_at);
-  const startAt = resetAtFromIso(period?.start) ?? resetAtFromIso(config.billingPeriodStart);
+    resetAtFromIso(period?.end ?? undefined) ??
+    resetAtFromIso(config.billingPeriodEnd ?? undefined) ??
+    resetAtFromIso(config.resetAt ?? undefined) ??
+    resetAtFromIso(config.reset_at ?? undefined);
+  const startAt = resetAtFromIso(period?.start ?? undefined) ?? resetAtFromIso(config.billingPeriodStart ?? undefined);
   const windowSeconds =
     startAt !== undefined && resetAt !== undefined && resetAt > startAt ? resetAt - startAt : undefined;
 
@@ -482,7 +482,7 @@ async function fetchXaiUsage({ store, authPath }: UsageContext): Promise<UsageSn
       if (identityResponse.ok) {
         const identity = await identityResponse.json();
         const identityParsed = v.safeParse(xaiIdentitySchema, identity);
-        userId = identityParsed.success ? identityParsed.output.userId : undefined;
+        userId = identityParsed.success ? (identityParsed.output.userId ?? undefined) : undefined;
       } else {
         void identityResponse.body?.cancel().catch(() => undefined);
       }

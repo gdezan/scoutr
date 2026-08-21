@@ -22,43 +22,42 @@ const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
 const clientSchema = v.array(v.object({ id: v.string(), secret: v.string() }));
 
 const tokenFileSchema = v.looseObject({
-  token: v.optional(
+  token: v.nullish(
     v.looseObject({
-      access_token: v.optional(v.string()),
-      refresh_token: v.optional(v.string()),
-      expiry: v.optional(v.string()),
+      access_token: v.nullish(v.string()),
+      refresh_token: v.nullish(v.string()),
+      expiry: v.nullish(v.string()),
     }),
   ),
 });
-
 const tokenSchema = v.looseObject({
-  access_token: v.optional(v.string()),
-  refresh_token: v.optional(v.string()),
-  expiry: v.optional(v.string()),
+  access_token: v.nullish(v.string()),
+  refresh_token: v.nullish(v.string()),
+  expiry: v.nullish(v.string()),
 });
 
 const refreshBodySchema = v.looseObject({
-  access_token: v.optional(v.string()),
-  refresh_token: v.optional(v.string()),
-  expires_in: v.optional(v.number()),
+  access_token: v.nullish(v.string()),
+  refresh_token: v.nullish(v.string()),
+  expires_in: v.nullish(v.number()),
 });
 
 const quotaBucketSchema = v.looseObject({
-  window: v.optional(v.string()),
-  displayName: v.optional(v.string()),
-  bucketId: v.optional(v.string()),
-  remainingFraction: v.optional(v.number()),
-  resetTime: v.optional(v.union([v.string(), v.number()])),
+  window: v.nullish(v.string()),
+  displayName: v.nullish(v.string()),
+  bucketId: v.nullish(v.string()),
+  remainingFraction: v.nullish(v.number()),
+  resetTime: v.nullish(v.union([v.string(), v.number()])),
 });
 
 const quotaGroupSchema = v.looseObject({
-  displayName: v.optional(v.string()),
-  buckets: v.optional(v.array(quotaBucketSchema)),
+  displayName: v.nullish(v.string()),
+  buckets: v.nullish(v.array(quotaBucketSchema)),
 });
 
 const quotaSchema = v.looseObject({
-  groups: v.optional(v.array(quotaGroupSchema)),
-  response: v.optional(v.looseObject({ groups: v.optional(v.array(quotaGroupSchema)) })),
+  groups: v.nullish(v.array(quotaGroupSchema)),
+  response: v.nullish(v.looseObject({ groups: v.nullish(v.array(quotaGroupSchema)) })),
 });
 
 type AntigravityQuota = v.InferOutput<typeof quotaSchema>;
@@ -86,16 +85,15 @@ let workingClientIndex = 0;
 const QUOTA_HOSTS = ["https://daily-cloudcode-pa.googleapis.com", "https://cloudcode-pa.googleapis.com"];
 const QUOTA_PATH = "/v1internal:retrieveUserQuotaSummary";
 
-function finite(value: number | undefined): number | undefined {
-  return value !== undefined && Number.isFinite(value) ? value : undefined;
+function finite(value: number | null | undefined): number | undefined {
+  return value != null && Number.isFinite(value) ? value : undefined;
 }
-
 function clampPercent(value: number): number {
   return Math.max(0, Math.min(100, value));
 }
 
-function resetAtFrom(value: string | number | undefined): number | undefined {
-  if (value === undefined) return undefined;
+function resetAtFrom(value: string | number | null | undefined): number | undefined {
+  if (value == null) return undefined;
   if (Number.isFinite(value)) {
     const num = Number(value);
     return Math.round(num > 10_000_000_000 ? num / 1000 : num);
@@ -122,10 +120,10 @@ async function readAntigravityToken(path: string): Promise<AntigravityToken | un
     const token = parsed.output.token;
     const access = token?.access_token ?? "";
     if (access === "") return undefined;
-    const expiry = token?.expiry !== undefined ? Date.parse(token.expiry) : Number.NaN;
+    const expiry = token?.expiry != null ? Date.parse(token.expiry) : Number.NaN;
     return {
       access,
-      refresh: token?.refresh_token,
+      refresh: token?.refresh_token ?? undefined,
       expires: Number.isFinite(expiry) ? expiry : undefined,
     };
   } catch (error) {
@@ -221,7 +219,7 @@ export function parseAntigravityUsage(root: AntigravityQuota): UsageSnapshot {
     const buckets = group.buckets ?? [];
     for (const bucket of buckets) {
       const remaining = bucket.remainingFraction;
-      if (remaining === undefined || !Number.isFinite(remaining)) continue;
+      if (remaining == null || !Number.isFinite(remaining)) continue;
       const resetAt = resetAtFrom(bucket.resetTime);
       const name = windowName(bucket);
       windows.push({
@@ -255,7 +253,8 @@ function windowName(bucket: AntigravityBucket): string {
   if (bucket.window === "daily") return "day";
   if (bucket.window === "weekly") return "wk";
   if (bucket.window === "monthly") return "mo";
-  if (bucket.displayName !== undefined && bucket.displayName.trim() !== "") return bucket.displayName.trim();
+  const display = bucket.displayName?.trim();
+  if (display) return display;
   return bucket.bucketId ?? "quota";
 }
 
