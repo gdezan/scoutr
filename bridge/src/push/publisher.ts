@@ -2,11 +2,12 @@
  * Turns herdr status events into contentless FCM pings.
  *
  * Publishing is edge-triggered: the publisher remembers which panes are
- * currently blocked and sends only on transitions in and out of that state.
- * A repeated `blocked` event for an already-blocked pane sends nothing at any
- * interval, which dedupes strictly better than a timer would — and, unlike a
- * timer, it structurally cannot swallow the resolve that clears the phone's
- * notification.
+ * currently blocked and which have already triggered a done ping, sending only
+ * on transitions in and out of those states.
+ * A repeated `blocked` or `done` event for an already-notified pane sends
+ * nothing at any interval, which dedupes strictly better than a timer would —
+ * and, unlike a timer, it structurally cannot swallow the resolve that clears
+ * the phone's notification.
  */
 
 import type { FeedEvent } from "../herdr/feed.js";
@@ -22,7 +23,7 @@ const STATUS_KINDS = new Set(["pane_agent_status_changed", "pane.agent_status_ch
 
 export class FcmPublisher {
   private readonly blockedPanes = new Set<string>();
-
+  private readonly donePanes = new Set<string>();
   constructor(
     private readonly sender: FcmSender,
     private readonly devices: DeviceRegistry,
@@ -38,12 +39,23 @@ export class FcmPublisher {
     const status = parsed.output.agent_status ?? "";
 
     if (status === "blocked") {
+      this.donePanes.delete(paneId);
       if (this.blockedPanes.has(paneId)) return false;
       this.blockedPanes.add(paneId);
       return this.ping("blocked", paneId);
     }
+    if (status === "done") {
+      let didSomething = false;
+      if (this.blockedPanes.delete(paneId)) {
+        didSomething = (await this.ping("resolve", paneId)) || didSomething;
+      }
+      if (this.donePanes.has(paneId)) return didSomething;
+      this.donePanes.add(paneId);
+      return (await this.ping("done", paneId)) || didSomething;
+    }
     if (!status) return false;
-    // Any other status — working, idle, done — means the agent no longer
+    this.donePanes.delete(paneId);
+    // Any other status — working, idle, etc. — means the agent no longer
     // needs the user, so the phone's notification for this pane should go.
     if (!this.blockedPanes.delete(paneId)) return false;
     return this.ping("resolve", paneId);
@@ -55,6 +67,10 @@ export class FcmPublisher {
       if (paneIds.has(paneId)) continue;
       this.blockedPanes.delete(paneId);
       void this.ping("resolve", paneId);
+    }
+    for (const paneId of [...this.donePanes]) {
+      if (paneIds.has(paneId)) continue;
+      this.donePanes.delete(paneId);
     }
   }
 

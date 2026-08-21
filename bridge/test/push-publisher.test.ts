@@ -75,7 +75,11 @@ test("done clears the notification like any other exit from blocked", async () =
   await publisher.handleEvent(statusEvent("w1:p1", "blocked"));
   await publisher.handleEvent(statusEvent("w1:p1", "done"));
 
-  assert.deepEqual(sender.sent.at(-1), { kind: "resolve", paneId: "w1:p1" });
+  assert.deepEqual(sender.sent, [
+    { kind: "blocked", paneId: "w1:p1" },
+    { kind: "resolve", paneId: "w1:p1" },
+    { kind: "done", paneId: "w1:p1" },
+  ]);
 });
 
 test("both event spellings are matched", async () => {

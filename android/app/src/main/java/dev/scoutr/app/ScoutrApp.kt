@@ -6,6 +6,7 @@ import dev.scoutr.app.data.ConnectionStore
 import dev.scoutr.app.data.SharedPreferencesLauncherSettingsStore
 import dev.scoutr.app.data.SharedPreferencesSessionCatalogStore
 import dev.scoutr.app.data.TerminalPreferencesStore
+import dev.scoutr.app.data.NotificationPreferencesStore
 import dev.scoutr.app.net.BridgeClient
 import dev.scoutr.app.net.PerformanceCounters
 import dev.scoutr.app.net.ScoutrApi
@@ -75,7 +76,8 @@ class AppContainer(application: Application) {
     val terminalPreferences = TerminalPreferencesStore(appContext)
     val performanceCounters = PerformanceCounters()
     val muteStore = MuteStore(appContext)
-    val notifications = NotificationPresenter(appContext, muteStore)
+    val notificationPreferencesStore = NotificationPreferencesStore(appContext)
+    val notifications = NotificationPresenter(appContext, muteStore, notificationPreferencesStore)
 
     private val okHttp = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
@@ -141,6 +143,9 @@ class AppContainer(application: Application) {
      * which panes still exist.
      */
     fun reconcileNotifications() {
+        // Auto-clear spec: done notifications vanish on every foreground entry,
+        // even while offline or before the fetch completes.
+        notifications.cancelAllDone()
         if (connectionStore.saved == null) return
         CoroutineScope(Dispatchers.IO).launch {
             val sessions = try {

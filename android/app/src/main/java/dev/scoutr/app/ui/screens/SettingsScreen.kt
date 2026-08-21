@@ -43,6 +43,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import dev.scoutr.app.data.AppearancePreferencesStore
+import dev.scoutr.app.data.NotificationPreferencesStore
 import dev.scoutr.app.data.ConnectionStore
 import dev.scoutr.app.data.TerminalPreferencesStore
 import dev.scoutr.app.ui.components.ConfirmDialog
@@ -92,6 +93,7 @@ fun SettingsScreen(
 ) {
     val context = LocalContext.current
     val appearance = remember(context) { AppearancePreferencesStore(context) }
+    val notificationPrefs = remember(context) { NotificationPreferencesStore(context) }
 
     Column(
         modifier
@@ -118,6 +120,7 @@ fun SettingsScreen(
 
         UpdateSection(api = api)
 
+        NotificationsSection(notificationPrefs = notificationPrefs)
         ChatSection(appearance = appearance)
 
         TypographySection(appearance = appearance)
@@ -358,6 +361,43 @@ private fun UpdateSection(api: ScoutrApi) {
                 )
             }
         }
+    }
+}
+
+/**
+ * Notifications: per-kind toggles for ringing, and a link to system channels.
+ * Blocked stays on by default; done is opt-in.
+ */
+@Composable
+private fun NotificationsSection(notificationPrefs: NotificationPreferencesStore) {
+    var blockedEnabled by remember { mutableStateOf(notificationPrefs.blockedEnabled) }
+    var doneEnabled by remember { mutableStateOf(notificationPrefs.doneEnabled) }
+
+    SettingsSection(
+        label = "Notifications",
+        footnote = "High-priority channels. System Settings lets you control sound per-channel too.",
+    ) {
+        SettingsSwitchRow(
+            title = "Ring for needs you",
+            subtitle = "When an agent needs your input.",
+            checked = blockedEnabled,
+            onCheckedChange = {
+                blockedEnabled = it
+                notificationPrefs.blockedEnabled = it
+            },
+            testTag = "settings_notifications_blocked",
+        )
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        SettingsSwitchRow(
+            title = "Ring for finished",
+            subtitle = "When an agent finishes.",
+            checked = doneEnabled,
+            onCheckedChange = {
+                doneEnabled = it
+                notificationPrefs.doneEnabled = it
+            },
+            testTag = "settings_notifications_done",
+        )
     }
 }
 

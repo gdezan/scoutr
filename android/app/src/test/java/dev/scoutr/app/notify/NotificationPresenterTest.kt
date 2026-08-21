@@ -36,6 +36,7 @@ class NotificationPresenterTest {
         manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         manager.cancelAll()
         context.getSharedPreferences(MuteStore.FILE, Context.MODE_PRIVATE).edit().clear().commit()
+        context.getSharedPreferences(dev.scoutr.app.data.NotificationPreferencesStore.FILE, Context.MODE_PRIVATE).edit().clear().commit()
         mutes = MuteStore(context)
         presenter = NotificationPresenter(context, mutes)
     }
@@ -54,11 +55,10 @@ class NotificationPresenterTest {
             ),
         )
 
-    private fun slots() = manager.activeNotifications.filter { it.id != NotificationPresenter.SUMMARY_ID }
+    private fun slots() = manager.activeNotifications.filter { it.id != NotificationPresenter.SUMMARY_ID && it.id != NotificationPresenter.DONE_SUMMARY_ID }
 
     private fun summary() =
         manager.activeNotifications.firstOrNull { it.id == NotificationPresenter.SUMMARY_ID }
-
     @Test
     fun oneBlockedAgentPostsOneSlotAndNoSummary() {
         presenter.showBlocked(blocked("w1:p1"))
@@ -176,8 +176,8 @@ class NotificationPresenterTest {
         presenter.showBlocked(blocked("w1:p1"))
 
         assertEquals(
-            listOf(NotificationPresenter.CHANNEL_NEEDS_YOU),
-            manager.notificationChannels.map { it.id },
+            setOf(NotificationPresenter.CHANNEL_NEEDS_YOU, NotificationPresenter.CHANNEL_DONE),
+            manager.notificationChannels.map { it.id }.toSet(),
         )
     }
 
