@@ -1,5 +1,6 @@
 package dev.scoutr.app.state
 
+import dev.scoutr.app.data.RepoSummary
 import dev.scoutr.app.data.SessionDescriptor
 import dev.scoutr.app.data.AgentsResponse
 import dev.scoutr.app.net.FakeScoutrApi
@@ -31,7 +32,12 @@ class ChatStatusTest {
         fake = FakeScoutrApi()
     }
 
-    private fun stubAgents(status: String, statusSinceMs: Long? = null) {
+    private fun stubAgents(
+        status: String,
+        statusSinceMs: Long? = null,
+        liveSummary: RepoSummary? = null,
+        doneSummary: RepoSummary? = null,
+    ) {
         fake.agentsResult = Result.success(
             AgentsResponse(
                 agents = listOf(
@@ -44,11 +50,22 @@ class ChatStatusTest {
                         cwd = "/home/gdezan/Dev/agents-mobile",
                         key = dev.scoutr.app.data.SessionKey("pi", "/home/gdezan/.pi/agent/sessions/s/s.jsonl"),
                         statusSinceMs = statusSinceMs?.toDouble(),
+                        liveSummary = liveSummary,
+                        doneSummary = doneSummary,
                     ),
                 ),
             ),
         )
     }
+
+    private fun dirtyMainSummary() = RepoSummary(
+        repoRoot = "/home/gdezan/Dev/agents-mobile",
+        branch = "main",
+        changedFiles = 1,
+        additions = 2,
+        deletions = 0,
+        dirty = true,
+    )
 
     /** Start the lifecycle poll and idle until its first tick has landed. */
     private fun ChatViewModel.awaitRefreshSettled() {
@@ -100,6 +117,37 @@ class ChatStatusTest {
         vm.awaitRefreshSettled()
         // No fabricated "0s": the indicator renders its label alone.
         assertEquals(null, vm.ui.value.statusSinceMs)
+    }
+
+    @Test
+    fun aRunningAgentCarriesItsLiveRepoFactsIntoState() {
+        stubAgents("working", liveSummary = dirtyMainSummary())
+        val vm = ChatViewModel(fake, null, "w1:p1", "working")
+
+        vm.awaitRefreshSettled()
+        val summary = vm.ui.value.repoSummary
+        assertEquals("main", summary?.branch)
+        assertEquals(true, summary?.dirty)
+    }
+
+    @Test
+    fun aDoneAgentCarriesItsFinalRepoFactsIntoState() {
+        stubAgents("done", doneSummary = dirtyMainSummary().copy(dirty = false))
+        val vm = ChatViewModel(fake, null, "w1:p1", "done")
+
+        vm.awaitRefreshSettled()
+        val summary = vm.ui.value.repoSummary
+        assertEquals("main", summary?.branch)
+        assertEquals(false, summary?.dirty)
+    }
+
+    @Test
+    fun anAgentOutsideGitLeavesRepoFactsNull() {
+        stubAgents("working")
+        val vm = ChatViewModel(fake, null, "w1:p1", "working")
+
+        vm.awaitRefreshSettled()
+        assertEquals(null, vm.ui.value.repoSummary)
     }
 
     @Test

@@ -10,6 +10,7 @@ import androidx.core.app.NotificationCompat
 import dev.scoutr.app.MainActivity
 import dev.scoutr.app.R
 import dev.scoutr.app.data.NotificationPreferencesStore
+import dev.scoutr.app.data.RepoSummary
 import dev.scoutr.app.data.SessionDescriptor
 import dev.scoutr.app.service.NotificationMuteReceiver
 import dev.scoutr.app.service.NotificationReplyReceiver
@@ -49,23 +50,40 @@ class NotificationPresenter(
     private val manager: NotificationManager =
         context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
 
-    /** A blocked agent, named. */
+    /** A blocked agent, named, with the repo state you'd be walking into. */
     fun showBlocked(session: SessionDescriptor) {
         if (!preferencesStore.blockedEnabled) return
         val paneId = session.live?.paneId ?: return
         val workspace = session.cwd?.trimEnd('/')?.substringAfterLast('/').orEmpty()
         val title = if (workspace.isEmpty()) session.displayName else "${session.displayName} · $workspace"
-        postBlocked(paneId, title, "Needs your input")
+        postBlocked(paneId, title, bodyWithBranch("Needs your input", session.liveSummary))
     }
 
-    /** A finished agent, named. */
+    /** A finished agent, named, with where its work sits. */
     fun showDone(session: SessionDescriptor) {
         if (!preferencesStore.doneEnabled) return
         val paneId = session.live?.paneId ?: return
         val workspace = session.cwd?.trimEnd('/')?.substringAfterLast('/').orEmpty()
         val title = if (workspace.isEmpty()) session.displayName else "${session.displayName} · $workspace"
-        postDone(paneId, title, "Finished")
+        postDone(paneId, title, bodyWithBranch("Finished", session.doneSummary))
     }
+
+    /**
+     * Appends deterministic git facts to a notification body in the Board
+     * card's own grammar: bare branch, then "uncommitted" when dirty. A
+     * missing or branchless summary leaves the body alone — no invented
+     * facts, and degraded notifications never gain context they don't have.
+     */
+    private fun bodyWithBranch(base: String, summary: RepoSummary?): String =
+        if (summary == null) {
+            base
+        } else {
+            listOfNotNull(
+                base,
+                summary.branch,
+                if (summary.dirty) "uncommitted" else null,
+            ).joinToString(" · ")
+        }
 
     /**
      * A blocked agent whose identity could not be fetched. Silence is the

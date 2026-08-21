@@ -7,6 +7,7 @@ import dev.scoutr.app.data.SessionAction
 import dev.scoutr.app.data.SessionKey
 import dev.scoutr.app.data.ModelInfo
 import dev.scoutr.app.data.QuestionEntry
+import dev.scoutr.app.data.RepoSummary
 import dev.scoutr.app.data.ModelProvider
 import dev.scoutr.app.data.FileListing
 import dev.scoutr.app.data.SessionEntry
@@ -381,6 +382,13 @@ data class ChatUiState(
     /** A set_model/set_thinking control is in flight (the sheet's busy state; the catalog fetch shows via [configuration]). */
     val configActionBusy: Boolean = false,
     val cwd: String? = null,
+    /**
+     * Deterministic git facts for this session's repo (branch, dirty, change
+     * counts), from the same /api/agents poll that drives status. Final for a
+     * done session; as-of-last-poll for a running one. Null when the cwd is
+     * not a git repo or the computation failed.
+     */
+    val repoSummary: RepoSummary? = null,
     val commands: Loadable<List<SlashCommandInfo>> = Loadable.Idle,
     /** `@` mention candidates for [cwd]; refetched every time a mention opens. */
     val files: Loadable<FileListing> = Loadable.Idle,
@@ -861,6 +869,11 @@ class ChatViewModel(
                         sessionKey = canonicalKey,
                         livePaneId = descriptor.live?.paneId,
                         agentStatus = descriptor.status,
+                        repoSummary = if (descriptor.status == "done") {
+                            descriptor.doneSummary
+                        } else {
+                            descriptor.liveSummary
+                        },
                         // An unstamped card keeps the previous stamp only while
                         // the status itself is unchanged; across a transition a
                         // stale stamp would time the wrong state, so drop it and
@@ -899,6 +912,9 @@ class ChatViewModel(
                         livePaneId = null,
                         agentStatus = if (canonicalKey != null) "done" else it.agentStatus,
                         statusSinceMs = null,
+                        // No descriptor means no repo evidence either; the chip
+                        // hides rather than reusing the last live snapshot.
+                        repoSummary = null,
                         commands = Loadable.Ready(emptyList()),
                     )
                 }

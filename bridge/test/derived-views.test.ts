@@ -4,7 +4,7 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { attachDoneSummaries, deriveSessionDescriptors } from "../src/routes/agents.js";
+import { attachRepoSummaries, deriveSessionDescriptors } from "../src/routes/agents.js";
 import type { BoardRepoSummaryCache } from "../src/board-repo-summary.js";
 import type { SessionDescriptor } from "../src/session-model.js";
 import { sessionWorkspaceRoots } from "../src/routes/review.js";
@@ -63,6 +63,7 @@ describe("deriveSessionDescriptors", () => {
       latestActivity: null,
       attention: { kind: "prompt", callId: null, questionCount: 0, currentQuestion: null, canQuickAnswer: false },
       doneSummary: null,
+      liveSummary: null,
       live: {
         paneId: "p1",
         workspaceId: "ws1",
@@ -147,7 +148,7 @@ describe("sessionWorkspaceRoots", () => {
   });
 });
 
-describe("attachDoneSummaries", () => {
+describe("attachRepoSummaries", () => {
   const summary = {
     repoRoot: "/repo",
     branch: "main",
@@ -192,13 +193,14 @@ describe("attachDoneSummaries", () => {
       latestActivity: null,
       attention: null,
       doneSummary: null,
+      liveSummary: null,
       live: { paneId: "p1", workspaceId: "ws1", tabId: "t1", status, statusSinceMs: null },
     } as SessionDescriptor;
   }
 
-  test("asks only for Done agents that carry a cwd", async () => {
+  test("asks only for live agents that carry a cwd", async () => {
     const { cache, requested } = stubCache(() => Promise.resolve(summary));
-    const enriched = await attachDoneSummaries(
+    const enriched = await attachRepoSummaries(
       [
         descriptor("done", "/repo"),
         descriptor("working", "/repo"),
@@ -209,20 +211,33 @@ describe("attachDoneSummaries", () => {
       ],
       cache,
     );
-    assert.deepEqual(requested, ["/repo"]);
+    assert.deepEqual(requested, ["/repo", "/repo", "/repo", "/repo", "/repo"]);
+    // Done cards carry the final facts; every other status carries the live
+    // snapshot under the other field, so a card never wears both labels.
     assert.ok(enriched[0]?.doneSummary);
-    for (const card of enriched.slice(1)) assert.equal(card.doneSummary, null);
+    assert.equal(enriched[0]?.liveSummary, null);
+    for (const card of enriched.slice(1, 5)) {
+      assert.ok(card?.liveSummary);
+      assert.equal(card.doneSummary, null);
+    }
   });
 
-  test("one failing repo degrades only its own card", async () => {
+  test("one failing repo degrades only its own card, done or live", async () => {
     const { cache } = stubCache((cwd) =>
       cwd === "/bad" ? Promise.reject(new Error("git blew up")) : Promise.resolve(summary),
     );
-    const [good, bad] = await attachDoneSummaries(
-      [descriptor("done", "/good"), descriptor("done", "/bad")],
+    const [good, bad, liveGood, liveBad] = await attachRepoSummaries(
+      [
+        descriptor("done", "/good"),
+        descriptor("done", "/bad"),
+        descriptor("working", "/good"),
+        descriptor("working", "/bad"),
+      ],
       cache,
     );
     assert.ok(good?.doneSummary);
     assert.equal(bad?.doneSummary, null);
+    assert.ok(liveGood?.liveSummary);
+    assert.equal(liveBad?.liveSummary, null);
   });
 });

@@ -3,7 +3,7 @@ import type { AgentBackend } from "./agents/types.js";
 import { getBackendOrNull } from "./agents/registry.js";
 import type { AgentInfo, AgentSessionInfo } from "./herdr/types.js";
 import { promptAttention, type AttentionSummary, type BoardDetail } from "./board-detail.js";
-import type { DoneRepoSummary } from "./board-repo-summary.js";
+import type { RepoSummary } from "./board-repo-summary.js";
 /** Durable identity for one backend-owned coding-agent transcript. */
 export interface SessionKey {
   agentKind: string;
@@ -42,10 +42,17 @@ export interface SessionDescriptor {
   attention: AttentionSummary | null;
   /**
    * Deterministic git evidence for a Done card (branch, dirty/clean, change
-   * counts). Null for every non-done status and whenever the repo summary
-   * is unavailable; never a safety verdict.
+   * counts). Null unless this is a Done agent with a cwd and the summary
+   * computation succeeded; never a safety verdict.
    */
-  doneSummary: DoneRepoSummary | null;
+  doneSummary: RepoSummary | null;
+  /**
+   * The same git evidence for a live (non-done) agent, as fresh as the last
+   * TTL-bounded computation — the repo state keeps moving under a running
+   * agent. Null for Done cards (they carry `doneSummary`) and whenever the
+   * computation failed; never a safety verdict.
+   */
+  liveSummary: RepoSummary | null;
   live: SessionLiveAttachment | null;
 }
 
@@ -96,8 +103,10 @@ export function descriptorForLiveAgent(
     // the herdr status known, so the board detail cannot say it on its own.
     attention: detail?.attention
       ?? (agent.agent_status === "blocked" ? promptAttention() : null),
-    // Only the /api/agents route fills this in, for done cards with a cwd.
+    // Only the /api/agents route fills these in; done cards get doneSummary,
+    // every other live status gets liveSummary.
     doneSummary: null,
+    liveSummary: null,
     live: {
       paneId: agent.pane_id,
       workspaceId: agent.workspace_id,

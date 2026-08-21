@@ -82,7 +82,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.scoutr.app.data.AttentionSummary
-import dev.scoutr.app.data.DoneRepoSummary
+import dev.scoutr.app.data.RepoSummary
 import dev.scoutr.app.ui.theme.DiffPalette
 import dev.scoutr.app.data.QuestionOption
 import dev.scoutr.app.data.SessionDescriptor
@@ -624,16 +624,21 @@ private fun AgentCardBody(
                             overflow = TextOverflow.Ellipsis,
                         )
                     }
-                    // Deterministic git evidence for a settled agent: what
-                    // changed, and anything obviously risky about the repo state.
-                    if (status == AgentStatus.Done) {
-                        agent.doneSummary?.let { summary ->
-                            DoneSummaryBlock(
-                                summary = summary,
-                                paneId = agent.live?.paneId.orEmpty(),
-                                onReview = onReview,
-                            )
-                        }
+                    // Deterministic git evidence: what changed and anything
+                    // obviously risky about the repo state — final for a done
+                    // agent, as-of-last-refresh for a running one.
+                    val cardSummary = if (status == AgentStatus.Done) {
+                        agent.doneSummary?.let { it to false }
+                    } else {
+                        agent.liveSummary?.let { it to true }
+                    }
+                    cardSummary?.let { (summary, live) ->
+                        CardSummaryBlock(
+                            summary = summary,
+                            paneId = agent.live?.paneId.orEmpty(),
+                            live = live,
+                            onReview = onReview,
+                        )
                     }
                     if (isNeedsYou) {
                         AttentionBlock(
@@ -702,7 +707,7 @@ private fun AgentCardBody(
  * Tracking state as git reports it: shown only when an upstream exists and
  * the branch has actually diverged, so no invented zeros pose as evidence.
  */
-internal fun doneTrackingLabel(summary: DoneRepoSummary): String? {
+internal fun trackingLabel(summary: RepoSummary): String? {
     // No upstream means the counts are meaningless, so they are omitted
     // rather than invented; a known upstream always reports both counts,
     // including synchronized "0 ahead · 0 behind".
@@ -711,15 +716,17 @@ internal fun doneTrackingLabel(summary: DoneRepoSummary): String? {
 }
 
 /**
- * Deterministic repo evidence on a Done card: what changed and the branch
+ * Deterministic repo evidence on a Board card: what changed and the branch
  * state, straight from git facts. It labels facts only — never "safe" or
  * "tests passed" — and offers Review as the drill-down through an accessibility
- * action rather than making the stats individually interactive.
+ * action rather than making the stats individually interactive. A live card
+ * says so in its metadata: its facts are as of the last refresh, not final.
  */
 @Composable
-private fun DoneSummaryBlock(
-    summary: DoneRepoSummary,
+private fun CardSummaryBlock(
+    summary: RepoSummary,
     paneId: String,
+    live: Boolean,
     onReview: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -737,15 +744,19 @@ private fun DoneSummaryBlock(
         }
     }
     val metadata = listOfNotNull(
+        if (live) "live" else null,
         summary.branch,
         if (summary.dirty) "uncommitted" else null,
-        doneTrackingLabel(summary),
+        trackingLabel(summary),
     ).joinToString(" · ")
-    val description = when {
+    val base = when {
         summary.dirty ->
             "${stats.text}: ${metadata ?: "no branch"}. Review changes for details."
-        else -> "${stats.text}. ${doneTrackingLabel(summary)?.let { "$it. " } ?: ""}Review changes for details."
+        else -> "${stats.text}. ${trackingLabel(summary)?.let { "$it. " } ?: ""}Review changes for details."
     }
+    // A live card leads with its freshness so TalkBack never reads churny
+    // numbers as final.
+    val description = if (live) "As of the last refresh: $base" else base
     Column(
         modifier = modifier
             .padding(top = 3.dp)
@@ -758,7 +769,7 @@ private fun DoneSummaryBlock(
                     },
                 )
             }
-            .testTag("board_done_summary_$paneId"),
+            .testTag(if (live) "board_live_summary_$paneId" else "board_done_summary_$paneId"),
     ) {
         Text(
             text = stats,

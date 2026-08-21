@@ -142,12 +142,14 @@ data class AttentionQuestion(
     val multiSelect: Boolean = false,
 )
 /**
- * Deterministic git evidence for a Done Board card (mirrors `DoneRepoSummary` in
- * bridge/src/board-repo-summary.ts). Every field is a git fact; nothing here
- * claims tests passed or code is safe to ship.
+ * Deterministic git evidence for a Board card, Done or live (mirrors
+ * `RepoSummary` in bridge/src/board-repo-summary.ts). Every field is a git
+ * fact; nothing here claims tests passed or code is safe to ship. On a live
+ * card the facts are only as fresh as the bridge's last TTL-bounded
+ * computation.
  */
 @Serializable
-data class DoneRepoSummary(
+data class RepoSummary(
     val repoRoot: String = "",
     val branch: String? = null,
     /** Upstream tracking branch when known; ahead/behind are meaningful only then. */
@@ -181,8 +183,14 @@ data class SessionDescriptor(
     val transcriptSize: Double? = null,
     val latestActivity: String? = null,
     val attention: AttentionSummary? = null,
-    /** Git evidence for Done cards; the bridge fills it only for done agents. */
-    val doneSummary: DoneRepoSummary? = null,
+    /** Final git facts for Done cards; the bridge fills it only for done agents. */
+    val doneSummary: RepoSummary? = null,
+    /**
+     * The same git facts for a running agent, as of the bridge's last
+     * TTL-bounded computation. Null for done cards (they carry [doneSummary])
+     * and whenever the computation failed.
+     */
+    val liveSummary: RepoSummary? = null,
     val live: SessionLiveAttachment? = null,
 ) {
     val status: String get() = live?.status ?: "done"

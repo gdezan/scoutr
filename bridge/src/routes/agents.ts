@@ -31,18 +31,23 @@ export async function deriveSessionDescriptors(
 }
 
 /**
- * Attach deterministic repo summaries to Done cards, best-effort. Only Done
+ * Attach deterministic repo summaries to Board cards, best-effort. Only live
  * agents with a cwd incur git work; a summary failure degrades that one card
- * to no summary instead of failing the Board response.
+ * to no summary instead of failing the Board response. Done cards carry the
+ * final facts in `doneSummary`; every other status carries the last
+ * TTL-bounded snapshot in `liveSummary`.
  */
-export async function attachDoneSummaries(
+export async function attachRepoSummaries(
   sessions: SessionDescriptor[],
   cache: BoardRepoSummaryCache,
 ): Promise<SessionDescriptor[]> {
   return Promise.all(sessions.map(async (session) => {
-    if (session.live?.status !== "done" || !session.cwd) return session;
-    const doneSummary = await cache.summaryFor(session.cwd).catch(() => null);
-    return doneSummary ? { ...session, doneSummary } : session;
+    if (!session.live || !session.cwd) return session;
+    const summary = await cache.summaryFor(session.cwd).catch(() => null);
+    if (!summary) return session;
+    return session.live.status === "done"
+      ? { ...session, doneSummary: summary }
+      : { ...session, liveSummary: summary };
   }));
 }
 
@@ -56,7 +61,7 @@ async function agents(ctx: RouteContext): Promise<RouteResult> {
     (paneId) => ctx.deps.tracker.since(paneId),
     ctx.deps.boardDetail,
   );
-  const enriched = await attachDoneSummaries(sessions, ctx.deps.boardRepoSummary);
+  const enriched = await attachRepoSummaries(sessions, ctx.deps.boardRepoSummary);
   return { status: 200, body: { ok: true, agents: enriched } };
 }
 

@@ -9,13 +9,15 @@ import {
 } from "./review.js";
 
 /**
- * Deterministic repo evidence for a Done agent's Board card.
+ * Deterministic repo evidence for a Board card, Done or live.
  *
  * Every field maps to a git fact; nothing here is a quality judgment. The UI
  * labels the facts (branch, dirty/clean, change counts) and never concludes
- * "safe to ship" — see .plans/p1-done-ship-readiness-summary.md.
+ * "safe to ship" — see .plans/p1-done-ship-readiness-summary.md. On a Done
+ * card the facts are final; on a live card they are only as fresh as the last
+ * TTL-bounded computation, so UI labels them as of that moment.
  */
-export interface DoneRepoSummary {
+export interface RepoSummary {
   repoRoot: string;
   branch: string | null;
   /** Upstream tracking branch when known; ahead/behind are meaningful only then. */
@@ -33,11 +35,11 @@ export interface DoneRepoSummary {
 }
 
 /** Pure derivation from already-fetched review primitives. */
-export function deriveDoneRepoSummary(
+export function deriveRepoSummary(
   repoRoot: string,
   overview: ReviewOverview,
   diff: ReviewDiffResult,
-): DoneRepoSummary {
+): RepoSummary {
   const paths = new Set<string>();
   for (const entry of overview.status) {
     // Porcelain renames/copies render as "old -> new"; both sides are real
@@ -72,7 +74,7 @@ export function deriveDoneRepoSummary(
 
 interface CacheEntry {
   at: number;
-  summary: DoneRepoSummary | null;
+  summary: RepoSummary | null;
 }
 
 interface RootEntry {
@@ -83,19 +85,20 @@ interface RootEntry {
 const MEMO_CAP = 64;
 
 /**
- * Shared, TTL-bounded repo summaries for Done Board cards.
+ * Shared, TTL-bounded repo summaries for Board cards, Done or live.
  *
  * The 3-second Board poll must not spawn a git subprocess storm, so work is
  * memoized by canonical repo root with a short TTL and concurrent callers
- * share one in-flight computation. Multiple Done agents in one repo cost one
- * summary per TTL window. Failures degrade to null (cached for the same TTL)
- * and never propagate to the route.
+ * share one in-flight computation. Multiple agents in one repo cost one
+ * summary per TTL window — which also bounds how fresh a live card's facts
+ * can be. Failures degrade to null (cached for the same TTL) and never
+ * propagate to the route.
  */
 export class BoardRepoSummaryCache {
   private readonly roots = new Map<string, RootEntry>();
   private readonly rootInFlight = new Map<string, Promise<string | null>>();
   private readonly entries = new Map<string, CacheEntry>();
-  private readonly inFlight = new Map<string, Promise<DoneRepoSummary | null>>();
+  private readonly inFlight = new Map<string, Promise<RepoSummary | null>>();
 
   constructor(
     private readonly options: { ttlMs?: number; now?: () => number } = {},
@@ -109,7 +112,7 @@ export class BoardRepoSummaryCache {
     return (this.options.now ?? Date.now)();
   }
 
-  async summaryFor(cwd: string): Promise<DoneRepoSummary | null> {
+  async summaryFor(cwd: string): Promise<RepoSummary | null> {
     if (!cwd) return null;
     const root = await this.rootFor(cwd);
     if (!root) return null;
@@ -157,7 +160,7 @@ export class BoardRepoSummaryCache {
    * overview; a failing diff with a live HEAD omits the whole summary rather
    * than presenting absent diff evidence as exact "+0 −0".
    */
-  private async compute(root: string): Promise<DoneRepoSummary | null> {
+  private async compute(root: string): Promise<RepoSummary | null> {
     const at = this.now();
     const summary = await this.summarize(root).catch(() => null);
     this.entries.set(root, { at, summary });
@@ -165,7 +168,7 @@ export class BoardRepoSummaryCache {
     return summary;
   }
 
-  private async summarize(root: string): Promise<DoneRepoSummary | null> {
+  private async summarize(root: string): Promise<RepoSummary | null> {
     const hasHead = await gitHasHead(root);
     const [overview, diff] = await Promise.all([
       hasHead ? reviewOverview(root, [root]) : reviewUnbornOverview(root, [root]),
@@ -174,7 +177,7 @@ export class BoardRepoSummaryCache {
     if (!overview || (hasHead && !diff)) return null;
     // Unborn HEAD: nothing is committed, so an empty diff stat is a fact,
     // not an invention.
-    return deriveDoneRepoSummary(root, overview, diff ?? { stat: [], truncated: false });
+    return deriveRepoSummary(root, overview, diff ?? { stat: [], truncated: false });
   }
 
   private evict(map: Map<string, { at: number }>): void {

@@ -4,7 +4,7 @@ import { execFileSync } from "node:child_process";
 import { mkdtemp, rm, writeFile, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { BoardRepoSummaryCache, deriveDoneRepoSummary } from "../src/board-repo-summary.js";
+import { BoardRepoSummaryCache, deriveRepoSummary } from "../src/board-repo-summary.js";
 
 interface Repo {
   path: string;
@@ -37,9 +37,9 @@ function fakeClock() {
   };
 }
 
-describe("deriveDoneRepoSummary", () => {
+describe("deriveRepoSummary", () => {
   test("counts the union of status and diff paths, including renames", () => {
-    const summary = deriveDoneRepoSummary(
+    const summary = deriveRepoSummary(
       "/repo",
       {
         path: "/repo",

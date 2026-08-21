@@ -26,7 +26,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.unit.dp
 import dev.scoutr.app.data.AttentionQuestion
-import dev.scoutr.app.data.DoneRepoSummary
+import dev.scoutr.app.data.RepoSummary
 import androidx.compose.ui.test.performCustomAccessibilityActionWithLabel
 import androidx.compose.ui.test.onAllNodesWithTag
 import dev.scoutr.app.data.AttentionSummary
@@ -769,7 +769,7 @@ class BoardScreenTest {
         cwd: String,
         model: String?,
         activity: String?,
-        summary: DoneRepoSummary?,
+        summary: RepoSummary?,
     ) = blockedAgent(paneId, title, cwd, model, activity).let { descriptor ->
         descriptor.copy(live = descriptor.live?.copy(status = "done"), doneSummary = summary)
     }
@@ -779,7 +779,7 @@ class BoardScreenTest {
         ahead: Int = 0,
         behind: Int = 0,
         statusTruncated: Boolean = false,
-    ) = DoneRepoSummary(
+    ) = RepoSummary(
         repoRoot = "/repo/a",
         branch = "main",
         upstream = upstream,
@@ -792,7 +792,7 @@ class BoardScreenTest {
         statusTruncated = statusTruncated,
     )
 
-    private fun cleanSummary() = DoneRepoSummary(
+    private fun cleanSummary() = RepoSummary(
         repoRoot = "/repo/a",
         branch = "main",
         dirty = false,

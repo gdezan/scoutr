@@ -117,6 +117,8 @@ import androidx.compose.ui.text.withStyle
 import dev.scoutr.app.ui.components.ChatProseMeasure
 import dev.scoutr.app.ui.components.AgentMark
 import dev.scoutr.app.ui.agentDisplayTitle
+import dev.scoutr.app.ui.projectFolderName
+import dev.scoutr.app.data.RepoSummary
 import dev.scoutr.app.ui.theme.DiffPalette
 import dev.scoutr.app.ui.theme.ScoutrType
 import androidx.compose.ui.input.key.Key
@@ -150,6 +152,8 @@ import dev.scoutr.app.ui.components.PressTintSurface
 import dev.scoutr.app.ui.components.SkillInvocationChip
 import dev.scoutr.app.ui.components.AskCard
 import dev.scoutr.app.ui.components.AskAnswerBubble
+import dev.scoutr.app.ui.components.StatusRing
+import dev.scoutr.app.ui.components.StatusRingAnimation
 import dev.scoutr.app.ui.components.WorkingIndicator
 import dev.scoutr.app.ui.components.WorkingIndicatorMode
 import dev.scoutr.app.ui.components.workingIndicatorMode
@@ -247,6 +251,7 @@ fun ChatScreen(
             onOpenConfiguration = { configurationOpen = true },
             onBack = onBack,
             cwd = ui.cwd,
+            repoSummary = ui.repoSummary,
             onOpenTerminal = onOpenTerminal,
             onOpenFiles = onOpenFiles,
             onOpenReview = onOpenReview,
@@ -531,6 +536,8 @@ private fun ChatHeader(
     onOpenConfiguration: () -> Unit,
     onBack: () -> Unit,
     cwd: String?,
+    /** Git facts for this session's repo; null hides the branch chip entirely. */
+    repoSummary: RepoSummary?,
     onOpenTerminal: (() -> Unit)?,
     onOpenFiles: ((String) -> Unit)?,
     onOpenReview: ((String) -> Unit)?,
@@ -680,6 +687,17 @@ private fun ChatHeader(
                     testTag = "chat_agent_config",
                 )
             }
+            // The workspace fact this rail exists for: which repo, on which
+            // branch, and whether the working tree carries uncommitted work.
+            // Read-only — the rail is configuration, not actions (§7a).
+            if (repoSummary != null) {
+                HeaderBranchChip(
+                    repo = projectFolderName(cwd) ?: "git",
+                    branch = repoSummary.branch,
+                    dirty = repoSummary.dirty,
+                    testTag = "chat_branch_config",
+                )
+            }
             if (agentKind == "pi") {
                 HeaderConfigurationChip(
                     label = "Provider",
@@ -728,6 +746,59 @@ private fun HeaderAgentChip(agentKind: String?, testTag: String) {
     ) {
         Box(Modifier.padding(horizontal = 10.dp, vertical = 6.dp)) {
             AgentMark(agentKind, size = 14.dp)
+        }
+    }
+}
+
+/**
+ * The workspace fact in the chat header rail: repo name as the quiet label,
+ * branch as the emphatic value, and the shared 9dp status ring in the warning
+ * color when the working tree is dirty. Same Space Grotesk grammar as the
+ * configuration chips (§7a); read-only this cut.
+ */
+@Composable
+private fun HeaderBranchChip(
+    repo: String,
+    branch: String?,
+    dirty: Boolean,
+    testTag: String,
+) {
+    Surface(
+        shape = RoundedCornerShape(4.dp),
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        modifier = Modifier.testTag(testTag),
+    ) {
+        Row(
+            Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                buildAnnotatedString {
+                    withStyle(SpanStyle(color = MaterialTheme.colorScheme.onSurfaceVariant)) {
+                        append(repo)
+                    }
+                    append(" ")
+                    withStyle(
+                        SpanStyle(
+                            color = if (branch == null) MaterialTheme.colorScheme.onSurfaceVariant
+                            else MaterialTheme.colorScheme.onSurface,
+                            fontWeight = if (branch == null) FontWeight.Medium else FontWeight.SemiBold,
+                        ),
+                    ) {
+                        append(branch ?: "no branch")
+                    }
+                },
+                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium),
+                maxLines = 1,
+            )
+            // DESIGN.md's status dot: a 9dp outlined ring, never a filled circle.
+            if (dirty) {
+                StatusRing(
+                    color = MaterialTheme.colorScheme.tertiary,
+                    animation = StatusRingAnimation.Static,
+                )
+            }
         }
     }
 }

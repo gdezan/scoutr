@@ -3,6 +3,8 @@ package dev.scoutr.app.notify
 import android.app.NotificationManager
 import android.content.Context
 import org.robolectric.RuntimeEnvironment
+import dev.scoutr.app.data.NotificationPreferencesStore
+import dev.scoutr.app.data.RepoSummary
 import dev.scoutr.app.data.SessionDescriptor
 import dev.scoutr.app.data.SessionLiveAttachment
 import dev.scoutr.app.state.MuteStore
@@ -41,19 +43,54 @@ class NotificationPresenterTest {
         presenter = NotificationPresenter(context, mutes)
     }
 
-    private fun blocked(paneId: String, name: String = "pi", cwd: String? = "/home/gdezan/Dev/scoutr") =
-        SessionDescriptor(
-            agentKind = "pi",
-            displayName = name,
-            title = "$name pane",
-            cwd = cwd,
-            live = SessionLiveAttachment(
-                paneId = paneId,
-                workspaceId = "w1",
-                tabId = "t1",
-                status = "blocked",
-            ),
-        )
+    private fun blocked(
+        paneId: String,
+        name: String = "pi",
+        cwd: String? = "/home/gdezan/Dev/scoutr",
+        liveSummary: RepoSummary? = null,
+    ) = session(paneId, status = "blocked", name = name, cwd = cwd, liveSummary = liveSummary)
+
+    private fun session(
+        paneId: String,
+        status: String,
+        name: String = "pi",
+        cwd: String? = "/home/gdezan/Dev/scoutr",
+        liveSummary: RepoSummary? = null,
+        doneSummary: RepoSummary? = null,
+    ) = SessionDescriptor(
+        agentKind = "pi",
+        displayName = name,
+        title = "$name pane",
+        cwd = cwd,
+        liveSummary = liveSummary,
+        doneSummary = doneSummary,
+        live = SessionLiveAttachment(
+            paneId = paneId,
+            workspaceId = "w1",
+            tabId = "t1",
+            status = status,
+        ),
+    )
+
+    /**
+     * Done pushes are opt-in (`DEFAULT_DONE = false`), so every done-path
+     * test flips the same toggle the user would.
+     */
+    private fun enableDoneNotifications() {
+        NotificationPreferencesStore(context).doneEnabled = true
+    }
+
+    /** Dirty working tree on main: the case worth naming in a push. */
+    private fun dirtyMainSummary() = RepoSummary(
+        repoRoot = "/home/gdezan/Dev/scoutr",
+        branch = "main",
+        changedFiles = 2,
+        additions = 3,
+        deletions = 1,
+        dirty = true,
+    )
+
+    private fun cleanMainSummary() = dirtyMainSummary().copy(dirty = false)
 
     private fun slots() = manager.activeNotifications.filter { it.id != NotificationPresenter.SUMMARY_ID && it.id != NotificationPresenter.DONE_SUMMARY_ID }
 
@@ -208,6 +245,43 @@ class NotificationPresenterTest {
         presenter.showDegraded("w1:p1")
 
         assertTrue("mute must hold for the degraded path too", slots().isEmpty())
+    }
+
+    @Test
+    fun aBlockedAgentNamesItsBranchAndUncommittedWork() {
+        presenter.showBlocked(blocked("w1:p1", liveSummary = dirtyMainSummary()))
+
+        assertEquals("Needs your input · main · uncommitted", slots().single().notification.extras.getString("android.text"))
+    }
+
+    @Test
+    fun aDoneAgentNamesWhereItsWorkSits() {
+        enableDoneNotifications()
+        presenter.showDone(session("w1:p1", status = "done", doneSummary = cleanMainSummary()))
+
+        assertEquals("Finished · main", slots().single().notification.extras.getString("android.text"))
+    }
+
+    @Test
+    fun aDoneAgentWithNoBranchStillFlagsUncommittedWork() {
+        enableDoneNotifications()
+        val detached = dirtyMainSummary().copy(branch = null)
+        presenter.showDone(session("w1:p1", status = "done", doneSummary = detached))
+
+        assertEquals("Finished · uncommitted", slots().single().notification.extras.getString("android.text"))
+    }
+
+    @Test
+    fun notificationsWithoutRepoEvidenceStayUnchanged() {
+        enableDoneNotifications()
+        presenter.showBlocked(blocked("w1:p1", name = "pi"))
+        presenter.showDone(session("w1:p2", status = "done", name = "claude"))
+
+        val texts = slots().associate {
+            it.notification.extras.getString("android.title") to it.notification.extras.getString("android.text")
+        }
+        assertEquals("Needs your input", texts["pi · scoutr"])
+        assertEquals("Finished", texts["claude · scoutr"])
     }
 
     @Test
