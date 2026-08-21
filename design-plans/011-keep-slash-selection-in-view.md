@@ -15,7 +15,7 @@
 - **Priority**: P2
 - **Effort**: S
 - **Risk**: LOW
-- **Depends on**: `design-plans/007-stabilize-chat-scroll-to-end.md`
+- **Depends on**: Plan 007 (Chat scroll predictability) — implemented and accepted 2026-08-15 as part of the Chat refresh performance slice (`docs/performance-study.md`, recommended sequence item 4); its plan file was removed per the completed-plans convention.
 - **Category**: navigation, friction, keyboard, a11y
 - **Planned at**: commit `0e67682`, 2026-08-12
 
