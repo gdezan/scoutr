@@ -60,7 +60,7 @@ before(() => {
       layouts: [],
     }) as never,
     usage: { all: async () => ({}) } as never,
-    config: { configDir: "/tmp/scoutr-test-config", token: TOKEN, port: PORT },
+    config: { configDir: "/tmp/scoutr-test-config", hostId: "host_test", token: TOKEN, port: PORT },
     terminal: new FakeTerminalLauncher(),
   });
 });

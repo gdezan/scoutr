@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 import { createSession, controlSession, launchStoredSession, SessionsError, THINKING_LEVELS } from "../src/sessions.js";
 import { piLaunchCommand, thinkingLevelKeys } from "../src/agents/pi/index.js";
 import { shellQuote } from "../src/shell.js";
+import { FileWorkspaceRootStore } from "../src/workspace-roots.js";
 import { pane, snapshot, tab, workspace } from "./support/snapshot.js";
 
 function fakeHerdr(overrides: Record<string, unknown> = {}) {
@@ -563,5 +564,170 @@ describe("controlSession", () => {
   it("rejects an unknown action", async () => {
     const herdr = fakeHerdr();
     await assert.rejects(controlSession(herdr, { paneId: "p1", action: "explode" as never }), SessionsError);
+  });
+});
+
+/**
+ * Persisted workspace roots make reuse survive a root pane cd-ing elsewhere.
+ * The live snapshot stays authoritative: dead ids are pruned, never reused,
+ * and Scoutr records only workspaces it created or deliberately joined.
+ */
+describe("createSession with persisted workspace roots", () => {
+  /** A workspace rooted at `rootCwd`, plus the live pane tab.create will return. */
+  function folderWorkspace(options: { rootCwd: string; workspaceId?: string; number?: number }) {
+    const workspaceId = options.workspaceId ?? "ws1";
+    return {
+      workspace: workspace({ workspace_id: workspaceId, number: options.number ?? 1 }),
+      root: pane({ pane_id: `${workspaceId}-root`, workspace_id: workspaceId, tab_id: `${workspaceId}-t0`, cwd: options.rootCwd }),
+    };
+  }
+
+  /** The pane tab.create hands back, already running an agent. */
+  const launched = (workspaceId: string) =>
+    pane({ pane_id: "p1", workspace_id: workspaceId, tab_id: "t1", agent: "pi", cwd });
+
+  const elsewhere = join(homedir(), "somewhere-else");
+
+  async function tempStore() {
+    const dir = await mkdtemp(join(tmpdir(), "scoutr-sessions-roots-"));
+    return { store: new FileWorkspaceRootStore(dir), cleanup: () => rm(dir, { recursive: true, force: true }) };
+  }
+
+  it("reuses a recorded workspace even after its root pane cd-ed elsewhere", async () => {
+    const { store, cleanup } = await tempStore();
+    try {
+      await store.record("ws1", cwd);
+      const moved = folderWorkspace({ rootCwd: elsewhere });
+      const herdr = fakeHerdr({
+        snapshot: snapshot([moved.root, launched("ws1")], [], [moved.workspace]),
+      });
+
+      const created = await createSession(herdr, { cwd, model: "m" }, store);
+
+      assert.equal(created.workspaceId, "ws1");
+      assert.equal(herdr.calls[1].method, "tab.create");
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it("records a workspace it created so later launches skip the inference", async () => {
+    const { store, cleanup } = await tempStore();
+    try {
+      const herdr = fakeHerdr();
+      await createSession(herdr, { cwd, model: "m" }, store);
+      const records = await store.list();
+      assert.deepEqual(records.map((record) => record.workspaceId), ["ws1"]);
+      assert.equal(records[0]?.cwd, cwd);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it("drops the record when the workspace it just created rolls back", async () => {
+    const { store, cleanup } = await tempStore();
+    try {
+      const herdr = fakeHerdr({ paneSendInputError: new Error("send failed") });
+      await assert.rejects(createSession(herdr, { cwd, model: "m" }, store), /session launch failed/);
+      assert.deepEqual(await store.list(), []);
+      assert.deepEqual(herdr.calls.at(-1)?.method, "workspace.close");
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it("prunes a stale record and falls back to the live-snapshot inference", async () => {
+    const { store, cleanup } = await tempStore();
+    try {
+      await store.record("ws-dead", cwd);
+      const existing = folderWorkspace({ rootCwd: cwd });
+      const herdr = fakeHerdr({
+        snapshot: snapshot([existing.root, launched("ws1")], [], [existing.workspace]),
+      });
+
+      const created = await createSession(herdr, { cwd, model: "m" }, store);
+
+      // The dead id is gone and the live inference result is now recorded.
+      assert.deepEqual((await store.list()).map((record) => record.workspaceId), ["ws1"]);
+      assert.equal(created.workspaceId, "ws1");
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it("records an unrecorded live workspace when the inference reuses it", async () => {
+    const { store, cleanup } = await tempStore();
+    try {
+      const existing = folderWorkspace({ rootCwd: cwd });
+      const herdr = fakeHerdr({
+        snapshot: snapshot([existing.root, launched("ws1")], [], [existing.workspace]),
+      });
+
+      await createSession(herdr, { cwd, model: "m" }, store);
+
+      assert.deepEqual(await store.list().then((records) => records.map((record) => record.workspaceId)), ["ws1"]);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it("prefers the lowest-numbered workspace among recorded duplicates for one folder", async () => {
+    const { store, cleanup } = await tempStore();
+    try {
+      await store.record("ws9", cwd);
+      await store.record("ws2", cwd);
+      const second = folderWorkspace({ rootCwd: cwd, workspaceId: "ws2", number: 2 });
+      const ninth = folderWorkspace({ rootCwd: cwd, workspaceId: "ws9", number: 9 });
+      const herdr = fakeHerdr({
+        snapshot: snapshot([second.root, ninth.root, launched("ws2"), launched("ws9")], [], [
+          second.workspace,
+          ninth.workspace,
+        ]),
+      });
+
+      const created = await createSession(herdr, { cwd, model: "m" }, store);
+
+      assert.equal(created.workspaceId, "ws2");
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it("never closes a reused workspace when rollback has no tab id to undo", async () => {
+    const { store, cleanup } = await tempStore();
+    try {
+      await store.record("ws1", cwd);
+      const moved = folderWorkspace({ rootCwd: elsewhere });
+      const herdr = fakeHerdr({
+        snapshot: snapshot([moved.root, launched("ws1")], [], [moved.workspace]),
+        tabCreate: { root_pane: { pane_id: "p1" } },
+        paneSendInputError: new Error("send failed"),
+      });
+
+      await assert.rejects(createSession(herdr, { cwd, model: "m" }, store), /session launch failed/);
+
+      // The joined workspace and its recorded root must survive the botched launch.
+      assert.equal(herdr.calls.some((call) => call.method === "workspace.close"), false);
+      assert.deepEqual((await store.list()).map((record) => record.workspaceId), ["ws1"]);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it("keeps a created workspace's record when its rollback close fails", async () => {
+    const { store, cleanup } = await tempStore();
+    try {
+      const herdr = fakeHerdr({
+        paneSendInputError: new Error("send failed"),
+        workspaceCloseError: new Error("close failed"),
+      });
+
+      await assert.rejects(createSession(herdr, { cwd, model: "m" }, store), /session launch failed/);
+
+      // herdr still reports (or may report) the workspace; prune settles it later.
+      assert.deepEqual((await store.list()).map((record) => record.workspaceId), ["ws1"]);
+    } finally {
+      await cleanup();
+    }
   });
 });

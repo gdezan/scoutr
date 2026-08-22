@@ -72,7 +72,8 @@ class AppContainer(application: Application) {
 
     val connectionStore = ConnectionStore(appContext)
     val launcherSettingsStore = SharedPreferencesLauncherSettingsStore(appContext)
-    val sessionCatalogStore = SharedPreferencesSessionCatalogStore(appContext)
+    val sessionCatalogStore =
+        SharedPreferencesSessionCatalogStore(appContext) { connectionStore.saved?.hostId }
     val terminalPreferences = TerminalPreferencesStore(appContext)
     val performanceCounters = PerformanceCounters()
     val muteStore = MuteStore(appContext)

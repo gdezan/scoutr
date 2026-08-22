@@ -29,7 +29,7 @@ function sequencedSnapshots(fake: FakeHerdr, pre: SessionSnapshot, post: Session
 }
 
 function depsFor(fake: HerdrPort): RouteContext["deps"] {
-  return { herdr: fake, config: { configDir: "/tmp/scoutr-test-config", token: TOKEN } } as unknown as RouteContext["deps"];
+  return { herdr: fake, config: { configDir: "/tmp/scoutr-test-config", hostId: "host_test", token: TOKEN } } as unknown as RouteContext["deps"];
 }
 
 function streamOf(chunks: Buffer[]): AsyncIterable<Buffer> {

@@ -139,6 +139,7 @@ async function main(): Promise<void> {
         const { createFcmSender } = await import("./push/fcm.js");
         const { JsonDeviceRegistry } = await import("./push/devices.js");
         const { FcmPublisher } = await import("./push/publisher.js");
+        const { FileWorkspaceRootStore } = await import("./workspace-roots.js");
 
         const { pruneStalePendingAsks } = await import("./agents/claude/pending-asks.js");
 
@@ -172,6 +173,7 @@ async function main(): Promise<void> {
           config,
           publisher: push?.publisher,
           devices: push?.devices,
+          workspaceRoots: new FileWorkspaceRootStore(config.configDir),
         });
         console.error(`scoutr bridge listening on ${server.url}`);
         // Never print the token: the credential would persist in journald.

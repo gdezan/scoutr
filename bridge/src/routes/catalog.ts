@@ -83,7 +83,7 @@ async function storedSessionAction(ctx: RouteContext): Promise<RouteResult> {
     const created = await launchStoredSession(ctx.deps.herdr, {
       path: target,
       mode: action,
-    });
+    }, ctx.deps.workspaceRoots);
     return { status: 201, body: { ok: true, ...created } };
   }
   if (action === "rename") {

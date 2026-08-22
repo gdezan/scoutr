@@ -44,7 +44,7 @@ function fakeDeps(sessionCatalogRoot?: string) {
       herdr: fake,
       feed: feed as never,
       usage: usage as never,
-      config: { configDir: "/tmp/scoutr-test-config", token: TOKEN, port: PORT },
+      config: { configDir: "/tmp/scoutr-test-config", hostId: "host_test", token: TOKEN, port: PORT },
       terminal: new FakeTerminalLauncher(),
       sessionCatalogRoot,
     },

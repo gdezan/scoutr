@@ -4,6 +4,17 @@ import java.nio.charset.StandardCharsets
 import java.util.Base64
 
 private const val SESSION_KEY_PREFIX = "sk1"
+private const val HOST_SESSION_KEY_PREFIX = "hsk1"
+
+/**
+ * A session identity pinned to one bridge installation. Device-local metadata
+ * (pins, archives) is stored under this identity so two bridges exposing the
+ * same (agentKind, path) can never share entries.
+ */
+data class HostSessionKey(
+    val hostId: String,
+    val session: SessionKey,
+)
 
 /** Versioned, path-safe encoding used by navigation and on-device preferences. */
 fun SessionKey.encode(): String = listOf(
@@ -13,16 +24,51 @@ fun SessionKey.encode(): String = listOf(
 ).joinToString(".")
 
 /** Decode a canonical key; legacy raw paths and malformed values return null. */
-fun decodeSessionKey(value: String): SessionKey? {
+fun decodeSessionKey(value: String): SessionKey? =
+    decodeHostSessionKey(value)?.takeIf { it.hostId.isEmpty() }?.session
+
+/** Host-qualified persisted spelling used by device-local session metadata. */
+fun HostSessionKey.encode(): String = listOf(
+    HOST_SESSION_KEY_PREFIX,
+    encodeSessionKeyPart(hostId),
+    encodeSessionKeyPart(session.agentKind),
+    encodeSessionKeyPart(session.path),
+).joinToString(".")
+/**
+ * The persisted identity of a catalog entry: host-qualified when the device
+ * knows its bridge, legacy sk1 otherwise. Decoding either spelling yields a
+ * [HostSessionKey]; [hostId] is empty for sk1 entries.
+ */
+fun decodeHostSessionKey(value: String): HostSessionKey? {
     val parts = value.split('.')
-    if (parts.size != 3 || parts[0] != SESSION_KEY_PREFIX) return null
-    return runCatching {
-        SessionKey(
-            agentKind = decodeSessionKeyPart(parts[1]),
-            path = decodeSessionKeyPart(parts[2]),
-        ).takeIf { it.agentKind.isNotBlank() && it.path.isNotBlank() }
-    }.getOrNull()
+    return when {
+        parts.size == 4 && parts[0] == HOST_SESSION_KEY_PREFIX ->
+            runCatching {
+                HostSessionKey(
+                    hostId = decodeSessionKeyPart(parts[1]),
+                    session = SessionKey(
+                        agentKind = decodeSessionKeyPart(parts[2]),
+                        path = decodeSessionKeyPart(parts[3]),
+                    ),
+                )
+            }.getOrNull()?.takeIf { it.hostId.isNotBlank() && validSession(it.session) }
+
+        parts.size == 3 && parts[0] == SESSION_KEY_PREFIX ->
+            runCatching {
+                HostSessionKey(
+                    hostId = "",
+                    session = SessionKey(
+                        agentKind = decodeSessionKeyPart(parts[1]),
+                        path = decodeSessionKeyPart(parts[2]),
+                    ),
+                )
+            }.getOrNull()?.takeIf { validSession(it.session) }
+
+        else -> null
+    }
 }
+
+private fun validSession(session: SessionKey) = session.agentKind.isNotBlank() && session.path.isNotBlank()
 
 private fun encodeSessionKeyPart(value: String): String =
     Base64.getUrlEncoder().withoutPadding().encodeToString(value.toByteArray(StandardCharsets.UTF_8))

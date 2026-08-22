@@ -25,6 +25,8 @@ export interface ExposureConfig {
 export interface BridgeConfig {
   /** Directory containing config.json; uploads and other sibling state live here. */
   configDir: string;
+  /** Opaque identity of this bridge installation; stable across token/port/exposure changes. */
+  hostId: string;
   /** Bearer token shared with the app. */
   token: string;
   /** Loopback port the bridge listens on (an exposure provider fronts it with TLS). */
@@ -44,6 +46,9 @@ export class ConfigError extends Error {
 }
 
 const bridgeConfigSchema = v.looseObject({
+  // hostId tolerates any scalar so a corrupted id regenerates the id only —
+  // a strict parse would fail the whole config and rotate the token.
+  hostId: v.optional(v.nullable(v.union([v.string(), v.number(), v.boolean()]))),
   token: v.string(),
   port: v.number(),
   fcmServiceAccountPath: v.optional(v.string()),
@@ -62,6 +67,18 @@ export function defaultConfigPath(): string {
 
 export function generateToken(): string {
   return `scoutr_${randomBytes(18).toString("base64url")}`;
+}
+
+/** Shape of a valid persisted host id; anything else is replaced by a fresh one. */
+const HOST_ID_PATTERN = /^host_[A-Za-z0-9_-]+$/;
+
+/**
+ * Opaque installation identity, minted once per config and never derived from
+ * URL, token, hostname, or any other observable — rotating credentials or
+ * moving the exposure must not re-namespace the phone's local metadata.
+ */
+export function generateHostId(): string {
+  return `host_${randomBytes(12).toString("base64url")}`;
 }
 
 /**
@@ -118,6 +135,11 @@ async function resolveFcmServiceAccountPath(
   }
 }
 
+/** A malformed or absent persisted id becomes a fresh one; the token is never touched. */
+function resolveHostId(raw: string | number | boolean | null | undefined): string {
+  return typeof raw === "string" && HOST_ID_PATTERN.test(raw) ? raw : generateHostId();
+}
+
 export async function loadOrCreateConfig(path = defaultConfigPath()): Promise<BridgeConfig> {
   let config: BridgeConfig | null = null;
   let readOk = false;
@@ -131,6 +153,7 @@ export async function loadOrCreateConfig(path = defaultConfigPath()): Promise<Br
     const configDir = join(path, "..");
     config = {
       configDir,
+      hostId: resolveHostId(parsed.output.hostId),
       token: parsed.output.token,
       port: parsed.output.port,
       fcmServiceAccountPath: await resolveFcmServiceAccountPath(parsed.output.fcmServiceAccountPath, configDir),
@@ -146,6 +169,7 @@ export async function loadOrCreateConfig(path = defaultConfigPath()): Promise<Br
   if (!config) {
     config = {
       configDir: join(path, ".."),
+      hostId: generateHostId(),
       token: generateToken(),
       port: 8737,
       exposure: { kind: "tailscale" },

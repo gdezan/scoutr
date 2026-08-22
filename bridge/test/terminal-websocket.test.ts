@@ -203,7 +203,7 @@ describe("terminal websocket contract (offline)", () => {
       herdr: fakeHerdr(),
       feed,
       usage: { all: async () => ({}) } as never,
-      config: { configDir: "/tmp/scoutr-test-config", token: TOKEN, port: PORT },
+      config: { configDir: "/tmp/scoutr-test-config", hostId: "host_test", token: TOKEN, port: PORT },
       terminal: launcher,
       terminalOptions: { graceMs: 120 },
     });

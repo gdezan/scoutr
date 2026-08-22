@@ -8,6 +8,8 @@ import kotlinx.serialization.json.JsonObject
 @Serializable
 data class HealthResponse(
     val ok: Boolean,
+    /** Opaque identity of the bridge installation; absent on older bridges. */
+    val hostId: String? = null,
     val service: String? = null,
     val version: String? = null,
     val api: ScoutrApiInfo? = null,

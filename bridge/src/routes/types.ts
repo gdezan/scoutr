@@ -12,6 +12,7 @@ import type { TerminalSessionBroker } from "../terminal/broker.js";
 import type { TerminalConnectionOptions } from "../terminal/websocket.js";
 import type { BridgeMetrics } from "../metrics.js";
 import type { SessionKey } from "../session-model.js";
+import type { WorkspaceRootStore } from "../workspace-roots.js";
 
 /** JSON body of a POST request, after parsing and object validation. */
 export interface JsonBody {
@@ -50,6 +51,8 @@ export interface ServerDeps {
   publisher?: FcmPublisher;
   /** Registered phones, written by POST /api/devices; absent when push is unconfigured. */
   devices?: DeviceRegistry;
+  /** Workspace→project-root registry under configDir; absent = snapshot inference only. */
+  workspaceRoots?: WorkspaceRootStore;
 }
 
 /**

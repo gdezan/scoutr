@@ -149,4 +149,22 @@ class ConnectViewModelTest {
             ),
         )
     }
+
+    @Test
+    fun pairingPersistsTheBridgesHostIdentityFromTheHealthHandshake() {
+        fake.healthResult = Result.success(
+            HealthResponse(
+                ok = true,
+                hostId = "host_live1",
+                api = ScoutrApiInfo(protocol = 2, features = REQUIRED_SCOUTR_API_FEATURES),
+                herdr = HerdrInfo(connected = true, version = "0.8.0", protocol = 19),
+            ),
+        )
+
+        viewModel.connect("https://bridge.test", "secret")
+        shadowOf(Looper.getMainLooper()).idle()
+
+        assertEquals("host_live1", store.saved?.hostId)
+        assertEquals("secret", store.saved?.token)
+    }
 }

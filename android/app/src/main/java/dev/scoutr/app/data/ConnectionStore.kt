@@ -25,8 +25,9 @@ class ConnectionStore(
         val token: String,
         /** Provider metadata only: no client branches on it. */
         val exposure: ExposureKind,
+        /** Bridge installation identity from the health handshake; null for older bridges. */
+        val hostId: String?,
     )
-
     val saved: Saved?
         get() {
             val host = prefs.getString(KEY_HOST, null)?.trim() ?: return null
@@ -39,6 +40,7 @@ class ConnectionStore(
                 // spelling, reads as Custom: an unlabelled base URL.
                 exposure = ExposureKind.fromWire(prefs.getString(KEY_EXPOSURE, null))
                     ?: ExposureKind.Custom,
+                hostId = prefs.getString(KEY_HOST_ID, null)?.trim()?.takeIf { it.isNotEmpty() },
             )
         }
 
@@ -55,11 +57,13 @@ class ConnectionStore(
         host: String,
         token: String,
         exposure: ExposureKind = ExposureKind.Custom,
+        hostId: String? = null,
     ): Boolean {
         val encrypted = encryptOrNull(token.trim())
         val edit = prefs.edit()
             .putString(KEY_HOST, host.trim())
             .putString(KEY_EXPOSURE, exposure.wire)
+            .putString(KEY_HOST_ID, hostId?.trim()?.takeIf { it.isNotEmpty() })
             .remove(KEY_LEGACY_TOKEN)
         if (encrypted == null) {
             // Fail closed: drop any stale credential rather than keep plaintext.
@@ -68,6 +72,19 @@ class ConnectionStore(
         }
         edit.putEncryptedToken(encrypted)
         return edit.commit()
+    }
+
+    /**
+     * Adopts the bridge's installation identity from an authenticated health
+     * handshake without touching the encrypted pairing. No-op when nothing is
+     * saved or the id already matches.
+     */
+    fun updateHostId(hostId: String?): Boolean {
+        val current = saved ?: return false
+        if (current.hostId == hostId?.trim()?.takeIf { it.isNotEmpty() }) return true
+        return prefs.edit()
+            .putString(KEY_HOST_ID, hostId?.trim())
+            .commit()
     }
 
     fun clear() {
@@ -140,6 +157,7 @@ class ConnectionStore(
         const val KEY_TOKEN_CIPHERTEXT = "tokenCiphertext"
         const val KEY_TOKEN_IV = "tokenIv"
         const val KEY_EXPOSURE = "exposure"
+        const val KEY_HOST_ID = "hostId"
         private const val TAG = "ConnectionStore"
     }
 }

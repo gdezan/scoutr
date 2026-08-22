@@ -5,7 +5,7 @@ import { writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { readFile } from "node:fs/promises";
-import { ConfigError, defaultConfigPath, generateToken, loadOrCreateConfig } from "../src/config.js";
+import { ConfigError, defaultConfigPath, generateHostId, generateToken, loadOrCreateConfig } from "../src/config.js";
 
 describe("defaultConfigPath", () => {
   test("honors XDG_CONFIG_HOME", () => {
@@ -165,5 +165,91 @@ describe("loadOrCreateConfig", () => {
     } finally {
       chmodSync(path, 0o600);
     }
+  });
+});
+
+describe("hostId", () => {
+  let dir: string;
+
+  before(() => {
+    dir = mkdtempSync(join(tmpdir(), "scoutr-config-hostid-"));
+  });
+
+  after(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  test("generateHostId mints opaque host_-prefixed ids", () => {
+    const id = generateHostId();
+    assert.match(id, /^host_[A-Za-z0-9_-]+$/);
+    assert.notEqual(id, generateHostId());
+  });
+
+  test("a fresh config gains a stable persisted host id", async () => {
+    const path = join(dir, "fresh", "config.json");
+    const config = await loadOrCreateConfig(path);
+    assert.match(config.hostId, /^host_/);
+    const again = await loadOrCreateConfig(path);
+    assert.equal(again.hostId, config.hostId, "the same installation keeps one id across restarts");
+  });
+
+  test("an old config without one gains a host id and keeps every credential", async () => {
+    const path = join(dir, "legacy", "config.json");
+    mkdirSync(join(dir, "legacy"), { recursive: true });
+    await writeFile(
+      path,
+      JSON.stringify({ token: "0123456789abcdef", port: 8737, publicHost: "scoutr.example.com" }),
+    );
+    const config = await loadOrCreateConfig(path);
+    assert.match(config.hostId, /^host_/);
+    assert.equal(config.token, "0123456789abcdef", "migration must not rotate the token");
+    const persisted = JSON.parse(await readFile(path, "utf8")) as Record<string, unknown>;
+    assert.equal(persisted.hostId, config.hostId);
+  });
+
+  test("rotating the token or changing publicHost does not change the host id", async () => {
+    const path = join(dir, "stable", "config.json");
+    mkdirSync(join(dir, "stable"), { recursive: true });
+    await writeFile(path, JSON.stringify({ token: "0123456789abcdef", port: 8737 }));
+    const first = await loadOrCreateConfig(path);
+    // A credential/exposure rewrite that keeps the installation's id.
+    await writeFile(
+      path,
+      JSON.stringify({
+        hostId: first.hostId,
+        token: "fedcba9876543210fedcba9876543210",
+        port: 9000,
+        publicHost: "other.example.com",
+      }),
+    );
+    const second = await loadOrCreateConfig(path);
+    assert.equal(second.hostId, first.hostId);
+    assert.equal(second.token, "fedcba9876543210fedcba9876543210");
+  });
+
+  test("a malformed hostId is replaced without touching the pairing", async () => {
+    const path = join(dir, "malformed", "config.json");
+    mkdirSync(join(dir, "malformed"), { recursive: true });
+    await writeFile(
+      path,
+      JSON.stringify({ hostId: "", token: "0123456789abcdef", port: 8737 }),
+    );
+    const config = await loadOrCreateConfig(path);
+    assert.match(config.hostId, /^host_/);
+    assert.equal(config.token, "0123456789abcdef");
+  });
+
+  test("a non-string hostId regenerates only the id, never the token", async () => {
+    const path = join(dir, "wrong-type", "config.json");
+    mkdirSync(join(dir, "wrong-type"), { recursive: true });
+    await writeFile(
+      path,
+      JSON.stringify({ hostId: 42, token: "0123456789abcdef", port: 8737 }),
+    );
+
+    const config = await loadOrCreateConfig(path);
+
+    assert.match(config.hostId, /^host_/);
+    assert.equal(config.token, "0123456789abcdef", "corruption of the id must not rotate the pairing");
   });
 });

@@ -4,7 +4,7 @@ import type { BridgeConfig, ExposureConfig } from "../src/config.js";
 import { ExposureError, resolveExposure } from "../src/exposure.js";
 
 function configWith(exposure: ExposureConfig): BridgeConfig {
-  return { configDir: "/tmp/scoutr-test", token: "0123456789abcdef", port: 8737, exposure };
+  return { configDir: "/tmp/scoutr-test", hostId: "host_test", token: "0123456789abcdef", port: 8737, exposure };
 }
 
 /** Records whether Tailscale discovery ran at all — the core provider invariant. */

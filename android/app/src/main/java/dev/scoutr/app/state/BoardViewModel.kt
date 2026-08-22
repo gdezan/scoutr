@@ -107,7 +107,12 @@ class BoardViewModel(
             }
             val hadSavedConnection = connectionStore.saved != null
             if (host != null && token != null) {
-                connectionStore.save(host = host, token = token)
+                // Explicit form connect: the pairing is replaced wholesale.
+                connectionStore.save(host = host, token = token, hostId = health.hostId)
+            } else if (health.ok && health.herdr?.connected == true) {
+                // Stored-credential probe: adopt the bridge's identity when it
+                // differs from what the pairing recorded (e.g. bridge reinstall).
+                connectionStore.updateHostId(health.hostId)
             }
             _ui.update {
                 it.copy(

@@ -185,4 +185,41 @@ class ConnectionStoreTest {
             prefs().all.values.none { it is String && it.contains("tok-123") },
         )
     }
+
+    @Test
+    fun save_keeps_the_bridge_identity_alongside_the_pairing() {
+        assertTrue(store().save("https://bridge.example.com", "tok-123", hostId = "host_abc"))
+
+        assertEquals("host_abc", store().saved?.hostId)
+    }
+
+    @Test
+    fun a_bridge_without_an_identity_pairs_with_a_null_host_id() {
+        assertTrue(store().save("https://bridge.example.com", "tok-123"))
+
+        assertNull(store().saved?.hostId)
+    }
+
+    @Test
+    fun updateHostId_adopts_a_new_identity_without_touching_the_token() {
+        store().save("https://bridge.example.com", "tok-123")
+
+        assertTrue(store().updateHostId("host_new"))
+
+        val saved = store().saved
+        assertEquals("host_new", saved?.hostId)
+        assertEquals("tok-123", saved?.token)
+    }
+
+    @Test
+    fun updateHostId_with_the_same_identity_is_a_no_op() {
+        store().save("https://bridge.example.com", "tok-123", hostId = "host_same")
+
+        assertTrue(store().updateHostId("host_same"))
+    }
+
+    @Test
+    fun updateHostId_without_a_saved_pairing_reports_failure() {
+        assertFalse(store().updateHostId("host_any"))
+    }
 }

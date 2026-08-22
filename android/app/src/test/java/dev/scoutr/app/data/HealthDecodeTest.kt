@@ -53,4 +53,16 @@ class HealthDecodeTest {
         val health = json.decodeFromString(HealthResponse.serializer(), """{"ok":true}""")
         assertFalse(health.terminal?.capability?.isUnsupported == true)
     }
+
+    @Test
+    fun `the bridge installation identity decodes and older bridges stay null`() {
+        val withHostId = json.decodeFromString(
+            HealthResponse.serializer(),
+            """{"ok":true,"hostId":"host_live1"}""",
+        )
+        assertEquals("host_live1", withHostId.hostId)
+
+        val withoutHostId = json.decodeFromString(HealthResponse.serializer(), """{"ok":true}""")
+        assertEquals(null, withoutHostId.hostId)
+    }
 }

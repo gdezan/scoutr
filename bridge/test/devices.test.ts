@@ -34,7 +34,7 @@ before(async () => {
       layouts: [],
     }) as never,
     usage: { all: async () => ({}) } as never,
-    config: { configDir: "/tmp/scoutr-test-config", token: TOKEN, port: PORT, exposure: { kind: "tailscale" } },
+    config: { configDir: "/tmp/scoutr-test-config", hostId: "host_test", token: TOKEN, port: PORT, exposure: { kind: "tailscale" } },
     terminal: new FakeTerminalLauncher(),
     devices,
   });

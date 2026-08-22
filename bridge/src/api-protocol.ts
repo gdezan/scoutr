@@ -20,4 +20,7 @@ export const SCOUTR_API_FEATURES = [
   // served over HTTP. The app requires this before issuing them; it never
   // falls back to the legacy /ws command frames.
   "commands.http.v1",
+  // /api/health carries the bridge installation's stable opaque hostId; the
+  // app persists it with the pairing to namespace device-local metadata.
+  "host-identity.v1",
 ] as const;

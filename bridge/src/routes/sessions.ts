@@ -193,7 +193,7 @@ async function createSessionRoute(ctx: RouteContext): Promise<RouteResult> {
     thinkingLevel: body.thinkingLevel,
     initialPrompt: body.initialPrompt,
     agent: body.agent,
-  });
+  }, ctx.deps.workspaceRoots);
   return { status: 200, body: { ok: true, ...created } };
 }
 

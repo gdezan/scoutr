@@ -25,6 +25,7 @@ async function health(ctx: RouteContext): Promise<RouteResult> {
     body: {
       ok: true,
       service: "scoutr-bridge",
+      hostId: config.hostId,
       version: "0.1.0",
       api: { protocol: SCOUTR_API_PROTOCOL, features: [...SCOUTR_API_FEATURES] },
       herdr: { connected: herdrConnected, version: herdrVersion, protocol: herdrProtocol },

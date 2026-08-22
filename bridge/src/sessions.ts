@@ -8,6 +8,7 @@ import { backendFor, resolveBackendForPane } from "./agents/registry.js";
 import type { AgentBackend, ControlAction, ControlParams } from "./agents/types.js";
 import { shellQuote } from "./shell.js";
 import { findPaneWorkspace } from "./herdr/panes.js";
+import type { WorkspaceRootStore } from "./workspace-roots.js";
 import { realpathSync, statSync } from "node:fs";
 import { basename, dirname, resolve } from "node:path";
 
@@ -109,6 +110,7 @@ export function validateCreateSessionParams(params: CreateSessionParams): void {
 export async function createSession(
   herdr: HerdrPort,
   params: CreateSessionParams,
+  workspaceRoots?: WorkspaceRootStore,
 ): Promise<CreatedSession> {
   validateCreateSessionParams(params);
   let cwd: string;
@@ -128,7 +130,7 @@ export async function createSession(
     thinkingLevel: params.thinkingLevel,
     name: params.name?.trim() || undefined,
   });
-  return launchWorkspace(herdr, cwd, name, command, async (paneId) => {
+  return launchWorkspace(herdr, cwd, name, command, workspaceRoots, async (paneId) => {
     if (!params.initialPrompt) return;
     if (backend.deliverInitialPrompt) {
       await backend.deliverInitialPrompt(herdr, paneId, params.initialPrompt);
@@ -145,6 +147,7 @@ export async function createSession(
 export async function launchStoredSession(
   herdr: HerdrPort,
   params: LaunchStoredSessionParams,
+  workspaceRoots?: WorkspaceRootStore,
 ): Promise<CreatedSession> {
   const { path, backend } = await resolveCatalogSessionPath(params.path);
   const session = await backend.readTranscript(path, { metadataOnly: true });
@@ -162,6 +165,7 @@ export async function launchStoredSession(
     cwd,
     basename(cwd) || "session",
     command,
+    workspaceRoots,
   );
 }
 
@@ -222,22 +226,65 @@ interface LaunchTarget {
   paneId: string;
   /** Set only when this launch created the tab (i.e. the workspace was reused). */
   tabId: string | null;
+  /** True when herdr created the whole workspace for this launch. Only then
+   * may rollback close it or drop its recorded root.
+   */
+  createdWorkspace: boolean;
+}
+
+/**
+ * The workspace a launch should join, from one snapshot: validated persisted
+ * metadata first (a recorded root survives its root pane cd-ing elsewhere),
+ * then the root-pane cwd inference for workspaces Scoutr never recorded.
+ * Every persisted id is checked against the same live snapshot, so a dead
+ * workspace id is pruned rather than resurrected. Returns null when no
+ * workspace matches or the snapshot is unavailable — a fresh workspace is
+ * then the safe fallback (at worst a second workspace on the folder).
+ */
+async function selectLaunchWorkspace(
+  herdr: HerdrPort,
+  cwd: string,
+  roots?: WorkspaceRootStore,
+): Promise<string | null> {
+  let snapshot: SessionSnapshot;
+  try {
+    snapshot = await herdr.snapshot();
+  } catch {
+    return null;
+  }
+  const wanted = canonicalPath(cwd);
+  if (!roots) return findWorkspaceForCwd(snapshot, wanted);
+
+  const liveIds = new Set(snapshot.workspaces.map((workspace) => workspace.workspace_id));
+  await roots.prune(liveIds);
+  const numbers = new Map(snapshot.workspaces.map((workspace) => [workspace.workspace_id, workspace.number]));
+  const recorded = (await roots.list())
+    .filter((record) => liveIds.has(record.workspaceId) && canonicalPath(record.cwd) === wanted)
+    .sort((a, b) => (numbers.get(a.workspaceId) ?? Infinity) - (numbers.get(b.workspaceId) ?? Infinity));
+  const first = recorded[0];
+  if (first) return first.workspaceId;
+
+  // Nothing recorded claims this folder; the snapshot inference is the only
+  // grounding left — and reusing it makes the mapping deliberate.
+  const inferred = findWorkspaceForCwd(snapshot, wanted);
+  if (inferred) await roots.record(inferred, wanted);
+  return inferred;
 }
 
 /**
  * Open the pane a session will run in. Workspaces are per folder: when one is
- * already rooted at `cwd` the session becomes a new tab in it, and only an
- * unclaimed folder gets a fresh workspace. The session name labels the tab —
- * existing workspace labels are never touched.
+ * already rooted at `cwd` (persisted metadata first, inference second) the
+ * session becomes a new tab in it, and only an unclaimed folder gets a fresh
+ * workspace — which is then recorded so later launches skip the inference.
+ * The session name labels the tab; existing workspace labels are never touched.
  */
-async function openLaunchTarget(herdr: HerdrPort, cwd: string, label: string): Promise<LaunchTarget> {
-  let existing: string | null = null;
-  try {
-    existing = findWorkspaceForCwd(await herdr.snapshot(), cwd);
-  } catch {
-    // Snapshot unavailable: a fresh workspace is the safe fallback — the
-    // launch still succeeds, at worst as a second workspace on the folder.
-  }
+async function openLaunchTarget(
+  herdr: HerdrPort,
+  cwd: string,
+  label: string,
+  roots?: WorkspaceRootStore,
+): Promise<LaunchTarget> {
+  const existing = await selectLaunchWorkspace(herdr, cwd, roots);
 
   if (existing) {
     const created = await herdr.tabCreate({ workspace_id: existing, cwd, label, focus: false });
@@ -247,7 +294,7 @@ async function openLaunchTarget(herdr: HerdrPort, cwd: string, label: string): P
       if (tabId) await closeTabQuietly(herdr, tabId);
       throw new SessionsError("herdr did not return a pane id", 502);
     }
-    return { workspaceId: existing, paneId, tabId: tabId || null };
+    return { workspaceId: existing, paneId, tabId: tabId || null, createdWorkspace: false };
   }
 
   const ws = await herdr.workspaceCreate({ cwd, focus: false });
@@ -258,7 +305,10 @@ async function openLaunchTarget(herdr: HerdrPort, cwd: string, label: string): P
     await closeWorkspaceQuietly(herdr, workspaceId);
     throw new SessionsError("herdr did not return a pane id", 502);
   }
-  return { workspaceId, paneId, tabId: null };
+  // Record only after creation fully succeeds: a rolled-back workspace must
+  // not leave an entry behind for the prune to clean up.
+  await roots?.record(workspaceId, cwd);
+  return { workspaceId, paneId, tabId: null, createdWorkspace: true };
 }
 
 async function launchWorkspace(
@@ -266,9 +316,10 @@ async function launchWorkspace(
   cwd: string,
   label: string,
   command: string,
+  workspaceRoots?: WorkspaceRootStore,
   afterStart?: (paneId: string) => Promise<void>,
 ): Promise<CreatedSession> {
-  const target = await openLaunchTarget(herdr, cwd, label);
+  const target = await openLaunchTarget(herdr, cwd, label, workspaceRoots);
   const { workspaceId, paneId } = target;
 
   try {
@@ -280,8 +331,7 @@ async function launchWorkspace(
     await afterStart?.(paneId);
     return { workspaceId, paneId };
   } catch (error) {
-    await undoLaunchTarget(herdr, target);
-    if (error instanceof SessionsError) throw error;
+    await undoLaunchTarget(herdr, target, workspaceRoots);
     throw new SessionsError(`session launch failed: ${error instanceof Error ? error.message : String(error)}`, 502);
   }
 }
@@ -301,10 +351,24 @@ async function waitForAgent(herdr: HerdrPort, paneId: string): Promise<SessionSn
   throw new SessionsError("agent did not start before the launch timeout", 502);
 }
 
-/** Undo exactly what this launch created: its tab, or the whole workspace. */
-async function undoLaunchTarget(herdr: HerdrPort, target: LaunchTarget): Promise<void> {
-  if (target.tabId) await closeTabQuietly(herdr, target.tabId);
-  else await closeWorkspaceQuietly(herdr, target.workspaceId);
+/** Undo exactly what this launch created — never what it merely joined.
+ * A joined workspace loses only its new tab (and if herdr gave no tab id,
+ * nothing at all: closing the whole workspace would destroy someone else's
+ * session). A created workspace is closed, and only when the close succeeds
+ * does its recorded root go with it; a failed close leaves the record for
+ * prune to settle once herdr reports the workspace's real fate.
+ */
+async function undoLaunchTarget(
+  herdr: HerdrPort,
+  target: LaunchTarget,
+  roots?: WorkspaceRootStore,
+): Promise<void> {
+  if (!target.createdWorkspace) {
+    if (target.tabId) await closeTabQuietly(herdr, target.tabId);
+    return;
+  }
+  const closed = await closeWorkspaceQuietly(herdr, target.workspaceId);
+  if (closed) await roots?.remove(target.workspaceId);
 }
 
 async function labelRootTabQuietly(
@@ -322,11 +386,13 @@ async function labelRootTabQuietly(
   }
 }
 
-async function closeWorkspaceQuietly(herdr: HerdrPort, workspaceId: string): Promise<void> {
+async function closeWorkspaceQuietly(herdr: HerdrPort, workspaceId: string): Promise<boolean> {
   try {
     await herdr.workspaceClose(workspaceId);
+    return true;
   } catch {
     // Keep the launch error; cleanup failure is visible in Herdr's workspace list.
+    return false;
   }
 }
 

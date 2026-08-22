@@ -112,7 +112,7 @@ describe("scoutr bridge HTTP/WS API (offline)", () => {
       herdr,
       feed,
       usage: usage as never,
-      config: { configDir, token: TOKEN, port: PORT },
+      config: { configDir, hostId: "host_test", token: TOKEN, port: PORT },
       terminal: new FakeTerminalLauncher(),
     });
   });
@@ -126,14 +126,16 @@ describe("scoutr bridge HTTP/WS API (offline)", () => {
     assert.equal(status, 200);
     const health = body as {
       ok: boolean;
+      hostId?: string;
       api: { protocol: number; features: string[] };
       herdr: { connected: boolean; version: string };
     };
     assert.equal(health.ok, true);
     assert.deepEqual(health.api, {
       protocol: 2,
-      features: ["terminal.v1", "asks.v2", "update.pull.v1", "session-model.v3", "commands.http.v1"],
+      features: ["terminal.v1", "asks.v2", "update.pull.v1", "session-model.v3", "commands.http.v1", "host-identity.v1"],
     });
+    assert.match(health.hostId ?? "", /^host_/);
     assert.equal(health.herdr.connected, true);
     assert.equal(health.herdr.version, "test");
   });
@@ -150,7 +152,7 @@ describe("scoutr bridge HTTP/WS API (offline)", () => {
     assert.equal(status, 200);
     assert.deepEqual(health.api, {
       protocol: 2,
-      features: ["terminal.v1", "asks.v2", "update.pull.v1", "session-model.v3", "commands.http.v1"],
+      features: ["terminal.v1", "asks.v2", "update.pull.v1", "session-model.v3", "commands.http.v1", "host-identity.v1"],
     });
     assert.equal(health.herdr.connected, false);
   });
