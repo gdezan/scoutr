@@ -13,7 +13,7 @@ import {
  *
  * Every field maps to a git fact; nothing here is a quality judgment. The UI
  * labels the facts (branch, dirty/clean, change counts) and never concludes
- * "safe to ship" — see .plans/p1-done-ship-readiness-summary.md. On a Done
+ * "safe to ship". On a Done
  * card the facts are final; on a live card they are only as fresh as the last
  * TTL-bounded computation, so UI labels them as of that moment.
  */
