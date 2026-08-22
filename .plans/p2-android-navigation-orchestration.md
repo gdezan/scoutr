@@ -344,11 +344,11 @@ Review tab shows the shared-ViewModel repo picker; `scoutr://chat/w83:p0`
 deep link opens that chat; Settings back works and Forget (confirm dialog) →
 Connect-only graph.
 
-Known pre-existing breakage (not from this change, recorded as papercut
-cbc4603): `NavHostGraphTest.bottomBarShowsAllFourTabsAndSwitchesBetweenThem`
-fails identically at HEAD because a dead-port seed never yields
-`apiCompatibility=Compatible`, so the bar is hidden by design. The adb-driven
-acceptance above covers its assertions against a live bridge instead.
+Follow-up fix: `NavHostGraphTest.bottomBarShowsAllFourTabsAndSwitchesBetweenThem`
+was failing at HEAD before this refactor (papercut cbc4603, since closed): its dead-port
+seed never yields `apiCompatibility=Compatible`, so the shell hides the bottom bar by
+design. The seed rule now runs an in-process MockWebServer answering the health
+handshake and an empty board; the test passes on emulator-5554.
 
 ## References
 

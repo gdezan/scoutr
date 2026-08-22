@@ -10,6 +10,10 @@ import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import dev.scoutr.app.MainActivity
 import dev.scoutr.app.data.ConnectionStore
+import okhttp3.mockwebserver.Dispatcher
+import okhttp3.mockwebserver.MockResponse
+import okhttp3.mockwebserver.MockWebServer
+import okhttp3.mockwebserver.RecordedRequest
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -17,11 +21,17 @@ import org.junit.runners.model.Statement
 import org.junit.rules.TestRule
 
 /**
- * NavHost graph test on the real activity: with a saved connection the app
- * starts on the Board tab with the bottom bar, and tapping each tab swaps
- * both the top bar title and the destination while the bar stays derived
- * from Destination.routes. The connection points at a dead port so no
- * bridge traffic can interfere with the assertions.
+ * NavHost graph test on the real activity: with a saved connection to a
+ * bridge that answers the compatibility handshake, the app starts on the
+ * Board tab with the bottom bar, and tapping each tab swaps both the top bar
+ * title and the destination while the bar stays derived from
+ * Destination.routes.
+ *
+ * The seed must be a live stub bridge, not just any saved connection: the
+ * shell shows the bottom bar only when the health probe classified the API as
+ * compatible (`showBottomBar` requires `compatible`), and a dead port never
+ * completes that probe. The dispatcher answers every request deterministically
+ * so background refreshes can never exhaust queued responses mid-assertion.
  *
  * The permission dialog problem: MainActivity requests POST_NOTIFICATIONS
  * before setContent, and a pending request steals the compose test owner's
@@ -37,9 +47,28 @@ class NavHostGraphTest {
     val seed: TestRule = TestRule { base, _ ->
         object : Statement() {
             override fun evaluate() {
-                val context = ApplicationProvider.getApplicationContext<android.content.Context>()
-                ConnectionStore(context).save("http://127.0.0.1:1", "t")
-                base.evaluate()
+                val server = MockWebServer()
+                server.dispatcher = object : Dispatcher() {
+                    override fun dispatch(request: RecordedRequest): MockResponse {
+                        val body = when (request.path?.substringBefore('?')) {
+                            "/api/health" ->
+                                """{"ok":true,"service":"scoutr-bridge","version":"test","api":{"protocol":2,"features":["commands.http.v1"]},"herdr":{"connected":true}}"""
+                            "/api/agents" -> """{"ok":true,"agents":[]}"""
+                            else -> """{"ok":false,"error":"not stubbed"}"""
+                        }
+                        return MockResponse()
+                            .setHeader("content-type", "application/json")
+                            .setBody(body)
+                    }
+                }
+                server.start()
+                try {
+                    ConnectionStore(ApplicationProvider.getApplicationContext())
+                        .save(server.url("/").toString().trimEnd('/'), "test_token")
+                    base.evaluate()
+                } finally {
+                    server.shutdown()
+                }
             }
         }
     }
@@ -52,7 +81,10 @@ class NavHostGraphTest {
 
     @Test
     fun bottomBarShowsAllFourTabsAndSwitchesBetweenThem() {
-        // Seeded connection: the NavHost starts on Board with the bar.
+        // Compatible stub bridge: the NavHost starts on Board with the bar.
+        compose.waitUntil(timeoutMillis = 10_000) {
+            compose.onAllNodesWithText("Board").filter(hasClickAction()).fetchSemanticsNodes().isNotEmpty()
+        }
         compose.onAllNodesWithText("Board").filter(hasClickAction())[0].assertIsDisplayed()
         compose.onAllNodesWithText("Sessions").filter(hasClickAction())[0].assertIsDisplayed()
         compose.onAllNodesWithText("Usage").filter(hasClickAction())[0].assertIsDisplayed()
