@@ -108,8 +108,7 @@ build gates. Use `--no-emulator` only when intentionally skipping the managed
 device suite.
 
 After final acceptance succeeds, do not start another review or verification
-cycle without new evidence of a defect. If a design plan was completed, update
-its status in `design-plans/README.md` and record meaningful checks and runtime
+cycle without new evidence of a defect. Record meaningful checks and runtime
 evidence before committing.
 
 ## Detailed diagnostics

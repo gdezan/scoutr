@@ -66,4 +66,3 @@ skipped Gradle output.
 - **Visual evidence when the active model cannot inspect images:** use `skills/scoutr-vision/SKILL.md`.
 - **Herdr sibling-pane delegation:** use the global `herdr-agent-delegation` skill for start, prompt, wait, read, recovery, and cleanup.
 - **Terminal implementation or review:** use `docs/terminal.md` plus ADRs 0001 and 0002.
-- **UX plan execution:** use `design-plans/README.md` for active order and status, then read the selected plan fully.
