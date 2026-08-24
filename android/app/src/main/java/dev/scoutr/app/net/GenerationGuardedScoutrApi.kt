@@ -44,7 +44,8 @@ class GenerationGuardedScoutrApi(
         delegate.registerDevice(fcmToken, profileGeneration)
     }
     override suspend fun unregisterDevice(fcmToken: String) = checked { delegate.unregisterDevice(fcmToken) }
-    override suspend fun session(key: SessionKey, since: String?) = checked { delegate.session(key, since) }
+    override suspend fun session(key: SessionKey, since: String?, before: String?, limit: Int?) =
+        checked { delegate.session(key, since = since, before = before, limit = limit) }
     override suspend fun sessionCatalog(query: String?, limit: Int?) = checked { delegate.sessionCatalog(query, limit) }
     override suspend fun sessionCatalogAction(action: CatalogAction, key: SessionKey, text: String?) = checked {
         delegate.sessionCatalogAction(action, key, text)

@@ -392,11 +392,18 @@ class BridgeClient private constructor(
         ) { }
     }
 
-    override suspend fun session(key: SessionKey, since: String?): SessionReadResponse =
+    override suspend fun session(
+        key: SessionKey,
+        since: String?,
+        before: String?,
+        limit: Int?,
+    ): SessionReadResponse =
         call("/api/sessions", query = buildMap {
             put("agentKind", key.agentKind)
             put("path", key.path)
             if (since != null) put("since", since)
+            if (before != null) put("before", before)
+            if (limit != null) put("limit", limit.toString())
         }) { json.decodeFromString(SessionReadResponse.serializer(), it) }
 
     override suspend fun usage(): UsageResponse =

@@ -132,8 +132,16 @@ class FakeScoutrApi : ScoutrApi {
         record("unregisterDevice", mapOf("fcmToken" to fcmToken)) { unregisterDeviceResult }
     }
 
-    override suspend fun session(key: SessionKey, since: String?): SessionReadResponse =
-        record("session", mapOf("key" to key, "path" to key.path, "since" to since)) { sessionResult }
+    override suspend fun session(
+        key: SessionKey,
+        since: String?,
+        before: String?,
+        limit: Int?,
+    ): SessionReadResponse =
+        record(
+            "session",
+            mapOf("key" to key, "path" to key.path, "since" to since, "before" to before, "limit" to limit),
+        ) { sessionResult }
 
     override suspend fun sessionCatalog(query: String?, limit: Int?): SessionCatalogResponse =
         record("sessionCatalog", mapOf("query" to query, "limit" to limit)) { sessionCatalogResult }

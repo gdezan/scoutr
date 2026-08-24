@@ -218,6 +218,10 @@ data class SessionReadResponse(
     // JS Date.now() returns a float; keep Double so fractional millis parse.
     val mtimeMs: Double = 0.0,
     val size: Double = 0.0,
+    /** Opaque reverse-history cursor; the app stores and sends it but never parses it. */
+    val beforeCursor: String? = null,
+    /** True when older transcript entries exist before this page. */
+    val hasMoreBefore: Boolean = false,
 )
 
 /** Structured ask_user_question card derived by the bridge from session events. */

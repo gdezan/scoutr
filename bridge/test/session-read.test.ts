@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, writeFileSync, appendFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { readSession } from "../src/routes/sessions.js";
+import { parseSessionPageLimit, readSession } from "../src/routes/sessions.js";
 
 /**
  * Fixture whose message ids are random 8-hex strings in an order that is NOT
@@ -125,4 +125,126 @@ test("readSession drops the memo when the file grows", async () => {
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("readSession legacy full snapshot reports no older history", async () => {
+  const { dir, agentDir, file } = fixtureDir();
+  process.env.PI_CODING_AGENT_DIR = agentDir;
+  try {
+    const result = await readSession(file, null);
+    assert.equal(result.beforeCursor, null);
+    assert.equal(result.hasMoreBefore, false);
+    assert.equal(result.lastEntryId, "b5a4c3d2");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("readSession with limit returns the newest page in file order", async () => {
+  const { dir, agentDir, file } = fixtureDir();
+  process.env.PI_CODING_AGENT_DIR = agentDir;
+  try {
+    const result = await readSession(file, null, undefined, { limit: 2 });
+    assert.deepEqual(result.entries.map((e) => e.entryId), ["0f1e2d3c", "b5a4c3d2"]);
+    assert.equal(result.since, null);
+    assert.equal(result.beforeCursor, "0f1e2d3c");
+    assert.equal(result.hasMoreBefore, true);
+    assert.equal(result.lastEntryId, "b5a4c3d2");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("readSession reverse page returns the preceding chronological entries", async () => {
+  const { dir, agentDir, file } = fixtureDir();
+  process.env.PI_CODING_AGENT_DIR = agentDir;
+  try {
+    const first = await readSession(file, null, undefined, { before: "0f1e2d3c", limit: 2 });
+    assert.deepEqual(first.entries.map((e) => e.entryId), ["a1b2c3d4", "77d90b6d"]);
+    assert.equal(first.beforeCursor, "a1b2c3d4");
+    assert.equal(first.hasMoreBefore, true);
+
+    const middle = await readSession(file, null, undefined, { before: "77d90b6d", limit: 2 });
+    assert.deepEqual(middle.entries.map((e) => e.entryId), ["ff676fb5", "a1b2c3d4"]);
+    assert.equal(middle.beforeCursor, null);
+    assert.equal(middle.hasMoreBefore, false);
+
+    const finalPage = await readSession(file, null, undefined, { before: "a1b2c3d4", limit: 2 });
+    assert.deepEqual(finalPage.entries.map((e) => e.entryId), ["ff676fb5"]);
+    assert.equal(finalPage.beforeCursor, null);
+    assert.equal(finalPage.hasMoreBefore, false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("readSession reverse page keeps random ids in file order", async () => {
+  const { dir, agentDir, file } = fixtureDir();
+  process.env.PI_CODING_AGENT_DIR = agentDir;
+  try {
+    const result = await readSession(file, null, undefined, { before: "b5a4c3d2", limit: 3 });
+    // File order, not lexical: ff676fb5 > a1b2c3d4 > 77d90b6d would be wrong.
+    assert.deepEqual(result.entries.map((e) => e.entryId), ["a1b2c3d4", "77d90b6d", "0f1e2d3c"]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("readSession rejects an invalid limit", async () => {
+  const { dir, agentDir, file } = fixtureDir();
+  process.env.PI_CODING_AGENT_DIR = agentDir;
+  try {
+    await assert.rejects(() => readSession(file, null, undefined, { limit: 0 }), /limit must be an integer between 1 and 200/);
+    await assert.rejects(() => readSession(file, null, undefined, { limit: 201 }), /limit must be an integer between 1 and 200/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("readSession rejects combining since and before", async () => {
+  const { dir, agentDir, file } = fixtureDir();
+  process.env.PI_CODING_AGENT_DIR = agentDir;
+  try {
+    await assert.rejects(
+      () => readSession(file, "b5a4c3d2", undefined, { before: "0f1e2d3c", limit: 2 }),
+      /since and before cannot be combined/,
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+test("readSession rejects before without limit", async () => {
+  const { dir, agentDir, file } = fixtureDir();
+  process.env.PI_CODING_AGENT_DIR = agentDir;
+  try {
+    await assert.rejects(
+      () => readSession(file, null, undefined, { before: "0f1e2d3c" }),
+      /before requires limit/,
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("readSession conflicts on a stale reverse cursor", async () => {
+  const { dir, agentDir, file } = fixtureDir();
+  process.env.PI_CODING_AGENT_DIR = agentDir;
+  try {
+    await assert.rejects(
+      () => readSession(file, null, undefined, { before: "deadbeef", limit: 2 }),
+      /reverse cursor is no longer in the transcript/,
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("parseSessionPageLimit accepts 1 through 200 and rejects the rest", () => {
+  assert.equal(parseSessionPageLimit(null), null);
+  assert.equal(parseSessionPageLimit("1"), 1);
+  assert.equal(parseSessionPageLimit("200"), 200);
+  assert.throws(() => parseSessionPageLimit("0"), /limit must be an integer between 1 and 200/);
+  assert.throws(() => parseSessionPageLimit("201"), /limit must be an integer between 1 and 200/);
+  assert.throws(() => parseSessionPageLimit("1.5"), /limit must be an integer between 1 and 200/);
+  assert.throws(() => parseSessionPageLimit("abc"), /limit must be an integer between 1 and 200/);
 });

@@ -450,6 +450,32 @@ describe("scoutr bridge HTTP/WS API (offline)", () => {
     assert.equal(status, 403); // path guard rejects outside the allow-list
   });
 
+
+  test("session reverse pagination rejects invalid queries", async () => {
+    const encoded = encodeURIComponent(sessionPath);
+    const invalidLimit = await getJson(`/api/sessions?agentKind=pi&path=${encoded}&limit=0`);
+    assert.equal(invalidLimit.status, 400);
+
+    const combined = await getJson(`/api/sessions?agentKind=pi&path=${encoded}&since=e1&before=e1&limit=2`);
+    assert.equal(combined.status, 400);
+
+    const missingLimit = await getJson(`/api/sessions?agentKind=pi&path=${encoded}&before=e1`);
+    assert.equal(missingLimit.status, 400);
+
+    const stale = await getJson(`/api/sessions?agentKind=pi&path=${encoded}&before=deadbeef&limit=2`);
+    assert.equal(stale.status, 409);
+  });
+
+  test("session first page with limit returns the newest entries", async () => {
+    const encoded = encodeURIComponent(sessionPath);
+    const { status, body } = await getJson(`/api/sessions?agentKind=pi&path=${encoded}&limit=1`);
+    assert.equal(status, 200);
+    const page = body as { ok: boolean; entries: { entryId: string }[]; hasMoreBefore: boolean; beforeCursor: string | null };
+    assert.equal(page.ok, true);
+    assert.deepEqual(page.entries.map((entry) => entry.entryId), ["e1"]);
+    assert.equal(page.hasMoreBefore, false);
+    assert.equal(page.beforeCursor, null);
+  });
   test("stored-session reads and mutations enforce the key's backend namespace", async () => {
     const read = await getJson(`/api/sessions?agentKind=claude&path=${encodeURIComponent(sessionPath)}`);
     assert.equal(read.status, 403);

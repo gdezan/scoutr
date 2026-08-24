@@ -28,6 +28,24 @@ interface SessionReadResult {
   lastEntryId: string | null;
   mtimeMs: number;
   size: number;
+  /** Opaque reverse-history cursor immediately before the oldest returned entry. */
+  beforeCursor: string | null;
+  /** True when older transcript entries exist before this page. */
+  hasMoreBefore: boolean;
+}
+
+interface ReverseHistoryCursors {
+  beforeCursor: string | null;
+  hasMoreBefore: boolean;
+}
+
+/** Inclusive page-size bound for GET /api/sessions `limit`. */
+const SESSION_PAGE_LIMIT_MIN = 1;
+const SESSION_PAGE_LIMIT_MAX = 200;
+
+export interface SessionReadPagination {
+  before?: string | null;
+  limit?: number | null;
 }
 
 /**
@@ -118,6 +136,8 @@ async function readSessionRoute(ctx: RouteContext): Promise<RouteResult> {
   const pathParam = ctx.query.get("path");
   const agentKind = ctx.query.get("agentKind");
   const since = ctx.query.get("since") ?? null;
+  const before = ctx.query.get("before") ?? null;
+  const limit = parseSessionPageLimit(ctx.query.get("limit"));
   if (!pathParam || !agentKind) {
     return { status: 400, body: { ok: false, error: "missing session key query parameters" } };
   }
@@ -125,11 +145,63 @@ async function readSessionRoute(ctx: RouteContext): Promise<RouteResult> {
   // outside-the-store rejection surfaces as its 403 via the dispatcher, and
   // unexpected failures are server faults (502 via the dispatcher's
   // catch-all).
-  const result = await readSession(pathParam, since, agentKind);
+  const result = await readSession(pathParam, since, agentKind, { before, limit });
   return { status: 200, body: { ok: true, ...result } };
 }
 
-export async function readSession(pathParam: string, since: string | null, agentKind?: string): Promise<SessionReadResult> {
+/**
+ * Parse the optional `limit` query. Absent stays null so a request with no
+ * pagination parameters remains the legacy full snapshot.
+ */
+export function parseSessionPageLimit(raw: string | null): number | null {
+  if (raw == null) return null;
+  if (!/^[1-9]\d*$/.test(raw)) {
+    throw new SessionsError("limit must be an integer between 1 and 200", 400);
+  }
+  const value = Number(raw);
+  if (value < SESSION_PAGE_LIMIT_MIN || value > SESSION_PAGE_LIMIT_MAX) {
+    throw new SessionsError("limit must be an integer between 1 and 200", 400);
+  }
+  return value;
+}
+
+function emptyHistoryPage(): ReverseHistoryCursors {
+  return { beforeCursor: null, hasMoreBefore: false };
+}
+
+/**
+ * Reverse-history cursors for one chronological page. `beforeCursor` is the
+ * oldest returned entry id when older file-order entries exist; Android
+ * treats it as opaque.
+ */
+function reverseHistoryCursors(
+  all: TranscriptEntry[],
+  page: TranscriptEntry[],
+): ReverseHistoryCursors {
+  if (page.length === 0) return emptyHistoryPage();
+  const oldestId = page[0]!.entryId;
+  const oldestIndex = all.findIndex((entry) => entry.entryId === oldestId);
+  if (oldestIndex <= 0) return emptyHistoryPage();
+  return { beforeCursor: oldestId, hasMoreBefore: true };
+}
+
+export async function readSession(
+  pathParam: string,
+  since: string | null,
+  agentKind?: string,
+  pagination: SessionReadPagination = {},
+): Promise<SessionReadResult> {
+  const before = pagination.before ?? null;
+  const limit = pagination.limit ?? null;
+  if (since && before) {
+    throw new SessionsError("since and before cannot be combined", 400);
+  }
+  if (before && limit == null) {
+    throw new SessionsError("before requires limit", 400);
+  }
+  if (limit != null && (limit < SESSION_PAGE_LIMIT_MIN || limit > SESSION_PAGE_LIMIT_MAX)) {
+    throw new SessionsError("limit must be an integer between 1 and 200", 400);
+  }
   // Only allow absolute paths claimed by a registered backend (read-only data).
   const target = canonicalPath(resolve(pathParam));
   const backend = backendForSessionPath(target);
@@ -141,13 +213,37 @@ export async function readSession(pathParam: string, since: string | null, agent
   }
   const info = await inspectSessionFile(target);
   if (!info.exists) {
-    return { path: target, agentKind: backend.id, name: basename(target), exists: false, since, entries: [], questions: [], model: null, thinkingLevel: null, lastEntryId: null, mtimeMs: 0, size: 0 };
+    return {
+      path: target,
+      agentKind: backend.id,
+      name: basename(target),
+      exists: false,
+      since,
+      entries: [],
+      questions: [],
+      model: null,
+      thinkingLevel: null,
+      lastEntryId: null,
+      mtimeMs: 0,
+      size: 0,
+      ...emptyHistoryPage(),
+    };
   }
   const read = await readTranscriptMemoized(target, backend, info);
   const session = read.transcript;
   let entries = session.entries;
   let cursor: string | null = since;
-  if (since) {
+  let history = emptyHistoryPage();
+  if (before) {
+    // Compare by file position, not lexically: pi ids are random hex.
+    const cursorIndex = session.entries.findIndex((entry) => entry.entryId === before);
+    if (cursorIndex === -1) {
+      throw new SessionsError("reverse cursor is no longer in the transcript", 409);
+    }
+    const start = Math.max(0, cursorIndex - limit!);
+    entries = session.entries.slice(start, cursorIndex);
+    history = reverseHistoryCursors(session.entries, entries);
+  } else if (since) {
     // Compare by file position, not lexically: pi ids are random hex, so
     // lexical order re-sends loaded entries and the app appends duplicate
     // LazyColumn keys (Compose crashes on those).
@@ -159,6 +255,9 @@ export async function readSession(pathParam: string, since: string | null, agent
     } else {
       entries = session.entries.slice(cursorIndex + 1);
     }
+  } else if (limit != null) {
+    entries = session.entries.slice(Math.max(0, session.entries.length - limit));
+    history = reverseHistoryCursors(session.entries, entries);
   }
   const lastEntry = entries[entries.length - 1];
   return {
@@ -175,6 +274,7 @@ export async function readSession(pathParam: string, since: string | null, agent
     lastEntryId: session.lastEntryId,
     mtimeMs: read.info.mtimeMs,
     size: read.info.size,
+    ...history,
   };
 }
 

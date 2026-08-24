@@ -45,7 +45,12 @@ interface ScoutrApi {
     suspend fun registerDevice(fcmToken: String, profileGeneration: Long)
     /** Removes this phone's token from the current bridge; absence is successful. */
     suspend fun unregisterDevice(fcmToken: String)
-    suspend fun session(key: SessionKey, since: String? = null): SessionReadResponse
+    suspend fun session(
+        key: SessionKey,
+        since: String? = null,
+        before: String? = null,
+        limit: Int? = null,
+    ): SessionReadResponse
     suspend fun sessionCatalog(query: String? = null, limit: Int? = null): SessionCatalogResponse
     suspend fun sessionCatalogAction(action: CatalogAction, key: SessionKey, text: String? = null): CreatedSessionResponse
     suspend fun createSession(

@@ -30,7 +30,7 @@ API; the Android app talks only to that API.
 - **Avoid debugging loops:** before each attempt, name the new evidence it can produce or hypothesis it can eliminate. If it repeats a materially similar attempt or succeeds only by chance, stop and reassess.
 - **Run the narrowest useful experiment:** prefer inspection, tracing, focused tests, or direct state verification over speculative edits.
 - **Diagnose infrastructure first:** AAPT2, packaging, missing-dex, emulator-focus, socket, and harness failures are not evidence that product behavior is wrong.
-- **Use completion signals:** recognized agents use Herdr lifecycle waits; ordinary long-running commands use a sibling pane and an explicit completion condition. Timeouts are safety ceilings, not completion mechanisms.
+- **Watch hung work:** before a long command, name the next expected progress. If that progress is late, inspect the process and last output and stop waiting. Recognized agents use Herdr lifecycle waits; slow/noisy/device-bound checks use the sibling-pane completion recipe in `skills/scoutr-verification/SKILL.md`. Timeouts are safety ceilings, not completion.
 - **Keep Android verification serial:** one Gradle invocation per checkout and one instrumentation run on `emulator-5554` at a time.
 - **Emulator is on-demand (artemis is always-on):** boot `emulator-5554` (`cockpit` AVD) only for final acceptance; kill with `adb -s emulator-5554 emu kill` when done. See `docs/dev-workflow.md` for boot/kill recipes.
 - **Deploy finalized bridge work:** when the phone or live app would only see the change through the supervised service, run the deploy recipe in `docs/dev-workflow.md`. Source-green is not live.

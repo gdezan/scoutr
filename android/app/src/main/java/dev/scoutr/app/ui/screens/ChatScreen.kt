@@ -97,6 +97,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.clip
@@ -342,6 +343,9 @@ fun ChatScreen(
                         statusSinceMs = ui.statusSinceMs,
                         hasPendingQuestion = ui.hasPendingQuestion,
                         agentKind = ui.agentKind,
+                        hasOlderEntries = ui.hasOlderEntries,
+                        loadingOlderEntries = ui.loadingOlderEntries,
+                        onLoadOlder = viewModel::loadOlderEntries,
                         onRetryPending = viewModel::retryPendingMessage,
                         onAskAnswer = viewModel::setAskAnswer,
                         onAskPage = viewModel::setAskPage,
@@ -847,12 +851,42 @@ private fun HeaderConfigurationChip(
  * concurrent appends can never crash it.
  */
 /** Rows of the chat list in emission order; see ChatList. */
-private sealed interface ChatRow {
+internal sealed interface ChatRow {
     data class Entry(val entry: SessionEntry) : ChatRow
     data class Questions(val group: List<QuestionEntry>) : ChatRow
     data class Pending(val message: PendingUserMessage) : ChatRow
     /** The tail busy row: starting, working, or waiting on the user. */
     data class Indicator(val mode: WorkingIndicatorMode) : ChatRow
+}
+
+/**
+ * Build the transcript row list. Answered questions whose anchor entry is
+ * not yet loaded stay off the list so they do not jump to the top during
+ * reverse pagination.
+ */
+internal fun buildChatRows(
+    entries: List<SessionEntry>,
+    pendingMessages: List<PendingUserMessage>,
+    questions: List<QuestionEntry>,
+    indicatorMode: WorkingIndicatorMode?,
+) : List<ChatRow> {
+    val questionsByCall = questions.groupBy { it.callId.ifEmpty { it.id.substringBefore('#') } }
+    val groupsByAnchorEntry = questionsByCall.values.groupBy { it.first().entryId }
+    val anchoredEntryIds = entries.mapTo(mutableSetOf()) { it.entryId }
+    return buildList {
+        for (entry in entries) {
+            add(ChatRow.Entry(entry))
+            groupsByAnchorEntry[entry.entryId]?.forEach { add(ChatRow.Questions(it)) }
+        }
+        questionsByCall.values
+            .filter { group ->
+                val anchorId = group.first().entryId
+                anchorId !in anchoredEntryIds && group.any { !it.answered }
+            }
+            .forEach { add(ChatRow.Questions(it)) }
+        pendingMessages.forEach { add(ChatRow.Pending(it)) }
+        if (indicatorMode != null) add(ChatRow.Indicator(indicatorMode))
+    }
 }
 
 @Composable
@@ -873,6 +907,9 @@ fun ChatList(
     statusSinceMs: Long? = null,
     hasPendingQuestion: Boolean = false,
     agentKind: String? = null,
+    hasOlderEntries: Boolean = false,
+    loadingOlderEntries: Boolean = false,
+    onLoadOlder: () -> Unit = {},
     onRetryPending: (String) -> Unit = {},
     onAskAnswer: (callId: String, questionId: String, answer: DraftAnswer) -> Unit = { _, _, _ -> },
     onAskPage: (callId: String, page: Int) -> Unit = { _, _ -> },
@@ -884,10 +921,10 @@ fun ChatList(
     val indicatorMode = workingIndicatorMode(starting, agentStatus, hasPendingQuestion)
 
     val reduceMotion = useReduceMotion()
-    var expandedToolIds by remember(entries.firstOrNull()?.entryId) {
+    var expandedToolIds by remember {
         mutableStateOf<Set<String>>(emptySet())
     }
-    var collapsedToolIds by remember(entries.firstOrNull()?.entryId) {
+    var collapsedToolIds by remember {
         mutableStateOf<Set<String>>(emptySet())
     }
     fun isToolExpanded(toolId: String): Boolean =
@@ -943,26 +980,8 @@ fun ChatList(
         }
     }
 
-    // Rows of the chat list in emission order; the follow index is computed
-    // the same way the LazyColumn emits items (entries, questions, pending,
-    // working indicator) so follow always lands on the true last item.
-    val questionsByCall = questions.groupBy { it.callId.ifEmpty { it.id.substringBefore('#') } }
-    // One assistant entry can hold several ask_user_question calls, so a
-    // single entry may anchor several groups; groupBy keeps them all.
-    val groupsByAnchorEntry = questionsByCall.values.groupBy { it.first().entryId }
-    val anchoredEntryIds = entries.mapTo(mutableSetOf()) { it.entryId }
     val rows: List<ChatRow> = remember(entries, pendingMessages, questions, indicatorMode) {
-        buildList {
-            for (entry in entries) {
-                add(ChatRow.Entry(entry))
-                groupsByAnchorEntry[entry.entryId]?.forEach { add(ChatRow.Questions(it)) }
-            }
-            questionsByCall.values
-                .filter { it.first().entryId !in anchoredEntryIds }
-                .forEach { add(ChatRow.Questions(it)) }
-            pendingMessages.forEach { add(ChatRow.Pending(it)) }
-            if (indicatorMode != null) add(ChatRow.Indicator(indicatorMode))
-        }
+        buildChatRows(entries, pendingMessages, questions, indicatorMode)
     }
     fun keyOf(row: ChatRow): String = when (row) {
         is ChatRow.Entry -> row.entry.entryId
@@ -1007,6 +1026,39 @@ fun ChatList(
     // it must not issue a scroll request (plan 007).
     LaunchedEffect(rows.size, lastItemKey) {
         if (followNew && hasContent) scrollToEnd()
+    }
+
+    // Load older history when the user is near the top. One request per
+    // threshold visit; leaving the near-top band is what allows another try.
+    val nearTopRowThreshold = 6
+    var requestedOlderThisVisit by remember { mutableStateOf(false) }
+    var olderScrollAnchor by remember { mutableStateOf<Pair<String, Int>?>(null) }
+    LaunchedEffect(listState, hasOlderEntries, loadingOlderEntries) {
+        snapshotFlow {
+            listState.layoutInfo.visibleItemsInfo.firstOrNull()?.index ?: Int.MAX_VALUE
+        }.collect { firstIndex ->
+            if (firstIndex > nearTopRowThreshold) {
+                requestedOlderThisVisit = false
+                return@collect
+            }
+            if (!hasOlderEntries || loadingOlderEntries || requestedOlderThisVisit) return@collect
+            val firstVisible = listState.layoutInfo.visibleItemsInfo.firstOrNull()
+            val key = firstVisible?.let { info -> rows.getOrNull(info.index)?.let(::keyOf) }
+            if (key != null) {
+                olderScrollAnchor = key to listState.firstVisibleItemScrollOffset
+            }
+            requestedOlderThisVisit = true
+            onLoadOlder()
+        }
+    }
+    LaunchedEffect(entries, loadingOlderEntries, olderScrollAnchor) {
+        val anchor = olderScrollAnchor ?: return@LaunchedEffect
+        if (loadingOlderEntries) return@LaunchedEffect
+        val index = rows.indexOfFirst { keyOf(it) == anchor.first }
+        if (index >= 0) {
+            listState.scrollToItem(index, anchor.second)
+            olderScrollAnchor = null
+        }
     }
 
     Box(modifier) {

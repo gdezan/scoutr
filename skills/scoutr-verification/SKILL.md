@@ -37,6 +37,10 @@ Choose the narrowest check that can produce useful evidence:
 
 Prefer incremental Gradle work. Use `--rerun-tasks` only after evidence of stale
 or incorrectly skipped output, not as a default.
+A focused Android JVM class should print results shortly after
+`:app:testDebugUnitTest` starts. Silence there is a hang: inspect
+`GradleWorkerMain` / the test process, then stop waiting. Robolectric parking
+scars live in `docs/dev-workflow.md`.
 
 ## Final acceptance selection
 
@@ -82,10 +86,11 @@ rc=$(printf '%s\n' "$result" | jq -r '.result.matched_line | split(":")[-1] | to
 
 The marker proves only that the command exited; inspect the exit code. Never
 reuse markers because `wait-output` checks existing output first, and anchor the
-whole line because terminal input may be echoed. For an interactive sequence
-that cannot emit a final marker, emit and wait on a heartbeat after each stage.
-Recognized agents use lifecycle state through the global
-`herdr-agent-delegation` skill instead.
+whole line because terminal input may be echoed. If the next expected stage is
+late, inspect pane output and the worker and stop the wait instead of letting
+the ceiling expire. For an interactive sequence that cannot emit a final marker,
+emit and wait on a heartbeat after each stage. Recognized agents use lifecycle
+state through the global `herdr-agent-delegation` skill instead.
 
 ## Runtime evidence
 

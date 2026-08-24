@@ -22,6 +22,7 @@ import dev.scoutr.app.net.ScoutrApi
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.async
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -77,6 +78,18 @@ fun mergeSessionEntries(
 }
 
 /**
+ * Prepend an older reverse-history page. Deduplicates by entry id so a
+ * reverse load that overlaps the current head cannot create duplicate keys.
+ */
+fun prependSessionEntries(
+    existing: List<SessionEntry>,
+    incoming: List<SessionEntry>,
+): List<SessionEntry> {
+    val known = existing.mapTo(mutableSetOf()) { it.entryId }
+    return incoming.filter { it.entryId !in known } + existing
+}
+
+/**
  * QUEUED covers only the moment between tapping send and the bridge accepting
  * the request. Once accepted the message is SENT — it is on the host whether or
  * not the transcript has caught up — and the row stops claiming otherwise.
@@ -125,6 +138,9 @@ data class PendingUserMessage(
  * messages seconds after they were sent, long before any agent could echo.
  */
 internal const val ECHO_GRACE_MS = 90_000L
+
+/** First Chat transcript read asks for at most this many newest entries. */
+internal const val INITIAL_SESSION_PAGE_LIMIT = 50
 
 /**
  * Merge question cards by stable id. Incremental polls only deliver new
@@ -395,6 +411,12 @@ data class ChatUiState(
     val commands: Loadable<List<SlashCommandInfo>> = Loadable.Idle,
     /** `@` mention candidates for [cwd]; refetched every time a mention opens. */
     val files: Loadable<FileListing> = Loadable.Idle,
+    /** Opaque reverse-history cursor from the last replacement or reverse page. */
+    val beforeCursor: String? = null,
+    /** True when older transcript entries exist before the loaded head. */
+    val hasOlderEntries: Boolean = false,
+    /** True while a reverse-history page request is in flight. */
+    val loadingOlderEntries: Boolean = false,
 ) {
     val lastUserMessage: String?
         get() = pendingMessages.lastOrNull()?.text
@@ -457,9 +479,11 @@ data class ChatUiState(
  * Transcript + steering for one agent session.
  *
  * Transcript: the bridge reads the pi session JSONL (read-only) and returns
- * incremental entries via ?since=<entryId>. We poll lightly while the screen
- * is alive; the pi session file is append-only so the cursor is stable.
- *
+ * incremental entries via ?since=<entryId>. The first open asks for a bounded
+ * newest page; older history is fetched with ?before= and prepended. We poll
+ * lightly while the screen is alive; the pi session file is append-only so
+ * the live cursor is stable.
+
  * Steering: herdr agent.prompt through the bridge (user-initiated only).
  */
 class ChatViewModel(
@@ -529,6 +553,12 @@ class ChatViewModel(
     private val refreshGate = Mutex()
     private var inFlightRefresh: Deferred<Boolean>? = null
 
+    /**
+     * Single-flight owner for reverse-history pages. May overlap the live
+     * refresh because the two mutate opposite ends of the transcript.
+     */
+    private val olderLoadGate = Mutex()
+    private var olderLoadJob: Job? = null
     /** Durable identity after bootstrap convergence; never derived from a pane id. */
     private var canonicalKey: SessionKey? = initialKey
     private val bootstrapPaneId: String? = bootstrapPaneId
@@ -570,6 +600,47 @@ class ChatViewModel(
         inFlightRefresh?.let { inFlight ->
             performanceCounters.chatRefreshCancelled()
             inFlight.cancel()
+        }
+        olderLoadJob?.cancel()
+    }
+
+    /**
+     * Fetch the previous reverse-history page. Single-flight, lifecycle-gated,
+     * and never auto-retried from a failure: the already-rendered transcript
+     * stays usable.
+     */
+    fun loadOlderEntries() {
+        if (!lifecycleActive) return
+        val cursor = _ui.value.beforeCursor
+        val key = canonicalKey ?: _ui.value.sessionKey
+        if (!_ui.value.hasOlderEntries || cursor.isNullOrEmpty() || key == null) return
+        if (!olderLoadGate.tryLock()) return
+        olderLoadJob = viewModelScope.launch {
+            try {
+                if (!lifecycleActive) return@launch
+                _ui.update { it.copy(loadingOlderEntries = true) }
+                val response = bridge.session(
+                    key,
+                    before = cursor,
+                    limit = INITIAL_SESSION_PAGE_LIMIT,
+                )
+                _ui.update {
+                    it.copy(
+                        entries = prependSessionEntries(it.entries, response.entries),
+                        beforeCursor = response.beforeCursor,
+                        hasOlderEntries = response.hasMoreBefore,
+                        loadingOlderEntries = false,
+                        questions = mergeQuestions(it.questions, response.questions),
+                    )
+                }
+            } catch (c: CancellationException) {
+                _ui.update { it.copy(loadingOlderEntries = false) }
+                throw c
+            } catch (_: Exception) {
+                _ui.update { it.copy(loadingOlderEntries = false) }
+            } finally {
+                olderLoadGate.unlock()
+            }
         }
     }
 
@@ -789,7 +860,12 @@ class ChatViewModel(
                 _ui.update { it.copy(transcript = Loadable.Ready(Unit), exists = false) }
                 return true
             }
-            val response = bridge.session(key, since = _ui.value.entries.lastOrNull()?.entryId)
+            val newestLoadedId = _ui.value.entries.lastOrNull()?.entryId
+            val response = if (newestLoadedId == null) {
+                bridge.session(key, limit = INITIAL_SESSION_PAGE_LIMIT)
+            } else {
+                bridge.session(key, since = newestLoadedId)
+            }
             _ui.update {
                 val previouslyAnswered = it.questions
                     .filter { q -> q.answered }
@@ -814,8 +890,9 @@ class ChatViewModel(
                     it.transcriptSize,
                 )
                 val responseHasRevision = hasTranscriptRevision(response.mtimeMs, response.size)
+                val incremental = response.since != null
                 it.copy(
-                    entries = mergeSessionEntries(it.entries, response.entries, incremental = response.since != null),
+                    entries = mergeSessionEntries(it.entries, response.entries, incremental = incremental),
                     questions = questions,
                     askDrafts = drafts,
                     dismissedCallIds = pruneDismissedAsks(it.dismissedCallIds, questions),
@@ -844,6 +921,8 @@ class ChatViewModel(
                     ),
                     transcriptMtimeMs = if (responseRevisionAccepted && responseHasRevision) response.mtimeMs else it.transcriptMtimeMs,
                     transcriptSize = if (responseRevisionAccepted && responseHasRevision) response.size else it.transcriptSize,
+                    beforeCursor = if (incremental) it.beforeCursor else response.beforeCursor,
+                    hasOlderEntries = if (incremental) it.hasOlderEntries else response.hasMoreBefore,
                 )
             }
             true

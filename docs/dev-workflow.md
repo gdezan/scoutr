@@ -249,7 +249,11 @@ proxy the policy already permits).
   apply; save/clear the connection explicitly per test
   (`ConnectionStore(app).apply { save(...) }` or `.clear()`).
 - Poll-loop tests advance with `ShadowLooper.idleMainLooper()` +
-  `delay(25)` in a `waitFor` loop; first poll is immediate.
+  `delay(25)` in a `waitFor` loop; first poll is immediate. Park a
+  Fake session read with `gates["session"]` (suspend `await`).
+  `runBlocking` inside `onCall` holds the Robolectric main thread so
+  `idleMainLooper()` never returns and the Gradle worker hangs until
+  killed.
 - To run a single class, use
   `-Pandroid.testInstrumentationRunnerArguments.class=dev.scoutr.app.ui.X`.
 
