@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# Tag every commit with the semantic version implied by its conventional-commit
+# subject. The bump rules live in scripts/version.mjs (feat -> minor, feat!/
+# BREAKING CHANGE -> major, everything else -> patch); this hook only decides
+# when to create the tag, never how the number is computed.
+#
+# Tags are local-only: nothing is pushed. Set SCOUTR_NO_AUTOTAG=1 to skip.
+set -euo pipefail
+
+[ "${SCOUTR_NO_AUTOTAG:-0}" = "1" ] && exit 0
+
+repo="$(git rev-parse --show-toplevel)"
+cd "$repo"
+
+# Mid-rebase / mid-merge commits are rewrites, not new history worth tagging.
+git_dir="$(git rev-parse --git-dir)"
+for marker in rebase-merge rebase-apply MERGE_HEAD CHERRY_PICK_HEAD; do
+  [ -e "$git_dir/$marker" ] && exit 0
+done
+
+head="$(git rev-parse HEAD)"
+
+# `git commit --amend` leaves the previous tag on an orphaned commit, which
+# breaks `git describe` for every later build. Move that tag out of the way.
+last_tag="$(git describe --tags --abbrev=0 2>/dev/null || true)"
+if [ -n "$last_tag" ] && ! git merge-base --is-ancestor "$last_tag^{commit}" "$head" 2>/dev/null; then
+  git tag -d "$last_tag" >/dev/null
+fi
+
+# Already tagged (re-run, or an amend that kept the same version)? Leave it be.
+if git describe --tags --exact-match HEAD >/dev/null 2>&1; then
+  exit 0
+fi
+
+version="$(node scripts/version.mjs --key version)"
+tag="v$version"
+
+if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+  echo "post-commit: $tag already exists, not tagging $(git rev-parse --short HEAD)" >&2
+  exit 0
+fi
+
+git tag -a "$tag" -m "$(git log -1 --pretty=%s)"
+echo "post-commit: tagged $(git rev-parse --short HEAD) as $tag"

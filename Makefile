@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 
-.PHONY: help build install release deploy-bridge verify bridge-test android-test
+.PHONY: help build install release deploy-bridge verify bridge-test android-test hooks
 .NOTPARALLEL:
 
 help:
@@ -11,7 +11,8 @@ help:
 		'make deploy-bridge  Build and restart the bridge service' \
 		'make verify         Run the complete verification script' \
 		'make bridge-test    Run bridge typecheck and tests' \
-		'make android-test   Run Android JVM unit tests'
+		'make android-test   Run Android JVM unit tests' \
+		'make hooks          Point git at the repo'"'"'s .githooks directory'
 
 build:
 	@cd android && ./gradlew assembleDebug
@@ -33,3 +34,7 @@ bridge-test:
 
 android-test:
 	@cd android && ./gradlew testDebugUnitTest
+
+hooks:
+	@git config core.hooksPath .githooks
+	@echo 'git hooks -> .githooks (post-commit auto-tags; SCOUTR_NO_AUTOTAG=1 to skip)'
