@@ -64,5 +64,6 @@ skipped Gradle output.
 - **Verification selection and final runtime evidence:** use `skills/scoutr-verification/SKILL.md`.
 - **Pre-commit review:** use `skills/scoutr-review/SKILL.md` and resolve or dismiss every finding. An explicit ask to commit, tag, or push without requesting review is the commit itself.
 - **Visual evidence when the active model cannot inspect images:** use `skills/scoutr-vision/SKILL.md`.
+- **Performance work — optimizing, benchmarking, or claiming a speed/memory win:** `docs/performance-study.md` owns what to measure on each side and the status of every slice. Read its measurement contract before benchmarking, and update it in the same change.
 - **Herdr sibling-pane delegation:** use the global `herdr-agent-delegation` skill for start, prompt, wait, read, recovery, and cleanup.
 - **Terminal implementation or review:** use `docs/terminal.md` plus ADRs 0001 and 0002.

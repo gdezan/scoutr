@@ -37,6 +37,12 @@ Choose the narrowest check that can produce useful evidence:
 
 Prefer incremental Gradle work. Use `--rerun-tasks` only after evidence of stale
 or incorrectly skipped output, not as a default.
+
+`npm run lint` (oxlint) is not clean at baseline and is not a gate: a large
+backlog of anti-slop errors predates any current change. Expecting zero, or
+fixing the backlog, is not the job. If you run it, judge only your own delta —
+compare the error count against the pre-change tree (`git stash`) and keep it
+at zero.
 A focused Android JVM class should print results shortly after
 `:app:testDebugUnitTest` starts. Silence there is a hang: inspect
 `GradleWorkerMain` / the test process, then stop waiting. Robolectric parking

@@ -178,7 +178,7 @@ Question state could not be derived from the displayed tail: an ask escaped in t
 | 14.4 MiB, 30k entries (~300 B each) | 151.8 + 30.0 ms | 14.0 MB / 30000 / 46.4 MiB | 29.4 + 0.1 ms | 23.8 KiB / 50 / ~0 |
 | 13.9 MiB, 8k entries (~1.5 KB each) | 55.9 + 26.5 ms | 14.0 MB / 8000 / 42.6 MiB | 26.4 + 0.2 ms | 62.1 KiB / 35 / ~0 |
 
-Retained heap is measured after a forced GC, so it is what the caches hold, not parse peak; the post-change figures are inside measurement noise. The re-read of an unchanged file is memoized on both sides and costs about 1 ms either way. The third row shows `limit` behaving as the documented maximum: 50 fat entries do not fit the 64 KiB tail window, so the page is 35 and `hasMoreBefore` carries the rest.
+Reproduce any row with `npm run bench:session-read` (see "Bridge evidence"); `--mode full` at the current commit still reproduces the before-row, which is the check that the legacy unpaginated path was left alone. Retained heap is measured after a forced GC, so it is what the caches hold, not parse peak; the post-change figures are inside measurement noise. The re-read of an unchanged file is memoized on both sides and costs about 1 ms either way. The third row shows `limit` behaving as the documented maximum: 50 fat entries do not fit the 64 KiB tail window, so the page is 35 and `hasMoreBefore` carries the rest.
 
 Residual cost after the change is the two whole-file text scans the bounded read still needs — the exact metadata scan and the ask-record scan — visible as the gap between the 3.8 MiB and 14.4 MiB rows. The record-line filter is what keeps them cheap: before it, the exact metadata scan alone cost 50.2 ms on the 14 MiB fixture, which would have made the composite slower than the full read it replaced. Structural proof that the display read is bounded is in `session-read.test.ts` ("serves the initial page from the bounded tail window" asserts the only display read is `{ tail: 6 }`), with truthful history, model/thinking, and question coverage beside it.
 
@@ -317,6 +317,8 @@ Emulator results are useful for functional regression, not decision-grade radio,
 ### Bridge evidence
 
 Record route count/status/bytes/duration, JSON serialization time, transcript bytes scanned/rows parsed/cache hit rate, herdr subscribers, WebSocket clients/queue bytes, terminal bytes/chunks, event-loop delay, CPU, RSS/heap, and GC.
+
+`bridge/scripts/bench-session-read.ts` (`npm run bench:session-read`) covers that contract for the Chat read path: cold and memoized read time, JSON serialization time, response bytes, entries returned, and GC'd retained heap, over a generated transcript of any entry count and size. It stamps every result with the commit it ran at, so a baseline run from a second worktree cannot be attributed to the wrong tree. Use it before optimizing, not only after: measuring only the functions a change touches hides serialization and retained heap, which were about half of what the bounded initial read actually saved.
 
 Load-test optimized polling and foreground event-stream variants with identical event timelines and 1/10/100 clients. Include slow clients and reconnect storms. Pass on bounded memory/queues and latency at target concurrency, not peak requests/second alone.
 

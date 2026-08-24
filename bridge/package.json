@@ -14,7 +14,8 @@
     "deploy": "npm run build && node ../scripts/bridge-service.mjs restart && npm run check:deployed",
     "check:deployed": "node scripts/check-deployed.mjs",
     "test": "node --import tsx --test --test-timeout=120000 test/*.test.ts",
-    "cli": "tsx src/cli.ts"
+    "cli": "tsx src/cli.ts",
+    "bench:session-read": "node --expose-gc --import tsx scripts/bench-session-read.ts"
   },
   "engines": {
     "node": ">=22"
