@@ -50,8 +50,12 @@ type ClaudeAnswersInput = v.InferOutput<typeof claudeAnswersSchema>;
  * PostToolUse hook missed heals itself.
  */
 export function claudeQuestions(transcript: Transcript): QuestionEntry[] {
-  const questions = extractClaudeQuestions(transcript.entries);
-  const pending = readPendingAsk(transcript.id);
+  return mergePendingAsk(transcript.id, extractClaudeQuestions(transcript.entries));
+}
+
+/** [claudeQuestions] for a caller that read the transcript's questions itself. */
+export function mergePendingAsk(sessionId: string, questions: QuestionEntry[]): QuestionEntry[] {
+  const pending = readPendingAsk(sessionId);
   if (!pending) return questions;
   if (questions.some((question) => question.callId === pending.toolUseId)) {
     clearPendingAsk(pending.sessionId);

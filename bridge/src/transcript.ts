@@ -246,6 +246,37 @@ function dropPartialFirstLine(text: string): string {
 }
 
 
+/**
+ * The whole lines of [text] that contain any of [needles], in file order.
+ *
+ * A transcript is mostly records its reader does not care about — a metadata
+ * scan wants two record types, a question scan wants the asks — and JSON
+ * parsing every line to find them is what makes those reads scale with the
+ * file. Matching by byte offset instead never materializes a string per
+ * record, so only the handful of matched lines reach a parser.
+ */
+export function linesMentioning(text: string, needles: readonly string[]): string {
+  const starts = new Set<number>();
+  for (const needle of needles) {
+    if (!needle) continue;
+    for (let at = text.indexOf(needle); at !== -1; at = text.indexOf(needle, at + needle.length)) {
+      starts.add(text.lastIndexOf("\n", at) + 1);
+    }
+  }
+  if (starts.size === 0) return "";
+  const lines: string[] = [];
+  for (const start of [...starts].sort((a, b) => a - b)) {
+    const end = text.indexOf("\n", start);
+    lines.push(end === -1 ? text.slice(start) : text.slice(start, end));
+  }
+  return `${lines.join("\n")}\n`;
+}
+
+/** [linesMentioning] over a whole transcript file. */
+export async function readRecordLines(path: string, needles: readonly string[]): Promise<string> {
+  return linesMentioning(await readTranscriptText(path), needles);
+}
+
 /** Extract plain text from a parsed entry for previews/notifications. */
 export function entryText(entry: TranscriptEntry, maxLength = 280): string {
   const text = collapseTranscriptText(joinContentBlocks(entry));

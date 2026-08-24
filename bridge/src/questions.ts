@@ -1,5 +1,5 @@
 import * as v from "valibot";
-import type { ContentBlock, TranscriptEntry, ToolCallBlock } from "./transcript.js";
+import { linesMentioning, readTranscriptText, type ContentBlock, type TranscriptEntry, type ToolCallBlock } from "./transcript.js";
 
 /**
  * Structured questions from pi session events.
@@ -204,4 +204,33 @@ export function sanitizeAnswerText(text: string): string {
   const singleLine = text.replace(/[\r\n\u2028\u2029]+/g, " ");
   const clean = singleLine.replace(/[\u0000-\u001f\u007f]/g, "").trim();
   return clean.length > MAX_ANSWER_LENGTH ? clean.slice(0, MAX_ANSWER_LENGTH) : clean;
+}
+
+/**
+ * Every question card of a session, read without normalizing the whole
+ * transcript.
+ *
+ * Question state has to be authoritative over the entire file: an ask the
+ * user escaped in the terminal is never written back as answered, and Chat
+ * keeps its composer locked on it — so a page-sized tail read cannot decide
+ * it. Almost none of a transcript is about questions, though. The file text
+ * is scanned for the few lines that can carry an ask (the tool call, then any
+ * record naming one of its call ids) and only those reach the JSONL parser,
+ * so a multi-megabyte session costs one read plus a handful of JSON.parse
+ * calls instead of a full entry normalization.
+ */
+export async function scanAskQuestions(
+  path: string,
+  toolNames: readonly string[],
+  parse: (text: string) => TranscriptEntry[],
+  extract: (entries: TranscriptEntry[]) => QuestionEntry[],
+): Promise<QuestionEntry[]> {
+  const text = await readTranscriptText(path);
+  const callText = linesMentioning(text, toolNames);
+  if (!callText) return [];
+  // The call ids come from the calls themselves: an answer record names the
+  // id but not always the tool, so it can only be found on a second pass.
+  const callIds = new Set(extract(parse(callText)).map((question) => question.callId));
+  if (callIds.size === 0) return [];
+  return extract(parse(linesMentioning(text, [...toolNames, ...callIds])));
 }

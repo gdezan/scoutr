@@ -14,7 +14,7 @@ import {
 } from "../src/agents/claude/index.js";
 import { parseClaudeTranscript } from "../src/agents/claude/transcript.js";
 import { readClaudeCommandsCatalog } from "../src/agents/claude/commands.js";
-import { claudeDeliverInitialPrompt, claudeExtractQuestions } from "../src/agents/claude/index.js";
+import { claudeDeliverInitialPrompt, claudeExtractQuestions, claudeReadTranscriptState } from "../src/agents/claude/index.js";
 import { fakeHerdr } from "./support/fake-herdr.js";
 
 /** CLAUDECONFIGDIR honing: point the claude adapter at a temp store. */
@@ -358,6 +358,40 @@ describe("claude adapter", () => {
       assert.deepEqual([...claudeBackend.capabilities], ["abort", "compact", "close", "set_model", "set_thinking"]);
       assert.equal(claudeBackend.hasModelCatalog, true);
       assert.equal(claudeBackend.hasSlashCommands, true);
+    });
+  });
+
+  /**
+   * The exact model read. Claude stamps the model on every assistant record,
+   * so the tail window normally answers it without touching the rest of the
+   * file — but a session that ends in a long run of user records has to keep
+   * finding the older one.
+   */
+  describe("model state", () => {
+    async function stateOf(lines: unknown[]): Promise<string | null> {
+      const dir = await mkdtemp(join(tmpdir(), "scoutr-claude-state-"));
+      const path = join(dir, "session.jsonl");
+      await writeFile(path, `${lines.map((line) => JSON.stringify(line)).join("\n")}\n`);
+      return (await claudeReadTranscriptState(path)).model;
+    }
+
+    it("reads the newest model from the tail window", async () => {
+      const model = await stateOf([
+        userRecord("u1", "hello"),
+        assistantRecord("a1", [{ type: "text", text: "hi" }]),
+      ]);
+      assert.equal(model, "claude-sonnet-4-6");
+    });
+
+    it("still finds a model the tail window cannot reach", async () => {
+      // 64 KiB of user records after the only assistant one push it out of
+      // the tail window entirely.
+      const filler = Array.from({ length: 80 }, (_, i) => userRecord(`f${i}`, "y".repeat(1000)));
+      const model = await stateOf([
+        assistantRecord("a1", [{ type: "text", text: "hi" }]),
+        ...filler,
+      ]);
+      assert.equal(model, "claude-sonnet-4-6");
     });
   });
 

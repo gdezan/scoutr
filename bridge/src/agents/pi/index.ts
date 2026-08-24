@@ -4,9 +4,10 @@ import { BridgeError } from "../../errors.js";
 import type { HerdrPort } from "../../herdr/port.js";
 import type { AgentSessionInfo } from "../../herdr/types.js";
 import type { QuestionEntry } from "../../questions.js";
-import { extractQuestions, sanitizeAnswerText } from "../../questions.js";
+import { extractQuestions, sanitizeAnswerText, scanAskQuestions, ASK_USER_QUESTION_TOOL } from "../../questions.js";
 import {
   MAX_SESSION_TITLE_LENGTH,
+  readRecordLines,
   readTranscriptText,
   type Transcript,
   type TranscriptReadOpts,
@@ -94,11 +95,19 @@ export async function piReadTranscript(path: string, opts?: TranscriptReadOpts):
   return parsePiTranscript(await readTranscriptText(path, opts), opts ?? {});
 }
 
+/** The record types [piReadTranscriptState] exists to find. */
+const PI_STATE_RECORDS = ["model_change", "thinking_level_change"] as const;
+
 export async function piReadTranscriptState(path: string, fromByte?: number): Promise<Transcript> {
-  const opts: TranscriptReadOpts = fromByte === undefined
-    ? { metadataOnly: true, exactMetadata: true }
-    : { metadataOnly: true, fromByte };
-  return parsePiTranscript(await readTranscriptText(path, opts), opts);
+  if (fromByte !== undefined) {
+    const opts: TranscriptReadOpts = { metadataOnly: true, fromByte };
+    return parsePiTranscript(await readTranscriptText(path, opts), opts);
+  }
+  // Exact, and still cheap: pi records a model or thinking change in its own
+  // record type, so the scan can reach every one of them without parsing a
+  // single message.
+  const opts: TranscriptReadOpts = { metadataOnly: true, exactMetadata: true };
+  return parsePiTranscript(await readRecordLines(path, PI_STATE_RECORDS), opts);
 }
 
 export async function piRenameStoredSession(path: string, title: string): Promise<void> {
@@ -107,6 +116,16 @@ export async function piRenameStoredSession(path: string, title: string): Promis
 
 export function piExtractQuestions(transcript: Transcript): QuestionEntry[] {
   return extractQuestions(transcript.entries);
+}
+
+/** Question cards of the whole session, without parsing every entry. */
+export async function piReadQuestions(path: string): Promise<QuestionEntry[]> {
+  return scanAskQuestions(
+    path,
+    [ASK_USER_QUESTION_TOOL],
+    (text) => parsePiTranscript(text).entries,
+    extractQuestions,
+  );
 }
 
 /**
@@ -256,6 +275,7 @@ export const piBackend: AgentBackend = {
   readTranscriptState: piReadTranscriptState,
   renameStoredSession: piRenameStoredSession,
   extractQuestions: piExtractQuestions,
+  readQuestions: piReadQuestions,
   answerAsk: piAnswerAsk,
   dismissAsk: piDismissAsk,
   control: piControl,

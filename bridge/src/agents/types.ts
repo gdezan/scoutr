@@ -111,6 +111,13 @@ export interface AgentBackend {
 
   extractQuestions(transcript: Transcript): QuestionEntry[];
   /**
+   * Every question card of the session at [path], read straight from the file
+   * without normalizing every entry (see `scanAskQuestions`). A bounded Chat
+   * page cannot derive authoritative question state from the entries it
+   * displays, so it asks the backend for it separately.
+   */
+  readQuestions(path: string): Promise<QuestionEntry[]>;
+  /**
    * Fingerprint of question state this backend keeps *outside* the transcript
    * file, cheap enough to call on every board poll. Claude's open ask is a
    * hook-written sidecar that appears and disappears while the transcript stat

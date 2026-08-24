@@ -2,6 +2,10 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { extractQuestions, sanitizeAnswerText } from "../src/questions.js";
 import type { TranscriptEntry } from "../src/transcript.js";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { piReadQuestions } from "../src/agents/pi/index.js";
 
 const TOOL_CALL_ID = "call_abc123|fc_xyz789";
 
@@ -210,4 +214,78 @@ test("sanitizeAnswerText collapses newlines, strips control chars, and caps leng
   const long = "x".repeat(5000);
   assert.equal(sanitizeAnswerText(long).length, 4000);
   assert.equal(sanitizeAnswerText("\n\n  \n"), "");
+});
+
+/**
+ * The ask-record scan (`scanAskQuestions`, reached here through pi's backend).
+ * It is what lets a bounded Chat page stay authoritative about questions, so
+ * it has to find exactly what a full parse would — from a file whose other
+ * records it never parses.
+ */
+test("piReadQuestions pairs an answer record that names only the call id", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "scoutr-ask-scan-"));
+  try {
+    const file = join(dir, "session.jsonl");
+    const noise = Array.from({ length: 50 }, (_, i) => JSON.stringify({
+      type: "message",
+      id: `n${i}`,
+      timestamp: "2026-08-10T00:00:00Z",
+      // Ordinary traffic the scan must never open.
+      message: { role: "user", content: [{ type: "text", text: "y".repeat(500) }] },
+    }));
+    writeFileSync(file, `${[
+      ...noise,
+      JSON.stringify({
+        type: "message",
+        id: "ask1",
+        timestamp: "2026-08-10T00:01:00Z",
+        message: {
+          role: "assistant",
+          content: [{
+            type: "toolCall",
+            id: "call_scan",
+            name: "ask_user_question",
+            arguments: { questions: [{ question: "Ship it?", header: "Ship", options: [{ label: "Yes" }, { label: "No" }] }] },
+          }],
+        },
+      }),
+      ...noise,
+      // No toolName here: only the call id links this record to the ask.
+      JSON.stringify({
+        type: "message",
+        id: "ans1",
+        timestamp: "2026-08-10T00:02:00Z",
+        message: {
+          role: "toolResult",
+          toolCallId: "call_scan",
+          content: [],
+          details: { answers: [{ questionIndex: 0, kind: "option", answer: "Yes" }] },
+        },
+      }),
+      ...noise,
+    ].join("\n")}\n`);
+    const questions = await piReadQuestions(file);
+    assert.equal(questions.length, 1);
+    assert.equal(questions[0]!.callId, "call_scan");
+    assert.equal(questions[0]!.answered, true);
+    assert.equal(questions[0]!.answerText, "Yes");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("piReadQuestions returns nothing for a session that never asked", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "scoutr-ask-scan-none-"));
+  try {
+    const file = join(dir, "session.jsonl");
+    writeFileSync(file, `${JSON.stringify({
+      type: "message",
+      id: "m1",
+      timestamp: "2026-08-10T00:00:00Z",
+      message: { role: "user", content: [{ type: "text", text: "hello" }] },
+    })}\n`);
+    assert.deepEqual(await piReadQuestions(file), []);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

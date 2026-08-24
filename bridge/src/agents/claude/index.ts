@@ -10,7 +10,7 @@ import {
 } from "../../transcript.js";
 import { closeSessionPane } from "../../herdr/panes.js";
 import { shellQuote } from "../../shell.js";
-import type { QuestionEntry } from "../../questions.js";
+import { scanAskQuestions, type QuestionEntry } from "../../questions.js";
 import type {
   AgentBackend,
   AskRequest,
@@ -21,7 +21,7 @@ import type {
 import { parseClaudeTranscript } from "./transcript.js";
 import { claudeEffortArg, claudeModelArg, readClaudeModelsCatalog } from "./models.js";
 import { readClaudeCommandsCatalog } from "./commands.js";
-import { claudeQuestions } from "./questions.js";
+import { CLAUDE_ASK_TOOL, claudeQuestions, extractClaudeQuestions, mergePendingAsk } from "./questions.js";
 import { clearPendingAsk, pendingAskStamp } from "./pending-asks.js";
 import { claudeAskPlan } from "./questionnaire.js";
 
@@ -126,9 +126,17 @@ export async function claudeReadTranscript(path: string, opts?: TranscriptReadOp
 }
 
 export async function claudeReadTranscriptState(path: string, fromByte?: number): Promise<Transcript> {
-  const opts: TranscriptReadOpts = fromByte === undefined
-    ? { metadataOnly: true, exactMetadata: true }
-    : { metadataOnly: true, fromByte };
+  if (fromByte !== undefined) {
+    const opts: TranscriptReadOpts = { metadataOnly: true, fromByte };
+    return parseClaudeTranscript(await readTranscriptText(path, opts), opts);
+  }
+  // Claude stamps the active model on every assistant record, so the newest
+  // one inside the tail window *is* the newest one in the file — exact,
+  // without reading the rest of it. Only a session whose last 64 KiB holds no
+  // assistant record at all has to fall back to the whole-file scan.
+  const tail = parseClaudeTranscript(await readTranscriptText(path, { tail: 1 }), { metadataOnly: true });
+  if (tail.modelObservationSeen) return tail;
+  const opts: TranscriptReadOpts = { metadataOnly: true, exactMetadata: true };
   return parseClaudeTranscript(await readTranscriptText(path, opts), opts);
 }
 
@@ -142,8 +150,27 @@ export function claudeExtractQuestions(transcript: Transcript): QuestionEntry[] 
  * The path's basename is the session uuid (see [claudeResumeCommand]).
  */
 export function claudeQuestionStateStamp(path: string): string {
-  const id = path.replace(/\.jsonl$/, "").split(/[\\/]/).pop() ?? "";
-  return pendingAskStamp(id);
+  return pendingAskStamp(claudeSessionId(path));
+}
+
+/** The session uuid a transcript path names (see [claudeResumeCommand]). */
+export function claudeSessionId(path: string): string {
+  return path.replace(/\.jsonl$/, "").split(/[\\/]/).pop() ?? "";
+}
+
+/**
+ * Question cards of the whole session, without parsing every entry. The
+ * sidecar is keyed by session id, which the path carries — a scan that finds
+ * no ask records has no transcript to read it from.
+ */
+export async function claudeReadQuestions(path: string): Promise<QuestionEntry[]> {
+  const recorded = await scanAskQuestions(
+    path,
+    [CLAUDE_ASK_TOOL],
+    (text) => parseClaudeTranscript(text).entries,
+    extractClaudeQuestions,
+  );
+  return mergePendingAsk(claudeSessionId(path), recorded);
 }
 
 /**
@@ -326,6 +353,7 @@ export const claudeBackend: AgentBackend = {
   readTranscript: claudeReadTranscript,
   readTranscriptState: claudeReadTranscriptState,
   extractQuestions: claudeExtractQuestions,
+  readQuestions: claudeReadQuestions,
   questionStateStamp: claudeQuestionStateStamp,
   answerAsk: claudeAnswerAsk,
   dismissAsk: claudeDismissAsk,

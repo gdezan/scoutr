@@ -1,6 +1,14 @@
 import { basename, isAbsolute, relative, resolve } from "node:path";
 import { canonicalPath } from "../dirs.js";
-import { entryText, inspectSessionFile, type SessionFileInfo, type Transcript, type TranscriptEntry } from "../transcript.js";
+import {
+  entryText,
+  inspectSessionFile,
+  TAIL_WINDOW_BYTES,
+  type SessionFileInfo,
+  type Transcript,
+  type TranscriptEntry,
+} from "../transcript.js";
+import { SessionDerivedStateCache, type SessionDerivedState } from "../session-derived-state.js";
 import type { QuestionEntry } from "../questions.js";
 import { backendForSessionPath } from "../agents/registry.js";
 import type { ControlAction } from "../agents/types.js";
@@ -68,6 +76,9 @@ interface MemoizedTranscript {
 
 const TRANSCRIPT_MEMO_CAP = 8;
 const transcriptMemo = new Map<string, TranscriptMemoEntry>();
+
+/** Model, thinking level, and question state for bounded initial pages. */
+const sessionDerivedState = new SessionDerivedStateCache();
 
 /**
  * The wire-valid control vocabulary, kept in lockstep with the
@@ -229,6 +240,13 @@ export async function readSession(
       ...emptyHistoryPage(),
     };
   }
+  // The first page of a session is the one read that cannot afford the whole
+  // file: nothing is loaded yet, so the newest entries come from a bounded
+  // tail window instead. Forward `since`, reverse `before`, and the legacy
+  // full snapshot keep reading through the memo below.
+  if (!since && !before && limit != null) {
+    return readBoundedInitialPage(target, backend, info, limit);
+  }
   const read = await readTranscriptMemoized(target, backend, info);
   const session = read.transcript;
   let entries = session.entries;
@@ -255,9 +273,6 @@ export async function readSession(
     } else {
       entries = session.entries.slice(cursorIndex + 1);
     }
-  } else if (limit != null) {
-    entries = session.entries.slice(Math.max(0, session.entries.length - limit));
-    history = reverseHistoryCursors(session.entries, entries);
   }
   const lastEntry = entries[entries.length - 1];
   return {
@@ -276,6 +291,77 @@ export async function readSession(
     size: read.info.size,
     ...history,
   };
+}
+
+/**
+ * The newest page of a session, read without parsing the whole transcript.
+ *
+ * Display entries come from the bounded tail window; the response fields that
+ * describe the whole session — model, thinking level, question cards — come
+ * from their own cheap scans (see `session-derived-state.ts`). Both are tied
+ * to one validated file revision, and a file that moves under the composite
+ * read is retried the same finite number of times the memo path uses.
+ */
+async function readBoundedInitialPage(
+  target: string,
+  backend: NonNullable<ReturnType<typeof backendForSessionPath>>,
+  info: SessionFileInfo,
+  limit: number,
+): Promise<SessionReadResult> {
+  let revision = info;
+  let tail!: Transcript;
+  let derived!: SessionDerivedState;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    if (attempt > 0) revision = await inspectSessionFile(target);
+    // One entry past the page: holding it is what proves older history exists
+    // without reading any more of the file.
+    tail = await backend.readTranscript(target, { tail: limit + 1 });
+    derived = await sessionDerivedState.stateFor(target, backend, revision);
+    const after = await inspectSessionFile(target);
+    if (revision.mtimeMs === after.mtimeMs && revision.size === after.size) break;
+    // A transcript growing through every attempt gets a coherent best effort
+    // tied to the revision its last read started from, and is not memoized.
+  }
+  const droppedFromWindow = tail.entries.length > limit;
+  const entries = droppedFromWindow ? tail.entries.slice(tail.entries.length - limit) : tail.entries;
+  const lastEntry = entries[entries.length - 1];
+  return {
+    path: target,
+    agentKind: backend.id,
+    name: basename(target),
+    exists: true,
+    since: null,
+    entries,
+    questions: derived.questions,
+    // The tail window can open after the model_change still in force, so the
+    // exact scan wins whenever it observed one.
+    model: derived.modelObservationSeen ? derived.model : tail.model,
+    thinkingLevel: derived.thinkingLevelObservationSeen ? derived.thinkingLevel : tail.thinkingLevel,
+    preview: lastEntry ? entryText(lastEntry, 120) : undefined,
+    lastEntryId: tail.lastEntryId,
+    mtimeMs: revision.mtimeMs,
+    size: revision.size,
+    ...boundedHistoryCursors(entries, droppedFromWindow, revision.size),
+  };
+}
+
+/**
+ * Reverse-history cursors for a page cut from a bounded tail window. Older
+ * history is proven two ways, neither of which reads more of the file: an
+ * entry the window held and the page dropped, or a file too large for the
+ * window to have reached its first byte. The size test can claim history that
+ * an outsized header alone accounts for; the reverse page that follows comes
+ * back empty and corrects it.
+ */
+function boundedHistoryCursors(
+  page: TranscriptEntry[],
+  droppedFromWindow: boolean,
+  size: number,
+): ReverseHistoryCursors {
+  const oldest = page[0];
+  if (!oldest) return emptyHistoryPage();
+  if (!droppedFromWindow && size <= TAIL_WINDOW_BYTES) return emptyHistoryPage();
+  return { beforeCursor: oldest.entryId, hasMoreBefore: true };
 }
 
 async function createSessionRoute(ctx: RouteContext): Promise<RouteResult> {

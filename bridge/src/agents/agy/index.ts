@@ -3,6 +3,7 @@ import { isAbsolute, join, relative, resolve } from "node:path";
 import type { HerdrPort } from "../../herdr/port.js";
 import type { AgentSessionInfo } from "../../herdr/types.js";
 import {
+  readRecordLines,
   readTranscriptText,
   type Transcript,
   type TranscriptReadOpts,
@@ -19,7 +20,8 @@ import type {
 import { parseAgyTranscript } from "./transcript.js";
 import { readAgyModelsCatalog } from "./models.js";
 import { readAgyCommandsCatalog } from "./commands.js";
-import { extractAgyQuestions } from "./questions.js";
+import { AGY_ASK_QUESTION_TOOL, extractAgyQuestions } from "./questions.js";
+import { scanAskQuestions, ASK_USER_QUESTION_TOOL, type QuestionEntry } from "../../questions.js";
 
 /** Antigravity / Gemini config dir honors ANTIGRAVITY_CONFIG_DIR or GEMINI_CONFIG_DIR. */
 export function agyConfigDir(): string {
@@ -74,6 +76,9 @@ export async function agyResolveSessionPath(ref: AgentSessionInfo, _cwd?: string
   return join(agySessionRoot(), ref.value, ".system_generated", "logs", "transcript.jsonl");
 }
 
+/** The phrase [agyReadTranscriptState] exists to find (see `extractModelFromSettings`). */
+const AGY_STATE_RECORDS = ["Model Selection"] as const;
+
 export async function agyReadTranscript(path: string, opts?: TranscriptReadOpts): Promise<Transcript> {
   const transcript = parseAgyTranscript(await readTranscriptText(path, opts), opts ?? {});
   if (!transcript.id) {
@@ -87,7 +92,13 @@ export async function agyReadTranscriptState(path: string, fromByte?: number): P
   const opts: TranscriptReadOpts = fromByte === undefined
     ? { metadataOnly: true, exactMetadata: true }
     : { metadataOnly: true, fromByte };
-  const transcript = parseAgyTranscript(await readTranscriptText(path, opts), opts);
+  // Exact, and still cheap: agy announces a model or effort change inside a
+  // user record that always names it, so the scan can reach every one of them
+  // without parsing an agent step.
+  const text = fromByte === undefined
+    ? await readRecordLines(path, AGY_STATE_RECORDS)
+    : await readTranscriptText(path, opts);
+  const transcript = parseAgyTranscript(text, opts);
   if (!transcript.id) {
     const match = path.match(/brain\/([^/\\]+)/);
     if (match && match[1]) transcript.id = match[1];
@@ -178,6 +189,16 @@ export const AGY_CAPABILITIES: ReadonlySet<ControlAction> = new Set([
   "set_thinking",
 ]);
 
+/** Question cards of the whole session, without parsing every entry. */
+export async function agyReadQuestions(path: string): Promise<QuestionEntry[]> {
+  return scanAskQuestions(
+    path,
+    [AGY_ASK_QUESTION_TOOL, ASK_USER_QUESTION_TOOL],
+    (text) => parseAgyTranscript(text).entries,
+    extractAgyQuestions,
+  );
+}
+
 export const agyBackend: AgentBackend = {
   id: "agy",
   displayName: "Antigravity",
@@ -193,6 +214,7 @@ export const agyBackend: AgentBackend = {
   readTranscript: agyReadTranscript,
   readTranscriptState: agyReadTranscriptState,
   extractQuestions: (transcript) => extractAgyQuestions(transcript.entries),
+  readQuestions: agyReadQuestions,
   answerAsk: agyAnswerAsk,
   dismissAsk: agyDismissAsk,
   control: agyControl,
