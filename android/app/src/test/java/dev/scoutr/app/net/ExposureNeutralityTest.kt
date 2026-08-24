@@ -81,7 +81,7 @@ class ExposureNeutralityTest {
 
     private fun httpGet(): String {
         server.enqueue(MockResponse().setResponseCode(200).setBody("""{"ok":true}"""))
-        runBlocking { bridge().health(null, null) }
+        runBlocking { bridge().health() }
         return describe(takeRequest())
     }
 
@@ -93,7 +93,19 @@ class ExposureNeutralityTest {
 
     private fun topologySocket(): String {
         server.enqueue(MockResponse().withWebSocketUpgrade(SilentServer()))
-        val feed = TopologyFeedClient(okHttp, store, NoopFeedListener(), backoffBaseMs = 50L)
+        val saved = requireNotNull(store.saved)
+        val feed = TopologyFeedClient(
+            okHttp = okHttp,
+            listener = NoopFeedListener(),
+            backoffBaseMs = 50L,
+            binding = HostConnectionBinding(
+                hostId = saved.hostId ?: "test-host",
+                connectionRevision = 1L,
+                baseUrl = saved.host,
+                token = saved.token,
+                exposure = saved.exposure,
+            ),
+        )
         feed.start()
         val request = takeRequest()
         feed.stop()
@@ -103,10 +115,17 @@ class ExposureNeutralityTest {
     private fun terminalSocket(): String {
         server.enqueue(MockResponse().withWebSocketUpgrade(SilentServer()))
         val saved = requireNotNull(store.saved)
-        val socket = TerminalSocketClient(okHttp).open(
-            TerminalOpenRequest(
-                host = saved.host,
+        val socket = TerminalSocketClient(
+            okHttp = okHttp,
+            fixedBinding = HostConnectionBinding(
+                hostId = saved.hostId ?: "test-host",
+                connectionRevision = 1L,
+                baseUrl = saved.host,
                 token = saved.token,
+                exposure = saved.exposure,
+            ),
+        ).open(
+            TerminalOpenRequest(
                 paneId = "w1:p1",
                 cols = 80,
                 rows = 24,

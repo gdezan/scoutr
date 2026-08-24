@@ -1,12 +1,13 @@
 /**
  * FCM HTTP v1 transport for contentless push.
  *
- * A ping carries only `kind` and `paneId` — never a `notification` block and
- * never any agent-identifying text. Two things follow from that: no
- * notification content transits Google's infrastructure, and Android always
- * hands the message to the app rather than auto-posting a tray item, so
- * `onMessageReceived` fires even when Scoutr is backgrounded. The app wakes on
- * the ping and fetches the detail from the bridge over the tailnet.
+ * A legacy ping carries only `kind` and `paneId`; a generation-qualified
+ * ping adds the bridge `hostId` and app-local `profileGeneration`. Neither
+ * carries a `notification` block or agent-identifying text. Two things follow
+ * from that: no notification content transits Google's infrastructure, and
+ * Android always hands the message to the app rather than auto-posting a tray
+ * item, so `onMessageReceived` fires even when Scoutr is backgrounded. The app
+ * wakes on the ping and fetches the detail from the bridge over the tailnet.
  */
 
 import { readFile } from "node:fs/promises";
@@ -16,19 +17,36 @@ export type PingKind = "blocked" | "resolve" | "done";
 /** One registered phone. */
 export interface PushDevice {
   token: string;
+  /** Null/omitted means this is a registration from an older app version. */
+  profileGeneration?: string | null;
   updatedAtMs: number;
 }
 
 /** Device tokens persisted at <configDir>/devices.json, mode 0600. */
 export interface DeviceRegistry {
   list(): readonly PushDevice[];
-  register(token: string): Promise<void>;
+  register(token: string, profileGeneration?: string): Promise<void>;
   unregister(token: string): Promise<void>;
 }
 
-/** Sends one contentless ping. Returns tokens FCM rejected as unregistered. */
+/**
+ * Sends one contentless ping. Returns tokens FCM rejected as unregistered.
+ * `profileGeneration` is per registration; the publisher sends registration
+ * records independently so one bridge event can target multiple app epochs.
+ */
 export interface FcmSender {
-  send(tokens: readonly string[], kind: PingKind, paneId: string): Promise<string[]>;
+  send(
+    tokens: readonly string[],
+    kind: PingKind,
+    paneId: string,
+    hostId: string,
+    profileGeneration?: string | null,
+  ): Promise<string[]>;
+}
+
+/** The wire form Android sends for a current, generation-qualified profile. */
+export function isProfileGeneration(value: string | null | undefined): value is string {
+  return value != null && /^[1-9][0-9]*$/.test(value);
 }
 
 const FCM_SCOPE = "https://www.googleapis.com/auth/firebase.messaging";
@@ -66,7 +84,13 @@ export class HttpV1FcmSender implements FcmSender {
     this.fetchImpl = options.fetchImpl ?? fetch;
   }
 
-  async send(tokens: readonly string[], kind: PingKind, paneId: string): Promise<string[]> {
+  async send(
+    tokens: readonly string[],
+    kind: PingKind,
+    paneId: string,
+    hostId: string,
+    profileGeneration?: string | null,
+  ): Promise<string[]> {
     if (tokens.length === 0) return [];
     let bearer: string;
     try {
@@ -76,17 +100,29 @@ export class HttpV1FcmSender implements FcmSender {
       console.error(`[fcm] could not mint an access token: ${describe(error)}`);
       return [];
     }
-    const stale = await Promise.all(tokens.map((token) => this.sendOne(token, kind, paneId, bearer)));
+    const stale = await Promise.all(
+      tokens.map((token) => this.sendOne(token, kind, paneId, hostId, profileGeneration, bearer)),
+    );
     return stale.filter((token): token is string => token !== null);
   }
 
   /** Returns the device token when FCM says it is dead, otherwise null. */
-  private async sendOne(token: string, kind: PingKind, paneId: string, bearer: string): Promise<string | null> {
+  private async sendOne(
+    token: string,
+    kind: PingKind,
+    paneId: string,
+    hostId: string,
+    profileGeneration: string | null | undefined,
+    bearer: string,
+  ): Promise<string | null> {
     const { priority, ttl } = DELIVERY[kind];
+    const data = profileGeneration != null
+      ? { kind, hostId, profileGeneration, paneId }
+      : { kind, paneId };
     const body = JSON.stringify({
       message: {
         token,
-        data: { kind, paneId },
+        data,
         android: { priority, ttl },
       },
     });

@@ -1,8 +1,6 @@
 package dev.scoutr.app.net
 
-import android.content.Context
-import dev.scoutr.app.data.ConnectionStore
-import dev.scoutr.app.data.FakeConnectionCipher
+import dev.scoutr.app.data.ExposureKind
 import okhttp3.OkHttpClient
 import okhttp3.Response
 import okhttp3.WebSocket
@@ -17,7 +15,6 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
-import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import java.io.IOException
 import java.util.concurrent.CompletableFuture
@@ -33,6 +30,7 @@ class TopologyFeedClientTest {
 
     private lateinit var server: MockWebServer
     private lateinit var client: TopologyFeedClient
+    private lateinit var binding: HostConnectionBinding
     private val events = CompletableFuture<String>()
     private val snapshots = CompletableFuture<Boolean>()
     private val failures = CompletableFuture<IOException>()
@@ -46,16 +44,18 @@ class TopologyFeedClientTest {
     fun setUp() {
         server = MockWebServer()
         server.start()
-        val app = RuntimeEnvironment.getApplication()
-        app.getSharedPreferences("scoutr_connection", Context.MODE_PRIVATE).edit()
-            .putString("host", server.url("/").toString().trimEnd('/'))
-            .putString("token", "test-token")
-            .apply()
+        binding = HostConnectionBinding(
+            hostId = "test-host",
+            connectionRevision = 1L,
+            baseUrl = server.url("/").toString().trimEnd('/'),
+            token = "test-token",
+            exposure = ExposureKind.Custom,
+        )
         client = TopologyFeedClient(
-            OkHttpClient.Builder().readTimeout(5, TimeUnit.SECONDS).build(),
-            ConnectionStore(app, FakeConnectionCipher()),
-            listener,
+            okHttp = OkHttpClient.Builder().readTimeout(5, TimeUnit.SECONDS).build(),
+            listener = listener,
             backoffBaseMs = 50L,
+            binding = binding,
         )
     }
 
@@ -142,6 +142,31 @@ class TopologyFeedClientTest {
         second.opened.get(5, TimeUnit.SECONDS)
         second.webSocket!!.send("""{"type":"feed","payload":{"type":"snapshot","snapshot":{}}}""")
         assertTrue(snapshots.get(5, TimeUnit.SECONDS))
+    }
+
+    @Test
+    fun registeredFeedDoesNotDispatchSocketWhenIdentityGateRejectsBinding() {
+        val rejectingGate = object : HostBindingGate {
+            override suspend fun <T> withVerifiedBinding(
+                hostId: String,
+                operation: suspend (HostConnectionBinding) -> T,
+            ): T = throw HostIdentityChangedException(hostId, "other-host")
+
+            override suspend fun <T> withVerifiedBinding(
+                binding: HostConnectionBinding,
+                operation: suspend (HostConnectionBinding) -> T,
+            ): T = throw HostIdentityChangedException(binding.hostId, "other-host")
+        }
+        client = TopologyFeedClient(
+            okHttp = OkHttpClient(),
+            listener = listener,
+            binding = binding,
+            bindingGate = rejectingGate,
+        )
+
+        assertTrue(client.start())
+        assertTrue(failures.get(5, TimeUnit.SECONDS) is HostIdentityChangedException)
+        assertEquals(0, server.requestCount)
     }
 
     private class FeedServer : WebSocketListener() {

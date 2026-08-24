@@ -1,7 +1,9 @@
 package dev.scoutr.app.ui.nav
 
 import androidx.navigation.NavController
+import dev.scoutr.app.data.HostProfileKey
 import dev.scoutr.app.data.SessionKey
+import dev.scoutr.app.data.decodeHostProfileKey
 import dev.scoutr.app.data.decodeSessionKey
 import dev.scoutr.app.data.encode
 import java.net.URLEncoder
@@ -13,20 +15,22 @@ import java.net.URLEncoder
  */
 object AppRoutes {
     const val CONNECT = "connect"
+    const val CONNECT_REFRESH = "connect/refresh?hostProfile={hostProfile}"
 
     /** One source with the shell predicate; see ui/nav/ShellRoute.kt. */
     const val CHAT = CHAT_ROUTE
 
-    const val FILE_BROWSER = "files?cwd={cwd}"
-    const val FILE_VIEWER = "file-viewer?cwd={cwd}&file={file}"
+    const val FILE_BROWSER = "files?cwd={cwd}&hostProfile={hostProfile}"
+    const val FILE_VIEWER = "file-viewer?cwd={cwd}&file={file}&hostProfile={hostProfile}"
     const val SETTINGS = "settings"
-    const val TERMINAL = "terminal?paneId={paneId}"
+    const val TERMINAL = "terminal?paneId={paneId}&hostProfile={hostProfile}"
 
     /** Chat's argument names and defaults, shared by both chat entry paths. */
     object ChatArgs {
         const val SESSION_KEY = "sessionKey"
         const val BOOTSTRAP_PANE_ID = "bootstrapPaneId"
         const val STATUS = "status"
+        const val HOST_PROFILE = "hostProfile"
 
         /** Sessions without a known state enter as working until live data corrects it. */
         const val DEFAULT_STATUS = "working"
@@ -35,17 +39,36 @@ object AppRoutes {
     object FileArgs {
         const val CWD = "cwd"
         const val FILE = "file"
+        const val HOST_PROFILE = "hostProfile"
     }
 
     object TerminalArgs {
         const val PANE_ID = "paneId"
+        const val HOST_PROFILE = "hostProfile"
     }
 
+    fun refreshConnection(profile: HostProfileKey): String =
+        "connect/refresh?hostProfile=${profile.encode()}"
+
+    /** New navigation builders always carry the immutable profile generation. */
+    fun chat(profile: HostProfileKey, key: SessionKey, status: String): String =
+        "chat?${ChatArgs.SESSION_KEY}=${key.encode()}&${ChatArgs.HOST_PROFILE}=${profile.encode()}&${ChatArgs.STATUS}=$status"
+
+    fun bootstrapChat(profile: HostProfileKey, paneId: String, status: String): String =
+        "chat?${ChatArgs.BOOTSTRAP_PANE_ID}=${encode(paneId)}&${ChatArgs.HOST_PROFILE}=${profile.encode()}&${ChatArgs.STATUS}=$status"
+
+    /** Legacy test/old-link builders; production navigation uses the overloads above. */
     fun chat(key: SessionKey, status: String): String =
         "chat?${ChatArgs.SESSION_KEY}=${key.encode()}&${ChatArgs.STATUS}=$status"
 
     fun bootstrapChat(paneId: String, status: String): String =
         "chat?${ChatArgs.BOOTSTRAP_PANE_ID}=${encode(paneId)}&${ChatArgs.STATUS}=$status"
+
+    fun fileBrowser(profile: HostProfileKey, cwd: String): String =
+        "files?${FileArgs.CWD}=${encode(cwd)}&${FileArgs.HOST_PROFILE}=${profile.encode()}"
+
+    fun fileViewer(profile: HostProfileKey, cwd: String, file: String): String =
+        "file-viewer?${FileArgs.CWD}=${encode(cwd)}&${FileArgs.FILE}=${encode(file)}&${FileArgs.HOST_PROFILE}=${profile.encode()}"
 
     fun fileBrowser(cwd: String): String =
         "files?${FileArgs.CWD}=${encode(cwd)}"
@@ -53,11 +76,21 @@ object AppRoutes {
     fun fileViewer(cwd: String, file: String): String =
         "file-viewer?${FileArgs.CWD}=${encode(cwd)}&${FileArgs.FILE}=${encode(file)}"
 
+    /** Usage/review are concrete routes even though their shell entries are hostless. */
+    fun usage(profile: HostProfileKey): String =
+        "usage?${DestinationArgs.HOST_PROFILE}=${profile.encode()}"
+
+    fun review(profile: HostProfileKey, repoPath: String? = null): String =
+        "review?${DestinationArgs.HOST_PROFILE}=${profile.encode()}&${DestinationArgs.REPO_PATH}=${repoPath?.let(::encode) ?: ""}"
+
     /**
      * Full-screen terminal. A null [paneId] lets the ViewModel resolve the
      * pane (saved pane, then herdr's focused pane, then the first one), so the
      * global top-bar action and the per-session "Open terminal" share a route.
      */
+    fun terminal(profile: HostProfileKey, paneId: String? = null): String =
+        "terminal?${TerminalArgs.PANE_ID}=${paneId?.let(::encode) ?: ""}&${TerminalArgs.HOST_PROFILE}=${profile.encode()}"
+
     fun terminal(paneId: String? = null): String =
         "terminal?${TerminalArgs.PANE_ID}=${paneId?.let(::encode) ?: ""}"
 }
@@ -70,11 +103,30 @@ private fun encode(value: String): String = URLEncoder.encode(value, "UTF-8")
  * launch converges. Null only when neither identity is known — callers skip
  * the navigation instead of building a broken route.
  */
+internal fun chatRoute(
+    profile: HostProfileKey,
+    key: SessionKey?,
+    bootstrapPaneId: String?,
+    status: String,
+): String? = key?.let { AppRoutes.chat(profile, it, status) }
+    ?: bootstrapPaneId?.let { AppRoutes.bootstrapChat(profile, it, status) }
+
+/** Compatibility route helper retained for non-production unit fixtures. */
 internal fun chatRoute(key: SessionKey?, bootstrapPaneId: String?, status: String): String? =
     key?.let { AppRoutes.chat(it, status) }
         ?: bootstrapPaneId?.let { AppRoutes.bootstrapChat(it, status) }
 
 /** Open a session by canonical key, or by its pane until a fresh launch converges. */
+internal fun NavController.navigateToChat(
+    profile: HostProfileKey,
+    key: SessionKey?,
+    bootstrapPaneId: String?,
+    status: String,
+) {
+    navigate(chatRoute(profile, key, bootstrapPaneId, status) ?: return)
+}
+
+/** Compatibility overload for old isolated navigation tests. */
 internal fun NavController.navigateToChat(key: SessionKey?, bootstrapPaneId: String?, status: String) {
     navigate(chatRoute(key, bootstrapPaneId, status) ?: return)
 }
@@ -84,12 +136,34 @@ internal fun NavController.navigateToChat(key: SessionKey?, bootstrapPaneId: Str
  * the detail pane rather than stacking chats, so repeated selection cannot grow
  * the back stack or leak per-session ChatViewModels.
  */
+internal fun NavController.navigateToChatFromPanel(
+    profile: HostProfileKey,
+    key: SessionKey?,
+    bootstrapPaneId: String?,
+    status: String,
+) {
+    navigate(chatRoute(profile, key, bootstrapPaneId, status) ?: return) {
+        popUpTo(Destination.Board.route) { inclusive = false }
+        launchSingleTop = true
+    }
+}
+
+/** Compatibility overload for old isolated navigation tests. */
 internal fun NavController.navigateToChatFromPanel(key: SessionKey?, bootstrapPaneId: String?, status: String) {
     navigate(chatRoute(key, bootstrapPaneId, status) ?: return) {
         popUpTo(Destination.Board.route) { inclusive = false }
         launchSingleTop = true
     }
 }
+
+/** Arguments shared by host-qualified shell destinations. */
+object DestinationArgs {
+    const val HOST_PROFILE = "hostProfile"
+    const val REPO_PATH = "repoPath"
+}
+
+fun decodeRouteProfile(raw: String?): HostProfileKey? =
+    raw?.takeIf(String::isNotBlank)?.let(::decodeHostProfileKey)
 
 /**
  * Decode the canonical session key carried in a filled chat URL back stack
@@ -103,3 +177,7 @@ internal fun decodedChatSessionKey(rawValue: String?): SessionKey? =
  */
 internal fun initialStartDestination(paired: Boolean): String =
     if (paired) Destination.Board.route else AppRoutes.CONNECT
+
+/** Registry-aware initial routing: pending singleton migration is an installation. */
+fun initialStartDestination(hasInstallation: Boolean, pendingMigration: Boolean): String =
+    if (hasInstallation || pendingMigration) Destination.Board.route else AppRoutes.CONNECT

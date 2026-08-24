@@ -76,7 +76,7 @@ class BoardQuickAnswerTest {
         // Unsaved at construction so the VM's init never probes health or
         // starts a poll that would race the tap under test.
         store.clear()
-        viewModel = BoardViewModel(
+        viewModel = legacyBoardViewModel(
             bridge = fake,
             connectionStore = store,
             initialState = BoardUiState(

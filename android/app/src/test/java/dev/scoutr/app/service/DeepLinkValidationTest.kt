@@ -1,7 +1,9 @@
 package dev.scoutr.app.service
 
+import dev.scoutr.app.data.HostProfileKey
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -59,6 +61,32 @@ class DeepLinkValidationTest {
         val link = resolveNotificationLink(click = null, paneId = "p3", status = "blocked")
         assertEquals("scoutr://chat/p3?status=blocked", link?.uri)
         assertEquals("p3", link?.paneId)
+    }
+
+    @Test
+    fun qualifiedLinkRoundTripsHostAndGeneration() {
+        val profile = HostProfileKey("host-a", 42)
+        val uri = scoutrChatUri(profile, "same-pane", "blocked")
+
+        val parsed = parseScoutrUri(uri)
+
+        assertEquals(profile, parsed?.profile)
+        assertEquals("same-pane", parsed?.paneId)
+        assertTrue(uri.contains("host-a"))
+    }
+
+    @Test
+    fun qualifiedResolverRejectsAnUnqualifiedClick() {
+        val profile = HostProfileKey("host-a", 42)
+
+        assertNull(
+            resolveNotificationLink(
+                click = "scoutr://chat/same-pane?status=blocked",
+                paneId = "same-pane",
+                status = "blocked",
+                profile = profile,
+            ),
+        )
     }
 
     @Test

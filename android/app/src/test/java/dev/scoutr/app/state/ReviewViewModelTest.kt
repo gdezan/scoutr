@@ -38,7 +38,11 @@ class ReviewViewModelTest {
         fake = FakeScoutrApi()
         connectionStore = ConnectionStore(RuntimeEnvironment.getApplication(), FakeConnectionCipher())
         saveConnection()
-        viewModel = ReviewViewModel(fake, connectionStore, ReviewStore(RuntimeEnvironment.getApplication()))
+        viewModel = ReviewViewModel(
+            fake,
+            connectionStore,
+            ReviewStore(RuntimeEnvironment.getApplication(), "legacy-singleton"),
+        )
     }
 
     private fun saveConnection() {

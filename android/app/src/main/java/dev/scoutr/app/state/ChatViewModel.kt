@@ -3,8 +3,10 @@ package dev.scoutr.app.state
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import dev.scoutr.app.data.HostProfileKey
 import dev.scoutr.app.data.SessionAction
 import dev.scoutr.app.data.SessionKey
+import dev.scoutr.app.data.encode
 import dev.scoutr.app.data.ModelInfo
 import dev.scoutr.app.data.QuestionEntry
 import dev.scoutr.app.data.RepoSummary
@@ -225,6 +227,7 @@ internal const val ASK_DISMISS_FAILED =
 
 private const val SAVED_ASK_DRAFTS = "ask_drafts"
 private const val SAVED_DISMISSED_ASKS = "dismissed_asks"
+private const val SAVED_HOST_PROFILE = "host_profile_key"
 
 // Drafts are saved as one string, since SavedStateHandle carries bundle values
 // and a nested map is not one. Separators are control characters, which
@@ -468,7 +471,13 @@ class ChatViewModel(
     private val savedState: SavedStateHandle = SavedStateHandle(),
     /** Wall clock for the submit-is-slow mark; overridden in tests. */
     private val nowMs: () -> Long = { System.currentTimeMillis() },
+    /** Immutable route identity retained with the SavedStateHandle. */
+    private val hostProfileKey: HostProfileKey? = null,
 ) : ViewModel() {
+
+    init {
+        hostProfileKey?.let { savedState[SAVED_HOST_PROFILE] = it.encode() }
+    }
 
     private val _ui = MutableStateFlow(
         ChatUiState(

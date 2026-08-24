@@ -9,7 +9,7 @@
 
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { DeviceRegistry, PushDevice } from "./fcm.js";
+import { isProfileGeneration, type DeviceRegistry, type PushDevice } from "./fcm.js";
 import * as v from "valibot";
 
 /** FCM tokens are ~163 chars today; the cap only rejects obvious junk. */
@@ -31,11 +31,20 @@ export class JsonDeviceRegistry implements DeviceRegistry {
     return this.devices;
   }
 
-  /** Idempotent on token equality; a re-registration just refreshes the clock. */
-  async register(token: string): Promise<void> {
+  /**
+   * Idempotent on token + generation equality. A changed generation replaces
+   * the old registration so one token cannot receive stale and current push
+   * identities at the same time.
+   */
+  async register(token: string, profileGeneration?: string): Promise<void> {
+    const generation = profileGeneration ?? null;
     const existing = this.devices.find((device) => device.token === token);
-    if (existing) existing.updatedAtMs = Date.now();
-    else this.devices.push({ token, updatedAtMs: Date.now() });
+    if (existing) {
+      existing.profileGeneration = generation;
+      existing.updatedAtMs = Date.now();
+    } else {
+      this.devices.push({ token, profileGeneration: generation, updatedAtMs: Date.now() });
+    }
     await this.persist();
   }
 
@@ -58,6 +67,9 @@ export class JsonDeviceRegistry implements DeviceRegistry {
 
 const deviceEntrySchema = v.looseObject({
   token: v.string(),
+  // Older files contain only token + updatedAtMs. Invalid generations are
+  // treated as legacy rather than allowing malformed data onto the FCM wire.
+  profileGeneration: v.optional(v.nullable(v.string())),
   updatedAtMs: v.optional(v.number()),
 });
 
@@ -68,7 +80,10 @@ async function load(path: string): Promise<PushDevice[]> {
     return parsed.flatMap((entry) => {
       const decoded = v.safeParse(deviceEntrySchema, entry);
       if (!decoded.success || !decoded.output.token) return [];
-      return [{ token: decoded.output.token, updatedAtMs: decoded.output.updatedAtMs ?? 0 }];
+      const profileGeneration = isProfileGeneration(decoded.output.profileGeneration)
+        ? decoded.output.profileGeneration
+        : null;
+      return [{ token: decoded.output.token, profileGeneration, updatedAtMs: decoded.output.updatedAtMs ?? 0 }];
     });
   } catch {
     // Missing or corrupt: start empty. The app re-registers on next launch.

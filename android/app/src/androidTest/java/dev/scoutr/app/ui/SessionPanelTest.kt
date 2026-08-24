@@ -25,6 +25,7 @@ import dev.scoutr.app.data.encode
 import dev.scoutr.app.data.liveSessionFixture
 import dev.scoutr.app.state.BoardUiState
 import dev.scoutr.app.state.BoardViewModel
+import dev.scoutr.app.state.legacyBoardViewModel
 import dev.scoutr.app.ui.screens.PanelSelection
 import dev.scoutr.app.ui.screens.SessionPanel
 import dev.scoutr.app.ui.theme.ScoutrTheme
@@ -69,7 +70,7 @@ class SessionPanelTest {
         val connection = ConnectionStore(context).apply { clear() }
         // Unsaved connection: the VM init never polls, so the UI stays static.
         val bridge = dev.scoutr.app.net.BridgeClient(okhttp3.OkHttpClient(), connection)
-        val viewModel = BoardViewModel(
+        val viewModel = legacyBoardViewModel(
             bridge,
             connection,
             initialState = BoardUiState(

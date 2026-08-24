@@ -199,7 +199,7 @@ fun ChatScreen(
     val ui by viewModel.ui.collectAsState()
 
     // The transcript poll runs only while the chat screen is STARTED.
-    LifecycleStartEffect(Unit) {
+    LifecycleStartEffect(viewModel) {
         viewModel.startPolling()
         onStopOrDispose { viewModel.stopPolling() }
     }

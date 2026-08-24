@@ -15,7 +15,11 @@ const val MAX_SCOUTR_API_PROTOCOL = 2
  * silently dropping back to the bridge's legacy WebSocket command frames would
  * hide a half-finished deployment instead of naming it.
  */
-val REQUIRED_SCOUTR_API_FEATURES = listOf("commands.http.v1")
+val REQUIRED_SCOUTR_API_FEATURES = listOf(
+    "commands.http.v1",
+    "host-identity.v1",
+    "push-profile-generation.v1",
+)
 
 /** Result of classifying a bridge health response against this app's supported range. */
 sealed interface ScoutrApiCompatibility {

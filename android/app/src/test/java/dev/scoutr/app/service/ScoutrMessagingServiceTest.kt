@@ -3,9 +3,16 @@ package dev.scoutr.app.service
 import android.app.NotificationManager
 import android.content.Context
 import dev.scoutr.app.data.AgentsResponse
+import dev.scoutr.app.data.ExposureKind
+import dev.scoutr.app.data.FakeConnectionCipher
+import dev.scoutr.app.data.HostRegistryStore
 import dev.scoutr.app.data.SessionDescriptor
 import dev.scoutr.app.data.SessionLiveAttachment
 import dev.scoutr.app.net.FakeScoutrApi
+import dev.scoutr.app.net.HostClientFactory
+import dev.scoutr.app.net.ScoutrApi
+import dev.scoutr.app.net.TerminalTransport
+import dev.scoutr.app.net.TopologyFeed
 import dev.scoutr.app.notify.NotificationPresenter
 import dev.scoutr.app.state.MuteStore
 import kotlinx.coroutines.test.runTest
@@ -40,6 +47,7 @@ class ScoutrMessagingServiceTest {
         manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         manager.cancelAll()
         context.getSharedPreferences(MuteStore.FILE, Context.MODE_PRIVATE).edit().clear().commit()
+        context.getSharedPreferences(HostRegistryStore.FILE, Context.MODE_PRIVATE).edit().clear().commit()
         presenter = NotificationPresenter(context, MuteStore(context))
         api = FakeScoutrApi()
         api.agentsResult = Result.success(AgentsResponse(agents = listOf(blocked("w1:p1"))))
@@ -123,5 +131,35 @@ class ScoutrMessagingServiceTest {
         )
 
         assertTrue(slots().isEmpty())
+    }
+
+    @Test
+    fun hostAwareHandlerDiscardsPingWithoutHostIdentityBeforeFetching() = runTest {
+        val registry = HostRegistryStore(context, FakeConnectionCipher())
+        registry.addOrRefresh("host-a", "https://a.example", "token", ExposureKind.Custom)
+        val hostAware = FcmPingHandler(
+            presenter = presenter,
+            registry = registry,
+            hostClients = FakeFactory(api),
+            isForegrounded = { false },
+            delayMs = { },
+        )
+
+        hostAware.handle(
+            mapOf(
+                FcmPingHandler.KEY_KIND to FcmPingHandler.KIND_BLOCKED,
+                FcmPingHandler.KEY_PANE_ID to "w1:p1",
+            ),
+        )
+
+        assertTrue(api.calls.none { it.name == "agents" })
+        assertTrue(slots().isEmpty())
+    }
+
+    private class FakeFactory(private val api: ScoutrApi) : HostClientFactory {
+        override fun api(hostId: String): ScoutrApi = api
+        override fun terminal(hostId: String): TerminalTransport = error("unused")
+        override fun topologyFeedFactory(hostId: String): TopologyFeed.Factory = error("unused")
+        override fun probe(host: String, token: String): ScoutrApi = error("unused")
     }
 }

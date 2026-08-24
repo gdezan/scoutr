@@ -55,7 +55,6 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import dev.scoutr.app.ScoutrApp
 import dev.scoutr.app.data.AppearancePreferencesStore
 import dev.scoutr.app.data.RepoCommit
 import dev.scoutr.app.data.RepoDiffFileStat
@@ -859,14 +858,6 @@ internal fun shortHash(hash: String) = hash.take(8)
 
 internal fun commitDate(seconds: Long): String =
     SimpleDateFormat("MMM d, HH:mm", Locale.US).format(Date(seconds * 1000))
-
-@Composable
-fun rememberReviewViewModel(): ReviewViewModel {
-    val app = LocalContext.current.applicationContext as ScoutrApp
-    return androidx.lifecycle.viewmodel.compose.viewModel(
-        factory = ReviewViewModel.factory(app.container.bridge, app.container.connectionStore),
-    )
-}
 
 private fun syncSuffix(overview: RepoOverviewResponse): String {
     val upstream = overview.upstream ?: return ""

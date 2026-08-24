@@ -4,7 +4,6 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.CreationExtras
 import androidx.lifecycle.viewModelScope
-import dev.scoutr.app.data.ConnectionStore
 import dev.scoutr.app.data.RepoDiffResponse
 import dev.scoutr.app.data.RepoFileDiffResponse
 import dev.scoutr.app.data.RepoFileResponse
@@ -53,7 +52,6 @@ fun DiffViewMode.showsContent(): Boolean = this == DiffViewMode.File || this == 
  */
 class ReviewViewModel(
     private val bridge: ScoutrApi,
-    private val connectionStore: ConnectionStore,
     private val store: ReviewStore,
 ) : ViewModel() {
     // Per-(repo, ref, kind, file) caches so flipping Diff/File/Preview or revisiting a
@@ -320,12 +318,12 @@ class ReviewViewModel(
     }
 
     companion object {
-        fun factory(bridge: ScoutrApi, connectionStore: ConnectionStore): ViewModelProvider.Factory =
+        fun factory(bridge: ScoutrApi, hostId: String): ViewModelProvider.Factory =
             object : ViewModelProvider.Factory {
                 @Suppress("UNCHECKED_CAST")
                 override fun <T : ViewModel> create(modelClass: Class<T>, extras: CreationExtras): T {
                     val app = extras[androidx.lifecycle.ViewModelProvider.AndroidViewModelFactory.Companion.APPLICATION_KEY] ?: error("application missing in ReviewViewModel factory")
-                    return ReviewViewModel(bridge, connectionStore, ReviewStore(app)) as T
+                    return ReviewViewModel(bridge, ReviewStore(app, hostId)) as T
                 }
             }
     }

@@ -23,4 +23,7 @@ export const SCOUTR_API_FEATURES = [
   // /api/health carries the bridge installation's stable opaque hostId; the
   // app persists it with the pairing to namespace device-local metadata.
   "host-identity.v1",
+  // Device registrations may carry the app-local profile generation, allowing
+  // push messages to reject stale notifications after a host is re-paired.
+  "push-profile-generation.v1",
 ] as const;

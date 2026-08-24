@@ -611,16 +611,23 @@ private class RecordingStore(
     pinned: Set<String> = emptySet(),
     archived: Set<String> = emptySet(),
 ) : SessionCatalogStore {
-    private val pinned = pinned.mapTo(mutableSetOf()) { dev.scoutr.app.data.SessionKey("pi", it) }
-    private val archived = archived.mapTo(mutableSetOf()) { dev.scoutr.app.data.SessionKey("pi", it) }
+    private val pinned = pinned.mapTo(mutableSetOf()) {
+        dev.scoutr.app.data.HostSessionKey("legacy-singleton", dev.scoutr.app.data.SessionKey("pi", it))
+    }
+    private val archived = archived.mapTo(mutableSetOf()) {
+        dev.scoutr.app.data.HostSessionKey("legacy-singleton", dev.scoutr.app.data.SessionKey("pi", it))
+    }
 
-    override fun pinnedKeys(catalogKeys: Collection<dev.scoutr.app.data.SessionKey>) = pinned.toSet()
-    override fun archivedKeys(catalogKeys: Collection<dev.scoutr.app.data.SessionKey>) = archived.toSet()
-    override fun setPinned(key: dev.scoutr.app.data.SessionKey, pinned: Boolean) {
+    override fun pinnedKeys(catalogKeys: Collection<dev.scoutr.app.data.HostSessionKey>) = pinned.toSet()
+    override fun archivedKeys(catalogKeys: Collection<dev.scoutr.app.data.HostSessionKey>) = archived.toSet()
+    override fun setPinned(key: dev.scoutr.app.data.HostSessionKey, pinned: Boolean) {
         if (pinned) this.pinned.add(key) else this.pinned.remove(key)
     }
 
-    override fun setArchived(key: dev.scoutr.app.data.SessionKey, archived: Boolean) {
+    override fun setArchived(key: dev.scoutr.app.data.HostSessionKey, archived: Boolean) {
         if (archived) this.archived.add(key) else this.archived.remove(key)
     }
+
+    override fun adoptLegacyEntries(hostId: String, catalogKeys: Collection<dev.scoutr.app.data.SessionKey>) = Unit
+    override fun copyRetainedMetadata(fromHostId: String, toHostId: String, confirmed: Boolean) = Unit
 }

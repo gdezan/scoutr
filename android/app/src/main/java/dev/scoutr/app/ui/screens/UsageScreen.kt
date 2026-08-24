@@ -67,7 +67,7 @@ fun UsageScreen(
 
     // Usage owns a retained ViewModel, so its producer must follow the screen
     // lifecycle rather than ViewModel lifetime.
-    LifecycleStartEffect(Unit) {
+    LifecycleStartEffect(viewModel) {
         viewModel.startPolling()
         onStopOrDispose { viewModel.stopPolling() }
     }

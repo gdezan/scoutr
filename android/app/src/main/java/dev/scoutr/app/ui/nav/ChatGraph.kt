@@ -23,7 +23,9 @@ import dev.scoutr.app.ui.screens.ChatScreen
  */
 internal fun NavGraphBuilder.chatDestination(
     navController: NavHostController,
-    openReview: (cwd: String) -> Unit,
+    container: dev.scoutr.app.AppContainer,
+    openReview: (profile: dev.scoutr.app.data.HostProfileKey, cwd: String) -> Unit,
+    markHostUsed: (dev.scoutr.app.data.HostProfileKey) -> Unit = {},
 ) {
     composable(
         route = AppRoutes.CHAT,
@@ -40,8 +42,20 @@ internal fun NavGraphBuilder.chatDestination(
                 type = NavType.StringType
                 defaultValue = AppRoutes.ChatArgs.DEFAULT_STATUS
             },
+            navArgument(AppRoutes.ChatArgs.HOST_PROFILE) {
+                type = NavType.StringType
+                defaultValue = ""
+            },
         ),
     ) { backStackEntry ->
+        val profile = backStackEntry.routeProfile(AppRoutes.ChatArgs.HOST_PROFILE)
+        val registryState by container.hostRegistry.states.collectAsState()
+        val connectionRevision = registryState.connectionRevision(profile)
+        val api = profile?.let { container.routeApi(it, connectionRevision) }
+        if (profile == null || api == null) {
+            dev.scoutr.app.ui.screens.HostUnavailableScreen(hostUnavailableReason(profile))
+            return@composable
+        }
         val initialKey = decodedChatSessionKey(
             backStackEntry.arguments?.getString(AppRoutes.ChatArgs.SESSION_KEY),
         )
@@ -54,21 +68,22 @@ internal fun NavGraphBuilder.chatDestination(
             // round has to survive process death, not only rotation.
             factory = savedStateViewModelFactory<ChatViewModel> { app, savedState ->
                 ChatViewModel(
-                    app.container.bridge,
-                    initialKey,
-                    bootstrapPaneId,
-                    agentStatus,
-                    app.container.performanceCounters,
-                    savedState,
+                    bridge = api,
+                    initialKey = initialKey,
+                    bootstrapPaneId = bootstrapPaneId,
+                    agentStatus = agentStatus,
+                    performanceCounters = app.container.performanceCounters,
+                    savedState = savedState,
+                    hostProfileKey = profile,
                 )
             },
-            key = "chat_${initialKey?.encode() ?: "bootstrap_$bootstrapPaneId"}",
+            key = "chat_${profile.encode()}_${connectionRevision}_${initialKey?.encode() ?: "bootstrap_$bootstrapPaneId"}",
         )
         val chatUi by chatViewModel.ui.collectAsState()
         LaunchedEffect(initialKey, chatUi.sessionKey) {
             val converged = chatUi.sessionKey
             if (initialKey == null && converged != null) {
-                navController.navigate(AppRoutes.chat(converged, chatUi.agentStatus)) {
+                navController.navigate(AppRoutes.chat(profile, converged, chatUi.agentStatus)) {
                     popUpTo(backStackEntry.destination.id) { inclusive = true }
                     launchSingleTop = true
                 }
@@ -78,10 +93,14 @@ internal fun NavGraphBuilder.chatDestination(
             viewModel = chatViewModel,
             onBack = { navController.popBackStack() },
             onOpenTerminal = {
-                chatUi.livePaneId?.let { navController.navigate(AppRoutes.terminal(it)) }
+                markHostUsed(profile)
+                chatUi.livePaneId?.let { navController.navigate(AppRoutes.terminal(profile, it)) }
             },
-            onOpenFiles = { cwd -> navController.navigate(AppRoutes.fileBrowser(cwd)) },
-            onOpenReview = openReview,
+            onOpenFiles = {
+                markHostUsed(profile)
+                navController.navigate(AppRoutes.fileBrowser(profile, it))
+            },
+            onOpenReview = { cwd -> openReview(profile, cwd) },
         )
     }
 }

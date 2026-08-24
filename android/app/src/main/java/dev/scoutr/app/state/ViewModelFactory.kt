@@ -15,7 +15,7 @@ import dev.scoutr.app.ScoutrApp
  *
  * ```kotlin
  * viewModel(factory = viewModelFactory<BoardViewModel> { app ->
- *     BoardViewModel(app.container.bridge, app.container.connectionStore)
+ *     BoardViewModel(app.container.hostClients, app.container.hostRegistry)
  * })
  * ```
  */

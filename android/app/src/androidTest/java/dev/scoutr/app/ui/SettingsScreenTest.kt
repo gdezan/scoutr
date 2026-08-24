@@ -16,8 +16,6 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.test.platform.app.InstrumentationRegistry
 import dev.scoutr.app.data.AppearancePreferencesStore
-import dev.scoutr.app.data.ConnectionStore
-import dev.scoutr.app.data.ExposureKind
 import dev.scoutr.app.data.TerminalPreferencesStore
 import dev.scoutr.app.data.ApkBuild
 import dev.scoutr.app.data.UpdateApkStatusResponse
@@ -26,6 +24,7 @@ import dev.scoutr.app.data.UpdateIdentity
 import dev.scoutr.app.data.UpdateStatusResponse
 import dev.scoutr.app.net.FakeScoutrApi
 import dev.scoutr.app.net.ScoutrApi
+import dev.scoutr.app.ui.screens.SettingsConnection
 import dev.scoutr.app.ui.screens.SettingsScreen
 import dev.scoutr.app.ui.theme.ScoutrTheme
 import org.junit.Assert.assertEquals
@@ -49,12 +48,11 @@ class SettingsScreenTest {
     private val context: Context
         get() = InstrumentationRegistry.getInstrumentation().targetContext
 
-    private val saved = ConnectionStore.Saved(
+    private val pairingToken = "super-secret-token-42"
+    private val saved = SettingsConnection(
         host = "http://bridge.local:8787",
-        token = "super-secret-token-42",
-        exposure = ExposureKind.Tailscale,
+        hostId = "test-host",
     )
-
     @Before
     fun clearPrefs() {
         context.getSharedPreferences(AppearancePreferencesStore.FILE, Context.MODE_PRIVATE)
@@ -66,7 +64,7 @@ class SettingsScreenTest {
     private fun terminalStore() = TerminalPreferencesStore(context)
 
     private fun setSettings(
-        saved: ConnectionStore.Saved? = this.saved,
+        saved: SettingsConnection? = this.saved,
         terminalPreferences: TerminalPreferencesStore = terminalStore(),
         api: ScoutrApi = FakeScoutrApi(),
         onForget: () -> Unit = {},
@@ -92,8 +90,8 @@ class SettingsScreenTest {
         compose.onNodeWithTag("settings_host").assertTextEquals(saved.host)
         // The token is neither text nor a content description anywhere on the page.
         compose.onAllNodes(
-            hasText(saved.token, substring = true) or
-                hasContentDescription(saved.token, substring = true),
+            hasText(pairingToken, substring = true) or
+                hasContentDescription(pairingToken, substring = true),
         ).assertCountEquals(0)
     }
 
@@ -183,7 +181,7 @@ class SettingsScreenTest {
     fun fontStepperWritesTheSharedTerminalStoreAndStopsAtTheBounds() {
         val store = terminalStore()
         setSettings(terminalPreferences = store)
-        val prefs = store.forConnection(saved.host, saved.token)
+        val prefs = store.forHost(saved.hostId ?: "test-host")
 
         compose.onNodeWithTag("settings_font_value").performScrollTo().assertTextEquals("12")
         compose.onNodeWithTag("settings_font_plus").performClick()
@@ -209,7 +207,7 @@ class SettingsScreenTest {
         setSettings(terminalPreferences = store)
         // The strip ships visible, so Settings starts on.
         compose.onNodeWithTag("settings_extra_keys").performScrollTo().assertIsOn().performClick()
-        assertFalse(store.forConnection(saved.host, saved.token).extraKeysVisible)
+        assertFalse(store.forHost(saved.hostId ?: "test-host").extraKeysVisible)
     }
 
     @Test

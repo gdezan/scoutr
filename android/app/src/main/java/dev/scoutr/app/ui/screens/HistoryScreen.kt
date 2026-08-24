@@ -90,7 +90,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 import java.text.SimpleDateFormat
@@ -113,14 +112,13 @@ import dev.scoutr.app.state.HistoryUiState
 import dev.scoutr.app.state.HistoryScope
 import dev.scoutr.app.state.ResumedSession
 import dev.scoutr.app.state.SessionHistoryViewModel
-import dev.scoutr.app.state.viewModelFactory
 import dev.scoutr.app.ui.components.ReadableContentColumn
 
 /** The Sessions tab: catalog of stored and live pi sessions with lifecycle actions. */
 @Composable
 fun HistoryScreen(
     onOpenSession: (ResumedSession) -> Unit,
-    viewModel: SessionHistoryViewModel = rememberHistoryViewModel(),
+    viewModel: SessionHistoryViewModel,
     onReview: (HistoryItem) -> Unit = {},
     // rememberLazyListState keeps the raw position across recreation; the per-tab
     // anchors cover tab switches where the position must not leak across views.
@@ -130,7 +128,7 @@ fun HistoryScreen(
     val ui by viewModel.ui.collectAsState()
 
     // The catalog poll runs only while the history screen is STARTED.
-    LifecycleStartEffect(Unit) {
+    LifecycleStartEffect(viewModel) {
         viewModel.startPolling()
         onStopOrDispose { viewModel.stopPolling() }
     }
@@ -256,6 +254,7 @@ fun HistoryScreen(
                     onTogglePin = viewModel::togglePin,
                     onToggleArchive = viewModel::toggleArchive,
                     onReview = onReview,
+                    isBusy = { item -> ui.busySessionKey == viewModel.hostSessionKey(item.session.key) },
                 )
             }
         }
@@ -403,6 +402,7 @@ private fun HistoryList(
     onTogglePin: (HistoryItem) -> Unit,
     onToggleArchive: (HistoryItem) -> Unit,
     onReview: (HistoryItem) -> Unit,
+    isBusy: (HistoryItem) -> Boolean,
 ) {
     if (sorted.isEmpty()) {
         Box(Modifier.fillMaxWidth().padding(vertical = 72.dp), contentAlignment = Alignment.Center) {
@@ -464,7 +464,7 @@ private fun HistoryList(
             item(key = historyItem.session.key.encode()) {
                 HistoryRow(
                     item = historyItem,
-                    busy = ui.busySessionKey == historyItem.session.key,
+                    busy = isBusy(historyItem),
                     busyLabel = ui.busyLabel,
                     onOpen = { onOpen(historyItem) },
                     onFork = { onFork(historyItem) },
@@ -1019,18 +1019,4 @@ private fun ErrorBanner(message: String, onDismiss: () -> Unit) {
         Spacer(Modifier.width(10.dp))
         Text(message, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
     }
-}
-
-
-@Composable
-private fun rememberHistoryViewModel(): SessionHistoryViewModel {
-    return viewModel(
-        factory = viewModelFactory<SessionHistoryViewModel> { app ->
-            SessionHistoryViewModel(
-                app.container.bridge,
-                app.container.connectionStore,
-                app.container.sessionCatalogStore,
-            )
-        },
-    )
 }

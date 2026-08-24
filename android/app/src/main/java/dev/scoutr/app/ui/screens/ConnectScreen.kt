@@ -18,13 +18,16 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.QrCodeScanner
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -41,9 +44,12 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
 
+import dev.scoutr.app.data.ExposureKind
+import dev.scoutr.app.data.UpdateHostDisposition
 import dev.scoutr.app.data.PairingPayloadParser
 import dev.scoutr.app.ui.imeOrNavigationBarsPadding
 import dev.scoutr.app.state.ConnectViewModel
+import dev.scoutr.app.state.PairingOutcome
 import dev.scoutr.app.state.viewModelFactory
 import dev.scoutr.app.state.Loadable
 
@@ -52,11 +58,21 @@ fun ConnectScreen(
     onConnected: () -> Unit,
     viewModel: ConnectViewModel = rememberConnectViewModel(),
     modifier: Modifier = Modifier,
+    initialHost: String = "",
+    refreshingHostId: String? = null,
 ) {
     val state by viewModel.state.collectAsState()
-    var host by remember { mutableStateOf("") }
+    val outcome by viewModel.outcome.collectAsState()
+    var host by remember(initialHost) { mutableStateOf(initialHost) }
     var token by remember { mutableStateOf("") }
     var scanError by remember { mutableStateOf<String?>(null) }
+    val submit: (String, String, ExposureKind) -> Unit = { candidateHost, candidateToken, exposure ->
+        if (refreshingHostId == null) {
+            viewModel.connect(candidateHost, candidateToken, exposure)
+        } else {
+            viewModel.refresh(refreshingHostId, candidateHost, candidateToken, exposure)
+        }
+    }
 
     val scanLauncher = rememberLauncherForActivityResult(ScanContract()) { result ->
         val contents = result?.contents
@@ -66,17 +82,110 @@ fun ConnectScreen(
                 host = payload.host
                 token = payload.token
                 scanError = null
-                viewModel.connect(payload.host, payload.token, payload.exposure)
+                submit(payload.host, payload.token, payload.exposure)
             } else {
                 scanError = "That QR doesn't look like a Scoutr pairing code"
             }
         }
     }
 
-    // React to the handshake result exactly once.
-    if (state is Loadable.Ready) {
-        onConnected()
-        viewModel.reset()
+    // Added and refreshed profiles can leave immediately. Identity changes stay on
+    // this screen until the user explicitly chooses a safe resolution or cancels.
+    LaunchedEffect(state, outcome) {
+        if (state is Loadable.Ready && outcome != null && outcome !is PairingOutcome.IdentityChanged) {
+            onConnected()
+            viewModel.reset()
+        }
+    }
+
+    (outcome as? PairingOutcome.IdentityChanged)?.let { changed ->
+        var choosingUpdateHost by remember(changed.previousHostId, changed.reportedHostId) {
+            mutableStateOf(false)
+        }
+        if (choosingUpdateHost) {
+            AlertDialog(
+                onDismissRequest = { choosingUpdateHost = false },
+                title = { Text("Choose update source") },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(
+                            "Only trust the replacement for in-app updates if you trust its APK signing key. " +
+                                "You can choose another paired host or disable in-app updates instead.",
+                        )
+                        changed.alternativeUpdateHosts.forEach { option ->
+                            OutlinedButton(
+                                onClick = {
+                                    viewModel.confirmIdentityReplacement(
+                                        UpdateHostDisposition.UseExisting(option.hostId),
+                                    )
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                Text("Use ${option.alias}")
+                            }
+                        }
+                        OutlinedButton(
+                            onClick = {
+                                viewModel.confirmIdentityReplacement(UpdateHostDisposition.Disable)
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text("Disable in-app updates")
+                        }
+                    }
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            viewModel.confirmIdentityReplacement(
+                                UpdateHostDisposition.TrustReplacementSigningKey,
+                            )
+                        },
+                    ) {
+                        Text("Trust replacement")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { choosingUpdateHost = false }) { Text("Back") }
+                },
+            )
+        } else {
+            AlertDialog(
+                onDismissRequest = viewModel::cancelIdentityChange,
+                title = { Text("Bridge identity changed") },
+                text = {
+                    Text(
+                        if (changed.reportedHostAlreadyPaired) {
+                            "This address now identifies as ${changed.reportedHostId}, which is already paired. Refresh that profile's credentials and leave ${changed.previousHostId} unchanged?"
+                        } else {
+                            "This address was ${changed.previousHostId} but now identifies as ${changed.reportedHostId}. " +
+                                "Replacing keeps the saved alias; pins and archives stay with the old identity. " +
+                                "Otherwise, keep both profiles with Add as new."
+                        },
+                    )
+                },
+                confirmButton = {
+                    if (changed.reportedHostAlreadyPaired) {
+                        TextButton(onClick = viewModel::confirmRefreshExisting) { Text("Refresh existing") }
+                    } else {
+                        Row {
+                            TextButton(onClick = viewModel::confirmAddAsNew) { Text("Add as new") }
+                            TextButton(
+                                onClick = {
+                                    if (changed.replacesUpdateHost) choosingUpdateHost = true
+                                    else viewModel.confirmIdentityReplacement()
+                                },
+                            ) {
+                                Text("Replace old")
+                            }
+                        }
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = viewModel::cancelIdentityChange) { Text("Cancel") }
+                },
+            )
+        }
     }
 
     Column(
@@ -173,7 +282,7 @@ fun ConnectScreen(
                 Spacer(Modifier.height(12.dp))
                 Button(
                     shape = MaterialTheme.shapes.small,
-                    onClick = { viewModel.connect(host, token) },
+                    onClick = { submit(host, token, ExposureKind.Custom) },
                     modifier = Modifier.fillMaxWidth().testTag("connect_button"),
                 ) {
                     Text("Try again")
@@ -183,11 +292,11 @@ fun ConnectScreen(
             else -> {
                 Button(
                     shape = MaterialTheme.shapes.small,
-                    onClick = { viewModel.connect(host, token) },
+                    onClick = { submit(host, token, ExposureKind.Custom) },
                     enabled = host.isNotBlank() && token.isNotBlank(),
                     modifier = Modifier.fillMaxWidth().testTag("connect_button"),
                 ) {
-                    Text("Connect")
+                    Text(if (refreshingHostId == null) "Connect" else "Refresh pairing")
                 }
             }
         }
@@ -198,7 +307,11 @@ fun ConnectScreen(
 private fun rememberConnectViewModel(): ConnectViewModel {
     return viewModel(
         factory = viewModelFactory<ConnectViewModel> { app ->
-            ConnectViewModel(app.container.bridge, app.container.connectionStore)
+            ConnectViewModel(
+                app.container.hostClients,
+                app.container.hostRegistry,
+                app.container.hostLifecycle,
+            )
         },
     )
 }

@@ -37,6 +37,7 @@ import dev.scoutr.app.data.AgentsResponse
 import dev.scoutr.app.data.ConnectionStore
 import dev.scoutr.app.state.BoardUiState
 import dev.scoutr.app.state.BoardViewModel
+import dev.scoutr.app.state.legacyBoardViewModel
 import dev.scoutr.app.data.ScoutrApiCompatibility
 import dev.scoutr.app.net.FakeScoutrApi
 import dev.scoutr.app.ui.screens.BoardScreen
@@ -439,7 +440,7 @@ class BoardScreenTest {
         }
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val connection = ConnectionStore(context).apply { clear() }
-        val viewModel = BoardViewModel(
+        val viewModel = legacyBoardViewModel(
             bridge = fake,
             connectionStore = connection,
             initialState = BoardUiState(board = BoardState.group(listOf(agent)), connected = true),
@@ -803,6 +804,6 @@ class BoardScreenTest {
         val connection = ConnectionStore(context).apply { clear() }
         // Unsaved connection: the VM init never polls, so the UI stays static.
         val bridge = dev.scoutr.app.net.BridgeClient(okhttp3.OkHttpClient(), connection)
-        return BoardViewModel(bridge, connection, initialState = ui)
+        return legacyBoardViewModel(bridge, connection, initialState = ui)
     }
 }

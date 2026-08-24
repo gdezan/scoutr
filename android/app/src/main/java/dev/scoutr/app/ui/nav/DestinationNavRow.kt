@@ -38,7 +38,7 @@ internal fun DestinationNavRow(
 ) {
     Row(modifier.padding(horizontal = 8.dp, vertical = 6.dp)) {
         Destination.entries.forEach { destination ->
-            val selected = currentRoute == destination.route
+            val selected = currentRoute == destination.route || currentRoute == destination.pattern
             val badge = if (destination == Destination.Board && needsYouCount > 0) needsYouCount else 0
             ScoutrNavItem(
                 destination = destination,

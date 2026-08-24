@@ -16,6 +16,7 @@ import androidx.compose.material3.Text
 import androidx.navigation.NavGraphBuilder
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.composable
+import dev.scoutr.app.data.HostProfileKey
 import dev.scoutr.app.state.BoardViewModel
 import dev.scoutr.app.ui.screens.BoardScreen
 
@@ -33,7 +34,9 @@ internal fun NavGraphBuilder.boardDestination(
     onNewSession: () -> Unit,
     onSettings: () -> Unit,
     onTerminal: (() -> Unit)?,
-    openReview: (cwd: String) -> Unit,
+    openReview: (profile: HostProfileKey, cwd: String) -> Unit,
+    markHostUsed: (HostProfileKey) -> Unit = {},
+    onRetryMigration: () -> Unit = {},
 ) {
     composable(Destination.Board.route) {
         if (showWidePlaceholder) {
@@ -62,13 +65,29 @@ internal fun NavGraphBuilder.boardDestination(
         ) { innerBoard ->
             BoardScreen(
                 onOpenAgent = { agent ->
-                    agent.live?.let { navController.navigateToChat(agent.key, it.paneId, it.status) }
+                    val profile = boardViewModel.ui.value.hostProfile
+                    agent.live?.let {
+                        if (profile != null) {
+                            markHostUsed(profile)
+                            navController.navigateToChat(profile, agent.key, it.paneId, it.status)
+                        }
+                    }
                 },
-                onReviewAgent = { agent -> agent.cwd?.let(openReview) },
-                onCloseAgent = { agent -> agent.live?.let { boardViewModel.closeAgent(it.paneId) } },
-                onQuickAnswer = { agent, label -> boardViewModel.quickAnswer(agent, label) },
+                onReviewAgent = { agent ->
+                    val profile = boardViewModel.ui.value.hostProfile
+                    agent.cwd?.let { cwd -> if (profile != null) openReview(profile, cwd) }
+                },
+                onCloseAgent = { agent ->
+                    boardViewModel.ui.value.hostProfile?.let(markHostUsed)
+                    agent.live?.let { boardViewModel.closeAgent(it.paneId) }
+                },
+                onQuickAnswer = { agent, label ->
+                    boardViewModel.ui.value.hostProfile?.let(markHostUsed)
+                    boardViewModel.quickAnswer(agent, label)
+                },
                 onResolveCompatibility = onSettings,
                 viewModel = boardViewModel,
+                onRetryMigration = onRetryMigration,
                 modifier = Modifier.padding(innerBoard),
             )
         }

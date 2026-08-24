@@ -27,6 +27,7 @@ export class FcmPublisher {
   constructor(
     private readonly sender: FcmSender,
     private readonly devices: DeviceRegistry,
+    private readonly hostId: string,
   ) {}
 
   /** Handle one feed event; returns true when a ping was attempted. */
@@ -75,9 +76,18 @@ export class FcmPublisher {
   }
 
   private async ping(kind: PingKind, paneId: string): Promise<boolean> {
-    const tokens = this.devices.list().map((device) => device.token);
-    if (tokens.length === 0) return false;
-    const stale = await this.sender.send(tokens, kind, paneId);
+    // Generations belong to registrations, not to the bridge event. Snapshot
+    // the records before sending so a mixed old/new app population receives
+    // either the legacy or qualified wire shape independently.
+    const devices = [...this.devices.list()];
+    if (devices.length === 0) return false;
+    const stale = (
+      await Promise.all(
+        devices.map((device) =>
+          this.sender.send([device.token], kind, paneId, this.hostId, device.profileGeneration),
+        ),
+      )
+    ).flat();
     for (const token of stale) await this.devices.unregister(token);
     return true;
   }

@@ -4,13 +4,19 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dev.scoutr.app.data.SessionAction
 import dev.scoutr.app.data.SessionDescriptor
+import dev.scoutr.app.data.SessionKey
 import dev.scoutr.app.data.BoardState
-import dev.scoutr.app.data.ConnectionStore
+import dev.scoutr.app.data.HostProfileKey
+import dev.scoutr.app.data.HostRegistryStore
+import dev.scoutr.app.data.LegacyMigrationState
 import dev.scoutr.app.data.ScoutrApiCompatibility
 import dev.scoutr.app.data.classifyScoutrApiCompatibility
 import dev.scoutr.app.data.formatScoutrApiIncompatibility
 import dev.scoutr.app.net.AskAnswer
 import dev.scoutr.app.net.BridgeException
+import dev.scoutr.app.net.GenerationGuardedScoutrApi
+import dev.scoutr.app.net.HostClientFactory
+import dev.scoutr.app.net.HostConnectionBinding
 import dev.scoutr.app.net.ScoutrApi
 // The Board's own quick-answer eligibility rule, shared with the cards that
 // draw the controls so the check that submits cannot drift from the check that
@@ -20,6 +26,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
@@ -33,6 +40,8 @@ import kotlin.time.Duration.Companion.seconds
 
 data class BoardUiState(
     val board: BoardState = BoardState(),
+    /** Host selected for this board snapshot; callbacks use this immutable key. */
+    val hostProfile: HostProfileKey? = null,
     val loading: Boolean = false,
     val isRefreshing: Boolean = false,
     val connected: Boolean = false,
@@ -46,12 +55,56 @@ data class BoardUiState(
     val quickAnswering: Set<String> = emptySet(),
 )
 
-class BoardViewModel(
-    private val bridge: ScoutrApi,
-    private val connectionStore: ConnectionStore,
-    initialState: BoardUiState = BoardUiState(),
-    private val pollInterval: Duration = 3.seconds,
+class BoardViewModel internal constructor(
+    private var bridge: ScoutrApi?,
+    private val connectionAvailable: () -> Boolean,
+    initialState: BoardUiState,
+    private val pollInterval: Duration,
+    private val bindDefaultFactory: (() -> Pair<HostProfileKey, ScoutrApi?>?)? = null,
+    private val hostRegistry: HostRegistryStore? = null,
+    private val migrationState: StateFlow<LegacyMigrationState>? = null,
+    private val adoptLegacyMetadata: (Collection<SessionKey>) -> Unit = {},
 ) : ViewModel() {
+    /** Production board binding: hostless UI, default profile selected at entry. */
+    constructor(
+        hostClients: HostClientFactory,
+        hostRegistry: HostRegistryStore,
+        currentBinding: (String) -> HostConnectionBinding?,
+        initialState: BoardUiState = BoardUiState(),
+        pollInterval: Duration = 3.seconds,
+        migrationState: StateFlow<LegacyMigrationState>? = null,
+        adoptLegacyMetadata: (Collection<SessionKey>) -> Unit = {},
+    ) : this(
+        bridge = null,
+        connectionAvailable = { hostRegistry.snapshot().profiles.isNotEmpty() || hostRegistry.snapshot().pendingLegacyConnection },
+        initialState = initialState,
+        pollInterval = pollInterval,
+        bindDefaultFactory = {
+            val state = hostRegistry.snapshot()
+            val profile = state.defaultHostId?.let { id -> state.profiles.firstOrNull { it.hostId == id } }
+            profile?.let { selected ->
+                currentBinding(selected.hostId)?.let { binding ->
+                    val key = HostProfileKey(selected.hostId, selected.profileGeneration)
+                    key to GenerationGuardedScoutrApi(
+                        hostRegistry,
+                        key,
+                        hostClients.api(binding),
+                        binding.connectionRevision,
+                    )
+                }
+            }
+        },
+        hostRegistry = hostRegistry,
+        migrationState = migrationState,
+        adoptLegacyMetadata = adoptLegacyMetadata,
+    )
+
+    constructor(
+        bridge: ScoutrApi,
+        hostRegistry: HostRegistryStore,
+        initialState: BoardUiState = BoardUiState(),
+        pollInterval: Duration = 3.seconds,
+    ) : this(bridge, { hostRegistry.snapshot().profiles.isNotEmpty() }, initialState, pollInterval)
 
     private val _ui = MutableStateFlow(initialState)
     val ui: StateFlow<BoardUiState> = _ui.asStateFlow()
@@ -59,39 +112,105 @@ class BoardViewModel(
     private val poller = Poller(viewModelScope)
     private val connectionMutex = Mutex()
     private val loadMutex = Mutex()
+    private var boundConnectionRevision: Long? = null
 
-    val hasSavedConnection: Boolean get() = connectionStore.saved != null
+    val hasSavedConnection: Boolean get() = connectionAvailable()
 
     init {
-        if (connectionStore.saved != null) {
-            connect(host = "", token = "")
+        if (bindDefaultFactory != null) {
+            viewModelScope.launch {
+                hostRegistry?.states?.collect { bindToDefault() }
+            }
         }
+        migrationState?.let { state ->
+            viewModelScope.launch {
+                state.collect { migration ->
+                    if (migration == LegacyMigrationState.None) {
+                        bindToDefault()
+                    } else if (hostRegistry?.snapshot()?.profiles.isNullOrEmpty()) {
+                        _ui.update {
+                            it.copy(
+                                loading = migration == LegacyMigrationState.Pending ||
+                                    migration == LegacyMigrationState.Probing,
+                                connected = false,
+                                error = when (migration) {
+                                    LegacyMigrationState.Pending,
+                                    LegacyMigrationState.Probing -> "Checking saved bridge…"
+                                    is LegacyMigrationState.WaitingToRetry -> migration.message
+                                    LegacyMigrationState.None -> null
+                                },
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        if (hasSavedConnection && bindDefaultFactory == null) connect(host = "", token = "")
+    }
+
+    private fun apiOrNull(): ScoutrApi? = bridge
+    private fun remoteActionsAllowed(): Boolean =
+        migrationState == null || migrationState.value == LegacyMigrationState.None
+
+    /** Rebinds the hostless board to the default profile when one appears. */
+    private fun bindToDefault() {
+        val selected = bindDefaultFactory?.invoke()
+        if (selected == null) {
+            bridge = null
+            boundConnectionRevision = null
+            _ui.update {
+                it.copy(
+                    hostProfile = null,
+                    loading = hostRegistry?.snapshot()?.pendingLegacyConnection == true,
+                    connected = false,
+                    error = if (hostRegistry?.snapshot()?.pendingLegacyConnection == true) "Checking saved bridge…" else null,
+                )
+            }
+            return
+        }
+        val key = selected.first
+        val revision = hostRegistry?.snapshot()?.profiles
+            ?.firstOrNull { it.hostId == key.hostId && it.profileGeneration == key.profileGeneration }
+            ?.connectionRevision
+        if (_ui.value.hostProfile == key && bridge != null && boundConnectionRevision == revision) return
+        boundConnectionRevision = revision
+        bridge = selected.second
+        _ui.update {
+            it.copy(
+                hostProfile = key,
+                board = BoardState(),
+                apiCompatibility = null,
+                quickAnswering = emptySet(),
+                error = null,
+                loading = true,
+                connected = false,
+            )
+        }
+        connect("", "")
     }
 
     /** Connects to the stored (or newly saved) connection and starts the live board. */
-    fun connect(host: String, token: String) {
-        val hasCandidate = host.isNotBlank() && token.isNotBlank()
-        if (!hasCandidate && connectionStore.saved == null) {
+    fun connect(@Suppress("UNUSED_PARAMETER") host: String, @Suppress("UNUSED_PARAMETER") token: String) {
+        if (!hasSavedConnection) {
             _ui.update { it.copy(error = "No connection configured") }
             return
         }
+        if (apiOrNull() == null) {
+            _ui.update { it.copy(loading = true, connected = false, error = "Checking saved bridge…") }
+            return
+        }
         viewModelScope.launch {
-            probeConnection(
-                host = host.takeIf { hasCandidate },
-                token = token.takeIf { hasCandidate },
-                showLoading = _ui.value.apiCompatibility !is ScoutrApiCompatibility.Incompatible,
-            )
+            probeConnection(showLoading = _ui.value.apiCompatibility !is ScoutrApiCompatibility.Incompatible)
         }
     }
 
-    private suspend fun probeConnection(
-        host: String? = null,
-        token: String? = null,
-        showLoading: Boolean = false,
-    ) = connectionMutex.withLock {
+    private suspend fun probeConnection(showLoading: Boolean = false) = connectionMutex.withLock {
         if (showLoading) _ui.update { it.copy(loading = true, error = null) }
+        val requestApi = apiOrNull() ?: return@withLock
+        val requestRevision = boundConnectionRevision
         try {
-            val health = bridge.health(host, token)
+            val health = requestApi.health()
+            if (requestApi !== apiOrNull() || requestRevision != boundConnectionRevision) return@withLock
             val compatibility = classifyScoutrApiCompatibility(health.api)
             if (compatibility is ScoutrApiCompatibility.Incompatible) {
                 _ui.update {
@@ -105,15 +224,6 @@ class BoardViewModel(
                 }
                 return@withLock
             }
-            val hadSavedConnection = connectionStore.saved != null
-            if (host != null && token != null) {
-                // Explicit form connect: the pairing is replaced wholesale.
-                connectionStore.save(host = host, token = token, hostId = health.hostId)
-            } else if (health.ok && health.herdr?.connected == true) {
-                // Stored-credential probe: adopt the bridge's identity when it
-                // differs from what the pairing recorded (e.g. bridge reinstall).
-                connectionStore.updateHostId(health.hostId)
-            }
             _ui.update {
                 it.copy(
                     connected = health.ok && health.herdr?.connected == true,
@@ -123,19 +233,20 @@ class BoardViewModel(
                 )
             }
             if (lifecycleActive) {
-                if (!hadSavedConnection && connectionStore.saved != null) startLive()
+                startLive()
                 loadBoard()
             }
-        } catch (c: CancellationException) {
-            throw c
-        } catch (e: Exception) {
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            if (requestApi !== apiOrNull() || requestRevision != boundConnectionRevision) return@withLock
             _ui.update { current ->
                 val incompatible = current.apiCompatibility as? ScoutrApiCompatibility.Incompatible
                 current.copy(
                     loading = false,
                     connected = false,
                     error = incompatible?.let(::formatScoutrApiIncompatibility)
-                        ?: e.message
+                        ?: error.message
                         ?: "connection failed",
                 )
             }
@@ -151,7 +262,7 @@ class BoardViewModel(
     fun startPolling() {
         if (lifecycleActive) return
         lifecycleActive = true
-        if (connectionStore.saved != null) startLive()
+        if (hasSavedConnection) startLive()
     }
 
     /** Stop the poll; in-flight one-shot actions are untouched. */
@@ -200,8 +311,12 @@ class BoardViewModel(
 
     private suspend fun loadBoard() = loadMutex.withLock {
         if (_ui.value.apiCompatibility != ScoutrApiCompatibility.Compatible) return@withLock
+        val requestApi = apiOrNull() ?: return@withLock
+        val requestRevision = boundConnectionRevision
         try {
-            val response = bridge.agents()
+            val response = requestApi.agents()
+            if (requestApi !== apiOrNull() || requestRevision != boundConnectionRevision) return@withLock
+            adoptLegacyMetadata(response.agents.mapNotNull(SessionDescriptor::key))
             _ui.update {
                 it.copy(
                     board = BoardState.group(response.agents),
@@ -210,7 +325,9 @@ class BoardViewModel(
                 )
             }
         } catch (e: IOException) {
-            _ui.update { it.copy(connected = false, error = e.message ?: "lost connection") }
+            if (requestApi === apiOrNull() && requestRevision == boundConnectionRevision) {
+                _ui.update { it.copy(connected = false, error = e.message ?: "lost connection") }
+            }
         } catch (c: CancellationException) {
             throw c
         } catch (_: Exception) {
@@ -225,6 +342,10 @@ class BoardViewModel(
 
     /** Closes an agent's pane via the bridge control action (swipe-bar Close). */
     fun closeAgent(paneId: String) {
+        if (!remoteActionsAllowed()) {
+            reportError("Finishing saved connection migration")
+            return
+        }
         val incompatible = _ui.value.apiCompatibility as? ScoutrApiCompatibility.Incompatible
         if (incompatible != null) {
             reportError(formatScoutrApiIncompatibility(incompatible))
@@ -234,9 +355,12 @@ class BoardViewModel(
             reportError("Checking bridge compatibility")
             return
         }
+        // Capture the pinned wrapper: after a rebind it throws stale instead of
+        // sending an old pane's action to a new host generation.
+        val requestApi = apiOrNull() ?: return
         viewModelScope.launch {
             try {
-                bridge.controlSession(paneId, SessionAction.Close)
+                requestApi.controlSession(paneId, SessionAction.Close)
             } catch (e: IOException) {
                 reportError(e.message ?: "could not close agent")
             }
@@ -255,6 +379,10 @@ class BoardViewModel(
      * `/api/agents` say what is still open.
      */
     fun quickAnswer(agent: SessionDescriptor, optionLabel: String) {
+        if (!remoteActionsAllowed()) {
+            reportError("Finishing saved connection migration")
+            return
+        }
         val incompatible = _ui.value.apiCompatibility as? ScoutrApiCompatibility.Incompatible
         if (incompatible != null) {
             reportError(formatScoutrApiIncompatibility(incompatible))
@@ -287,10 +415,13 @@ class BoardViewModel(
             return
         }
 
+        // Pinned wrapper: after a rebind it throws stale instead of answering on
+        // the new host generation.
+        val requestApi = apiOrNull() ?: return
         _ui.update { it.copy(quickAnswering = it.quickAnswering + paneId, error = null) }
         viewModelScope.launch {
             val failure = try {
-                bridge.answerAsk(
+                requestApi.answerAsk(
                     paneId = paneId,
                     callId = callId,
                     answers = listOf(

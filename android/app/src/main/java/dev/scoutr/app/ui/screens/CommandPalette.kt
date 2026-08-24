@@ -43,14 +43,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
-import dev.scoutr.app.ScoutrApp
 import dev.scoutr.app.ui.imeOrNavigationBarsPadding
 import dev.scoutr.app.ui.components.ConfirmDialog
 import dev.scoutr.app.ui.components.ScoutrTextField
@@ -244,12 +242,4 @@ private fun PaletteRow(
             TextButton(onClick = onResume) { Text("Resume") }
         }
     }
-}
-
-@Composable
-fun rememberCommandPaletteViewModel(): CommandPaletteViewModel {
-    val app = LocalContext.current.applicationContext as ScoutrApp
-    return androidx.lifecycle.viewmodel.compose.viewModel(
-        factory = CommandPaletteViewModel.factory(app.container.bridge, app.container.connectionStore),
-    )
 }

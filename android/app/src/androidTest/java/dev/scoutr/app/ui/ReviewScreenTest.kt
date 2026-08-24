@@ -190,7 +190,7 @@ class ReviewScreenTest {
             save(server.url("/").toString().trimEnd('/'), "test-token")
         }
         val bridge = BridgeClient(OkHttpClient.Builder().readTimeout(5, TimeUnit.SECONDS).build(), connection)
-        return ReviewViewModel(bridge, connection, ReviewStore(context))
+        return ReviewViewModel(bridge, connection, ReviewStore(context, connection.saved?.hostId ?: "test-host"))
     }
 
     @Test

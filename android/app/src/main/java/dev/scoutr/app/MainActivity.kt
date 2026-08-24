@@ -14,6 +14,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
 import dev.scoutr.app.service.ScoutrDeepLink
 import dev.scoutr.app.service.parseScoutrUri
+import dev.scoutr.app.service.resolveCurrentNotificationLink
 import dev.scoutr.app.state.ReduceMotionStore
 import dev.scoutr.app.ui.nav.ScoutrAppNav
 import dev.scoutr.app.ui.theme.ScoutrTheme
@@ -31,7 +32,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        deepLink.value = parseScoutrUri(intent.dataString)
+        deepLink.value = validatedDeepLink(intent.dataString)
         enableEdgeToEdge(
             statusBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
             navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
@@ -54,6 +55,16 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        deepLink.value = parseScoutrUri(intent.dataString)
+        deepLink.value = validatedDeepLink(intent.dataString)
     }
+
+    /** External notification links must name the current host generation. */
+    private fun validatedDeepLink(uri: String?) =
+        parseScoutrUri(uri)?.let {
+            resolveCurrentNotificationLink(
+                it,
+                ScoutrApp.container(this).hostRegistry,
+                ScoutrApp.container(this).pushRegistrations::isRetiring,
+            )
+        }
 }

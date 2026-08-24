@@ -1,5 +1,8 @@
 package dev.scoutr.app.data
 
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
+
 /**
  * Which provider fronts the bridge's public URL. Pairing records it and
  * [ConnectionStore] persists it; nothing in the transport reads it. Every
@@ -9,9 +12,15 @@ package dev.scoutr.app.data
  * [wire] is the stable persisted/QR spelling — keep it in sync with
  * bridge/src/exposure.ts and bridge/src/pairing.ts.
  */
+@Serializable
 enum class ExposureKind(val wire: String) {
+    @SerialName("tailscale")
     Tailscale("tailscale"),
+
+    @SerialName("cloudflare")
     Cloudflare("cloudflare"),
+
+    @SerialName("custom")
     Custom("custom");
 
     companion object {

@@ -159,7 +159,10 @@ async function main(): Promise<void> {
         if (config.fcmServiceAccountPath) {
           try {
             const devices = await JsonDeviceRegistry.open(config.configDir);
-            push = { publisher: new FcmPublisher(await createFcmSender(config.fcmServiceAccountPath), devices), devices };
+            push = {
+              publisher: new FcmPublisher(await createFcmSender(config.fcmServiceAccountPath), devices, config.hostId),
+              devices,
+            };
           } catch (error) {
             console.error(`warning: push disabled — ${error instanceof Error ? error.message : String(error)}`);
           }

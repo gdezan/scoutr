@@ -69,8 +69,6 @@ interface TerminalTransportListener {
 }
 
 data class TerminalOpenRequest(
-    val host: String,
-    val token: String,
     val paneId: String,
     val cols: Int,
     val rows: Int,

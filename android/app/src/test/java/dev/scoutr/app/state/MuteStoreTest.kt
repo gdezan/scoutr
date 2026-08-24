@@ -1,6 +1,8 @@
 package dev.scoutr.app.state
 
 import android.content.Context
+import dev.scoutr.app.data.HostPaneKey
+import dev.scoutr.app.data.HostProfileKey
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -47,6 +49,38 @@ class MuteStoreTest {
         store.mute("w1:p1")
 
         assertTrue(store.isMuted("w1:p1"))
+    }
+
+    @Test
+    fun hostGenerationAndPaneArePartOfMuteIdentity() {
+        val store = MuteStore(context)
+        val first = HostPaneKey(HostProfileKey("host-a", 1), "same-pane")
+        val otherHost = HostPaneKey(HostProfileKey("host-b", 1), "same-pane")
+        val repaired = HostPaneKey(HostProfileKey("host-a", 2), "same-pane")
+
+        store.mute(first)
+
+        assertTrue(store.isMuted(first))
+        assertFalse(store.isMuted(otherHost))
+        assertFalse(store.isMuted(repaired))
+        store.clearHost("host-a")
+        assertFalse(store.isMuted(first))
+
+    }
+
+    @Test
+    fun legacyMuteIsAdoptedIntoMigratedHostGeneration() {
+        val store = MuteStore(context)
+        val profile = HostProfileKey("host-a", 7)
+        val adopted = HostPaneKey(profile, "w1:p1")
+        store.mute("w1:p1")
+
+        store.adoptLegacyMutes(profile)
+
+        assertFalse(store.isMuted("w1:p1"))
+        assertTrue(store.isMuted(adopted))
+        store.clearHost("host-a")
+        assertFalse(store.isMuted(adopted))
     }
 
     @Test

@@ -76,6 +76,7 @@ fun SessionPanel(
     onSettings: () -> Unit,
     onTerminal: () -> Unit,
     onResolveCompatibility: () -> Unit,
+    onRetryMigration: () -> Unit = {},
     currentRoute: String? = null,
     onSelectDestination: (String) -> Unit = {},
     modifier: Modifier = Modifier,
@@ -153,7 +154,10 @@ fun SessionPanel(
                             onReviewAgent = onReviewAgent,
                             onCloseAgent = { pendingClose = it },
                             onQuickAnswer = onQuickAnswer,
-                            onRetry = { viewModel.connect("", "") },
+                            onRetry = {
+                                onRetryMigration()
+                                viewModel.connect("", "")
+                            },
                             onResolveCompatibility = onResolveCompatibility,
                         )
                     }

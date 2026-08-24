@@ -7,11 +7,9 @@ import dev.scoutr.app.state.ForegroundTracker
 import kotlinx.coroutines.runBlocking
 
 /**
- * System wake for a contentless FCM ping.
- *
- * FCM delivers data-only messages here even when the app is backgrounded or
- * force-stopped. The service posts the device token on rotation and hands
- * every ping to [FcmPingHandler]; it never reads a `notification` block.
+ * System wake for a contentless FCM ping. The service never uses the
+ * singleton bridge compatibility property: every qualified message resolves
+ * its API through the host client factory after the generation gate.
  */
 class ScoutrMessagingService : FirebaseMessagingService() {
 
@@ -26,8 +24,11 @@ class ScoutrMessagingService : FirebaseMessagingService() {
         runBlocking {
             FcmPingHandler(
                 presenter = container.notifications,
-                api = container.bridge,
+                registry = container.hostRegistry,
+                hostClients = container.hostClients,
                 isForegrounded = { ForegroundTracker.isForegrounded },
+                isRetiring = container.pushRegistrations::isRetiring,
+                workCoordinator = container.hostWorkCoordinator,
             ).handle(message.data)
         }
     }

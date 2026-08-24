@@ -94,6 +94,22 @@ class ConnectionStore(
     }
 
     /**
+     * Removes only the legacy singleton fields after a registry transaction.
+     * Unlike [clear], this must not delete the shared Keystore key: the
+     * registry may already own the same encrypted credential or pending copy.
+     */
+    fun clearLegacyFields(): Boolean = prefs.edit()
+        .remove(KEY_HOST)
+        .remove(KEY_LEGACY_TOKEN)
+        .remove(KEY_TOKEN_CIPHERTEXT)
+        .remove(KEY_TOKEN_IV)
+        .remove(KEY_EXPOSURE)
+        .remove(KEY_HOST_ID)
+        .commit()
+
+    fun clearLegacyRecord(): Boolean = clearLegacyFields()
+
+    /**
      * Encrypted fields win. A legacy plaintext token is migrated in place; if
      * that migration fails it stays readable so the pairing is never stranded.
      */

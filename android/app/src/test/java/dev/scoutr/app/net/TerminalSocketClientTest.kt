@@ -41,7 +41,14 @@ class TerminalSocketClientTest {
         server = MockWebServer()
         server.start()
         transport = TerminalSocketClient(
-            OkHttpClient.Builder().readTimeout(5, TimeUnit.SECONDS).build(),
+            okHttp = OkHttpClient.Builder().readTimeout(5, TimeUnit.SECONDS).build(),
+            fixedBinding = HostConnectionBinding(
+                hostId = "test-host",
+                connectionRevision = 1L,
+                baseUrl = server.url("/").toString().trimEnd('/'),
+                token = "test-token",
+                exposure = dev.scoutr.app.data.ExposureKind.Custom,
+            ),
         )
     }
 
@@ -92,8 +99,6 @@ class TerminalSocketClientTest {
         server.enqueue(MockResponse().withWebSocketUpgrade(serverSide))
         return transport.open(
             TerminalOpenRequest(
-                host = server.url("/").toString().trimEnd('/'),
-                token = "test-token",
                 paneId = "w1:p1",
                 cols = 80,
                 rows = 24,
@@ -141,8 +146,6 @@ class TerminalSocketClientTest {
         )
         transport.open(
             TerminalOpenRequest(
-                host = server.url("/").toString().removeSuffix("/"),
-                token = "test-token",
                 paneId = "w1:p1",
                 cols = 80,
                 rows = 24,

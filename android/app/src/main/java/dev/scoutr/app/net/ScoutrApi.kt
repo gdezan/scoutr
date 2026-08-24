@@ -33,16 +33,18 @@ import java.io.File
 
 /**
  * The typed bridge surface ViewModels consume. [BridgeClient] is the one
- * production implementation (OkHttp + ConnectionStore); tests use
+ * production implementation, bound to immutable host credentials; tests use
  * [FakeScoutrApi] so behaviour can be asserted without an HTTP server.
  */
 interface ScoutrApi {
     val connectedHost: String?
 
-    suspend fun health(host: String? = null, token: String? = null): HealthResponse
+    suspend fun health(): HealthResponse
     suspend fun agents(): AgentsResponse
-    /** Registers this phone's FCM device token so the bridge can wake it. */
-    suspend fun registerDevice(fcmToken: String)
+    /** Registers this phone using the profile generation local to this installation. */
+    suspend fun registerDevice(fcmToken: String, profileGeneration: Long)
+    /** Removes this phone's token from the current bridge; absence is successful. */
+    suspend fun unregisterDevice(fcmToken: String)
     suspend fun session(key: SessionKey, since: String? = null): SessionReadResponse
     suspend fun sessionCatalog(query: String? = null, limit: Int? = null): SessionCatalogResponse
     suspend fun sessionCatalogAction(action: CatalogAction, key: SessionKey, text: String? = null): CreatedSessionResponse

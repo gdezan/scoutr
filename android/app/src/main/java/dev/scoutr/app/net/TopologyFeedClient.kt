@@ -1,6 +1,5 @@
 package dev.scoutr.app.net
 
-import dev.scoutr.app.data.ConnectionStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -38,17 +37,22 @@ import java.util.concurrent.ThreadLocalRandom
  */
 class TopologyFeedClient(
     private val okHttp: OkHttpClient,
-    private val connectionStore: ConnectionStore,
     private val listener: TopologyFeed.Listener,
     private val scope: CoroutineScope = CoroutineScope(Dispatchers.IO),
     private val backoffBaseMs: Long = 500L,
     private val backoffMaxMs: Long = 8_000L,
     private val performanceCounters: PerformanceCounters? = null,
-) : TopologyFeed {
+    private val binding: HostConnectionBinding? = null,
+    /** Registered-host feeds resolve a fresh immutable binding on reconnect. */
+    private val bindingProvider: (() -> HostConnectionBinding?)? = null,
+    private val bindingGate: HostBindingGate? = null,
+    private val workCoordinator: HostWorkCoordinator? = null,
+ ) : TopologyFeed {
 
     @Volatile private var started = false
     @Volatile private var closed = false
     @Volatile private var webSocket: WebSocket? = null
+    @Volatile private var webSocketBinding: HostConnectionBinding? = null
     private data class PerformanceSocket(
         val webSocket: WebSocket,
         val handle: PerformanceCounters.SocketHandle,
@@ -59,11 +63,12 @@ class TopologyFeedClient(
 
     override fun start(): Boolean {
         if (started) return true
-        val saved = connectionStore.saved
-        if (saved == null) return false
+        if (currentBinding() == null) return false
+        val captured = currentBinding()
+        if (captured != null && workCoordinator?.isActive(captured) == false) return false
         started = true
         closed = false
-        openSocket(saved)
+        openSocket()
         return true
     }
 
@@ -73,29 +78,81 @@ class TopologyFeedClient(
             closed = true
             reconnectJob?.cancel()
             closePerformanceSocket()
+            webSocketBinding = null
             webSocket.also { webSocket = null }
         }
         socket?.cancel()
     }
 
-    private fun openSocket(saved: ConnectionStore.Saved) {
+    private fun openSocket() {
         if (!started || closed) return
+        val current = currentBinding() ?: return
+        val gate = bindingGate
+        if (gate != null) {
+            scope.launch {
+                try {
+                    gate.withVerifiedBinding(current) { verified ->
+                        openVerifiedSocket(verified)
+                    }
+                } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                    throw cancelled
+                } catch (error: Exception) {
+                    rejectSocket(error)
+                }
+            }
+        } else {
+            openVerifiedSocket(current)
+        }
+    }
+
+    /** Dispatches the upgrade while the coordinator still holds the verified binding lock. */
+    private fun openVerifiedSocket(current: HostConnectionBinding) {
+        if (!started || closed) return
+        val credentials = dev.scoutr.app.data.HostCredentials(
+            current.baseUrl,
+            current.token,
+            current.exposure,
+        )
+        if (workCoordinator?.isActive(current) == false) return
         val ws = okHttp.newWebSocket(
             Request.Builder()
-                .url(TerminalSocketClient.wsUrl(saved.host) + "/ws")
-                .header("Authorization", "Bearer ${saved.token}")
+                .url(TerminalSocketClient.wsUrl(credentials.baseUrl) + "/ws")
+                .header("Authorization", "Bearer ${credentials.token}")
                 .build(),
             feedListener,
         )
         val cancel = synchronized(this) {
-            if (!started || closed) {
+            if (!started || closed || workCoordinator?.isActive(current) == false) {
                 true
             } else {
-                webSocket = ws
-                false
+                // Retirement must stop the feed, not only cancel its current socket:
+                // otherwise a delayed reconnect could admit new work after retirement.
+                val registered = workCoordinator?.registerCloser(current) { stop() } != false
+                if (!registered) {
+                    true
+                } else {
+                    webSocket = ws
+                    webSocketBinding = current
+                    false
+                }
             }
         }
         if (cancel) ws.cancel()
+    }
+
+    private fun rejectSocket(error: Exception) {
+        val notify = synchronized(this) {
+            if (!started || closed) {
+                false
+            } else {
+                started = false
+                closed = true
+                true
+            }
+        }
+        if (notify) {
+            listener.onFeedFailure(error as? IOException ?: IOException("Topology identity check failed", error))
+        }
     }
 
     @Synchronized
@@ -127,13 +184,13 @@ class TopologyFeedClient(
         }
 
         override fun onMessage(webSocket: WebSocket, text: String) {
-            if (closed) return
+            if (closed || !socketIsCurrentBinding(webSocket)) return
             classify(text)
         }
 
         override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
             closePerformanceSocket(webSocket)
-            if (closed) return
+            if (closed || !socketIsCurrentBinding(webSocket)) return
             if (response != null) {
                 // The upgrade was rejected (401/403/503/...): retrying will not help.
                 val rejected = synchronized(this@TopologyFeedClient) {
@@ -154,7 +211,7 @@ class TopologyFeedClient(
         }
 
         override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
-            if (closed) return
+            if (closed || !socketIsCurrentBinding(webSocket)) return
             // Abrupt server close (no feed_error): reconnect.
             closePerformanceSocket(webSocket)
             scheduleReconnect(webSocket)
@@ -162,7 +219,7 @@ class TopologyFeedClient(
 
         override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
             closePerformanceSocket(webSocket)
-            if (closed) return
+            if (closed || !socketIsCurrentBinding(webSocket)) return
             if (code != NORMAL_CLOSE) scheduleReconnect(webSocket)
         }
     }
@@ -173,14 +230,26 @@ class TopologyFeedClient(
     private fun scheduleReconnect(socket: WebSocket? = null) {
         if (!started || closed) return
         if (socket != null && webSocket !== socket) return
-        val saved = connectionStore.saved ?: return
+        val current = currentBinding() ?: return
+        if (workCoordinator?.isActive(current) == false) return
         webSocket = null
+        webSocketBinding = null
         val nextDelay = backoffDelayMs(attempt++)
         reconnectJob?.cancel()
         reconnectJob = scope.launch {
             delay(nextDelay)
-            if (started && !closed) openSocket(saved)
+            if (started && !closed) openSocket()
         }
+    }
+
+    private fun currentBinding(): HostConnectionBinding? = bindingProvider?.invoke() ?: binding
+
+    private fun socketIsCurrentBinding(socket: WebSocket): Boolean {
+        val socketBinding = webSocketBinding ?: return true
+        if (workCoordinator?.isActive(socketBinding) == false) return false
+        val current = currentBinding() ?: return false
+        return current.connectionRevision == socketBinding.connectionRevision &&
+            current.hostId == socketBinding.hostId
     }
 
     private fun backoffDelayMs(attempt: Int): Long {

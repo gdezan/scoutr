@@ -5,7 +5,6 @@ import dev.scoutr.app.data.SessionAction
 import dev.scoutr.app.data.AgentKindsResponse
 import dev.scoutr.app.data.AgentsResponse
 import dev.scoutr.app.data.AttachmentResponse
-import dev.scoutr.app.data.ConnectionStore
 import dev.scoutr.app.data.CommandResponse
 import dev.scoutr.app.data.CommandsCatalogResponse
 import dev.scoutr.app.data.ControlResponse
@@ -41,6 +40,7 @@ import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
@@ -75,13 +75,35 @@ class BridgeException(val status: Int, reason: String) : IOException("bridge $st
  * Every request carries the pairing token as a Bearer header. Pairing tokens
  * never appear in URLs created by this client.
  */
-class BridgeClient(
+class BridgeClient private constructor(
     private val okHttp: OkHttpClient,
-    private val connectionStore: ConnectionStore,
+    private val fixedBinding: HostConnectionBinding?,
+    private val bindingGate: HostBindingGate?,
+    private val registeredHostId: String?,
+    private val expectedBinding: HostConnectionBinding?,
     private val performanceCounters: PerformanceCounters? = null,
 ) : ScoutrApi {
-    private val json = Json { ignoreUnknownKeys = true }
+    constructor(
+        okHttp: OkHttpClient,
+        binding: HostConnectionBinding,
+        performanceCounters: PerformanceCounters? = null,
+    ) : this(okHttp, binding, null, null, null, performanceCounters)
 
+    internal constructor(
+        okHttp: OkHttpClient,
+        bindingGate: HostBindingGate,
+        hostId: String,
+        performanceCounters: PerformanceCounters? = null,
+    ) : this(okHttp, null, bindingGate, hostId, null, performanceCounters)
+
+    internal constructor(
+        okHttp: OkHttpClient,
+        bindingGate: HostBindingGate,
+        binding: HostConnectionBinding,
+        performanceCounters: PerformanceCounters? = null,
+    ) : this(okHttp, null, bindingGate, binding.hostId, binding, performanceCounters)
+
+    private val json = Json { ignoreUnknownKeys = true }
     /** Bridge failure body: {"ok":false,"error":"..."} (error optional). */
     @Serializable
     private data class BridgeErrorBody(val ok: Boolean = false, val error: String? = null)
@@ -98,84 +120,92 @@ class BridgeClient(
             ?: response.message
     }
 
-    override val connectedHost: String? get() = connectionStore.saved?.host
-
-    private fun baseUrl(): String {
-        val saved = connectionStore.saved ?: throw IOException("no connection configured")
-        return saved.host.trimEnd('/')
-    }
-
-    private fun token(): String {
-        return connectionStore.saved?.token ?: throw IOException("no connection configured")
-    }
+    override val connectedHost: String?
+        get() = fixedBinding?.baseUrl
+            ?: expectedBinding?.baseUrl
 
     private fun request(
+        binding: HostConnectionBinding,
         path: String,
         query: Map<String, String> = emptyMap(),
-        host: String? = null,
-        token: String? = null,
         body: RequestBody? = null,
     ): Request {
-        val base = (host?.trimEnd('/') ?: baseUrl())
-        val auth = token ?: token()
-        val url = (base + path).toHttpUrl().newBuilder().apply {
+        val url = (binding.baseUrl.trimEnd('/') + path).toHttpUrl().newBuilder().apply {
             for ((key, value) in query) addQueryParameter(key, value)
         }.build()
         val builder = Request.Builder()
             .url(url)
-            .header("Authorization", "Bearer $auth")
+            .header("Authorization", "Bearer ${binding.token}")
         return if (body == null) builder.get().build() else builder.post(body).build()
     }
 
-    /** Calls the bridge and decodes the response body as [T]. */
+    /** Resolves and identity-validates one immutable binding for the whole request. */
     private suspend fun <T> call(
         path: String,
         query: Map<String, String> = emptyMap(),
         body: RequestBody? = null,
-        host: String? = null,
-        token: String? = null,
         decode: (String) -> T,
-    ): T =
-        suspendCancellableCoroutine { continuation ->
-            val requestMetric = performanceCounters?.beginHttpRequest(path)
-            val call = okHttp.newCall(request(path, query, host, token, body))
-            continuation.invokeOnCancellation {
-                requestMetric?.fail(cancelled = true)
-                call.cancel()
-            }
-            call.enqueue(object : Callback {
-                override fun onFailure(call: Call, e: IOException) {
-                    requestMetric?.fail(cancelled = call.isCanceled())
-                    if (!continuation.isCancelled) continuation.resumeWithException(e)
-                }
+    ): T {
+        return withBinding { binding -> rawCall(binding, path, query, body, decode) }
+    }
 
-                override fun onResponse(call: Call, response: Response) {
-                    response.use {
-                        try {
-                            val bodyText = it.body?.string()
-                            if (continuation.isCancelled) {
-                                requestMetric?.fail(cancelled = true)
-                                return
-                            }
-                            requestMetric?.complete(
-                                status = it.code,
-                                bodyBytes = bodyText?.toByteArray(Charsets.UTF_8)?.size?.toLong() ?: 0L,
-                            )
-                            if (it.isSuccessful) {
-                                resumeDecoded(continuation, bodyText, decode)
-                            } else {
-                                continuation.resumeWithException(
-                                    BridgeException(it.code, bridgeReason(it, bodyText)),
-                                )
-                            }
-                        } catch (error: Throwable) {
-                            requestMetric?.fail(cancelled = call.isCanceled())
-                            if (!continuation.isCancelled) continuation.resumeWithException(error)
+    private suspend fun <T> withBinding(operation: suspend (HostConnectionBinding) -> T): T {
+        val gate = bindingGate
+        return if (gate != null) {
+            expectedBinding?.let { gate.withVerifiedBinding(it, operation) }
+                ?: gate.withVerifiedBinding(requireNotNull(registeredHostId), operation)
+        } else {
+            operation(requireNotNull(fixedBinding))
+        }
+    }
+
+    /** Executes without identity validation; only fixed probe clients and the gate call this. */
+    private suspend fun <T> rawCall(
+        binding: HostConnectionBinding,
+        path: String,
+        query: Map<String, String>,
+        body: RequestBody?,
+        decode: (String) -> T,
+    ): T = suspendCancellableCoroutine { continuation ->
+        val requestMetric = performanceCounters?.beginHttpRequest(path)
+        val call = okHttp.newCall(request(binding, path, query, body))
+        continuation.invokeOnCancellation {
+            requestMetric?.fail(cancelled = true)
+            call.cancel()
+        }
+        call.enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) {
+                requestMetric?.fail(cancelled = call.isCanceled())
+                if (!continuation.isCancelled) continuation.resumeWithException(e)
+            }
+
+            override fun onResponse(call: Call, response: Response) {
+                response.use {
+                    try {
+                        val bodyText = it.body?.string()
+                        if (continuation.isCancelled) {
+                            requestMetric?.fail(cancelled = true)
+                            return
                         }
+                        requestMetric?.complete(
+                            status = it.code,
+                            bodyBytes = bodyText?.toByteArray(Charsets.UTF_8)?.size?.toLong() ?: 0L,
+                        )
+                        if (it.isSuccessful) {
+                            resumeDecoded(continuation, bodyText, decode)
+                        } else {
+                            continuation.resumeWithException(
+                                BridgeException(it.code, bridgeReason(it, bodyText)),
+                            )
+                        }
+                    } catch (error: Throwable) {
+                        requestMetric?.fail(cancelled = call.isCanceled())
+                        if (!continuation.isCancelled) continuation.resumeWithException(error)
                     }
                 }
-            })
-        }
+            }
+        })
+    }
 
     /** List subdirectories for the folder picker (rooted at home by the bridge). */
     override suspend fun dirs(path: String?): DirListingResponse =
@@ -334,21 +364,28 @@ class BridgeClient(
             }.toString().toRequestBody("application/json".toMediaType()),
         ) { json.decodeFromString(ControlResponse.serializer(), it) }
 
-    /**
-     * Probe the bridge health endpoint. Optional host/token overrides let the
-     * connect screen verify a candidate connection before saving it.
-     */
-    override suspend fun health(host: String?, token: String?): HealthResponse =
-        call("/api/health", host = host, token = token) {
+    override suspend fun health(): HealthResponse =
+        call("/api/health") {
             json.decodeFromString(HealthResponse.serializer(), it)
         }
 
     override suspend fun agents(): AgentsResponse =
         call("/api/agents") { json.decodeFromString(AgentsResponse.serializer(), it) }
 
-    override suspend fun registerDevice(fcmToken: String) {
+    override suspend fun registerDevice(fcmToken: String, profileGeneration: Long) {
+        require(profileGeneration > 0L) { "profileGeneration must be positive" }
         call(
             "/api/devices",
+            body = buildJsonObject {
+                put("fcmToken", JsonPrimitive(fcmToken))
+                put("profileGeneration", JsonPrimitive(profileGeneration.toString()))
+            }.toString().toRequestBody("application/json".toMediaType()),
+        ) { }
+    }
+
+    override suspend fun unregisterDevice(fcmToken: String) {
+        call(
+            "/api/devices/unregister",
             body = buildJsonObject { put("fcmToken", JsonPrimitive(fcmToken)) }
                 .toString()
                 .toRequestBody("application/json".toMediaType()),
@@ -455,33 +492,41 @@ class BridgeClient(
      * copy loop must not sit on the caller's thread.
      */
     override suspend fun downloadApk(destination: File, onProgress: (Long, Long) -> Unit): Long =
-        withContext(Dispatchers.IO) {
-            val response = okHttp.newCall(request("/api/update/apk")).execute()
-            response.use {
-                val body = it.body ?: throw BridgeException(it.code, "empty APK response")
-                if (!it.isSuccessful) throw BridgeException(it.code, bridgeReason(it, body.string()))
-                val total = body.contentLength().coerceAtLeast(0L)
-                var written = 0L
-                body.byteStream().use { input ->
-                    destination.outputStream().use { output ->
-                        val buffer = ByteArray(DOWNLOAD_BUFFER_BYTES)
-                        while (true) {
-                            // The coroutine may be cancelled mid-download (the
-                            // user leaves Settings); stop copying rather than
-                            // finishing a file nobody will install.
-                            ensureActive()
-                            val read = input.read(buffer)
-                            if (read == -1) break
-                            output.write(buffer, 0, read)
-                            written += read
-                            onProgress(written, total)
+        withBinding { binding ->
+            withContext(Dispatchers.IO) {
+                val call = okHttp.newCall(request(binding, "/api/update/apk"))
+                val cancellation = currentCoroutineContext()[kotlinx.coroutines.Job]
+                    ?.invokeOnCompletion { call.cancel() }
+                try {
+                    val response = call.execute()
+                    response.use {
+                        val body = it.body ?: throw BridgeException(it.code, "empty APK response")
+                        if (!it.isSuccessful) {
+                            throw BridgeException(it.code, bridgeReason(it, body.string()))
                         }
+                        val total = body.contentLength().coerceAtLeast(0L)
+                        var written = 0L
+                        body.byteStream().use { input ->
+                            destination.outputStream().use { output ->
+                                val buffer = ByteArray(DOWNLOAD_BUFFER_BYTES)
+                                while (true) {
+                                    ensureActive()
+                                    val read = input.read(buffer)
+                                    if (read == -1) break
+                                    output.write(buffer, 0, read)
+                                    written += read
+                                    onProgress(written, total)
+                                }
+                            }
+                        }
+                        if (total > 0 && written != total) {
+                            throw BridgeException(it.code, "APK download truncated at $written of $total bytes")
+                        }
+                        written
                     }
+                } finally {
+                    cancellation?.dispose()
                 }
-                if (total > 0 && written != total) {
-                    throw BridgeException(it.code, "APK download truncated at $written of $total bytes")
-                }
-                written
             }
         }
 

@@ -5,7 +5,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import dev.scoutr.app.data.SessionAction
 import dev.scoutr.app.data.CatalogAction
-import dev.scoutr.app.data.ConnectionStore
+import dev.scoutr.app.data.HostProfileKey
 import dev.scoutr.app.data.SessionCatalogItem
 import dev.scoutr.app.data.SessionKey
 import dev.scoutr.app.net.ScoutrApi
@@ -55,10 +55,12 @@ data class PaletteUiState(
  * actions. Steer and rename happen inside the session screen, so the palette
  * only ever needs to get you to the right pane.
  */
-class CommandPaletteViewModel(
+class CommandPaletteViewModel internal constructor(
     private val bridge: ScoutrApi,
-    private val connectionStore: ConnectionStore,
+    val profile: HostProfileKey?,
+    private val connectionAvailable: () -> Boolean,
 ) : ViewModel() {
+    constructor(bridge: ScoutrApi, profile: HostProfileKey) : this(bridge, profile, { true })
 
     private val _ui = MutableStateFlow(PaletteUiState())
     val ui: StateFlow<PaletteUiState> = _ui.asStateFlow()
@@ -68,7 +70,7 @@ class CommandPaletteViewModel(
 
     fun open() {
         _ui.update { it.copy(open = true, error = null) }
-        if (connectionStore.saved == null) {
+        if (!connectionAvailable()) {
             _ui.update { it.copy(error = "Not connected to the bridge") }
             return
         }
@@ -202,11 +204,11 @@ class CommandPaletteViewModel(
     }
 
     companion object {
-        fun factory(bridge: ScoutrApi, connectionStore: ConnectionStore): ViewModelProvider.Factory =
+        fun factory(bridge: ScoutrApi): ViewModelProvider.Factory =
             object : ViewModelProvider.Factory {
                 @Suppress("UNCHECKED_CAST")
                 override fun <T : ViewModel> create(modelClass: Class<T>): T =
-                    CommandPaletteViewModel(bridge, connectionStore) as T
+                    CommandPaletteViewModel(bridge, null, { true }) as T
             }
     }
 }

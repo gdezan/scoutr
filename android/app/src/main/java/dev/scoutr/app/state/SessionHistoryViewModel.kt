@@ -4,7 +4,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dev.scoutr.app.data.SessionAction
 import dev.scoutr.app.data.CatalogAction
-import dev.scoutr.app.data.ConnectionStore
+import dev.scoutr.app.data.HostProfileKey
+import dev.scoutr.app.data.HostSessionKey
 import dev.scoutr.app.data.SessionCatalogItem
 import dev.scoutr.app.data.SessionCatalogStore
 import dev.scoutr.app.data.SessionKey
@@ -40,8 +41,8 @@ data class HistoryUiState(
     val connected: Boolean = false,
     val error: String? = null,
     val truncated: Boolean = false,
-    /** Canonical session currently running a catalog mutation (row shows progress). */
-    val busySessionKey: SessionKey? = null,
+    /** Host-qualified session currently running a catalog mutation (row shows progress). */
+    val busySessionKey: HostSessionKey? = null,
     /** Human label of the mutation in flight, e.g. "Deleting…". */
     val busyLabel: String? = null,
 )
@@ -51,14 +52,26 @@ data class ResumedSession(
     val key: SessionKey? = null,
     val bootstrapPaneId: String? = null,
     val workspaceId: String? = null,
+    val profile: HostProfileKey? = null,
 )
 
+/** Sessions is a hostless shell entry, but its VM binds one default profile at entry. */
 class SessionHistoryViewModel(
     private val bridge: ScoutrApi,
-    private val connectionStore: ConnectionStore,
     private val store: SessionCatalogStore,
+    private val hostId: String? = null,
+    private val profile: HostProfileKey? = null,
+    private val connectionAvailable: () -> Boolean = { hostId != null },
+    private val adoptLegacyMetadata: (Collection<SessionKey>) -> Unit = {},
     initialState: HistoryUiState = HistoryUiState(),
 ) : ViewModel() {
+    constructor(
+        bridge: ScoutrApi,
+        profile: HostProfileKey,
+        store: SessionCatalogStore,
+        initialState: HistoryUiState = HistoryUiState(),
+        adoptLegacyMetadata: (Collection<SessionKey>) -> Unit = {},
+    ) : this(bridge, store, profile.hostId, profile, { true }, adoptLegacyMetadata, initialState)
 
     private val _ui = MutableStateFlow(initialState)
     val ui: StateFlow<HistoryUiState> = _ui.asStateFlow()
@@ -67,6 +80,26 @@ class SessionHistoryViewModel(
     private var query: String = ""
 
     private val poller = Poller(viewModelScope)
+
+    private fun hostKeys(keys: Collection<SessionKey>): List<HostSessionKey> =
+        keys.map { key -> HostSessionKey(requireNotNull(hostId), key) }
+
+    private fun pinnedKeys(keys: Collection<SessionKey>): Set<SessionKey> =
+        store.pinnedKeys(hostKeys(keys)).mapTo(mutableSetOf()) { it.session }
+
+    private fun archivedKeys(keys: Collection<SessionKey>): Set<SessionKey> =
+        store.archivedKeys(hostKeys(keys)).mapTo(mutableSetOf()) { it.session }
+
+    fun hostSessionKey(key: SessionKey): HostSessionKey =
+        HostSessionKey(requireNotNull(hostId), key)
+
+    private fun setPinned(key: SessionKey, value: Boolean) {
+        store.setPinned(hostSessionKey(key), value)
+    }
+
+    private fun setArchived(key: SessionKey, value: Boolean) {
+        store.setArchived(hostSessionKey(key), value)
+    }
 
     // No init-started polling: HistoryScreen's LifecycleStartEffect drives
     // the loop so it runs only while the screen is STARTED.
@@ -85,7 +118,7 @@ class SessionHistoryViewModel(
     /** Start the 8s catalog poll; no-op when already polling or offline. */
     fun startPolling() {
         if (lifecycleActive) return
-        if (connectionStore.saved == null) {
+        if (!connectionAvailable()) {
             _ui.update { it.copy(loading = false) }
             return
         }
@@ -105,8 +138,9 @@ class SessionHistoryViewModel(
         try {
             val response = bridge.sessionCatalog(query = query.ifBlank { null }, limit = 200)
             val catalogKeys = response.sessions.map { it.key }
-            val pinned = store.pinnedKeys(catalogKeys)
-            val archived = store.archivedKeys(catalogKeys)
+            adoptLegacyMetadata(catalogKeys)
+            val pinned = pinnedKeys(catalogKeys)
+            val archived = archivedKeys(catalogKeys)
             _ui.update {
                 it.copy(
                     items = response.sessions.map { session ->
@@ -132,19 +166,19 @@ class SessionHistoryViewModel(
     }
 
     fun togglePin(item: HistoryItem) {
-        store.setPinned(item.session.key, !item.pinned)
+        setPinned(item.session.key, !item.pinned)
         refreshFlags()
     }
 
     fun toggleArchive(item: HistoryItem) {
-        store.setArchived(item.session.key, !item.archived)
+        setArchived(item.session.key, !item.archived)
         refreshFlags()
     }
 
     private fun refreshFlags() {
         val catalogKeys = _ui.value.items.map { it.session.key }
-        val pinned = store.pinnedKeys(catalogKeys)
-        val archived = store.archivedKeys(catalogKeys)
+        val pinned = pinnedKeys(catalogKeys)
+        val archived = archivedKeys(catalogKeys)
         _ui.update { state ->
             state.copy(
                 items = state.items.map {
@@ -160,7 +194,7 @@ class SessionHistoryViewModel(
         return try {
             val response = bridge.sessionCatalogAction(CatalogAction.Resume, item.session.key)
             if (response.ok && response.paneId != null) {
-                ResumedSession(key = item.session.key, workspaceId = response.workspaceId)
+                ResumedSession(key = item.session.key, workspaceId = response.workspaceId, profile = profile)
             } else null
         } catch (c: CancellationException) {
             throw c
@@ -177,7 +211,7 @@ class SessionHistoryViewModel(
         return try {
             val response = bridge.sessionCatalogAction(CatalogAction.Fork, item.session.key)
             if (response.ok && response.paneId != null) {
-                ResumedSession(bootstrapPaneId = response.paneId, workspaceId = response.workspaceId)
+                ResumedSession(bootstrapPaneId = response.paneId, workspaceId = response.workspaceId, profile = profile)
             } else null
         } catch (c: CancellationException) {
             throw c
@@ -230,8 +264,8 @@ class SessionHistoryViewModel(
         return try {
             val response = bridge.sessionCatalogAction(CatalogAction.Delete, item.session.key)
             if (response.ok) {
-                store.setPinned(item.session.key, false)
-                store.setArchived(item.session.key, false)
+                setPinned(item.session.key, false)
+                setArchived(item.session.key, false)
             }
             response.ok
         } catch (c: CancellationException) {
@@ -245,7 +279,7 @@ class SessionHistoryViewModel(
     }
 
     private fun setBusy(item: HistoryItem, label: String) {
-        _ui.update { it.copy(busySessionKey = item.session.key, busyLabel = label) }
+        _ui.update { it.copy(busySessionKey = hostSessionKey(item.session.key), busyLabel = label) }
     }
 
     private fun clearBusy() {

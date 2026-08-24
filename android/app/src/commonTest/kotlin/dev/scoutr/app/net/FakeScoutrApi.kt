@@ -62,6 +62,7 @@ class FakeScoutrApi : ScoutrApi {
     )
     var agentsResult: Result<AgentsResponse> = Result.success(AgentsResponse())
     var registerDeviceResult: Result<Unit> = Result.success(Unit)
+    var unregisterDeviceResult: Result<Unit> = Result.success(Unit)
     var sessionResult: Result<SessionReadResponse> = Result.success(SessionReadResponse())
     var sessionCatalogResult: Result<SessionCatalogResponse> = Result.success(SessionCatalogResponse(ok = true))
     var catalogActionResult: Result<CreatedSessionResponse> = Result.success(CreatedSessionResponse(ok = true))
@@ -115,13 +116,20 @@ class FakeScoutrApi : ScoutrApi {
 
     override val connectedHost: String? get() = "http://fake-bridge"
 
-    override suspend fun health(host: String?, token: String?): HealthResponse =
-        record("health", mapOf("host" to host, "token" to token)) { healthResult }
+    override suspend fun health(): HealthResponse =
+        record("health") { healthResult }
 
     override suspend fun agents(): AgentsResponse = record("agents") { agentsResult }
 
-    override suspend fun registerDevice(fcmToken: String) {
-        record("registerDevice", mapOf("fcmToken" to fcmToken)) { registerDeviceResult }
+    override suspend fun registerDevice(fcmToken: String, profileGeneration: Long) {
+        record(
+            "registerDevice",
+            mapOf("fcmToken" to fcmToken, "profileGeneration" to profileGeneration),
+        ) { registerDeviceResult }
+    }
+
+    override suspend fun unregisterDevice(fcmToken: String) {
+        record("unregisterDevice", mapOf("fcmToken" to fcmToken)) { unregisterDeviceResult }
     }
 
     override suspend fun session(key: SessionKey, since: String?): SessionReadResponse =

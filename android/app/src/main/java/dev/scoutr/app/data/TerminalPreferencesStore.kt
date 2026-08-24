@@ -2,6 +2,7 @@ package dev.scoutr.app.data
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.util.Base64
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -11,103 +12,168 @@ import okhttp3.HttpUrl.Companion.toHttpUrl
 import java.security.MessageDigest
 
 /**
- * Per-connection terminal preferences (plan "Per-connection state").
+ * Durable terminal choices scoped by bridge installation id.
  *
- * Keys are scoped by a SHA-256 digest of the canonicalized bridge URL plus
- * the pairing token, so two saved connections never share terminal state
- * and the raw token never appears in preference keys. "Last pane id" is the
- * route's remembered selection; font size and extra-key visibility are the
- * future view's settings, stored now so the slice 7 UI reads one store.
+ * URL and bearer token are transport credentials, not durable identity. A
+ * credential refresh therefore keeps the same terminal state, while two
+ * bridges with identical URLs or tokens cannot share it. The selected pane is
+ * host-scoped and [clearHost] removes it during retired-host cleanup.
  */
-class TerminalPreferencesStore(context: Context) {
+class TerminalPreferencesStore(
+    context: Context,
+    private val writeIfRegistered: (String, () -> Unit) -> Boolean = { _, write ->
+        write()
+        true
+    },
+) {
 
-    private val prefs: SharedPreferences =
-        context.applicationContext.getSharedPreferences(FILE, Context.MODE_PRIVATE)
+    private val prefs: SharedPreferences = context.applicationContext
+        .getSharedPreferences(FILE, Context.MODE_PRIVATE)
 
     private val _viewPreferencesRevision = MutableStateFlow(0)
-
-    /**
-     * Bumped whenever [ConnectionPreferences.fontSizeSp] or
-     * [ConnectionPreferences.extraKeysVisible] is written, so a reader that is
-     * already composed re-reads them. Settings and the terminal's own pinch /
-     * extra-keys strip write the same setters through the same store instance,
-     * which is how a Settings change reaches an open Terminal without leaving
-     * the route.
-     *
-     * `lastPaneId` deliberately does not bump it: nothing observes it, and
-     * attach writes it often enough to cause pointless recomposition.
-     */
     val viewPreferencesRevision: StateFlow<Int> = _viewPreferencesRevision.asStateFlow()
 
-    /**
-     * Per-connection preferences. The key is derived from the same values
-     * the socket uses, so re-pairing with a new token resets the route.
-     */
+    /** Preferences belonging to one host id. */
     class ConnectionPreferences internal constructor(
         private val prefs: SharedPreferences,
         private val key: String,
         private val onViewPreferenceWritten: () -> Unit,
+        private val writeIfRegistered: ((() -> Unit) -> Boolean),
     ) {
         var lastPaneId: String?
             get() = prefs.getString(keyFor("lastPaneId"), null)
-            set(value) = prefs.edit().putString(keyFor("lastPaneId"), value).apply()
+            set(value) {
+                writeIfRegistered {
+                    val edit = prefs.edit()
+                    if (value == null) edit.remove(keyFor("lastPaneId"))
+                    else edit.putString(keyFor("lastPaneId"), value)
+                    edit.apply()
+                }
+            }
 
-        /** Clamped on write, so every writer — pinch, Settings — lands in range. */
         var fontSizeSp: Float
             get() = prefs.getFloat(keyFor("fontSizeSp"), DEFAULT_FONT_SIZE_SP)
             set(value) {
-                val clamped = value.coerceIn(MIN_FONT_SIZE_SP, MAX_FONT_SIZE_SP)
-                prefs.edit().putFloat(keyFor("fontSizeSp"), clamped).apply()
-                onViewPreferenceWritten()
+                val written = writeIfRegistered {
+                    prefs.edit()
+                        .putFloat(keyFor("fontSizeSp"), value.coerceIn(MIN_FONT_SIZE_SP, MAX_FONT_SIZE_SP))
+                        .apply()
+                }
+                if (written) onViewPreferenceWritten()
             }
 
         var extraKeysVisible: Boolean
             get() = prefs.getBoolean(keyFor("extraKeysVisible"), DEFAULT_EXTRA_KEYS_VISIBLE)
             set(value) {
-                prefs.edit().putBoolean(keyFor("extraKeysVisible"), value).apply()
-                onViewPreferenceWritten()
+                val written = writeIfRegistered {
+                    prefs.edit().putBoolean(keyFor("extraKeysVisible"), value).apply()
+                }
+                if (written) onViewPreferenceWritten()
             }
 
         private fun keyFor(name: String) = "$key.$name"
 
         companion object {
-            /** Plan "TerminalViewport": default monospace size; the view can still autoscale. */
             const val DEFAULT_FONT_SIZE_SP = 12f
             const val DEFAULT_EXTRA_KEYS_VISIBLE = true
-
-            /** Bounds live with the value they constrain, so both writers inherit them. */
             const val MIN_FONT_SIZE_SP = 8f
             const val MAX_FONT_SIZE_SP = 24f
         }
     }
 
-    /**
-     * Cached per connection: the key costs a SHA-256 over the canonical URL,
-     * and pinch-to-zoom asks for it on every motion event (write, then the
-     * revision tick re-reads font and extra-keys). Deriving it each time put
-     * three digests on the frame thread per event.
-     */
-    private val byConnection = HashMap<String, ConnectionPreferences>()
+    private val byHost = HashMap<String, ConnectionPreferences>()
 
     @Synchronized
-    fun forConnection(host: String, token: String): ConnectionPreferences =
-        byConnection.getOrPut("$host\n$token") {
-            ConnectionPreferences(prefs, connectionKey(host, token)) {
-                _viewPreferencesRevision.update { it + 1 }
-            }
+    fun forHost(hostId: String): ConnectionPreferences {
+        val host = requireHostId(hostId)
+        return byHost.getOrPut(host) {
+            ConnectionPreferences(
+                prefs = prefs,
+                key = hostKey(host),
+                onViewPreferenceWritten = { _viewPreferencesRevision.update { it + 1 } },
+                writeIfRegistered = { write -> writeIfRegistered(host, write) },
+            )
         }
+    }
+
+    /**
+     * Moves the old URL/token-derived terminal record to the first host.
+     * This is intentionally explicit and is only for singleton migration; no
+     * normal read attempts to infer a host from credentials.
+     */
+    @Synchronized
+    fun adoptLegacyPreferences(hostId: String, legacyHost: String, legacyToken: String) {
+        val host = requireHostId(hostId)
+        val adoptedHost = prefs.getString(KEY_LEGACY_HOST_ID, null)
+            ?.trim()
+            ?.takeIf(String::isNotEmpty)
+        require(adoptedHost == null || adoptedHost == host) {
+            "Legacy terminal preferences already belong to $adoptedHost"
+        }
+
+        val oldKey = legacyConnectionKey(legacyHost, legacyToken)
+        val newKey = hostKey(host)
+        val editor = prefs.edit().putString(KEY_LEGACY_HOST_ID, host)
+        prefs.getString("$oldKey.lastPaneId", null)?.let {
+            editor.putString("$newKey.lastPaneId", it)
+        }
+        if (prefs.contains("$oldKey.fontSizeSp")) {
+            editor.putFloat(
+                "$newKey.fontSizeSp",
+                prefs.getFloat("$oldKey.fontSizeSp", ConnectionPreferences.DEFAULT_FONT_SIZE_SP),
+            )
+        }
+        if (prefs.contains("$oldKey.extraKeysVisible")) {
+            editor.putBoolean(
+                "$newKey.extraKeysVisible",
+                prefs.getBoolean("$oldKey.extraKeysVisible", ConnectionPreferences.DEFAULT_EXTRA_KEYS_VISIBLE),
+            )
+        }
+        editor.remove("$oldKey.lastPaneId")
+            .remove("$oldKey.fontSizeSp")
+            .remove("$oldKey.extraKeysVisible")
+        check(editor.commit()) { "Could not adopt legacy terminal preferences" }
+    }
+
+    /** Removes all host-derived terminal state, including selected pane. */
+    @Synchronized
+    fun clearHost(hostId: String): Boolean {
+        val host = requireHostId(hostId)
+        val prefix = "${hostKey(host)}."
+        val editor = prefs.edit()
+        var changed = false
+        prefs.all.keys.filter { it.startsWith(prefix) }.forEach {
+            editor.remove(it)
+            changed = true
+        }
+        byHost.remove(host)
+        return !changed || editor.commit()
+    }
+
+    private fun hostKey(hostId: String): String =
+        "$HOST_KEY_PREFIX${Base64.encodeToString(hostId.toByteArray(Charsets.UTF_8), Base64.NO_WRAP or Base64.URL_SAFE)}"
+
+    private fun requireHostId(value: String): String =
+        value.trim().takeIf(String::isNotEmpty) ?: error("Host id must be nonblank")
 
     companion object {
         const val FILE = "scoutr_terminal"
 
+        private const val HOST_KEY_PREFIX = "host."
+        private const val KEY_LEGACY_HOST_ID = "legacyHostId"
         private const val HEX = "0123456789abcdef"
 
-        /** SHA-256 over canonical host and token; hex digest, no raw token on disk. */
-        internal fun connectionKey(host: String, token: String): String {
-            val input = "${canonicalize(host)}\n$token".toByteArray(Charsets.UTF_8)
-            val digest = MessageDigest.getInstance("SHA-256").digest(input)
-            // Hand-rolled hex: String.format costs ~1-2 µs a byte, which is 64
-            // of them per key on a path the terminal touches during a gesture.
+        /** Canonicalized URL/token digest used only to locate old singleton data. */
+        internal fun legacyConnectionKey(host: String, token: String): String =
+            digestKey("${canonicalize(host)}\n$token")
+
+        /** Canonical host-id key is intentionally independent of URL/token. */
+        internal fun hostPreferenceKey(hostId: String): String =
+            "$HOST_KEY_PREFIX${Base64.encodeToString(hostId.toByteArray(Charsets.UTF_8), Base64.NO_WRAP or Base64.URL_SAFE)}"
+
+        private fun digestKey(input: String): String {
+            val digest = MessageDigest.getInstance("SHA-256")
+                .digest(input.toByteArray(Charsets.UTF_8))
             val out = StringBuilder(digest.size * 2)
             for (byte in digest) {
                 val value = byte.toInt() and 0xFF
@@ -117,11 +183,8 @@ class TerminalPreferencesStore(context: Context) {
         }
 
         /**
-         * Canonicalize a saved bridge URL for keying: lower-case scheme and
-         * host, drop the default port, drop a trailing path slash, keep a
-         * non-default port and any non-root path. URLs carrying userinfo,
-         * query, or fragment are rejected (opaque fallback: trimmed,
-         * lower-cased) because they cannot be routed to reliably.
+         * Canonicalize a saved bridge URL for locating old singleton keys.
+         * It is not part of the new durable identity.
          */
         internal fun canonicalize(host: String): String {
             val trimmed = host.trim().trimEnd('/')
@@ -130,9 +193,7 @@ class TerminalPreferencesStore(context: Context) {
                 ?: return trimmed.lowercase()
             if (url.username.isNotEmpty() || url.password.isNotEmpty() ||
                 url.query != null || url.fragment != null
-            ) {
-                return trimmed.lowercase()
-            }
+            ) return trimmed.lowercase()
             val scheme = url.scheme.lowercase()
             val hostPart = url.host.lowercase()
             val port = if (url.port != defaultPort(url.scheme)) ":${url.port}" else ""

@@ -222,4 +222,15 @@ class ConnectionStoreTest {
     fun updateHostId_without_a_saved_pairing_reports_failure() {
         assertFalse(store().updateHostId("host_any"))
     }
+
+    @Test
+    fun legacy_cleanup_removes_fields_without_deleting_the_cipher_key() {
+        assertTrue(store().save("https://bridge.example.com", "tok-123", hostId = "host_a"))
+        val before = cipher.clearKeyCalls
+
+        assertTrue(store().clearLegacyFields())
+        assertNull(store().saved)
+        assertEquals(before, cipher.clearKeyCalls)
+        assertTrue("registry migration cleanup must not delete the key", cipher.keyPresent)
+    }
 }

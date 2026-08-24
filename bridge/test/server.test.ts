@@ -133,7 +133,15 @@ describe("scoutr bridge HTTP/WS API (offline)", () => {
     assert.equal(health.ok, true);
     assert.deepEqual(health.api, {
       protocol: 2,
-      features: ["terminal.v1", "asks.v2", "update.pull.v1", "session-model.v3", "commands.http.v1", "host-identity.v1"],
+      features: [
+        "terminal.v1",
+        "asks.v2",
+        "update.pull.v1",
+        "session-model.v3",
+        "commands.http.v1",
+        "host-identity.v1",
+        "push-profile-generation.v1",
+      ],
     });
     assert.match(health.hostId ?? "", /^host_/);
     assert.equal(health.herdr.connected, true);
@@ -152,7 +160,15 @@ describe("scoutr bridge HTTP/WS API (offline)", () => {
     assert.equal(status, 200);
     assert.deepEqual(health.api, {
       protocol: 2,
-      features: ["terminal.v1", "asks.v2", "update.pull.v1", "session-model.v3", "commands.http.v1", "host-identity.v1"],
+      features: [
+        "terminal.v1",
+        "asks.v2",
+        "update.pull.v1",
+        "session-model.v3",
+        "commands.http.v1",
+        "host-identity.v1",
+        "push-profile-generation.v1",
+      ],
     });
     assert.equal(health.herdr.connected, false);
   });

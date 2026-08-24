@@ -44,8 +44,12 @@ after(async () => {
   await server.close();
 });
 
-async function post(body: unknown, token = TOKEN): Promise<{ status: number; data: any }> {
-  const response = await fetch(`http://127.0.0.1:${PORT}/api/devices`, {
+async function post(
+  body: unknown,
+  token = TOKEN,
+  path = "/api/devices",
+): Promise<{ status: number; data: any }> {
+  const response = await fetch(`http://127.0.0.1:${PORT}${path}`, {
     method: "POST",
     headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
     body: typeof body === "string" ? body : JSON.stringify(body),
@@ -77,9 +81,43 @@ describe("POST /api/devices", () => {
     assert.match(data.error, /exceeds/);
   });
 
+  it("accepts only positive decimal-string profile generations", async () => {
+    const valid = await post({ fcmToken: "generation-token", profileGeneration: "42" });
+    assert.equal(valid.status, 200);
+    assert.deepEqual(devices.list().find((device) => device.token === "generation-token"), {
+      token: "generation-token",
+      profileGeneration: "42",
+      updatedAtMs: devices.list().find((device) => device.token === "generation-token")?.updatedAtMs,
+    });
+    const replaced = await post({ fcmToken: "generation-token", profileGeneration: "43" });
+    assert.equal(replaced.status, 200);
+    assert.equal(devices.list().find((device) => device.token === "generation-token")?.profileGeneration, "43");
+
+    for (const profileGeneration of ["", "0", "-1", "1.5", 1, null]) {
+      const { status, data } = await post({ fcmToken: `invalid-generation-${String(profileGeneration)}`, profileGeneration });
+      assert.equal(status, 400);
+      assert.match(data.error, /profileGeneration/);
+    }
+  });
+
   it("refuses an unauthenticated caller", async () => {
     const { status } = await post({ fcmToken: "device-token-2" }, "wrong_token");
     assert.equal(status, 401);
+  });
+
+  it("unregisters an existing or already-absent token", async () => {
+    const registered = await post({ fcmToken: "token-to-unregister", profileGeneration: "9" });
+    assert.equal(registered.status, 200);
+
+    const first = await post({ fcmToken: "token-to-unregister" }, TOKEN, "/api/devices/unregister");
+    assert.deepEqual(first, { status: 200, data: { ok: true } });
+    assert.equal(devices.list().some((device) => device.token === "token-to-unregister"), false);
+
+    const second = await post({ fcmToken: "token-to-unregister" }, TOKEN, "/api/devices/unregister");
+    assert.deepEqual(second, { status: 200, data: { ok: true } });
+
+    const unauthorized = await post({ fcmToken: "generation-token" }, "wrong_token", "/api/devices/unregister");
+    assert.equal(unauthorized.status, 401);
   });
 
   it("reports push state through /api/health", async () => {

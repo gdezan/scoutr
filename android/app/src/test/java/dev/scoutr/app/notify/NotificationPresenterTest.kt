@@ -3,6 +3,7 @@ package dev.scoutr.app.notify
 import android.app.NotificationManager
 import android.content.Context
 import org.robolectric.RuntimeEnvironment
+import dev.scoutr.app.data.HostProfileKey
 import dev.scoutr.app.data.NotificationPreferencesStore
 import dev.scoutr.app.data.RepoSummary
 import dev.scoutr.app.data.SessionDescriptor
@@ -102,6 +103,53 @@ class NotificationPresenterTest {
 
         assertEquals(1, slots().size)
         assertNull("a group of one renders as a stray header", summary())
+    }
+
+    @Test
+    fun cancelLegacyRemovesOnlyUntaggedSingletonNotifications() {
+        presenter.showBlocked(blocked("legacy-pane"))
+        presenter.showBlocked(HostProfileKey("host-a", 1), blocked("qualified-pane"))
+
+        presenter.cancelLegacy()
+
+        val remaining = slots().single()
+        assertTrue(remaining.tag?.contains("host-a") == true)
+    }
+
+    @Test
+    fun samePaneOnTwoHostsUsesIndependentTaggedSlotsAndIntents() {
+        val hostA = HostProfileKey("host-a", 1)
+        val hostB = HostProfileKey("host-b", 2)
+
+        presenter.showBlocked(hostA, blocked("same-pane"))
+        presenter.showBlocked(hostB, blocked("same-pane", name = "claude"))
+
+        val children = slots()
+        assertEquals(2, children.size)
+        assertTrue(children.mapNotNull { it.tag }.any { it.contains("host-a") })
+        assertTrue(children.mapNotNull { it.tag }.any { it.contains("host-b") })
+        val links = children.mapNotNull { child ->
+            child.notification.contentIntent?.let { pending ->
+                org.robolectric.Shadows.shadowOf(pending).savedIntent?.data?.toString()
+            }
+        }
+        assertTrue(links.any { it.contains("host-a") && it.contains("/1/") })
+        assertTrue(links.any { it.contains("host-b") && it.contains("/2/") })
+
+        presenter.cancelHost("host-a")
+        assertEquals(1, slots().size)
+        assertTrue(slots().single().tag!!.contains("host-b"))
+    }
+
+    @Test
+    fun hostQualifiedNotificationsRespectDisabledPreferences() {
+        val profile = HostProfileKey("host-a", 1)
+        NotificationPreferencesStore(context).blockedEnabled = false
+
+        presenter.showBlocked(profile, blocked("pane-a"))
+        presenter.showDone(profile, session("pane-b", status = "done"))
+
+        assertTrue(slots().isEmpty())
     }
 
     @Test

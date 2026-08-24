@@ -36,15 +36,25 @@ class TerminalSocketClient(
     private val okHttp: OkHttpClient,
     private val outboundQueueMaxBytes: Long = DEFAULT_OUTBOUND_QUEUE_MAX_BYTES,
     private val performanceCounters: PerformanceCounters? = null,
+    /** Only used by raw transport contract tests; production supplies a binding per open. */
+    private val fixedBinding: HostConnectionBinding? = null,
 ) : TerminalTransport {
 
-    override fun open(request: TerminalOpenRequest, listener: TerminalTransportListener): TerminalSocket {
-        val wsUrl = wsUrl(request.host) + "/ws/terminal"
+    override fun open(request: TerminalOpenRequest, listener: TerminalTransportListener): TerminalSocket =
+        open(requireNotNull(fixedBinding) { "TerminalSocketClient requires a host binding" }, request, listener)
+
+    /** Opens one socket with the immutable binding captured by its host wrapper. */
+    fun open(
+        binding: HostConnectionBinding,
+        request: TerminalOpenRequest,
+        listener: TerminalTransportListener,
+    ): TerminalSocket {
+        val wsUrl = wsUrl(binding.baseUrl) + "/ws/terminal"
         val socket = Socket(request, listener)
         val webSocket = okHttp.newWebSocket(
             Request.Builder()
                 .url(wsUrl)
-                .header("Authorization", "Bearer ${request.token}")
+                .header("Authorization", "Bearer ${binding.token}")
                 .build(),
             socket.wsListener,
         )

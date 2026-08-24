@@ -14,6 +14,7 @@ import dev.scoutr.app.data.ConnectionStore
 import dev.scoutr.app.net.BridgeClient
 import dev.scoutr.app.state.BoardUiState
 import dev.scoutr.app.state.BoardViewModel
+import dev.scoutr.app.state.legacyBoardViewModel
 import dev.scoutr.app.ui.screens.ConnectScreen
 import dev.scoutr.app.ui.screens.BoardScreen
 import dev.scoutr.app.ui.nav.ScoutrBottomBar
@@ -35,7 +36,7 @@ class ScoutrUiTest {
     private fun fakeBoard(state: BoardUiState): BoardViewModel {
         val context = androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().targetContext
         val connectionStore = ConnectionStore(context).also { it.clear() }
-        return BoardViewModel(
+        return legacyBoardViewModel(
             bridge = BridgeClient(OkHttpClient(), connectionStore),
             connectionStore = connectionStore,
             initialState = state,

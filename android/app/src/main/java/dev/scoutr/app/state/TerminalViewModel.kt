@@ -4,7 +4,6 @@ import android.os.SystemClock
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import dev.scoutr.app.data.ConnectionStore
 import dev.scoutr.app.data.DirListingResponse
 import dev.scoutr.app.data.SnapshotResponse
 import dev.scoutr.app.data.TerminalHierarchyCommand
@@ -27,6 +26,7 @@ import dev.scoutr.app.net.TopologyFeed
 import dev.scoutr.app.terminal.RemoteTerminalSession
 import dev.scoutr.app.terminal.TerminalOutputFailure
 import dev.scoutr.app.terminal.TerminalOutputPump
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -69,13 +69,14 @@ class TerminalViewModel(
     private val api: ScoutrApi,
     private val transport: TerminalTransport,
     private val feedFactory: TopologyFeed.Factory,
-    private val connectionStore: ConnectionStore,
+    private val hostPreferences: TerminalPreferencesStore.ConnectionPreferences,
     private val preferencesStore: TerminalPreferencesStore,
     initialPaneId: String? = null,
     injectedIo: CoroutineDispatcher? = null,
     private val performanceCounters: PerformanceCounters? = null,
+    private val hostIsCurrent: () -> Boolean = { true },
+    private val hostAvailable: () -> Boolean = { true },
 ) : ViewModel() {
-
     /**
      * Pane the route was opened for (e.g. the Chat overflow's "Open terminal").
      * Consumed by the first [resolvePaneId] so it outranks the saved pane once
@@ -124,6 +125,7 @@ class TerminalViewModel(
     }
 
     @Volatile private var started = false
+    @Volatile private var disposed = false
     @Volatile private var activeSocket: TerminalSocket? = null
     private var reconnectJob: Job? = null
     private var snapshotDebounce: Job? = null
@@ -157,9 +159,13 @@ class TerminalViewModel(
 
     /** Route entry: capability gate, then snapshot + attach. Idempotent. */
     fun start() {
-        if (started) return
-        val saved = connectionStore.saved ?: run {
+        if (started || disposed) return
+        if (!hostAvailable()) {
             _ui.update { it.copy(connection = TerminalConnectionState.Failed("No connection configured", retryable = false)) }
+            return
+        }
+        if (!hostIsCurrent()) {
+            _ui.update { it.copy(connection = TerminalConnectionState.Failed("Host forgotten or route expired", retryable = false)) }
             return
         }
         started = true
@@ -179,9 +185,9 @@ class TerminalViewModel(
     }
 
     private suspend fun checkHealthAndAttach() {
-        val saved = connectionStore.saved ?: return
+        if (!hostIsCurrent()) return
         try {
-            val health = api.health(host = saved.host, token = saved.token)
+            val health = api.health()
             val capability = health.terminal?.capability
             if (capability?.isUnsupported == true) {
                 _ui.update {
@@ -195,6 +201,8 @@ class TerminalViewModel(
             }
             refreshSnapshot()
             openSocket()
+        } catch (stale: CancellationException) {
+            throw stale
         } catch (e: Exception) {
             _ui.update {
                 it.copy(connection = TerminalConnectionState.Failed(e.message ?: "bridge unreachable", retryable = true))
@@ -221,11 +229,10 @@ class TerminalViewModel(
      * decision, not a transport fault.
      */
     fun attach(paneId: String) {
-        if (!started) return
-        val saved = connectionStore.saved ?: return
+        if (!started || !hostIsCurrent()) return
         reconnectJob?.cancel()
         retireSocket()
-        preferencesStore.forConnection(saved.host, saved.token).lastPaneId = paneId
+        hostPreferences.lastPaneId = paneId
         _ui.update { it.copy(paneClosedNotice = false, canTakeover = false) }
         openSocket(paneId)
     }
@@ -270,8 +277,8 @@ class TerminalViewModel(
     }
 
     /** Per-connection terminal preferences (font size, extra-key row, last pane). */
-    val preferences: TerminalPreferencesStore.ConnectionPreferences?
-        get() = connectionStore.saved?.let { preferencesStore.forConnection(it.host, it.token) }
+    val preferences: TerminalPreferencesStore.ConnectionPreferences
+        get() = hostPreferences
 
     /**
      * Ticks when font size or extra-key visibility is written from anywhere —
@@ -395,6 +402,8 @@ class TerminalViewModel(
                 } else {
                     _ui.update { it.copy(hierarchyError = e.message ?: "hierarchy $label failed") }
                 }
+            } catch (stale: CancellationException) {
+                throw stale
             } catch (e: Exception) {
                 _ui.update { it.copy(hierarchyError = e.message ?: "hierarchy $label failed") }
             } finally {
@@ -472,6 +481,8 @@ class TerminalViewModel(
     private suspend fun refreshSnapshot() {
         val response: SnapshotResponse = try {
             api.snapshot()
+        } catch (stale: CancellationException) {
+            throw stale
         } catch (e: Exception) {
             _ui.update { it.copy(snapshotError = e.message ?: "snapshot unavailable") }
             return
@@ -488,7 +499,7 @@ class TerminalViewModel(
     }
 
     private fun openSocket(paneId: String? = null, intent: TerminalIntent = TerminalIntent.AUTO) {
-        val saved = connectionStore.saved ?: return
+        if (!hostIsCurrent()) return
         val targetPaneId = paneId ?: resolvePaneId()
         if (targetPaneId == null) {
             _ui.update {
@@ -506,14 +517,12 @@ class TerminalViewModel(
                 paneName = it.snapshot?.pane(targetPaneId)?.displayName ?: it.paneName,
             )
         }
-        preferencesStore.forConnection(saved.host, saved.token).lastPaneId = targetPaneId
+        hostPreferences.lastPaneId = targetPaneId
         val grid = (if (measuredCols > 0 && measuredRows > 0) measuredCols to measuredRows else GRID_COLS to GRID_ROWS)
         socketGrid = grid
         val ref = SocketRef()
         val socket = transport.open(
             TerminalOpenRequest(
-                host = saved.host,
-                token = saved.token,
                 paneId = targetPaneId,
                 cols = grid.first,
                 rows = grid.second,
@@ -534,7 +543,7 @@ class TerminalViewModel(
         val requested = pendingInitialPaneId
         pendingInitialPaneId = null
         if (requested != null && state.snapshot?.pane(requested) != null) return requested
-        val prefsPane = connectionStore.saved?.let { preferencesStore.forConnection(it.host, it.token).lastPaneId }
+        val prefsPane = hostPreferences.lastPaneId
         return when {
             prefsPane != null && state.snapshot?.pane(prefsPane) != null -> prefsPane
             state.snapshot?.focusedPane() != null -> state.snapshot.focusedPane()!!.paneId
@@ -703,7 +712,7 @@ class TerminalViewModel(
     }
 
     private fun isCurrent(ref: SocketRef): Boolean =
-        ref.socket != null && ref.socket === activeSocket
+        hostIsCurrent() && ref.socket != null && ref.socket === activeSocket
 
     /** Forward terminal-produced bytes; gated on Ready(writable). Never queued or replayed. */
     private fun forwardInput(bytes: ByteArray) {
@@ -731,9 +740,10 @@ class TerminalViewModel(
         return (exp.coerceAtMost(RECONNECT_MAX_MS) * jitter).toLong().coerceAtLeast(1L)
     }
 
-    override fun onCleared() {
-        // Grace: cancel without release so the bridge keeps the child in grace
-        // and the pane is not killed while the user might come back.
+    fun dispose() {
+        if (disposed) return
+        disposed = true
+        // Cancel without release so the bridge keeps the child in grace while the user may return.
         activeSocket?.cancel()
         activeSocket = null
         reconnectJob?.cancel()
@@ -742,6 +752,10 @@ class TerminalViewModel(
         outputPump.close()
         terminalScope.cancel()
         if (ownsIo) (terminalIo as? kotlinx.coroutines.ExecutorCoroutineDispatcher)?.close()
+    }
+
+    override fun onCleared() {
+        dispose()
     }
 
     /**

@@ -9,27 +9,41 @@ import type { DeviceRegistry, FcmSender, PingKind, PushDevice } from "../src/pus
  * swallow the resolve that clears the phone's notification, and this cannot.
  */
 
-function fakeSender(): FcmSender & { sent: Array<{ kind: PingKind; paneId: string }>; stale: string[] } {
+function fakeSender(): FcmSender & {
+  sent: Array<{ kind: PingKind; paneId: string }>;
+  calls: Array<{ tokens: string[]; hostId: string; profileGeneration?: string | null }>;
+  stale: string[];
+} {
   const sent: Array<{ kind: PingKind; paneId: string }> = [];
+  const calls: Array<{ tokens: string[]; hostId: string; profileGeneration?: string | null }> = [];
   const stale: string[] = [];
   return {
     sent,
+    calls,
     stale,
-    async send(_tokens, kind, paneId) {
+    async send(tokens, kind, paneId, hostId, profileGeneration) {
+      calls.push({ tokens: [...tokens], hostId, profileGeneration });
       sent.push({ kind, paneId });
       return stale.splice(0, stale.length);
     },
   };
 }
 
-function fakeDevices(tokens: string[] = ["device-a"]): DeviceRegistry & { unregistered: string[] } {
-  const devices: PushDevice[] = tokens.map((token) => ({ token, updatedAtMs: 0 }));
+function fakeDevices(
+  tokens: string[] = ["device-a"],
+  generations: Record<string, string | null> = {},
+): DeviceRegistry & { unregistered: string[] } {
+  const devices: PushDevice[] = tokens.map((token) => ({
+    token,
+    profileGeneration: generations[token] ?? null,
+    updatedAtMs: 0,
+  }));
   const unregistered: string[] = [];
   return {
     unregistered,
     list: () => devices,
-    async register(token) {
-      devices.push({ token, updatedAtMs: 0 });
+    async register(token, profileGeneration) {
+      devices.push({ token, profileGeneration: profileGeneration ?? null, updatedAtMs: 0 });
     },
     async unregister(token) {
       unregistered.push(token);
@@ -92,6 +106,18 @@ test("both event spellings are matched", async () => {
   assert.deepEqual(sender.sent, [
     { kind: "blocked", paneId: "w1:p1" },
     { kind: "blocked", paneId: "w1:p2" },
+  ]);
+});
+
+test("each registration receives the bridge identity and its own generation", async () => {
+  const sender = fakeSender();
+  const publisher = new FcmPublisher(sender, fakeDevices(["legacy", "current"], { current: "8" }), "host-a");
+
+  await publisher.handleEvent(statusEvent("w1:p1", "blocked"));
+
+  assert.deepEqual(sender.calls, [
+    { tokens: ["legacy"], hostId: "host-a", profileGeneration: null },
+    { tokens: ["current"], hostId: "host-a", profileGeneration: "8" },
   ]);
 });
 

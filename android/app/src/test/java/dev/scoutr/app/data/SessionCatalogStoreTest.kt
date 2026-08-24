@@ -2,6 +2,7 @@ package dev.scoutr.app.data
 
 import android.content.Context
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -27,98 +28,128 @@ class SessionCatalogStoreTest {
     }
 
     @Test
-    fun legacyPathMigratesWhenExactlyOneCatalogKeyClaimsIt() {
+    fun legacyPathDoesNotMigrateOnReadButDoesMigrateDuringFirstHostAdoption() {
         val path = "/sessions/one.jsonl"
-        context.getSharedPreferences("scoutr_session_catalog", Context.MODE_PRIVATE)
-            .edit().putStringSet("pinned", setOf(path)).commit()
+        catalogPrefs().edit().putStringSet("pinned", setOf(path)).commit()
         val key = SessionKey("pi", path)
+        val hosted = HostSessionKey("host_a", key)
 
-        assertEquals(setOf(key), store.pinnedKeys(listOf(key)))
-        assertEquals(setOf(key), store.pinnedKeys(emptyList()))
+        assertTrue(store.pinnedKeys(listOf(hosted)).isEmpty())
+        assertEquals(setOf(path), catalogPrefs().getStringSet("pinned", emptySet()))
+        assertTrue(store.hasUnqualifiedLegacyEntries())
+        store.adoptLegacyEntries("host_a", listOf(key))
+
+        assertEquals(setOf(hosted), store.pinnedKeys(emptyList()))
+        assertTrue(catalogPrefs().getStringSet("pinned", emptySet()).orEmpty()
+            .single().startsWith("hsk1."))
+        assertFalse(store.hasUnqualifiedLegacyEntries())
     }
 
     @Test
-    fun ambiguousLegacyPathIsRetainedUntilOneBackendMatchRemains() {
+    fun ambiguousLegacyPathWaitsForAUniqueFirstHostCatalogOwner() {
         val path = "/shared/session.jsonl"
-        context.getSharedPreferences("scoutr_session_catalog", Context.MODE_PRIVATE)
-            .edit().putStringSet("archived", setOf(path)).commit()
+        catalogPrefs().edit().putStringSet("archived", setOf(path)).commit()
         val pi = SessionKey("pi", path)
         val claude = SessionKey("claude", path)
 
-        assertTrue(store.archivedKeys(listOf(pi, claude)).isEmpty())
-        assertEquals(setOf(pi), store.archivedKeys(listOf(pi)))
+        store.adoptLegacyEntries("host_a", listOf(pi, claude))
+        assertTrue(store.archivedKeys(emptyList()).isEmpty())
+        assertEquals(setOf(path), catalogPrefs().getStringSet("archived", emptySet()))
+
+        // The marker is idempotent for the same first host; it does not permit
+        // a later host to claim the old singleton entry.
+        store.adoptLegacyEntries("host_a", listOf(pi))
+        assertEquals(
+            setOf(HostSessionKey("host_a", pi)),
+            store.archivedKeys(emptyList()),
+        )
     }
 
     @Test
-    fun backendQualifiedKeysWithTheSamePathDoNotCollide() {
-        val pi = SessionKey("pi", "/shared/session.jsonl")
-        val claude = SessionKey("claude", "/shared/session.jsonl")
+    fun oldSk1EntriesMigrateOnlyWhenFirstHostAdoptionIsExplicit() {
+        val key = SessionKey("pi", "/sessions/legacy.jsonl")
+        catalogPrefs().edit().putStringSet("pinned", setOf(key.encode())).commit()
+        assertTrue(store.pinnedKeys(emptyList()).isEmpty())
 
-        store.setPinned(pi, true)
-        store.setPinned(claude, true)
+        store.adoptLegacyEntries("first-host")
 
-        assertEquals(setOf(pi, claude), store.pinnedKeys(emptyList()))
-        store.setPinned(pi, false)
-        assertEquals(setOf(claude), store.pinnedKeys(emptyList()))
+        assertEquals(setOf(HostSessionKey("first-host", key)), store.pinnedKeys(emptyList()))
     }
 
     @Test
-    fun sessionKeyEncodingRoundTripsArbitraryValidPaths() {
+    fun sameSessionOnTwoHostsHasIndependentRetainedMetadata() {
+        val session = SessionKey("pi", "/shared/session.jsonl")
+        val a = HostSessionKey("host_a", session)
+        val b = HostSessionKey("host_b", session)
+
+        store.setPinned(a, true)
+        store.setPinned(b, true)
+        assertEquals(setOf(a, b), store.pinnedKeys(emptyList()))
+
+        store.setPinned(a, false)
+        assertEquals(setOf(b), store.pinnedKeys(emptyList()))
+    }
+
+    @Test
+    fun readsOnlyReturnTheRequestedHostCatalogEntries() {
+        val session = SessionKey("pi", "/same.jsonl")
+        val a = HostSessionKey("host_a", session)
+        val b = HostSessionKey("host_b", session)
+        store.setArchived(a, true)
+        store.setArchived(b, true)
+
+        assertEquals(setOf(a), store.archivedKeys(listOf(a)))
+        assertEquals(setOf(b), store.archivedKeys(listOf(b)))
+    }
+
+    @Test
+    fun retainedMetadataSurvivesForgetAndSameIdRepair() {
+        val key = HostSessionKey("host_a", SessionKey("pi", "/kept.jsonl"))
+        store.setPinned(key, true)
+        store.setArchived(key, true)
+
+        // Cleanup intentionally has no SessionCatalogStore.clearHost call:
+        // retained flags are host-owned durable metadata.
+        val repaired = SharedPreferencesSessionCatalogStore(context)
+        assertEquals(setOf(key), repaired.pinnedKeys(emptyList()))
+        assertEquals(setOf(key), repaired.archivedKeys(emptyList()))
+    }
+
+    @Test
+    fun copyingRetainedMetadataNeedsExplicitConfirmationAndKeepsTheSource() {
+        val session = SessionKey("pi", "/copy.jsonl")
+        val source = HostSessionKey("host_a", session)
+        val target = HostSessionKey("host_b", session)
+        store.setPinned(source, true)
+
+        var rejected = false
+        try {
+            store.copyRetainedMetadata("host_a", "host_b", confirmed = false)
+        } catch (_: IllegalArgumentException) {
+            rejected = true
+        }
+        assertTrue(rejected)
+
+        store.copyRetainedMetadata("host_a", "host_b", confirmed = true)
+        assertEquals(setOf(source, target), store.pinnedKeys(emptyList()))
+    }
+
+    @Test
+    fun sessionAndHostCodecsRoundTripAndRejectStaleShapes() {
         val key = SessionKey("claude/code", "/projects/a b/α?.jsonl")
+        val identity = HostSessionKey("host.a", key)
+        val profile = HostProfileKey("host.a", 42)
+        val pane = HostPaneKey(profile, "pane.1")
 
         assertEquals(key, decodeSessionKey(key.encode()))
-    }
-
-    @Test
-    fun hostQualifiedEncodingRoundTripsAndKeepsSpellingsDistinct() {
-        val identity = HostSessionKey("host_a", SessionKey("pi", "/p/one.jsonl"))
-
         assertEquals(identity, decodeHostSessionKey(identity.encode()))
         assertNull("hsk1 is not a plain session key", decodeSessionKey(identity.encode()))
-        assertNull(decodeHostSessionKey("junk"))
+        assertEquals(profile, decodeHostProfileKey(profile.encode()))
+        assertEquals(pane, decodeHostPaneKey(pane.encode()))
+        assertFalse(decodeHostSessionKey("junk") != null)
+        assertNull(decodeHostProfileKey("hpk1.invalid.0"))
+        assertNull(decodeHostPaneKey("hpn1.invalid.1."))
     }
-
-    @Test
-    fun sk1EntriesMigrateToTheCurrentHostNamespaceOnRead() {
-        val key = SessionKey("pi", "/sessions/hostless.jsonl")
-        // Seed through a host-unaware store: pre-pairing device behaviour.
-        SharedPreferencesSessionCatalogStore(context).setPinned(key, true)
-        val hosted = SharedPreferencesSessionCatalogStore(context) { "host_a" }
-
-        assertEquals(setOf(key), hosted.pinnedKeys(emptyList()))
-        // The rewrite persists, so the legacy spelling is gone from storage.
-        val stored = catalogPrefs()
-            .getStringSet("pinned", emptySet()).orEmpty()
-        assertTrue(stored.all { it.startsWith("hsk1.") })
-    }
-
-    @Test
-    fun entriesOfOtherHostsAreHiddenButKeptForAPossibleRevisit() {
-        val other = HostSessionKey("host_b", SessionKey("pi", "/sessions/x.jsonl"))
-        catalogPrefs()
-            .edit().putStringSet("archived", setOf(other.encode())).commit()
-        val mine = SharedPreferencesSessionCatalogStore(context) { "host_a" }
-
-        assertTrue(mine.archivedKeys(emptyList()).isEmpty())
-
-        // Re-pairing with the original bridge surfaces the entry again.
-        val original = SharedPreferencesSessionCatalogStore(context) { "host_b" }
-        assertEquals(setOf(other.session), original.archivedKeys(emptyList()))
-    }
-
-    @Test
-    fun mutationsAreWrittenHostQualifiedWhenTheHostIsKnown() {
-        val store = SharedPreferencesSessionCatalogStore(context) { "host_a" }
-        val key = SessionKey("pi", "/sessions/live.jsonl")
-
-        store.setPinned(key, true)
-
-        assertEquals(setOf(key), store.pinnedKeys(emptyList()))
-        val stored = catalogPrefs()
-            .getStringSet("pinned", emptySet()).orEmpty()
-        assertTrue(stored.single().startsWith("hsk1."))
-    }
-
 
     private companion object {
         const val PREFS = "scoutr_session_catalog"

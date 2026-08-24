@@ -7,12 +7,14 @@ import dev.scoutr.app.data.ConnectionStore
 import dev.scoutr.app.data.FakeConnectionCipher
 import dev.scoutr.app.data.HealthResponse
 import dev.scoutr.app.data.HerdrInfo
+import dev.scoutr.app.data.LegacyMigrationState
 import dev.scoutr.app.data.REQUIRED_SCOUTR_API_FEATURES
 import dev.scoutr.app.data.ScoutrApiCompatibility
 import dev.scoutr.app.data.ScoutrApiInfo
 import dev.scoutr.app.net.BridgeException
 import dev.scoutr.app.net.FakeScoutrApi
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -42,7 +44,7 @@ class BoardViewModelTest {
         // Unsaved at construction: the VM init never connects, so no health
         // probe and no poll loop interfere with the control POST below.
         connectionStore.clear()
-        viewModel = BoardViewModel(
+        viewModel = legacyBoardViewModel(
             bridge = fake,
             connectionStore = connectionStore,
             initialState = BoardUiState(
@@ -161,7 +163,7 @@ class BoardViewModelTest {
             ),
         )
 
-        val incompatibleViewModel = BoardViewModel(fake, store)
+        val incompatibleViewModel = legacyBoardViewModel(fake, store)
         incompatibleViewModel.startPolling()
         waitUntil { incompatibleViewModel.ui.value.apiCompatibility is ScoutrApiCompatibility.Incompatible }
 
@@ -185,7 +187,7 @@ class BoardViewModelTest {
         fake.healthResult = Result.success(
             HealthResponse(ok = true, api = ScoutrApiInfo(protocol = 3), herdr = HerdrInfo(connected = true)),
         )
-        val recoveringViewModel = BoardViewModel(fake, store)
+        val recoveringViewModel = legacyBoardViewModel(fake, store)
         recoveringViewModel.startPolling()
         waitUntil { recoveringViewModel.ui.value.apiCompatibility is ScoutrApiCompatibility.Incompatible }
 
@@ -232,7 +234,7 @@ class BoardViewModelTest {
             }
         }
 
-        val selfHealingViewModel = BoardViewModel(fake, store, pollInterval = 10.milliseconds)
+        val selfHealingViewModel = legacyBoardViewModel(fake, store, pollInterval = 10.milliseconds)
         selfHealingViewModel.startPolling()
 
         waitUntil {
@@ -243,6 +245,26 @@ class BoardViewModelTest {
         val firstAgentsCall = fake.calls.indexOfFirst { it.name == "agents" }
         assertTrue(fake.calls.take(firstAgentsCall).count { it.name == "health" } >= 2)
         selfHealingViewModel.stopPolling()
+    }
+
+    @Test
+    fun pendingLegacyMetadataBlocksRemoteBoardActions() {
+        val migrating = BoardViewModel(
+            bridge = fake,
+            connectionAvailable = { true },
+            initialState = BoardUiState(
+                connected = true,
+                apiCompatibility = ScoutrApiCompatibility.Compatible,
+            ),
+            pollInterval = 3_000.milliseconds,
+            migrationState = MutableStateFlow(LegacyMigrationState.Pending),
+        )
+
+        migrating.closeAgent("p1")
+        shadowOf(Looper.getMainLooper()).idle()
+
+        assertEquals(0, fake.calls.count { it.name == "controlSession" })
+        assertEquals("Finishing saved connection migration", migrating.ui.value.error)
     }
 
     private fun waitUntil(condition: () -> Boolean) {

@@ -1,5 +1,6 @@
 package dev.scoutr.app.data
 
+import android.content.Context
 import org.junit.Assert.assertEquals
 import org.junit.Before
 import org.junit.Test
@@ -11,11 +12,12 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
 class LauncherSettingsStoreTest {
+    private lateinit var context: Context
     private lateinit var store: SharedPreferencesLauncherSettingsStore
 
     @Before
     fun setUp() {
-        val context = RuntimeEnvironment.getApplication()
+        context = RuntimeEnvironment.getApplication()
         context.getSharedPreferences("scoutr_launcher", android.content.Context.MODE_PRIVATE)
             .edit()
             .clear()
@@ -65,5 +67,46 @@ class LauncherSettingsStoreTest {
         assertEquals(8, loaded.recentModelKeys.size)
         assertEquals(6, loaded.recentFolders.size)
         assertEquals(12, loaded.presets.size)
+    }
+
+    @Test
+    fun hostSettingsAreIndependentAndLegacySettingsAdoptOnlyToFirstHost() {
+        val legacy = LauncherSettings(recentFolders = listOf("/legacy"))
+        store.saveLauncherSettings(legacy)
+
+        store.adoptLegacySettings("host-a")
+        val hostA = store.forHost("host-a")
+        val hostB = store.forHost("host-b")
+        assertEquals(legacy, hostA.loadLauncherSettings())
+        assertEquals(LauncherSettings(), hostB.loadLauncherSettings())
+        assertEquals(LauncherSettings(), store.loadLauncherSettings())
+
+        hostB.saveLauncherSettings(LauncherSettings(recentFolders = listOf("/other")))
+        assertEquals(listOf("/legacy"), hostA.loadLauncherSettings().recentFolders)
+        assertEquals(listOf("/other"), hostB.loadLauncherSettings().recentFolders)
+    }
+
+    @Test
+    fun retiredHostCannotRepopulateClearedLauncherState() {
+        val guarded = SharedPreferencesLauncherSettingsStore(
+            context,
+            writeIfRegistered = { _, _ -> false },
+        )
+        guarded.forHost("host-a").saveLauncherSettings(
+            LauncherSettings(recentFolders = listOf("/stale")),
+        )
+
+        assertEquals(LauncherSettings(), guarded.forHost("host-a").loadLauncherSettings())
+    }
+
+    @Test
+    fun clearingOneHostDoesNotClearAnotherHost() {
+        store.forHost("host-a").saveLauncherSettings(LauncherSettings(recentFolders = listOf("/a")))
+        store.forHost("host-b").saveLauncherSettings(LauncherSettings(recentFolders = listOf("/b")))
+
+        store.clearHost("host-a")
+
+        assertEquals(LauncherSettings(), store.forHost("host-a").loadLauncherSettings())
+        assertEquals(listOf("/b"), store.forHost("host-b").loadLauncherSettings().recentFolders)
     }
 }

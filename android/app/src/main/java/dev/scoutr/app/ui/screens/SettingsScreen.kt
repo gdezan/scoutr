@@ -44,7 +44,6 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import dev.scoutr.app.data.AppearancePreferencesStore
 import dev.scoutr.app.data.NotificationPreferencesStore
-import dev.scoutr.app.data.ConnectionStore
 import dev.scoutr.app.data.TerminalPreferencesStore
 import dev.scoutr.app.ui.components.ConfirmDialog
 import dev.scoutr.app.ui.components.SectionLabel
@@ -77,6 +76,8 @@ import kotlin.math.roundToInt
  * Only reachable from the tab shell, which exists only while paired — after
  * Forget the graph is Connect-only, so there is no unpaired Settings.
  */
+data class SettingsConnection(val host: String, val hostId: String)
+
 @Composable
 fun SettingsScreen(
     onBack: () -> Unit,
@@ -86,10 +87,18 @@ fun SettingsScreen(
      */
     terminalPreferences: TerminalPreferencesStore,
     onForget: () -> Unit,
-    api: ScoutrApi,
+    api: ScoutrApi?,
+    trackUpdateWork: suspend (suspend () -> Unit) -> Unit = { work -> work() },
     modifier: Modifier = Modifier,
     /** Null only before the first pairing, which the tab shell cannot reach. */
-    saved: ConnectionStore.Saved? = null,
+    saved: SettingsConnection? = null,
+    updateHostId: String? = saved?.hostId,
+    updateHostAlias: String? = null,
+    updateHostOptions: Map<String, String> = emptyMap(),
+    onSelectUpdateHost: (String) -> Unit = {},
+    onDisableUpdates: () -> Unit = {},
+    onRefreshConnection: (() -> Unit)? = null,
+    forgetUpdateHostAlias: String? = null,
 ) {
     val context = LocalContext.current
     val appearance = remember(context) { AppearancePreferencesStore(context) }
@@ -115,19 +124,31 @@ fun SettingsScreen(
         Spacer(Modifier.height(20.dp))
 
         if (saved != null) {
-            ConnectionSection(saved = saved, onForget = onForget)
+            ConnectionSection(
+                saved = saved,
+                onForget = onForget,
+                onRefreshConnection = onRefreshConnection,
+                forgetUpdateHostAlias = forgetUpdateHostAlias,
+            )
         }
 
-        UpdateSection(api = api)
+        UpdateSection(api = api, trackUpdateWork = trackUpdateWork)
+        UpdateHostSection(
+            currentHostId = updateHostId,
+            currentHostAlias = updateHostAlias,
+            options = updateHostOptions,
+            onSelect = onSelectUpdateHost,
+            onDisable = onDisableUpdates,
+        )
 
         NotificationsSection(notificationPrefs = notificationPrefs)
         ChatSection(appearance = appearance)
 
         TypographySection(appearance = appearance)
-        if (saved != null) {
+        saved?.hostId?.let { hostId ->
             TerminalSection(
-                preferences = remember(terminalPreferences, saved) {
-                    terminalPreferences.forConnection(saved.host, saved.token)
+                preferences = remember(terminalPreferences, hostId) {
+                    terminalPreferences.forHost(hostId)
                 },
             )
         }
@@ -144,16 +165,22 @@ fun SettingsScreen(
  */
 @Composable
 private fun ConnectionSection(
-    saved: ConnectionStore.Saved,
+    saved: SettingsConnection,
     onForget: () -> Unit,
+    onRefreshConnection: (() -> Unit)?,
+    forgetUpdateHostAlias: String?,
 ) {
     var confirming by remember { mutableStateOf(false) }
 
     if (confirming) {
         ConfirmDialog(
             title = "Forget connection?",
-            text = "Forget ${saved.host}? You'll need to pair again. " +
-                "Notifications will stop.",
+            text = if (forgetUpdateHostAlias == null) {
+                "Forget ${saved.host}? You'll need to pair again. Notifications will stop."
+            } else {
+                "Forget ${saved.host}? Notifications from this host will stop. " +
+                    "In-app updates will move to $forgetUpdateHostAlias. Only continue if you trust that host's APK signing key."
+            },
             confirmLabel = "Forget",
             destructive = true,
             onConfirm = {
@@ -193,6 +220,15 @@ private fun ConnectionSection(
                 modifier = Modifier.testTag("settings_host"),
             )
         }
+        if (onRefreshConnection != null) {
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            TextButton(
+                onClick = onRefreshConnection,
+                modifier = Modifier.fillMaxWidth().testTag("settings_refresh_connection"),
+            ) {
+                Text("Refresh pairing")
+            }
+        }
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         TextButton(
             onClick = { confirming = true },
@@ -217,7 +253,10 @@ private fun ConnectionSection(
  * dirty flag still counts toward `updateAvailable` but is never shown.
  */
 @Composable
-private fun UpdateSection(api: ScoutrApi) {
+private fun UpdateSection(
+    api: ScoutrApi?,
+    trackUpdateWork: suspend (suspend () -> Unit) -> Unit,
+) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var status by remember { mutableStateOf<UpdateStatusResponse?>(null) }
@@ -232,7 +271,8 @@ private fun UpdateSection(api: ScoutrApi) {
         ActivityResultContracts.StartActivityForResult(),
     ) { canInstall = ApkInstaller.canInstall(context) }
 
-    LaunchedEffect(Unit) {
+    LaunchedEffect(api) {
+        if (api == null) return@LaunchedEffect
         runCatching {
             api.updateStatus(
                 commit = BuildConfig.GIT_COMMIT,
@@ -264,17 +304,25 @@ private fun UpdateSection(api: ScoutrApi) {
             onConfirm = {
                 confirming = false
                 error = null
+                val updateApi = api ?: return@ConfirmDialog
                 scope.launch {
-                    val updater = AppUpdater(
-                        api = api,
-                        installer = ApkInstaller.forContext(context),
-                        cacheDir = context.cacheDir,
-                    )
-                    runCatching { updater.run { progress = it } }
-                        .onFailure { error = it.message ?: "update failed" }
-                    // The system sheet owns the flow from here; on success this
-                    // process is replaced, so there is nothing to reset.
-                    progress = null
+                    try {
+                        trackUpdateWork {
+                            val updater = AppUpdater(
+                                api = updateApi,
+                                installer = ApkInstaller.forContext(context),
+                                cacheDir = context.cacheDir,
+                            )
+                            updater.run { progress = it }
+                        }
+                    } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                        throw cancelled
+                    } catch (failure: Exception) {
+                        error = failure.message ?: "update failed"
+                    } finally {
+                        // The system sheet owns the flow after install starts; otherwise clear stale progress.
+                        progress = null
+                    }
                 }
             },
             onDismiss = { confirming = false },
@@ -289,6 +337,7 @@ private fun UpdateSection(api: ScoutrApi) {
         val current = status
         val stage = progress
         val statusLabel = when {
+            api == null -> "Updates disabled"
             stage != null -> progressLabel(stage)
             error != null -> error!!
             current?.updateAvailable == true -> "Update available"
@@ -359,6 +408,76 @@ private fun UpdateSection(api: ScoutrApi) {
                         else -> "Update app"
                     },
                 )
+            }
+        }
+    }
+}
+
+@Composable
+private fun UpdateHostSection(
+    currentHostId: String?,
+    currentHostAlias: String?,
+    options: Map<String, String>,
+    onSelect: (String) -> Unit,
+    onDisable: () -> Unit,
+) {
+    if (options.isEmpty()) return
+    var pendingHostId by remember { mutableStateOf<String?>(null) }
+    var confirmingDisable by remember { mutableStateOf(false) }
+
+    pendingHostId?.let { hostId ->
+        val alias = options.getValue(hostId)
+        ConfirmDialog(
+            title = "Use $alias for updates?",
+            text = "Only choose a host you trust. Android will reject an APK signed with a different key, but this host controls which app build is offered.",
+            confirmLabel = "Use $alias",
+            onConfirm = {
+                pendingHostId = null
+                onSelect(hostId)
+            },
+            onDismiss = { pendingHostId = null },
+        )
+    }
+    if (confirmingDisable) {
+        ConfirmDialog(
+            title = "Disable in-app updates?",
+            text = "You can choose a trusted host and turn updates back on later.",
+            confirmLabel = "Disable",
+            onConfirm = {
+                confirmingDisable = false
+                onDisable()
+            },
+            onDismiss = { confirmingDisable = false },
+        )
+    }
+
+    SettingsSection(
+        label = "Update source",
+        footnote = "Updates are fetched from one explicitly selected host. Switching hosts may also switch signing keys.",
+    ) {
+        Column(Modifier.fillMaxWidth().padding(14.dp)) {
+            Text(
+                currentHostAlias?.let { "Updates use $it" } ?: "In-app updates are disabled",
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.testTag("settings_update_host"),
+            )
+            options.forEach { (hostId, alias) ->
+                if (hostId != currentHostId) {
+                    TextButton(
+                        onClick = { pendingHostId = hostId },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text("Use $alias")
+                    }
+                }
+            }
+            if (currentHostId != null) {
+                TextButton(
+                    onClick = { confirmingDisable = true },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("Disable in-app updates", color = MaterialTheme.colorScheme.error)
+                }
             }
         }
     }

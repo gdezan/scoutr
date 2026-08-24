@@ -15,8 +15,8 @@ import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 
 /**
- * Per-connection terminal preferences: SHA-256 key isolation, URL
- * canonicalization, defaults, and no raw token in preference keys.
+ * Host-qualified terminal preferences: host-id isolation, defaults,
+ * first-host migration, cleanup, and no credential-derived durable keys.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
@@ -35,24 +35,25 @@ class TerminalPreferencesStoreTest {
 
     @Test
     fun defaults_apply() {
-        val prefs = store().forConnection("http://host", "token-a")
+        val prefs = store().forHost("host-a")
         assertEquals(null, prefs.lastPaneId)
         assertEquals(TerminalPreferencesStore.ConnectionPreferences.DEFAULT_FONT_SIZE_SP, prefs.fontSizeSp)
         assertTrue(prefs.extraKeysVisible)
     }
 
     @Test
-    fun values_round_trip_per_connection() {
+    fun values_round_trip_per_host_and_survive_credential_refresh() {
         val store = store()
-        val a = store.forConnection("http://host", "token-a")
-        val b = store.forConnection("http://host", "token-b")
+        val a = store.forHost("host-a")
+        val b = store.forHost("host-b")
         a.lastPaneId = "w1:p1"
         a.fontSizeSp = 16f
         a.extraKeysVisible = false
         assertNotEquals(a.lastPaneId, b.lastPaneId)
         assertEquals(null, b.lastPaneId)
-        assertEquals(16f, store.forConnection("http://host", "token-a").fontSizeSp)
-        assertFalse(store.forConnection("http://host", "token-a").extraKeysVisible)
+        // URL/token changes are irrelevant: the host id is the durable key.
+        assertEquals(16f, store.forHost("host-a").fontSizeSp)
+        assertFalse(store.forHost("host-a").extraKeysVisible)
     }
 
     @Test
@@ -61,8 +62,8 @@ class TerminalPreferencesStoreTest {
         // connection; a write on either must reach the other, and the revision
         // is what tells an already-composed reader to re-read.
         val store = store()
-        val settings = store.forConnection("http://host", "t")
-        val terminal = store.forConnection("http://host", "t")
+        val settings = store.forHost("host-a")
+        val terminal = store.forHost("host-a")
         val before = store.viewPreferencesRevision.value
 
         settings.fontSizeSp = 18f
@@ -75,7 +76,7 @@ class TerminalPreferencesStoreTest {
 
         // Independently of the cache, the values are on disk for a cold reader.
         assertEquals(18f, TerminalPreferencesStore(RuntimeEnvironment.getApplication())
-            .forConnection("http://host", "t").fontSizeSp)
+            .forHost("host-a").fontSizeSp)
     }
 
     @Test
@@ -85,18 +86,18 @@ class TerminalPreferencesStoreTest {
         // on the frame thread per event.
         val store = store()
         assertSame(
-            store.forConnection("http://host", "t"),
-            store.forConnection("http://host", "t"),
+            store.forHost("host-a"),
+            store.forHost("host-a"),
         )
         assertNotSame(
-            store.forConnection("http://host", "t"),
-            store.forConnection("http://host", "other-token"),
+            store.forHost("host-a"),
+            store.forHost("host-b"),
         )
     }
 
     @Test
     fun font_size_is_clamped_on_write_whoever_writes_it() {
-        val prefs = store().forConnection("http://host", "t")
+        val prefs = store().forHost("host-a")
         prefs.fontSizeSp = 100f
         assertEquals(TerminalPreferencesStore.ConnectionPreferences.MAX_FONT_SIZE_SP, prefs.fontSizeSp)
         prefs.fontSizeSp = 1f
@@ -109,42 +110,62 @@ class TerminalPreferencesStoreTest {
         // churn the terminal's font/extra-keys recomposition.
         val store = store()
         val before = store.viewPreferencesRevision.value
-        store.forConnection("http://host", "t").lastPaneId = "w1:p1"
+        store.forHost("host-a").lastPaneId = "w1:p1"
         assertEquals(before, store.viewPreferencesRevision.value)
     }
 
     @Test
-    fun canonicalize_equivalents_share_keys() {
+    fun first_host_migration_moves_legacy_url_token_state_once() {
+        val oldHost = "https://bridge.example/path"
+        val oldToken = "legacy-token"
+        val oldKey = TerminalPreferencesStore.legacyConnectionKey(oldHost, oldToken)
+        RuntimeEnvironment.getApplication()
+            .getSharedPreferences(TerminalPreferencesStore.FILE, Context.MODE_PRIVATE)
+            .edit()
+            .putString("$oldKey.lastPaneId", "legacy-pane")
+            .putFloat("$oldKey.fontSizeSp", 17f)
+            .commit()
+
         val store = store()
-        val http = store.forConnection("http://HOST:80/path/", "t")
-        val https = store.forConnection("https://host/path", "t")
-        assertEquals(http.lastPaneId, https.lastPaneId)
-        // Different port is a different connection.
-        val port = store.forConnection("http://host:8080/path", "t")
-        assertEquals(null, port.lastPaneId)
-        port.lastPaneId = "w1:p1"
-        assertEquals(null, store.forConnection("http://host:8080/other", "t").lastPaneId)
+        store.adoptLegacyPreferences("host-a", oldHost, oldToken)
+
+        assertEquals("legacy-pane", store.forHost("host-a").lastPaneId)
+        assertEquals(17f, store.forHost("host-a").fontSizeSp)
+        assertEquals(null, store.forHost("host-b").lastPaneId)
     }
 
     @Test
-    fun canonicalize_rules() {
-        assertEquals("http://host", TerminalPreferencesStore.canonicalize("HTTP://HOST:80/"))
-        assertEquals("https://host:8443/path", TerminalPreferencesStore.canonicalize("https://host:8443/path/"))
-        assertEquals("host", TerminalPreferencesStore.canonicalize("host"))
-        assertEquals("http://host", TerminalPreferencesStore.canonicalize("http://host/"))
-        assertEquals("http://host/a/b", TerminalPreferencesStore.canonicalize("http://host/a/b/"))
+    fun clearHost_removes_selected_pane_and_view_choices_without_touching_another_host() {
+        val store = store()
+        store.forHost("host-a").lastPaneId = "pane-a"
+        store.forHost("host-a").fontSizeSp = 19f
+        store.forHost("host-b").lastPaneId = "pane-b"
+
+        assertTrue(store.clearHost("host-a"))
+        assertEquals(null, store.forHost("host-a").lastPaneId)
+        assertEquals(TerminalPreferencesStore.ConnectionPreferences.DEFAULT_FONT_SIZE_SP, store.forHost("host-a").fontSizeSp)
+        assertEquals("pane-b", store.forHost("host-b").lastPaneId)
+    }
+
+    @Test
+    fun retiredHostCannotRepopulateClearedTerminalState() {
+        val guarded = TerminalPreferencesStore(RuntimeEnvironment.getApplication()) { _, _ -> false }
+        guarded.forHost("host-a").lastPaneId = "stale-pane"
+
+        assertEquals(null, guarded.forHost("host-a").lastPaneId)
     }
 
     @Test
     fun token_never_appears_in_preference_keys() {
         val app = RuntimeEnvironment.getApplication()
         val token = "super-secret-token-42"
-        store().forConnection("https://bridge.example", token).lastPaneId = "w1:p1"
+        store().forHost("host-a").lastPaneId = "w1:p1"
         val all = app.getSharedPreferences(TerminalPreferencesStore.FILE, Context.MODE_PRIVATE).all
         assertTrue(all.isNotEmpty())
         for (key in all.keys) {
             assertFalse("raw token leaked into key: $key", key.contains(token))
         }
         assertFalse("raw token leaked into value", all.values.any { it.toString().contains(token) })
+        assertTrue("host state must be keyed by host id", all.keys.any { it.startsWith("host.") })
     }
 }

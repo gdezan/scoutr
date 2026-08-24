@@ -27,6 +27,7 @@ export interface JsonBody {
   path?: string;
   key?: SessionKey;
   fcmToken?: string;
+  profileGeneration?: string;
 }
 
 /** Any JSON-serializable value a route may return as its response body. */

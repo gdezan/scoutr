@@ -80,7 +80,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.scoutr.app.data.AttentionSummary
 import dev.scoutr.app.data.RepoSummary
 import dev.scoutr.app.ui.theme.DiffPalette
@@ -91,7 +90,6 @@ import dev.scoutr.app.data.ScoutrApiCompatibility
 import dev.scoutr.app.data.formatScoutrApiIncompatibility
 import dev.scoutr.app.state.BoardUiState
 import dev.scoutr.app.state.BoardViewModel
-import dev.scoutr.app.state.viewModelFactory
 import dev.scoutr.app.ui.components.AgentMark
 import dev.scoutr.app.ui.components.ConfirmDialog
 import dev.scoutr.app.ui.components.ReadableContentColumn
@@ -116,12 +114,13 @@ import kotlinx.coroutines.launch
 @Composable
 fun BoardScreen(
     onOpenAgent: (SessionDescriptor) -> Unit = {},
-    viewModel: BoardViewModel = rememberBoardViewModel(),
+    viewModel: BoardViewModel,
     modifier: Modifier = Modifier,
     onReviewAgent: (SessionDescriptor) -> Unit = {},
     onCloseAgent: (SessionDescriptor) -> Unit = {},
     onResolveCompatibility: () -> Unit = {},
     onQuickAnswer: (SessionDescriptor, String) -> Unit = {_, _ -> },
+    onRetryMigration: () -> Unit = {},
 ) {
     val ui by viewModel.ui.collectAsState()
 
@@ -197,7 +196,10 @@ fun BoardScreen(
                     onReviewAgent = onReviewAgent,
                     onCloseAgent = { pendingClose = it },
                     onQuickAnswer = onQuickAnswer,
-                    onRetry = { viewModel.connect("", "") },
+                    onRetry = {
+                        onRetryMigration()
+                        viewModel.connect("", "")
+                    },
                     onResolveCompatibility = onResolveCompatibility,
                 )
             }
@@ -990,12 +992,3 @@ private fun statusLabel(status: AgentStatus) = when (status) {
 /** Compact "time in state" from the bridge-stamped entry time. */
 internal fun timeInState(sinceMs: Double?, nowMs: Long = System.currentTimeMillis()): String? =
     sinceMs?.let { dev.scoutr.app.ui.relativeTime(it, nowMs = nowMs) }
-
-@Composable
-private fun rememberBoardViewModel(): BoardViewModel {
-    return viewModel(
-        factory = viewModelFactory<BoardViewModel> { app ->
-            BoardViewModel(app.container.bridge, app.container.connectionStore)
-        },
-    )
-}

@@ -93,6 +93,21 @@ class SessionHistoryViewModelTest {
     }
 
     @Test
+    fun successfulCatalogFetchSuppliesKeysForLegacyMetadataAdoption() = runBlocking {
+        var adopted = emptyList<dev.scoutr.app.data.SessionKey>()
+        val viewModel = SessionHistoryViewModel(
+            bridge = fake,
+            profile = dev.scoutr.app.data.HostProfileKey("host-a", 1),
+            store = store,
+            adoptLegacyMetadata = { adopted = it.toList() },
+        )
+
+        viewModel.waitForLoaded()
+
+        assertEquals(fake.sessionCatalogResult.getOrThrow().sessions.map { it.key }, adopted)
+    }
+
+    @Test
     fun queryIsSentToTheBridgeAndFilters() = runBlocking {
         val viewModel = SessionHistoryViewModel(fake, savedConnection(), store)
         viewModel.setQuery("billing")
@@ -205,13 +220,18 @@ class RecordingSessionCatalogStore : SessionCatalogStore {
     val pinned = mutableSetOf<dev.scoutr.app.data.SessionKey>()
     val archived = mutableSetOf<dev.scoutr.app.data.SessionKey>()
 
-    override fun pinnedKeys(catalogKeys: Collection<dev.scoutr.app.data.SessionKey>) = pinned.toSet()
-    override fun archivedKeys(catalogKeys: Collection<dev.scoutr.app.data.SessionKey>) = archived.toSet()
-    override fun setPinned(key: dev.scoutr.app.data.SessionKey, pinned: Boolean) {
-        if (pinned) this.pinned.add(key) else this.pinned.remove(key)
+    override fun pinnedKeys(catalogKeys: Collection<dev.scoutr.app.data.HostSessionKey>) =
+        pinned.mapTo(mutableSetOf()) { dev.scoutr.app.data.HostSessionKey(catalogKeys.firstOrNull()?.hostId ?: "legacy-singleton", it) }
+    override fun archivedKeys(catalogKeys: Collection<dev.scoutr.app.data.HostSessionKey>) =
+        archived.mapTo(mutableSetOf()) { dev.scoutr.app.data.HostSessionKey(catalogKeys.firstOrNull()?.hostId ?: "legacy-singleton", it) }
+    override fun setPinned(key: dev.scoutr.app.data.HostSessionKey, pinned: Boolean) {
+        if (pinned) this.pinned.add(key.session) else this.pinned.remove(key.session)
     }
 
-    override fun setArchived(key: dev.scoutr.app.data.SessionKey, archived: Boolean) {
-        if (archived) this.archived.add(key) else this.archived.remove(key)
+    override fun setArchived(key: dev.scoutr.app.data.HostSessionKey, archived: Boolean) {
+        if (archived) this.archived.add(key.session) else this.archived.remove(key.session)
     }
+
+    override fun adoptLegacyEntries(hostId: String, catalogKeys: Collection<dev.scoutr.app.data.SessionKey>) = Unit
+    override fun copyRetainedMetadata(fromHostId: String, toHostId: String, confirmed: Boolean) = Unit
 }

@@ -9,11 +9,15 @@ import android.net.Uri
 import androidx.core.app.NotificationCompat
 import dev.scoutr.app.MainActivity
 import dev.scoutr.app.R
+import dev.scoutr.app.data.HostPaneKey
+import dev.scoutr.app.data.HostProfileKey
 import dev.scoutr.app.data.NotificationPreferencesStore
 import dev.scoutr.app.data.RepoSummary
 import dev.scoutr.app.data.SessionDescriptor
+import dev.scoutr.app.data.encode
 import dev.scoutr.app.service.NotificationMuteReceiver
 import dev.scoutr.app.service.NotificationReplyReceiver
+import dev.scoutr.app.service.putHostPaneIdentity
 import dev.scoutr.app.service.resolveNotificationLink
 import dev.scoutr.app.service.scoutrChatUri
 import dev.scoutr.app.state.MuteStore
@@ -21,25 +25,10 @@ import dev.scoutr.app.state.MuteStore
 /**
  * The one place Scoutr posts, updates, and clears notifications.
  *
- * Presentation used to be split between the monitor service and the app
- * container, which drifted into two builders that disagreed on channel, icon,
- * and id. Everything now goes through here, which is what makes the
- * invariants below true rather than merely intended:
- *
- * - **One slot per pane**, keyed `paneId.hashCode()` for blocked and
- *   `paneId.hashCode() xor DONE_SLOT_XOR` for done. A pane that blocks twice
- *   updates its own notification instead of stacking a second one, and the
- *   resolve ping can cancel it by pane id alone.
- * - **Two channels**, `needs_you` (blocked) and `agent_done` (done).
- *   Blocked is high-priority “needs your input”; done is high-priority
- *   “finished” and is gated by its own in-app toggle.
- * - **Deep links are built, never received.** The content intent comes from
- *   [scoutrChatUri] through [resolveNotificationLink], so no payload string
- *   ever reaches the launcher unvalidated.
- *
- * The posted notifications themselves are the state: [NotificationManager]
- * survives process death, an in-memory slot map would not, and the FCM path
- * runs in a process the system starts and stops at will.
+ * Host-aware notifications use a tag containing host id, profile generation,
+ * and pane id. Their numeric id is also derived from that full identity, and
+ * every PendingIntent carries the same identity. The old pane-only overloads
+ * remain for pre-host tests and migration compatibility only.
  */
 class NotificationPresenter(
     private val context: Context,
@@ -50,30 +39,202 @@ class NotificationPresenter(
     private val manager: NotificationManager =
         context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
 
-    /** A blocked agent, named, with the repo state you'd be walking into. */
     fun showBlocked(session: SessionDescriptor) {
-        if (!preferencesStore.blockedEnabled) return
         val paneId = session.live?.paneId ?: return
-        val workspace = session.cwd?.trimEnd('/')?.substringAfterLast('/').orEmpty()
-        val title = if (workspace.isEmpty()) session.displayName else "${session.displayName} · $workspace"
-        postBlocked(paneId, title, bodyWithBranch("Needs your input", session.liveSummary))
+        showBlockedLegacy(paneId, session)
     }
 
-    /** A finished agent, named, with where its work sits. */
-    fun showDone(session: SessionDescriptor) {
-        if (!preferencesStore.doneEnabled) return
+    fun showBlocked(key: HostPaneKey, session: SessionDescriptor) {
+        if (session.live?.paneId != key.paneId) return
+        val workspace = session.cwd?.trimEnd('/')?.substringAfterLast('/').orEmpty()
+        val title = if (workspace.isEmpty()) session.displayName else "${session.displayName} · $workspace"
+        postBlocked(key, title, bodyWithBranch("Needs your input", session.liveSummary))
+    }
+
+    fun showBlocked(profile: HostProfileKey, session: SessionDescriptor) {
         val paneId = session.live?.paneId ?: return
         val workspace = session.cwd?.trimEnd('/')?.substringAfterLast('/').orEmpty()
         val title = if (workspace.isEmpty()) session.displayName else "${session.displayName} · $workspace"
-        postDone(paneId, title, bodyWithBranch("Finished", session.doneSummary))
+        postBlocked(
+            HostPaneKey(profile, paneId),
+            title,
+            bodyWithBranch("Needs your input", session.liveSummary),
+        )
+    }
+
+    fun showDone(session: SessionDescriptor) {
+        val paneId = session.live?.paneId ?: return
+        showDoneLegacy(paneId, session)
+    }
+
+    fun showDone(key: HostPaneKey, session: SessionDescriptor) {
+        if (session.live?.paneId != key.paneId) return
+        val workspace = session.cwd?.trimEnd('/')?.substringAfterLast('/').orEmpty()
+        val title = if (workspace.isEmpty()) session.displayName else "${session.displayName} · $workspace"
+        postDone(key, title, bodyWithBranch("Finished", session.doneSummary))
+    }
+
+    fun showDone(profile: HostProfileKey, session: SessionDescriptor) {
+        val paneId = session.live?.paneId ?: return
+        val workspace = session.cwd?.trimEnd('/')?.substringAfterLast('/').orEmpty()
+        val title = if (workspace.isEmpty()) session.displayName else "${session.displayName} · $workspace"
+        postDone(
+            HostPaneKey(profile, paneId),
+            title,
+            bodyWithBranch("Finished", session.doneSummary),
+        )
+    }
+
+    /** Degraded notifications still retain the host-qualified destination. */
+    fun showDegraded(paneId: String) {
+        if (!preferencesStore.blockedEnabled) return
+        postBlockedLegacy(paneId, "An agent needs you", "Tap to open Scoutr")
+    }
+
+    fun showDegraded(key: HostPaneKey) = showDegraded(key.profile, key.paneId)
+
+    fun showDegraded(profile: HostProfileKey, paneId: String) {
+        if (!preferencesStore.blockedEnabled) return
+        postBlocked(HostPaneKey(profile, paneId), "An agent needs you", "Tap to open Scoutr")
+    }
+
+    fun showDegradedDone(paneId: String) {
+        if (!preferencesStore.doneEnabled) return
+        postDoneLegacy(paneId, "An agent finished", "Tap to open Scoutr")
+    }
+
+    fun showDegradedDone(key: HostPaneKey) = showDegradedDone(key.profile, key.paneId)
+
+    fun showDegradedDone(profile: HostProfileKey, paneId: String) {
+        if (!preferencesStore.doneEnabled) return
+        postDone(HostPaneKey(profile, paneId), "An agent finished", "Tap to open Scoutr")
+    }
+
+    /** Cancels both status slots for one generation-qualified pane. */
+    fun cancel(key: HostPaneKey) {
+        manager.cancel(tagOf(key), slotOf(key))
+        manager.cancel(tagOf(key), doneSlotOf(key))
+        syncBlockedSummary()
+        syncDoneSummary()
+    }
+
+    fun cancel(profile: HostProfileKey, paneId: String) = cancel(HostPaneKey(profile, paneId))
+
+    /** Compatibility pane-only cancellation. */
+    fun cancel(paneId: String) {
+        manager.cancel(slotOf(paneId))
+        syncBlockedSummary()
+    }
+
+    /** Cancels every generation and pane belonging to one host id. */
+    fun cancelHost(hostId: String) {
+        for (entry in manager.activeNotifications) {
+            if (entry.tag?.startsWith(hostTagPrefix(hostId)) == true) {
+                manager.cancel(entry.tag, entry.id)
+            }
+        }
+        syncBlockedSummary()
+        syncDoneSummary()
+    }
+
+    fun cancelHost(hostId: String, profileGeneration: Long) =
+        cancelHost(HostProfileKey(hostId, profileGeneration))
+
+    fun cancelHost(profile: HostProfileKey) {
+        val prefix = profileTagPrefix(profile)
+        for (entry in manager.activeNotifications) {
+            if (entry.tag?.startsWith(prefix) == true) {
+                manager.cancel(entry.tag, entry.id)
+            }
+        }
+        syncBlockedSummary()
+        syncDoneSummary()
     }
 
     /**
-     * Appends deterministic git facts to a notification body in the Board
-     * card's own grammar: bare branch, then "uncommitted" when dirty. A
-     * missing or branchless summary leaves the body alone — no invented
-     * facts, and degraded notifications never gain context they don't have.
+     * Clears only blocked notifications for one current profile generation.
+     * Notifications belonging to another host/generation are untouched.
      */
+    fun cancelAllExcept(profile: HostProfileKey, livePaneIds: Set<String>) {
+        val keep = livePaneIds.map { tagOf(HostPaneKey(profile, it)) }.toSet()
+        for (entry in activeEntries(GROUP_KEY)) {
+            if (entry.tag?.startsWith(profileTagPrefix(profile)) == true && entry.tag !in keep) {
+                manager.cancel(entry.tag, entry.id)
+            }
+        }
+        syncBlockedSummary()
+    }
+
+    fun cancelAllExcept(hostId: String, profileGeneration: Long, livePaneIds: Set<String>) =
+        cancelAllExcept(HostProfileKey(hostId, profileGeneration), livePaneIds)
+
+    /** Compatibility host-scoped overload used while the shell has no generation. */
+    fun cancelAllExcept(livePaneIds: Set<String>) {
+        val keep = livePaneIds.map(::slotOf).toSet()
+        for (entry in activeEntries(GROUP_KEY)) {
+            if (entry.tag == null && entry.id !in keep) manager.cancel(entry.id)
+        }
+        syncBlockedSummary()
+    }
+
+    fun cancelAllExcept(hostId: String, livePaneIds: Set<String>) {
+        for (entry in activeEntries(GROUP_KEY)) {
+            val tag = entry.tag ?: continue
+            if (tag.startsWith(hostTagPrefix(hostId)) &&
+                livePaneIds.none { tag.endsWith(".${encodeTagPart(it)}") }
+            ) {
+                manager.cancel(tag, entry.id)
+            }
+        }
+        syncBlockedSummary()
+    }
+
+    /** Auto-clear for done notifications on foreground entry. */
+    fun cancelAllDone() {
+        for (entry in activeEntries(GROUP_DONE)) manager.cancel(entry.tag, entry.id)
+        syncDoneSummary()
+    }
+
+    fun cancelAllDone(profile: HostProfileKey) {
+        for (entry in activeEntries(GROUP_DONE)) {
+            if (entry.tag?.startsWith(profileTagPrefix(profile)) == true) {
+                manager.cancel(entry.tag, entry.id)
+            }
+        }
+        syncDoneSummary()
+    }
+
+    fun cancelAllDone(hostId: String, profileGeneration: Long) =
+        cancelAllDone(HostProfileKey(hostId, profileGeneration))
+
+    /** Removes unqualified notifications posted by the singleton app version. */
+    fun cancelLegacy() {
+        for (entry in manager.activeNotifications) {
+            if (entry.tag == null) manager.cancel(entry.id)
+        }
+        syncBlockedSummary()
+        syncDoneSummary()
+    }
+
+    /** Used by host cleanup; unlike [cancelHost], also clears old singleton slots. */
+    fun cancelAll() {
+        manager.cancelAll()
+    }
+
+    private fun showBlockedLegacy(paneId: String, session: SessionDescriptor) {
+        if (!preferencesStore.blockedEnabled) return
+        val workspace = session.cwd?.trimEnd('/')?.substringAfterLast('/').orEmpty()
+        val title = if (workspace.isEmpty()) session.displayName else "${session.displayName} · $workspace"
+        postBlockedLegacy(paneId, title, bodyWithBranch("Needs your input", session.liveSummary))
+    }
+
+    private fun showDoneLegacy(paneId: String, session: SessionDescriptor) {
+        if (!preferencesStore.doneEnabled) return
+        val workspace = session.cwd?.trimEnd('/')?.substringAfterLast('/').orEmpty()
+        val title = if (workspace.isEmpty()) session.displayName else "${session.displayName} · $workspace"
+        postDoneLegacy(paneId, title, bodyWithBranch("Finished", session.doneSummary))
+    }
+
     private fun bodyWithBranch(base: String, summary: RepoSummary?): String =
         if (summary == null) {
             base
@@ -85,52 +246,50 @@ class NotificationPresenter(
             ).joinToString(" · ")
         }
 
-    /**
-     * A blocked agent whose identity could not be fetched. Silence is the
-     * failure mode being eliminated, so the user still learns something
-     * happened and tapping opens the app, which retries.
-     */
-    fun showDegraded(paneId: String) {
+    private fun postBlocked(key: HostPaneKey, title: String, body: String) {
         if (!preferencesStore.blockedEnabled) return
-        postBlocked(paneId, "An agent needs you", "Tap to open Scoutr")
+        if (muteStore.isMuted(key)) return
+        ensureChannels()
+        val notification = NotificationCompat.Builder(context, CHANNEL_NEEDS_YOU)
+            .setSmallIcon(R.drawable.ic_scoutr_notification)
+            .setColor(ACCENT)
+            .setContentTitle(title)
+            .setContentText(body)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+            .setAutoCancel(true)
+            .setOnlyAlertOnce(true)
+            .setGroup(GROUP_KEY)
+            .setContentIntent(openPaneIntent(key, BLOCKED))
+            .addAction(NotificationReplyReceiver.replyAction(context, key))
+            .addAction(NotificationMuteReceiver.muteAction(context, key))
+            .build()
+        manager.notify(tagOf(key), slotOf(key), notification)
+        syncBlockedSummary()
     }
 
-    /** A finished agent whose identity could not be fetched. */
-    fun showDegradedDone(paneId: String) {
+    private fun postDone(key: HostPaneKey, title: String, body: String) {
         if (!preferencesStore.doneEnabled) return
-        postDone(paneId, "An agent finished", "Tap to open Scoutr")
-    }
-
-    fun cancel(paneId: String) {
-        manager.cancel(slotOf(paneId))
-        syncBlockedSummary()
-    }
-
-    fun cancelDone(paneId: String) {
-        manager.cancel(doneSlotOf(paneId))
+        if (muteStore.isMuted(key)) return
+        ensureChannels()
+        val notification = NotificationCompat.Builder(context, CHANNEL_DONE)
+            .setSmallIcon(R.drawable.ic_scoutr_notification)
+            .setColor(ACCENT)
+            .setContentTitle(title)
+            .setContentText(body)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+            .setAutoCancel(true)
+            .setOnlyAlertOnce(true)
+            .setGroup(GROUP_DONE)
+            .setContentIntent(openPaneIntent(key, DONE))
+            .build()
+        manager.notify(tagOf(key), doneSlotOf(key), notification)
         syncDoneSummary()
     }
 
-    /**
-     * Clear every blocked slot whose pane is no longer blocked. This is the backstop
-     * for a resolve ping that never arrived — a dropped push must not leave a
-     * notification the user cannot get rid of.
-     */
-    fun cancelAllExcept(livePaneIds: Set<String>) {
-        val keep = livePaneIds.map(::slotOf).toSet()
-        for (slot in activeBlockedSlots()) {
-            if (slot !in keep) manager.cancel(slot)
-        }
-        syncBlockedSummary()
-    }
-
-    /** Auto-clear for done: drops every finished notification on foreground entry. */
-    fun cancelAllDone() {
-        for (slot in activeDoneSlots()) manager.cancel(slot)
-        syncDoneSummary()
-    }
-
-    private fun postBlocked(paneId: String, title: String, body: String) {
+    private fun postBlockedLegacy(paneId: String, title: String, body: String) {
+        if (!preferencesStore.blockedEnabled) return
         if (muteStore.isMuted(paneId)) return
         ensureChannels()
         val notification = NotificationCompat.Builder(context, CHANNEL_NEEDS_YOU)
@@ -143,7 +302,7 @@ class NotificationPresenter(
             .setAutoCancel(true)
             .setOnlyAlertOnce(true)
             .setGroup(GROUP_KEY)
-            .setContentIntent(openPaneIntent(paneId, BLOCKED))
+            .setContentIntent(openPaneIntentLegacy(paneId, BLOCKED))
             .addAction(NotificationReplyReceiver.replyAction(context, paneId))
             .addAction(NotificationMuteReceiver.muteAction(context, paneId))
             .build()
@@ -151,7 +310,8 @@ class NotificationPresenter(
         syncBlockedSummary()
     }
 
-    private fun postDone(paneId: String, title: String, body: String) {
+    private fun postDoneLegacy(paneId: String, title: String, body: String) {
+        if (!preferencesStore.doneEnabled) return
         if (muteStore.isMuted(paneId)) return
         ensureChannels()
         val notification = NotificationCompat.Builder(context, CHANNEL_DONE)
@@ -164,34 +324,52 @@ class NotificationPresenter(
             .setAutoCancel(true)
             .setOnlyAlertOnce(true)
             .setGroup(GROUP_DONE)
-            .setContentIntent(openPaneIntent(paneId, DONE))
+            .setContentIntent(openPaneIntentLegacy(paneId, DONE))
             .build()
         manager.notify(doneSlotOf(paneId), notification)
         syncDoneSummary()
     }
-    private fun openPaneIntent(paneId: String, status: String): PendingIntent {
+
+    private fun openPaneIntent(key: HostPaneKey, status: String): PendingIntent {
+        val link = resolveNotificationLink(
+            click = scoutrChatUri(key.profile, key.paneId, status),
+            paneId = key.paneId,
+            status = status,
+            profile = key.profile,
+        ) ?: error("Could not build a host-qualified notification destination")
+        val intent = Intent(context, MainActivity::class.java)
+            .putHostPaneIdentity(key, status)
+            .apply {
+                action = Intent.ACTION_VIEW
+                data = Uri.parse(link.uri)
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            }
+        return PendingIntent.getActivity(
+            context,
+            requestCode(key, status),
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+    }
+
+    private fun openPaneIntentLegacy(paneId: String, status: String): PendingIntent {
         val link = resolveNotificationLink(scoutrChatUri(paneId, status), paneId, status)
         val intent = Intent(context, MainActivity::class.java).apply {
             action = Intent.ACTION_VIEW
             link?.let { data = Uri.parse(it.uri) }
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
         }
-        val requestCode = if (status == DONE) doneSlotOf(paneId) else slotOf(paneId)
         return PendingIntent.getActivity(
             context,
-            requestCode,
+            if (status == DONE) doneSlotOf(paneId) else slotOf(paneId),
             intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
     }
 
-    /**
-     * A group with one child renders as a stray "1 notification" header, so
-     * the summary exists only from two agents up.
-     */
     private fun syncBlockedSummary() {
         syncGroupSummary(
-            count = activeBlockedSlots().size,
+            count = activeEntries(GROUP_KEY).size,
             summaryId = SUMMARY_ID,
             channel = CHANNEL_NEEDS_YOU,
             group = GROUP_KEY,
@@ -201,7 +379,7 @@ class NotificationPresenter(
 
     private fun syncDoneSummary() {
         syncGroupSummary(
-            count = activeDoneSlots().size,
+            count = activeEntries(GROUP_DONE).size,
             summaryId = DONE_SUMMARY_ID,
             channel = CHANNEL_DONE,
             group = GROUP_DONE,
@@ -228,23 +406,7 @@ class NotificationPresenter(
         }
     }
 
-    private fun activeBlockedSlots(): List<Int> =
-        manager.activeNotifications
-            .filter { it.id != SUMMARY_ID && it.id != DONE_SUMMARY_ID && it.notification.group == GROUP_KEY }
-            .map { it.id }
-
-    private fun activeDoneSlots(): List<Int> =
-        manager.activeNotifications
-            .filter { it.id != SUMMARY_ID && it.id != DONE_SUMMARY_ID && it.notification.group == GROUP_DONE }
-            .map { it.id }
-
-    /**
-     * Created lazily rather than in the container's init, because a
-     * push-woken process may never build the UI half of the app. Upgrading
-     * installs still carry the two channels this replaced, so they are
-     * removed here — otherwise the user keeps two dead toggles in system
-     * settings forever.
-     */
+    @Suppress("DEPRECATION")
     private fun ensureChannels() {
         manager.deleteNotificationChannel(LEGACY_CHANNEL_AGENTS)
         manager.deleteNotificationChannel(LEGACY_CHANNEL_MONITOR)
@@ -258,8 +420,31 @@ class NotificationPresenter(
         )
     }
 
-    @Suppress("DEPRECATION")
-    private fun ensureChannel() = ensureChannels()
+    private fun activeEntries(group: String) = manager.activeNotifications.filter {
+        it.id != SUMMARY_ID && it.id != DONE_SUMMARY_ID && it.notification.group == group
+    }
+
+    private fun tagOf(key: HostPaneKey): String =
+        "${hostTagPrefix(key.profile.hostId)}${key.profile.profileGeneration}.${encodeTagPart(key.paneId)}"
+
+    /** Length-prefixing keeps host A from matching host A.B during cleanup. */
+    private fun hostTagPrefix(hostId: String): String = "$TAG_PREFIX${hostId.length}:$hostId."
+
+    private fun profileTagPrefix(profile: HostProfileKey): String =
+        "${hostTagPrefix(profile.hostId)}${profile.profileGeneration}."
+
+    private fun encodeTagPart(value: String): String =
+        android.util.Base64.encodeToString(
+            value.toByteArray(Charsets.UTF_8),
+            android.util.Base64.URL_SAFE or android.util.Base64.NO_WRAP or android.util.Base64.NO_PADDING,
+        )
+
+    private fun requestCode(key: HostPaneKey, action: String): Int =
+        key.encode().hashCode() xor action.hashCode()
+
+    private fun slotOf(key: HostPaneKey): Int = key.encode().hashCode()
+
+    private fun doneSlotOf(key: HostPaneKey): Int = slotOf(key) xor DONE_SLOT_XOR
 
     private fun slotOf(paneId: String): Int = paneId.hashCode()
 
@@ -271,18 +456,14 @@ class NotificationPresenter(
         const val GROUP_KEY = "dev.scoutr.app.NEEDS_YOU"
         const val GROUP_DONE = "dev.scoutr.app.AGENT_DONE"
 
-        /** A fixed id outside the range a pane hash realistically lands on. */
         const val SUMMARY_ID = 0x5C0F7A
         const val DONE_SUMMARY_ID = 0x5C0F7B
 
         private const val BLOCKED = "blocked"
         private const val DONE = "done"
-
-        /** `error` from the design system: needs-you red. */
         private const val ACCENT = 0xFFE5484D.toInt()
-
         private const val DONE_SLOT_XOR = 0x40000000.toInt()
-
+        private const val TAG_PREFIX = "scoutr.notification."
         private const val LEGACY_CHANNEL_AGENTS = "agents"
         private const val LEGACY_CHANNEL_MONITOR = "scoutr_monitor"
     }

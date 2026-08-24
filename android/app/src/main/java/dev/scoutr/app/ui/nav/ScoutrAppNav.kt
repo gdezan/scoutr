@@ -38,12 +38,13 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import dev.scoutr.app.ScoutrApp
+import dev.scoutr.app.data.HostProfileKey
 import dev.scoutr.app.data.ScoutrApiCompatibility
+import dev.scoutr.app.data.encode
 import dev.scoutr.app.service.ScoutrDeepLink
 import dev.scoutr.app.state.BoardViewModel
 import dev.scoutr.app.state.CommandPaletteViewModel
 import dev.scoutr.app.state.NewSessionViewModel
-import dev.scoutr.app.state.ReviewViewModel
 import dev.scoutr.app.state.viewModelFactory
 import dev.scoutr.app.ui.motion.HapticEvent
 import dev.scoutr.app.ui.motion.ScoutrMotion
@@ -55,110 +56,153 @@ import dev.scoutr.app.ui.screens.NewSessionSheet
 import dev.scoutr.app.ui.screens.PanelSelection
 import dev.scoutr.app.ui.screens.SessionPanel
 
-/** Above this window width the shell shows the session panel beside the detail pane. */
 private val WIDE_WINDOW_BREAKPOINT = 840.dp
-
-/** The session panel's fixed width; the detail pane takes the remainder. */
 private val SESSION_PANEL_WIDTH = 320.dp
 
-/**
- * The app shell: one root NavController, the wide-window panel/detail split,
- * the compact bottom bar, and the two overlays (new-session sheet, command
- * palette). Feature destinations register themselves through the graph
- * modules in this package; everything they need from the shell arrives as an
- * explicit parameter.
- */
+/** Root shell. Hostless Board/Sessions choose a default; remote routes carry the key. */
 @Composable
-fun ScoutrAppNav(
-    deepLink: MutableState<ScoutrDeepLink?>,
-) {
+fun ScoutrAppNav(deepLink: MutableState<ScoutrDeepLink?>) {
     val app = LocalContext.current.applicationContext as ScoutrApp
     val navController = rememberNavController()
     val container = app.container
+    val registryState by container.hostRegistry.states.collectAsState()
+    val removingHostIds by container.removingHostIds.collectAsState()
     val backStack by navController.currentBackStackEntryAsState()
     val currentRoute = backStack?.destination?.route
 
+    val installed = registryState.profiles.any { it.hostId !in removingHostIds } ||
+        registryState.pendingLegacyConnection
     var startDestination by remember {
-        mutableStateOf(initialStartDestination(container.connectionStore.saved != null))
+        mutableStateOf(initialStartDestination(registryState.profiles.isNotEmpty(), registryState.pendingLegacyConnection))
     }
 
-    // One activity-scoped board VM: the bottom-bar badge, the session panel
-    // and the Board screen share the same live snapshot, so there is no
-    // duplicate polling.
-    val boardViewModel: BoardViewModel = viewModel(
-        factory = viewModelFactory<BoardViewModel> { app ->
-            BoardViewModel(app.container.bridge, app.container.connectionStore)
-        },
-        key = "activity_board",
-    )
-    val boardUi by boardViewModel.ui.collectAsState()
-
-    val onTab = { route: String ->
-        navController.navigate(route) {
-            popUpTo(Destination.Board.route) { inclusive = false }
-            launchSingleTop = true
-        }
-    }
-
-    // Legacy notification links carry a live pane id. Resolve that attachment
-    // through the bridge-owned Board descriptor before navigation so an
-    // existing session still enters Chat by canonical key.
-    val pendingDeepLink = deepLink.value
-    LaunchedEffect(pendingDeepLink, boardUi.apiCompatibility, boardUi.board) {
-        if (pendingDeepLink != null) {
-            if (container.connectionStore.saved == null) {
-                deepLink.value = null
-            } else if (boardUi.apiCompatibility == ScoutrApiCompatibility.Compatible) {
-                val session = boardUi.board.sessions.firstOrNull {
-                    it.live?.paneId == pendingDeepLink.paneId
-                }
-                if (session != null) {
-                    navController.navigateToChat(
-                        session.key,
-                        pendingDeepLink.paneId,
-                        session.live?.status ?: pendingDeepLink.status ?: AppRoutes.ChatArgs.DEFAULT_STATUS,
-                    )
-                    deepLink.value = null
-                }
+    // Migration and pairing change the graph entry without consulting the old singleton store.
+    LaunchedEffect(installed, currentRoute) {
+        if (installed && currentRoute == AppRoutes.CONNECT) {
+            startDestination = Destination.Board.route
+            navController.navigate(Destination.Board.route) {
+                popUpTo(AppRoutes.CONNECT) { inclusive = true }
+            }
+        } else if (!installed && currentRoute != null && currentRoute != AppRoutes.CONNECT) {
+            startDestination = AppRoutes.CONNECT
+            navController.navigate(AppRoutes.CONNECT) {
+                popUpTo(navController.graph.id) { inclusive = true }
             }
         }
     }
 
-    val paletteViewModel: CommandPaletteViewModel = viewModel(
-        factory = CommandPaletteViewModel.factory(container.bridge, container.connectionStore),
+    val boardViewModel: BoardViewModel = viewModel(
+        factory = viewModelFactory<BoardViewModel> { appInstance ->
+            BoardViewModel(
+                appInstance.container.hostClients,
+                appInstance.container.hostRegistry,
+                currentBinding = appInstance.container::currentHostBinding,
+                migrationState = appInstance.container.migration.state,
+                adoptLegacyMetadata = appInstance.container.migration::adoptPendingMetadata,
+            )
+        },
+        key = "activity_board",
     )
-    // Hoisted to the activity so session rows can steer it (fix 5: review the
-    // workspace the agent runs in from the Sessions list). Demand-driven, no
-    // polling, so keeping it alive across tabs is harmless.
-    val reviewViewModel: ReviewViewModel = viewModel(
-        factory = ReviewViewModel.factory(container.bridge, container.connectionStore),
-    )
+    val boardUi by boardViewModel.ui.collectAsState()
+    val defaultProfile = registryState.defaultHostId?.let { id ->
+        registryState.profiles.firstOrNull { it.hostId == id }
+    }
+    val defaultProfileKey = defaultProfile?.let { HostProfileKey(it.hostId, it.profileGeneration) }
+    val defaultConnectionRevision = defaultProfile?.connectionRevision
+
+    // Notification links are already validated by MainActivity. Keep their host identity intact;
+    // Chat bootstrapping can resolve the pane directly on that bridge, even when it is not default.
+    val pendingDeepLink = deepLink.value
+    LaunchedEffect(pendingDeepLink, registryState) {
+        val link = pendingDeepLink ?: return@LaunchedEffect
+        val profile = link.profile
+        if (profile == null || container.currentHostProfile(profile) == null) {
+            deepLink.value = null
+            return@LaunchedEffect
+        }
+        runCatching { container.hostRegistry.markUsed(profile.hostId) }
+        navController.navigate(
+            AppRoutes.bootstrapChat(profile, link.paneId, link.status ?: AppRoutes.ChatArgs.DEFAULT_STATUS),
+        )
+        deepLink.value = null
+    }
+
+    fun markExplicitTarget(profile: HostProfileKey) {
+        if (container.currentHostProfile(profile) != null) {
+            runCatching { container.hostRegistry.markUsed(profile.hostId) }
+        }
+    }
+
+    val onTab: (String) -> Unit = { route ->
+        val destination = Destination.forRoute(route)
+        val concrete = when (destination) {
+            Destination.Board, Destination.Sessions -> route
+            Destination.Usage -> defaultProfileKey?.also(::markExplicitTarget)?.let(AppRoutes::usage)
+            Destination.Review -> defaultProfileKey?.also(::markExplicitTarget)?.let(AppRoutes::review)
+            null -> route
+        }
+        if (concrete != null) {
+            navController.navigate(concrete) {
+                popUpTo(Destination.Board.route) { inclusive = false }
+                launchSingleTop = true
+            }
+        }
+    }
+
+    val paletteViewModel: CommandPaletteViewModel? = defaultProfileKey?.let { profile ->
+        val api = container.routeApi(profile, defaultConnectionRevision)
+        if (api == null) null else viewModel(
+            factory = viewModelFactory<CommandPaletteViewModel> {
+                CommandPaletteViewModel(api, profile)
+            },
+            key = "palette_${profile.encode()}_$defaultConnectionRevision",
+        )
+    }
 
     var paletteOpen by remember { mutableStateOf(false) }
-    val openPalette = { paletteOpen = true }
-    val openSettings = { navController.navigate(AppRoutes.SETTINGS) }
+    val openPalette: () -> Unit = {
+        defaultProfileKey?.let {
+            markExplicitTarget(it)
+            paletteOpen = true
+        }
+        Unit
+    }
+    val openSettings: () -> Unit = { navController.navigate(AppRoutes.SETTINGS) }
 
-    // Single-top so repeated taps on the top-bar terminal action reuse the live
-    // route (and its one socket) instead of stacking a second attached pane.
-    val openTerminal = {
-        navController.navigate(AppRoutes.terminal()) { launchSingleTop = true }
+    val openTerminal: () -> Unit = {
+        defaultProfileKey?.let { profile ->
+            markExplicitTarget(profile)
+            navController.navigate(AppRoutes.terminal(profile)) { launchSingleTop = true }
+        }
+        Unit
     }
 
-    /** Pre-select the repo and land on Review; shared by Board, the session panel, Sessions and Chat. */
-    val openReview: (String) -> Unit = { cwd ->
-        reviewViewModel.selectRepo(cwd)
-        onTab(Destination.Review.route)
+    /** Session-originated actions retain their source profile and never consult a new default. */
+    val openReview: (HostProfileKey, String) -> Unit = { profile, cwd ->
+        markExplicitTarget(profile)
+        navController.navigate(AppRoutes.review(profile, cwd)) { launchSingleTop = true }
     }
 
-    // The new-session sheet is hoisted so the wide window's panel FAB opens the
-    // same sheet from any destination, not only from the Board route.
-    val newSessionViewModel: NewSessionViewModel = viewModel(
-        factory = NewSessionViewModel.factory(container.bridge, container.launcherSettingsStore),
-    )
     var showNewSession by remember { mutableStateOf(false) }
+    var newSessionProfile by remember { mutableStateOf<HostProfileKey?>(null) }
+    val openNewSession: () -> Unit = {
+        defaultProfileKey?.let {
+            markExplicitTarget(it)
+            newSessionProfile = it
+            showNewSession = true
+        }
+        Unit
+    }
+    val newSessionViewModel: NewSessionViewModel? = defaultProfileKey?.let { profile ->
+        val api = container.routeApi(profile, defaultConnectionRevision)
+        if (api == null) null else viewModel(
+            factory = viewModelFactory<NewSessionViewModel> {
+                NewSessionViewModel(api, it.container.launcherSettingsStore.forHost(profile.hostId))
+            },
+            key = "new_session_${profile.encode()}_$defaultConnectionRevision",
+        )
+    }
 
-    // Pairing lifecycle lives at the shell because both ends rebuild the
-    // graph root: pairing swaps Connect for Board, forgetting does the reverse.
     val onPaired = {
         container.registerCachedFcmToken()
         startDestination = Destination.Board.route
@@ -166,43 +210,24 @@ fun ScoutrAppNav(
             popUpTo(AppRoutes.CONNECT) { inclusive = true }
         }
     }
-    // One user-visible step: the pairing teardown (and its ordering) belongs
-    // to the container; the activity-scoped board VM is told to let go before
-    // the graph is rebuilt Connect-only.
     val onPairingForgotten = {
         container.forgetConnection()
-        boardViewModel.disconnect()
-        startDestination = AppRoutes.CONNECT
-        navController.navigate(AppRoutes.CONNECT) {
-            popUpTo(navController.graph.id) { inclusive = true }
-        }
     }
 
     BoxWithConstraints {
         val compatible = boardUi.apiCompatibility == ScoutrApiCompatibility.Compatible
-        // Read straight off the window, as ReadableContentColumn already does;
-        // a plain Boolean threaded from the shell is also directly testable.
         val isWide = maxWidth >= WIDE_WINDOW_BREAKPOINT
         val showPanel = isWide && isShellRoute(currentRoute) && compatible
-        // Compact windows only. Wide navigation lives in the session panel's
-        // destination row, so nothing sits beneath the panes.
-        val showBottomBar = !isWide && compatible && currentRoute in Destination.routes
-        // Derived from the back stack, never stored. Both arguments matter: a
-        // chat entered by bootstrap has no sessionKey until the route rewrites.
+        val showBottomBar = !isWide && compatible && Destination.isDestinationRoute(currentRoute)
         val selection = if (currentRoute == CHAT_ROUTE) {
             val args = backStack?.arguments
             PanelSelection(
                 sessionKey = args?.getString(AppRoutes.ChatArgs.SESSION_KEY)?.takeIf(String::isNotBlank),
                 paneId = args?.getString(AppRoutes.ChatArgs.BOOTSTRAP_PANE_ID)?.takeIf(String::isNotBlank),
             )
-        } else {
-            null
-        }
+        } else null
 
         Scaffold(
-            // Status/side bars only. Every screen owns its own bottom inset via
-            // imeOrNavigationBarsPadding — including nav bars here stacks a
-            // nav-bar-tall gap above the keyboard.
             contentWindowInsets = WindowInsets.systemBars.only(
                 WindowInsetsSides.Horizontal + WindowInsetsSides.Top,
             ),
@@ -223,17 +248,31 @@ fun ScoutrAppNav(
                         viewModel = boardViewModel,
                         selection = selection,
                         onOpenSession = { agent ->
+                            val profile = boardUi.hostProfile
                             agent.live?.let {
-                                navController.navigateToChatFromPanel(agent.key, it.paneId, it.status)
+                                if (profile != null) {
+                                    markExplicitTarget(profile)
+                                    navController.navigateToChatFromPanel(profile, agent.key, it.paneId, it.status)
+                                }
                             }
                         },
-                        onReviewAgent = { agent -> agent.cwd?.let(openReview) },
-                        onCloseAgent = { agent -> agent.live?.let { boardViewModel.closeAgent(it.paneId) } },
-                        onQuickAnswer = { agent, label -> boardViewModel.quickAnswer(agent, label) },
-                        onNewSession = { showNewSession = true },
+                        onReviewAgent = { agent ->
+                            val profile = boardUi.hostProfile
+                            agent.cwd?.let { cwd -> if (profile != null) openReview(profile, cwd) }
+                        },
+                        onCloseAgent = { agent ->
+                            boardUi.hostProfile?.let(::markExplicitTarget)
+                            agent.live?.let { boardViewModel.closeAgent(it.paneId) }
+                        },
+                        onQuickAnswer = { agent, label ->
+                            boardUi.hostProfile?.let(::markExplicitTarget)
+                            boardViewModel.quickAnswer(agent, label)
+                        },
+                        onNewSession = openNewSession,
                         onSettings = openSettings,
                         onTerminal = openTerminal,
                         onResolveCompatibility = openSettings,
+                        onRetryMigration = { container.migration.retry() },
                         currentRoute = currentRoute,
                         onSelectDestination = onTab,
                         modifier = Modifier.width(SESSION_PANEL_WIDTH).fillMaxHeight(),
@@ -244,8 +283,6 @@ fun ScoutrAppNav(
                     navController = navController,
                     startDestination = startDestination,
                     modifier = Modifier.weight(1f),
-                    // Destination changes are a short fade only; rows own their own
-                    // 140ms arrival and never shift the list with placement animation.
                     enterTransition = {
                         if (motion) fadeIn(animationSpec = tween(0))
                         else fadeIn(animationSpec = tween(ScoutrMotion.DURATION_ARRIVE))
@@ -263,16 +300,18 @@ fun ScoutrAppNav(
                         else fadeOut(animationSpec = tween(ScoutrMotion.DURATION_ARRIVE))
                     },
                 ) {
-                    connectDestination(onPaired)
+                    connectDestination(navController, container, onPaired)
                     boardDestination(
                         navController = navController,
                         boardViewModel = boardViewModel,
                         compatible = compatible,
                         showWidePlaceholder = showPanel,
-                        onNewSession = { showNewSession = true },
+                        onNewSession = openNewSession,
                         onSettings = openSettings,
                         onTerminal = openTerminal,
                         openReview = openReview,
+                        markHostUsed = ::markExplicitTarget,
+                        onRetryMigration = { container.migration.retry() },
                     )
                     sessionsDestination(
                         navController = navController,
@@ -280,31 +319,33 @@ fun ScoutrAppNav(
                         isWide = isWide,
                         openPalette = openPalette,
                         openReview = openReview,
+                        markHostUsed = ::markExplicitTarget,
                     )
-                    chatDestination(navController, openReview)
+                    chatDestination(navController, container, openReview, ::markExplicitTarget)
                     fileDestinations(navController, container)
                     usageDestination(container, isWide)
-                    reviewDestination(reviewViewModel, isWide)
+                    reviewDestination(navController, container, isWide)
                     terminalDestination(navController, container)
                     settingsDestination(navController, container, onPairingForgotten)
                 }
             }
         }
 
-        if (showNewSession) {
+        if (showNewSession && newSessionViewModel != null) {
             NewSessionSheet(
                 viewModel = newSessionViewModel,
                 onDismiss = { showNewSession = false },
                 onCreated = { paneId ->
-                    showNewSession = false
-                    navController.navigate(AppRoutes.bootstrapChat(paneId, AppRoutes.ChatArgs.DEFAULT_STATUS))
+                    (newSessionProfile ?: defaultProfileKey)?.let { profile ->
+                        markExplicitTarget(profile)
+                        showNewSession = false
+                        navController.navigate(AppRoutes.bootstrapChat(profile, paneId, AppRoutes.ChatArgs.DEFAULT_STATUS))
+                    }
                 },
             )
         }
 
-        if (paletteOpen) {
-
-            // The palette's own back-dismiss closes the ViewModel; mirror it so
+        if (paletteOpen && paletteViewModel != null) {
             val haptic = rememberHaptic()
             LaunchedEffect(Unit) {
                 haptic(HapticEvent.Select)
@@ -312,14 +353,17 @@ fun ScoutrAppNav(
             }
             OverlayPresence(reduceMotion = useReduceMotion()) {
                 CommandPalette(
-
                     onDismiss = {
                         paletteViewModel.close()
                         paletteOpen = false
                     },
                     viewModel = paletteViewModel,
                     onOpen = { key, bootstrapPaneId ->
-                        navController.navigateToChat(key, bootstrapPaneId, AppRoutes.ChatArgs.DEFAULT_STATUS)
+                        val profile = paletteViewModel.profile
+                        if (profile != null) {
+                            markExplicitTarget(profile)
+                            navController.navigateToChat(profile, key, bootstrapPaneId, AppRoutes.ChatArgs.DEFAULT_STATUS)
+                        }
                     },
                 )
             }
@@ -327,17 +371,10 @@ fun ScoutrAppNav(
     }
 }
 
-/** Number of agents that currently need the user, for the Board tab badge. */
 @Composable
 private fun rememberNeedsYouCount(boardViewModel: BoardViewModel): Int =
     boardViewModel.ui.collectAsState().value.board.needsYou.size
 
-/**
- * Compact phone bar: the shared [DestinationNavRow] over a surface sheet with
- * a top hairline and safe-area padding. Wide windows render the same row
- * inside the session panel instead, so this bar never shows beside it.
- * Selection is interruption-safe (single-top, no queued back stacks).
- */
 @Composable
 fun ScoutrBottomBar(
     currentRoute: String?,

@@ -2,45 +2,52 @@ package dev.scoutr.app
 
 import android.app.Application
 import android.content.Context
+import android.util.Log
 import dev.scoutr.app.data.ConnectionStore
+import dev.scoutr.app.data.FcmTokenStore
+import dev.scoutr.app.data.HostMigrationCoordinator
+import dev.scoutr.app.data.HostRegistryStore
+import dev.scoutr.app.data.UpdateHostDisposition
+import dev.scoutr.app.data.NotificationPreferencesStore
 import dev.scoutr.app.data.SharedPreferencesLauncherSettingsStore
 import dev.scoutr.app.data.SharedPreferencesSessionCatalogStore
 import dev.scoutr.app.data.TerminalPreferencesStore
-import dev.scoutr.app.data.NotificationPreferencesStore
-import dev.scoutr.app.net.BridgeClient
+import dev.scoutr.app.net.DefaultHostClientFactory
+import dev.scoutr.app.net.HostClientFactory
+import dev.scoutr.app.net.HostLifecycleCoordinator
+import dev.scoutr.app.net.HostConnectionBinding
+import dev.scoutr.app.net.HostWorkCoordinator
 import dev.scoutr.app.net.PerformanceCounters
-import dev.scoutr.app.net.ScoutrApi
+import dev.scoutr.app.net.TerminalOpenRequest
+import dev.scoutr.app.net.TerminalSocket
 import dev.scoutr.app.net.TerminalSocketClient
 import dev.scoutr.app.net.TerminalTransport
+import dev.scoutr.app.net.TerminalTransportListener
 import dev.scoutr.app.net.TopologyFeed
 import dev.scoutr.app.net.TopologyFeedClient
 import dev.scoutr.app.notify.NotificationPresenter
+import dev.scoutr.app.service.PushRegistrationManager
 import dev.scoutr.app.state.ForegroundTracker
 import dev.scoutr.app.state.MuteStore
 import dev.scoutr.app.ui.theme.TerminalPalette
-import android.util.Log
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
+import java.io.IOException
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 
-/**
- * Minimal manual DI: the app container owns the singletons the view models need.
- * Tests replace [container] with fakes.
- */
 class ScoutrApp : Application() {
-
     lateinit var container: AppContainer
 
     override fun onCreate() {
         super.onCreate()
-        // Terminal emulators copy the vendored scheme when created, so install
-        // the gdezan-material palette before any session can exist.
         TerminalPalette.install()
         container = AppContainer(this)
-        ForegroundTracker.install(this) { container.reconcileNotifications() }
+        ForegroundTracker.install(this) { container.onForeground() }
         requestCurrentFcmToken()
     }
 
@@ -51,30 +58,32 @@ class ScoutrApp : Application() {
                     val token = task.result ?: return@addOnCompleteListener
                     if (task.isSuccessful) container.registerFcmToken(token)
                 }
-        } catch (e: Exception) {
-            Log.w(TAG, "FCM token unavailable", e)
+        } catch (error: Exception) {
+            Log.w(TAG, "FCM token unavailable", error)
         }
     }
 
     companion object {
         private const val TAG = "ScoutrApp"
-
-        /** Container access for services/receivers; safe on cold start because
-         *  Application.onCreate always runs before any component. */
         fun container(context: Context): AppContainer =
             (context.applicationContext as ScoutrApp).container
     }
 }
 
+/** Process-wide dependency graph. Every network client is bound to an immutable host identity. */
 class AppContainer(application: Application) {
-
     private val appContext: Context = application
+    private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
-    val connectionStore = ConnectionStore(appContext)
-    val launcherSettingsStore = SharedPreferencesLauncherSettingsStore(appContext)
-    val sessionCatalogStore =
-        SharedPreferencesSessionCatalogStore(appContext) { connectionStore.saved?.hostId }
-    val terminalPreferences = TerminalPreferencesStore(appContext)
+    /** Legacy preferences are read only by the startup migration coordinator. */
+    private val legacyConnectionStore = ConnectionStore(appContext)
+    val hostRegistry = HostRegistryStore(appContext)
+    val launcherSettingsStore = SharedPreferencesLauncherSettingsStore(
+        appContext,
+        writeIfRegistered = hostRegistry::writeIfRegistered,
+    )
+    val sessionCatalogStore = SharedPreferencesSessionCatalogStore(appContext)
+    val terminalPreferences = TerminalPreferencesStore(appContext, hostRegistry::writeIfRegistered)
     val performanceCounters = PerformanceCounters()
     val muteStore = MuteStore(appContext)
     val notificationPreferencesStore = NotificationPreferencesStore(appContext)
@@ -87,84 +96,278 @@ class AppContainer(application: Application) {
         .pingInterval(20, TimeUnit.SECONDS)
         .build()
 
-    val bridge: ScoutrApi = BridgeClient(
-        okHttp = okHttp,
-        connectionStore = connectionStore,
-        performanceCounters = performanceCounters,
-    )
+    private lateinit var concreteHostClients: DefaultHostClientFactory
+    private val topologyFeeds = ConcurrentHashMap<String, MutableSet<RestartableTopologyFeed>>()
+    val hostClients: HostClientFactory
+    val hostWorkCoordinator: HostWorkCoordinator
+    val retiringHostIds: kotlinx.coroutines.flow.StateFlow<Set<String>>
+        get() = concreteHostClients.coordinator().retiredHosts
+    val removingHostIds: kotlinx.coroutines.flow.StateFlow<Set<String>>
+        get() = hostLifecycle.removingHostIds
 
-    /** Slice 6: terminal route seams (one active pane socket + route-scoped topology feed). */
-    val terminalTransport: TerminalTransport = TerminalSocketClient(okHttp, performanceCounters = performanceCounters)
-    val terminalTopologyFeedFactory = TopologyFeed.Factory { listener ->
-        TopologyFeedClient(okHttp, connectionStore, listener, performanceCounters = performanceCounters)
+    init {
+        concreteHostClients = DefaultHostClientFactory(
+            okHttp = okHttp,
+            registry = hostRegistry,
+            performanceCounters = performanceCounters,
+            terminalFactory = { hostId -> hostBoundTerminal(hostId) },
+            topologyFactory = { hostId -> TopologyFeed.Factory { listener -> hostBoundTopology(hostId, listener) } },
+        )
+        hostClients = concreteHostClients
+        hostWorkCoordinator = concreteHostClients.work()
     }
 
-    @Volatile
-    private var cachedFcmToken: String? = null
+    val pushRegistrations: PushRegistrationManager
+    val hostLifecycle: HostLifecycleCoordinator
+    val migration: HostMigrationCoordinator
 
-    /**
-     * Drop the saved pairing (Settings → Forget).
-     *
-     * Device preferences deliberately survive: launcher, terminal, catalog,
-     * review, and appearance are how the user likes the app, not who they
-     * paired with. The caller still owns the UI half — stopping the board
-     * view model and resetting navigation to Connect.
-     */
+    /** Cleanup and migration resume before the push observer can launch requests. */
+    init {
+        hostLifecycle = HostLifecycleCoordinator(
+            registry = hostRegistry,
+            hostClients = hostClients,
+            connections = concreteHostClients.coordinator(),
+            cleanupLocal = ::cleanupHostLocalState,
+            copyRetainedMetadata = { from, to ->
+                sessionCatalogStore.copyRetainedMetadata(from, to, confirmed = true)
+            },
+            onActivated = ::restartHostTransports,
+        )
+        // A crash can happen after the registry removes credentials but before
+        // notification/mute/terminal cleanup completes. Resume those tombstones
+        // before migration or UI observers can create new host work.
+        hostLifecycle.resumePendingCleanup()
+
+        migration = HostMigrationCoordinator(
+            registry = hostRegistry,
+            legacyStore = legacyConnectionStore,
+            sessionCatalog = sessionCatalogStore,
+            hostClients = hostClients,
+            scope = applicationScope,
+            lifecycle = hostLifecycle,
+            terminalPreferences = terminalPreferences,
+            launcherSettings = launcherSettingsStore,
+            adoptLegacyReview = { hostId ->
+                dev.scoutr.app.state.ReviewStore(appContext, hostId).adoptLegacyPath(hostId)
+            },
+            adoptLegacyMutes = muteStore::adoptLegacyMutes,
+            clearLegacyNotifications = notifications::cancelLegacy,
+        )
+
+        pushRegistrations = PushRegistrationManager(
+            hostRegistry,
+            FcmTokenStore(appContext),
+            hostClients,
+            applicationScope,
+        )
+        hostLifecycle.attachPushRegistrations(pushRegistrations)
+    }
+
+
     fun forgetConnection() {
-        connectionStore.clear()
+        val state = hostRegistry.snapshot()
+        val hostId = state.defaultHostId ?: return
+        val replacement = state.profiles.firstOrNull { it.hostId != hostId }
+        val disposition = if (state.updateHostId == hostId && replacement != null) {
+            UpdateHostDisposition.UseExisting(replacement.hostId)
+        } else {
+            null
+        }
+        forgetHost(hostId, disposition)
     }
 
-    /**
-     * POST this phone's FCM device token to `/api/devices`. Cached so pairing
-     * after a token arrives can register without asking Firebase again.
-     */
-    fun registerFcmToken(token: String) {
-        cachedFcmToken = token
-        if (connectionStore.saved == null) return
-        CoroutineScope(Dispatchers.IO).launch {
-            try {
-                bridge.registerDevice(token)
-            } catch (c: CancellationException) {
-                throw c
-            } catch (e: Exception) {
-                Log.w(TAG, "FCM device registration failed", e)
-            }
+    fun forgetHost(hostId: String, updateHostDisposition: UpdateHostDisposition? = null) {
+        applicationScope.launch {
+            runCatching { hostLifecycle.forget(hostId, updateHostDisposition) }
+                .onFailure { Log.w(TAG, "Could not forget host $hostId", it) }
         }
     }
 
-    fun registerCachedFcmToken() {
-        cachedFcmToken?.let(::registerFcmToken)
+    fun registerFcmToken(token: String) = pushRegistrations.updateToken(token)
+    fun registerCachedFcmToken() = Unit
+
+    fun currentHostBinding(hostId: String): HostConnectionBinding? =
+        concreteHostClients.coordinator().currentBinding(hostId)
+
+    fun isHostRetiring(hostId: String): Boolean =
+        concreteHostClients.coordinator().isRetired(hostId)
+
+    /** Resolves host-qualified terminal preferences without exposing ConnectionStore to routes. */
+    fun terminalPreferencesForHost(hostId: String): TerminalPreferencesStore.ConnectionPreferences {
+        check(hostRegistry.credentials(hostId) != null) { "Host credentials unavailable: $hostId" }
+        return terminalPreferences.forHost(hostId)
     }
 
-    /**
-     * Bring the shade back in line with the bridge whenever the user opens
-     * Scoutr. A `resolve` ping can be dropped — FCM makes no delivery promise
-     * — and the resulting notification would otherwise be unclearable. Mutes
-     * are pruned in the same pass, since this is the one moment the app knows
-     * which panes still exist.
-     */
+    fun reviewStoreForHost(hostId: String): dev.scoutr.app.state.ReviewStore =
+        dev.scoutr.app.state.ReviewStore(appContext, hostId, hostRegistry::writeIfRegistered)
+
+    fun onForeground() {
+        migration.retry()
+        pushRegistrations.registerAllCurrent()
+        reconcileNotifications()
+    }
+
     fun reconcileNotifications() {
-        // Auto-clear spec: done notifications vanish on every foreground entry,
-        // even while offline or before the fetch completes.
+        // Done notifications auto-clear on foreground even when every host is offline.
         notifications.cancelAllDone()
-        if (connectionStore.saved == null) return
-        CoroutineScope(Dispatchers.IO).launch {
+        hostRegistry.snapshot().profiles.forEach { reconcileNotifications(it.hostId) }
+    }
+
+    private fun reconcileNotifications(hostId: String) {
+        val binding = concreteHostClients.coordinator().currentBinding(hostId) ?: return
+        if (!concreteHostClients.work().isActive(binding)) return
+        applicationScope.launch {
             val sessions = try {
-                bridge.agents().agents
-            } catch (c: CancellationException) {
-                throw c
-            } catch (e: Exception) {
-                // Offline is the common case here; the next foregrounding retries.
-                Log.w(TAG, "notification reconcile failed", e)
+                hostClients.api(binding).agents().agents
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                Log.w(TAG, "notification reconcile failed", error)
                 return@launch
             }
-            val live = sessions.mapNotNull { it.live?.paneId }.toSet()
-            notifications.cancelAllExcept(sessions.filter { it.blocked }.mapNotNull { it.live?.paneId }.toSet())
-            muteStore.prune(live)
+            concreteHostClients.work().withActive(binding) {
+                val current = hostRegistry.snapshot().profiles.firstOrNull { it.hostId == hostId }
+                if (current?.connectionRevision != binding.connectionRevision ||
+                    pushRegistrations.isRetiring(hostId)
+                ) return@withActive
+                val live = sessions.mapNotNull { it.live?.paneId }.toSet()
+                notifications.cancelAllExcept(
+                    current.hostId,
+                    current.profileGeneration,
+                    sessions.filter { it.blocked }.mapNotNull { it.live?.paneId }.toSet(),
+                )
+                muteStore.prune(current.hostId, live)
+            }
         }
     }
+
+    private fun hostBoundTerminal(binding: HostConnectionBinding): TerminalTransport {
+        val hostId = binding.hostId
+        val delegate = TerminalSocketClient(okHttp, performanceCounters = performanceCounters)
+        return object : TerminalTransport {
+            override fun open(request: TerminalOpenRequest, listener: TerminalTransportListener): TerminalSocket {
+                val pending = VerifiedTerminalSocket()
+                applicationScope.launch(Dispatchers.IO) {
+                    try {
+                        concreteHostClients.coordinator().withVerifiedBinding(binding) { verified ->
+                            val opened = delegate.open(verified, request, listener)
+                            if (!concreteHostClients.work().registerCloser(verified) {
+                                    opened.cancel()
+                                    listener.onFailure(IOException("Host binding refreshed: $hostId"))
+                                }
+                            ) {
+                                opened.cancel()
+                                throw IOException("Host binding is retired: $hostId")
+                            }
+                            pending.attach(opened)
+                        }
+                    } catch (cancelled: CancellationException) {
+                        listener.onFailure(IOException("Host binding retired: $hostId", cancelled))
+                        throw cancelled
+                    } catch (error: Exception) {
+                        listener.onFailure(error as? IOException ?: IOException("Terminal open failed", error))
+                    }
+                }
+                return pending
+            }
+        }
+    }
+
+    private fun hostBoundTopology(binding: HostConnectionBinding, listener: TopologyFeed.Listener): TopologyFeed {
+        val hostId = binding.hostId
+        val feed = RestartableTopologyFeed(
+            connectionRevision = binding.connectionRevision,
+            delegate = TopologyFeedClient(
+                okHttp = okHttp,
+                listener = listener,
+                performanceCounters = performanceCounters,
+                bindingProvider = { binding },
+                bindingGate = concreteHostClients.coordinator(),
+                workCoordinator = concreteHostClients.work(),
+            ),
+        )
+        topologyFeeds.computeIfAbsent(hostId) { ConcurrentHashMap.newKeySet() }.add(feed)
+        return feed
+    }
+
+    private fun restartHostTransports(hostId: String) {
+        val connectionRevision = concreteHostClients.coordinator()
+            .currentBinding(hostId)?.connectionRevision
+        topologyFeeds[hostId]?.toList()?.forEach { it.restartIfStarted(connectionRevision) }
+    }
+    private fun cleanupHostLocalState(hostId: String) {
+        notifications.cancelHost(hostId)
+        notifications.cancelLegacy()
+        muteStore.clearHost(hostId)
+        terminalPreferences.clearHost(hostId)
+        launcherSettingsStore.clearHost(hostId)
+        dev.scoutr.app.state.ReviewStore(appContext, hostId).clearHost(hostId)
+    }
+
+    private fun defaultHostId(): String? = hostRegistry.snapshot().defaultHostId
 
     private companion object {
         const val TAG = "ScoutrApp"
+    }
+}
+
+/** Defers terminal socket creation until the host identity gate succeeds. */
+private class VerifiedTerminalSocket : TerminalSocket {
+    private enum class PendingClose { Release, Cancel }
+
+    private var delegate: TerminalSocket? = null
+    private var pendingClose: PendingClose? = null
+
+    @Synchronized
+    fun attach(socket: TerminalSocket) {
+        when (pendingClose) {
+            PendingClose.Release -> socket.release()
+            PendingClose.Cancel -> socket.cancel()
+            null -> delegate = socket
+        }
+    }
+
+    @Synchronized
+    override fun sendInput(bytes: ByteArray): Boolean = delegate?.sendInput(bytes) ?: false
+
+    @Synchronized
+    override fun resize(cols: Int, rows: Int): Boolean = delegate?.resize(cols, rows) ?: false
+
+    @Synchronized
+    override fun release() {
+        delegate?.release() ?: run { pendingClose = PendingClose.Release }
+    }
+
+    @Synchronized
+    override fun cancel() {
+        delegate?.cancel() ?: run { pendingClose = PendingClose.Cancel }
+    }
+}
+
+/** Tracks route ownership so a credential refresh can restart only live feeds. */
+private class RestartableTopologyFeed(
+    private val connectionRevision: Long,
+    private val delegate: TopologyFeed,
+) : TopologyFeed {
+    @Volatile private var started = false
+
+    @Synchronized
+    override fun start(): Boolean {
+        val result = delegate.start()
+        started = result
+        return result
+    }
+
+    @Synchronized
+    override fun stop() {
+        started = false
+        delegate.stop()
+    }
+
+    @Synchronized
+    fun restartIfStarted(currentGeneration: Long?) {
+        if (!started) return
+        delegate.stop()
+        started = currentGeneration == connectionRevision && delegate.start()
     }
 }

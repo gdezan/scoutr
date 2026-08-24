@@ -8,8 +8,16 @@ import dev.scoutr.app.data.HealthResponse
 import dev.scoutr.app.data.HerdrInfo
 import dev.scoutr.app.data.PairingPayloadParser
 import dev.scoutr.app.data.REQUIRED_SCOUTR_API_FEATURES
+import dev.scoutr.app.data.HostRegistryStore
+import dev.scoutr.app.data.UpdateHostDisposition
 import dev.scoutr.app.data.ScoutrApiInfo
 import dev.scoutr.app.net.FakeScoutrApi
+import dev.scoutr.app.net.HostClientFactory
+import dev.scoutr.app.net.HostConnectionCoordinator
+import dev.scoutr.app.net.HostLifecycleCoordinator
+import dev.scoutr.app.net.ScoutrApi
+import dev.scoutr.app.net.TerminalTransport
+import dev.scoutr.app.net.TopologyFeed
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -34,6 +42,9 @@ class ConnectViewModelTest {
     fun setUp() {
         fake = FakeScoutrApi()
         store = ConnectionStore(RuntimeEnvironment.getApplication(), FakeConnectionCipher()).also { it.clear() }
+        RuntimeEnvironment.getApplication()
+            .getSharedPreferences(HostRegistryStore.FILE, android.content.Context.MODE_PRIVATE)
+            .edit().clear().commit()
         viewModel = ConnectViewModel(fake, store)
     }
 
@@ -166,5 +177,119 @@ class ConnectViewModelTest {
 
         assertEquals("host_live1", store.saved?.hostId)
         assertEquals("secret", store.saved?.token)
+    }
+
+    @Test
+    fun changedIdentityWaitsForAnExplicitAddAsNewChoice() {
+        val registry = hostRegistryWith("old-host")
+        fake.healthResult = healthyHealth("new-host")
+        val candidate = registryViewModel(registry)
+
+        candidate.refresh("old-host", "https://new.example", "new-token")
+        shadowOf(Looper.getMainLooper()).idle()
+
+        assertTrue(candidate.outcome.value is PairingOutcome.IdentityChanged)
+        assertEquals(listOf("old-host"), registry.snapshot().profiles.map { it.hostId })
+
+        candidate.confirmAddAsNew()
+        shadowOf(Looper.getMainLooper()).idle()
+
+        assertTrue(candidate.outcome.value is PairingOutcome.Added)
+        assertEquals(setOf("old-host", "new-host"), registry.snapshot().profiles.map { it.hostId }.toSet())
+    }
+
+    @Test
+    fun changedIdentityCanExplicitlyReplaceTheOldProfile() {
+        val registry = hostRegistryWith("old-host")
+        fake.healthResult = healthyHealth("new-host")
+        val candidate = registryViewModel(registry)
+
+        candidate.refresh("old-host", "https://new.example", "new-token")
+        shadowOf(Looper.getMainLooper()).idle()
+        val changed = candidate.outcome.value as PairingOutcome.IdentityChanged
+        assertTrue(changed.replacesUpdateHost)
+        candidate.confirmIdentityReplacement(UpdateHostDisposition.TrustReplacementSigningKey)
+        shadowOf(Looper.getMainLooper()).idle()
+
+        val state = registry.snapshot()
+        assertEquals(listOf("new-host"), state.profiles.map { it.hostId })
+        assertEquals("new-host", state.defaultHostId)
+        assertEquals("new-host", state.updateHostId)
+    }
+
+    @Test
+    fun changedUpdateIdentityCanChooseAnotherPairedUpdateHost() {
+        val registry = hostRegistryWith("old-host")
+        registry.addOrRefresh("fallback-host", "https://fallback.example", "fallback-token")
+        fake.healthResult = healthyHealth("new-host")
+        val candidate = registryViewModel(registry)
+
+        candidate.refresh("old-host", "https://new.example", "new-token")
+        shadowOf(Looper.getMainLooper()).idle()
+        val changed = candidate.outcome.value as PairingOutcome.IdentityChanged
+        assertEquals(listOf("fallback-host"), changed.alternativeUpdateHosts.map { it.hostId })
+
+        candidate.confirmIdentityReplacement(UpdateHostDisposition.UseExisting("fallback-host"))
+        shadowOf(Looper.getMainLooper()).idle()
+
+        val state = registry.snapshot()
+        assertEquals(setOf("fallback-host", "new-host"), state.profiles.map { it.hostId }.toSet())
+        assertEquals("fallback-host", state.updateHostId)
+    }
+
+    @Test
+    fun changedIdentityCanRefreshAnAlreadyPairedProfileWithoutRemovingTheSource() {
+        val registry = hostRegistryWith("old-host")
+        registry.addOrRefresh("new-host", "https://existing.example", "existing-token")
+        fake.healthResult = healthyHealth("new-host")
+        val candidate = registryViewModel(registry)
+
+        candidate.refresh("old-host", "https://new.example", "new-token")
+        shadowOf(Looper.getMainLooper()).idle()
+
+        val changed = candidate.outcome.value as PairingOutcome.IdentityChanged
+        assertTrue(changed.reportedHostAlreadyPaired)
+        candidate.confirmRefreshExisting()
+        shadowOf(Looper.getMainLooper()).idle()
+
+        val state = registry.snapshot()
+        assertEquals(setOf("old-host", "new-host"), state.profiles.map { it.hostId }.toSet())
+        assertEquals("https://new.example", state.profiles.single { it.hostId == "new-host" }.baseUrl)
+        assertEquals("old-host", state.updateHostId)
+    }
+
+    private fun hostRegistryWith(hostId: String): HostRegistryStore {
+        val registry = HostRegistryStore(RuntimeEnvironment.getApplication(), FakeConnectionCipher())
+        registry.addOrRefresh(hostId, "https://old.example", "old-token")
+        return registry
+    }
+
+    private fun registryViewModel(registry: HostRegistryStore): ConnectViewModel {
+        val factory = TestHostClientFactory(fake)
+        val lifecycle = HostLifecycleCoordinator(
+            registry = registry,
+            hostClients = factory,
+            connections = HostConnectionCoordinator(
+                registry = registry,
+                healthProbe = { healthyHealth(it.hostId).getOrThrow() },
+            ),
+        )
+        return ConnectViewModel(factory, registry, lifecycle)
+    }
+
+    private fun healthyHealth(hostId: String): Result<HealthResponse> = Result.success(
+        HealthResponse(
+            ok = true,
+            hostId = hostId,
+            api = ScoutrApiInfo(protocol = 2, features = REQUIRED_SCOUTR_API_FEATURES),
+            herdr = HerdrInfo(connected = true, version = "0.8.0", protocol = 19),
+        ),
+    )
+
+    private class TestHostClientFactory(private val api: ScoutrApi) : HostClientFactory {
+        override fun api(hostId: String): ScoutrApi = api
+        override fun terminal(hostId: String): TerminalTransport = error("unused")
+        override fun topologyFeedFactory(hostId: String): TopologyFeed.Factory = error("unused")
+        override fun probe(host: String, token: String): ScoutrApi = api
     }
 }
