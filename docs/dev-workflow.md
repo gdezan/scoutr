@@ -299,6 +299,11 @@ Hard-won rules for scroll and placement assertions in Compose tests:
   `performScrollToNode(hasText("message 0", substring = true))`, not with
   `swipeDown` — a touch swipe drags only ~1400px (~9 rows), which may not
   reach the top of a long list.
+- **Restore a prepended list with `firstVisibleItemScrollOffset`.** Pair the
+  first visible row key with `LazyListState.firstVisibleItemScrollOffset`
+  and pass that to `scrollToItem`. `LazyListItemInfo.offset` is a signed
+  viewport coordinate and can be negative; feeding it to `scrollToItem`
+  jumps the restored row.
 
 ## Live notification / deep-link validation
 
