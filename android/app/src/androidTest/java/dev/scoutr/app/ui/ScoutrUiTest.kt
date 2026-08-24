@@ -12,9 +12,7 @@ import dev.scoutr.app.data.SessionDescriptor
 import dev.scoutr.app.data.BoardState
 import dev.scoutr.app.data.ConnectionStore
 import dev.scoutr.app.net.BridgeClient
-import dev.scoutr.app.state.BoardUiState
 import dev.scoutr.app.state.BoardViewModel
-import dev.scoutr.app.state.legacyBoardViewModel
 import dev.scoutr.app.ui.screens.ConnectScreen
 import dev.scoutr.app.ui.screens.BoardScreen
 import dev.scoutr.app.ui.nav.ScoutrBottomBar
@@ -29,19 +27,12 @@ class ScoutrUiTest {
     val composeRule = createComposeRule()
 
     /**
-     * BoardViewModel pinned to a fixed UI state; never touches the network.
-     * The store is wiped first so a connection saved on the device (e.g. from an
-     * earlier live session) cannot trigger a real connect() from init.
+     * BoardViewModel pinned to a seeded snapshot; never touches the network.
+     * The harness wipes prefs first so a connection saved on the device (e.g.
+     * from an earlier live session) cannot interfere.
      */
-    private fun fakeBoard(state: BoardUiState): BoardViewModel {
-        val context = androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().targetContext
-        val connectionStore = ConnectionStore(context).also { it.clear() }
-        return legacyBoardViewModel(
-            bridge = BridgeClient(OkHttpClient(), connectionStore),
-            connectionStore = connectionStore,
-            initialState = state,
-        )
-    }
+    private fun fakeBoard(sessions: List<SessionDescriptor>): BoardViewModel =
+        StaticBoards.boardViewModel(sessions)
     @Test
     fun connectScreen_disablesButtonUntilFieldsFilled() {
         val context = androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().targetContext
@@ -82,34 +73,28 @@ class ScoutrUiTest {
 
     @Test
     fun boardScreen_rendersNeedsYouSectionFirst() {
-        val state = BoardUiState(
-            connected = true,
-            loading = false,
-            board = BoardState.group(
-                listOf(
-                    dev.scoutr.app.data.liveSessionFixture(
-                        paneId = "w1:p1",
-                        workspaceId = "w1",
-                        tabId = "w1:t1",
-                        agentKind = "pi",
-                        status = "blocked",
-                        title = "hestia",
-                        cwd = "/home/gdezan/Dev/hestia",
-                    ),
-                    dev.scoutr.app.data.liveSessionFixture(
-                        paneId = "w2:p1",
-                        workspaceId = "w2",
-                        tabId = "w2:t1",
-                        agentKind = "pi",
-                        status = "working",
-                        title = "agents-mobile",
-                    ),
+        // Render the BoardScreen with a seeded snapshot via a fake view model.
+        val fakeVm = fakeBoard(
+            listOf(
+                dev.scoutr.app.data.liveSessionFixture(
+                    paneId = "w1:p1",
+                    workspaceId = "w1",
+                    tabId = "w1:t1",
+                    agentKind = "pi",
+                    status = "blocked",
+                    title = "hestia",
+                    cwd = "/home/gdezan/Dev/hestia",
+                ),
+                dev.scoutr.app.data.liveSessionFixture(
+                    paneId = "w2:p1",
+                    workspaceId = "w2",
+                    tabId = "w2:t1",
+                    agentKind = "pi",
+                    status = "working",
+                    title = "agents-mobile",
                 ),
             ),
         )
-
-        // Render the BoardScreen with a fixed state via a fake view model.
-        val fakeVm = fakeBoard(state)
         composeRule.setContent {
             ScoutrTheme {
                 BoardScreen(onOpenAgent = {}, viewModel = fakeVm)
@@ -138,7 +123,7 @@ class ScoutrUiTest {
 
     @Test
     fun boardScreen_showsEmptyState() {
-        val fakeVm = fakeBoard(BoardUiState(connected = true, loading = false))
+        val fakeVm = StaticBoards.connectedEmptyViewModel()
         composeRule.setContent {
             ScoutrTheme {
                 BoardScreen(onOpenAgent = {}, viewModel = fakeVm)

@@ -74,6 +74,8 @@ fun CommandPalette(
 
     onDismiss: () -> Unit = viewModel::close,
     modifier: Modifier = Modifier,
+    /** Which bridge the search talks to; null keeps the palette anonymous. */
+    hostAlias: String? = null,
 ) {
     val ui by viewModel.ui.collectAsState()
     val focusRequester = remember { FocusRequester() }
@@ -110,6 +112,15 @@ fun CommandPalette(
                     .padding(horizontal = 12.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                if (hostAlias != null) {
+                    Text(
+                        hostAlias,
+                        style = dev.scoutr.app.ui.theme.ScoutrType.monoMeta,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                        maxLines = 1,
+                        modifier = Modifier.padding(end = 6.dp),
+                    )
+                }
                 Icon(
                     Icons.Default.Search,
                     contentDescription = null,

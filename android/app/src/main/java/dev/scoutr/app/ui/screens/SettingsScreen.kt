@@ -28,6 +28,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -40,6 +41,23 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
+import androidx.compose.runtime.rememberCoroutineScope
+import dev.scoutr.app.data.UpdateHostDisposition
+import dev.scoutr.app.state.HostAvailability
+import kotlinx.coroutines.CoroutineScope
+import androidx.compose.foundation.layout.Box
+import dev.scoutr.app.state.HostRowUi
+import dev.scoutr.app.state.HostsViewModel
+import kotlinx.coroutines.launch
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import dev.scoutr.app.data.AppearancePreferencesStore
@@ -50,7 +68,6 @@ import dev.scoutr.app.ui.components.SectionLabel
 import dev.scoutr.app.ui.components.StatusRing
 import dev.scoutr.app.ui.components.StatusRingAnimation
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.scoutr.app.BuildConfig
 import dev.scoutr.app.data.UpdateStatusResponse
@@ -59,7 +76,6 @@ import dev.scoutr.app.update.ApkInstallOutcome
 import dev.scoutr.app.update.ApkInstaller
 import dev.scoutr.app.update.AppUpdater
 import dev.scoutr.app.update.UpdateProgress
-import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
 /**
@@ -86,19 +102,18 @@ fun SettingsScreen(
      * revision, and a second instance would tick a flow nobody is collecting.
      */
     terminalPreferences: TerminalPreferencesStore,
-    onForget: () -> Unit,
     api: ScoutrApi?,
     trackUpdateWork: suspend (suspend () -> Unit) -> Unit = { work -> work() },
     modifier: Modifier = Modifier,
-    /** Null only before the first pairing, which the tab shell cannot reach. */
-    saved: SettingsConnection? = null,
-    updateHostId: String? = saved?.hostId,
+    /** Multi-host management; null only before the first pairing. */
+    hostsViewModel: HostsViewModel? = null,
+    updateHostId: String? = null,
     updateHostAlias: String? = null,
     updateHostOptions: Map<String, String> = emptyMap(),
     onSelectUpdateHost: (String) -> Unit = {},
     onDisableUpdates: () -> Unit = {},
-    onRefreshConnection: (() -> Unit)? = null,
-    forgetUpdateHostAlias: String? = null,
+    onAddHost: () -> Unit = {},
+    onAllHostsForgotten: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val appearance = remember(context) { AppearancePreferencesStore(context) }
@@ -123,12 +138,14 @@ fun SettingsScreen(
         }
         Spacer(Modifier.height(20.dp))
 
-        if (saved != null) {
-            ConnectionSection(
-                saved = saved,
-                onForget = onForget,
-                onRefreshConnection = onRefreshConnection,
-                forgetUpdateHostAlias = forgetUpdateHostAlias,
+        if (hostsViewModel != null) {
+            val scope = rememberCoroutineScope()
+            HostsSection(
+                viewModel = hostsViewModel,
+                onAddHost = onAddHost,
+                onAllHostsForgotten = {
+                    scope.launch { onAllHostsForgotten() }
+                },
             )
         }
 
@@ -145,97 +162,21 @@ fun SettingsScreen(
         ChatSection(appearance = appearance)
 
         TypographySection(appearance = appearance)
-        saved?.hostId?.let { hostId ->
-            TerminalSection(
-                preferences = remember(terminalPreferences, hostId) {
-                    terminalPreferences.forHost(hostId)
-                },
-            )
-        }
+        // Terminal display preferences are host-scoped; the section shows the
+        // default host's set (the one a fresh install would use).
+        hostsViewModel?.ui?.collectAsState()?.value?.rows
+            ?.firstOrNull { it.isDefault }
+            ?.hostId
+            ?.let { hostId ->
+                TerminalSection(
+                    preferences = remember(terminalPreferences, hostId) {
+                        terminalPreferences.forHost(hostId)
+                    },
+                )
+            }
 
         HapticsSection(appearance = appearance)
         MotionSection(appearance = appearance)
-    }
-}
-
-/**
- * The saved pairing, read-only, plus Forget. The token is never composed —
- * not as text, not as a content description: Settings is a screen that gets
- * screenshotted and screen-shared.
- */
-@Composable
-private fun ConnectionSection(
-    saved: SettingsConnection,
-    onForget: () -> Unit,
-    onRefreshConnection: (() -> Unit)?,
-    forgetUpdateHostAlias: String?,
-) {
-    var confirming by remember { mutableStateOf(false) }
-
-    if (confirming) {
-        ConfirmDialog(
-            title = "Forget connection?",
-            text = if (forgetUpdateHostAlias == null) {
-                "Forget ${saved.host}? You'll need to pair again. Notifications will stop."
-            } else {
-                "Forget ${saved.host}? Notifications from this host will stop. " +
-                    "In-app updates will move to $forgetUpdateHostAlias. Only continue if you trust that host's APK signing key."
-            },
-            confirmLabel = "Forget",
-            destructive = true,
-            onConfirm = {
-                confirming = false
-                onForget()
-            },
-            onDismiss = { confirming = false },
-        )
-    }
-
-    SettingsSection("Connection") {
-        Column(Modifier.fillMaxWidth().padding(14.dp)) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.testTag("settings_connection_status"),
-            ) {
-                StatusRing(
-                    color = MaterialTheme.colorScheme.primary,
-                    animation = StatusRingAnimation.Static,
-                )
-                Spacer(Modifier.width(8.dp))
-                Text(
-                    "Connected",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.primary,
-                )
-            }
-            Spacer(Modifier.height(14.dp))
-            Text("Bridge", style = MaterialTheme.typography.bodyMedium)
-            Spacer(Modifier.height(4.dp))
-            Text(
-                saved.host,
-                style = ScoutrType.monoMeta,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                overflow = TextOverflow.Ellipsis,
-                maxLines = 2,
-                modifier = Modifier.testTag("settings_host"),
-            )
-        }
-        if (onRefreshConnection != null) {
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-            TextButton(
-                onClick = onRefreshConnection,
-                modifier = Modifier.fillMaxWidth().testTag("settings_refresh_connection"),
-            ) {
-                Text("Refresh pairing")
-            }
-        }
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-        TextButton(
-            onClick = { confirming = true },
-            modifier = Modifier.fillMaxWidth().testTag("settings_forget"),
-        ) {
-            Text("Forget this connection", color = MaterialTheme.colorScheme.error)
-        }
     }
 }
 
@@ -851,3 +792,492 @@ private fun SettingsSwitchRow(
 }
 
 private const val FONT_STEP_SP = 1f
+
+
+/**
+ * The multi-host management section: one row per paired profile with status,
+ * Default/Updates badges, an overflow menu, and tap-for-details. Every
+ * destructive flow runs through [HostsViewModel], which alone routes through
+ * the lifecycle coordinator so worker retirement and cleanup stay ordered.
+ */
+@Composable
+private fun HostsSection(
+    viewModel: HostsViewModel,
+    onAddHost: () -> Unit,
+    onAllHostsForgotten: () -> Unit,
+) {
+    val ui by viewModel.ui.collectAsState()
+    val scope = rememberCoroutineScope()
+
+    var renaming by remember { mutableStateOf<HostRowUi?>(null) }
+    var updateWarningFor by remember { mutableStateOf<HostRowUi?>(null) }
+    var forgetting by remember { mutableStateOf<HostRowUi?>(null) }
+    var replacingIdentityFor by remember { mutableStateOf<HostRowUi?>(null) }
+
+    SettingsSection("Hosts") {
+        ui.rows.forEachIndexed { index, row ->
+            HostRow(
+                row = row,
+                checking = row.hostId in ui.checking,
+                onRename = { renaming = row },
+                onSetDefault = { viewModel.setDefault(row.hostId) },
+                onRefresh = { viewModel.refresh(row.hostId) },
+                onUseForUpdates = { updateWarningFor = row },
+                onForget = { forgetting = row },
+                onReplaceIdentity = { replacingIdentityFor = row },
+            )
+            if (index != ui.rows.lastIndex) {
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            }
+        }
+        if (ui.rows.isEmpty()) {
+            Text(
+                "No bridge is paired.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(vertical = 8.dp),
+            )
+        }
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        TextButton(onClick = onAddHost, modifier = Modifier.fillMaxWidth().testTag("settings_add_host")) {
+            Text("Add host")
+        }
+        ui.transientError?.let { message ->
+            Text(
+                message,
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier
+                    .padding(top = 4.dp)
+                    .testTag("settings_hosts_error"),
+            )
+        }
+    }
+
+    renaming?.let { row ->
+        RenameHostDialog(
+            row = row,
+            onConfirm = { pair ->
+                viewModel.rename(pair.first, pair.second)
+                renaming = null
+            },
+            onDismiss = { renaming = null },
+        )
+    }
+    updateWarningFor?.let { row ->
+        ConfirmDialog(
+            title = "Use ${row.alias} for updates?",
+            text = "Hosts may build APKs with different signing keys. An APK signed " +
+                "with another key may not install over the current app.",
+            confirmLabel = "Use for updates",
+            onConfirm = {
+                viewModel.useForUpdates(row.hostId)
+                updateWarningFor = null
+            },
+            onDismiss = { updateWarningFor = null },
+        )
+    }
+    forgetting?.let { row ->
+        ForgetHostDialog(
+            viewModel = viewModel,
+            row = row,
+            scope = scope,
+            onForgotten = { allGone ->
+                forgetting = null
+                if (allGone) onAllHostsForgotten()
+            },
+            onDismiss = { forgetting = null },
+        )
+    }
+    replacingIdentityFor?.let { row ->
+        ReplaceIdentityDialog(
+            viewModel = viewModel,
+            row = row,
+            scope = scope,
+            onAddAsNew = {
+                replacingIdentityFor = null
+                onAddHost()
+            },
+            onDone = { replaced ->
+                replacingIdentityFor = null
+                if (replaced) {
+                    // Replacement retires the old id entirely; nothing else to do.
+                }
+            },
+            onDismiss = { replacingIdentityFor = null },
+        )
+    }
+}
+
+/** Status vocabulary shared by rows and detail areas. */
+internal fun hostStatusLabel(status: HostAvailability): String = when (status) {
+    is HostAvailability.Online -> "Online"
+    is HostAvailability.Offline -> "Offline"
+    is HostAvailability.Incompatible -> "Incompatible"
+    is HostAvailability.IdentityChanged -> "Identity changed"
+    HostAvailability.Unknown -> "Checking"
+}
+
+@Composable
+private fun hostStatusColor(status: HostAvailability) = when (status) {
+    is HostAvailability.Online -> MaterialTheme.colorScheme.primary
+    is HostAvailability.Offline -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+    is HostAvailability.Incompatible, is HostAvailability.IdentityChanged -> MaterialTheme.colorScheme.error
+    HostAvailability.Unknown -> MaterialTheme.colorScheme.outline
+}
+
+@Composable
+private fun HostRow(
+    row: HostRowUi,
+    checking: Boolean,
+    onRename: () -> Unit,
+    onSetDefault: () -> Unit,
+    onRefresh: () -> Unit,
+    onUseForUpdates: () -> Unit,
+    onForget: () -> Unit,
+    onReplaceIdentity: () -> Unit,
+) {
+    var menuOpen by remember { mutableStateOf(false) }
+    var expanded by remember { mutableStateOf(false) }
+    Column(Modifier.fillMaxWidth().padding(vertical = 10.dp)) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .clickable { expanded = !expanded }
+                .testTag("host_row_${row.alias}"),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            StatusRing(
+                color = hostStatusColor(row.status),
+                animation = if (checking) StatusRingAnimation.Live else StatusRingAnimation.Static,
+            )
+            Spacer(Modifier.width(10.dp))
+            Column(Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        row.alias,
+                        style = MaterialTheme.typography.titleSmall,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    if (row.isDefault) HostBadge("Default")
+                    if (row.isUpdateHost) HostBadge("Updates")
+                }
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    row.url,
+                    style = ScoutrType.monoMeta,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Spacer(Modifier.height(2.dp))
+                val statusLine = when (val status = row.status) {
+                    is HostAvailability.Online -> "Online · checked ${relativeTimeLabel(status.checkedAtMs)}"
+                    is HostAvailability.Offline ->
+                        status.lastSuccessAtMs
+                            ?.let { "Offline · last ok ${relativeTimeLabel(it)}" }
+                            ?: "Offline"
+                    else -> hostStatusLabel(status)
+                }
+                Text(
+                    statusLine,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = hostStatusColor(row.status),
+                )
+            }
+            Box {
+                IconButton(
+                    onClick = { menuOpen = true },
+                    modifier = Modifier.testTag("host_menu_${row.alias}"),
+                ) {
+                    Icon(Icons.Default.MoreVert, contentDescription = "Host actions for ${row.alias}")
+                }
+                DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                    DropdownMenuItem(text = { Text("Refresh") }, onClick = { menuOpen = false; onRefresh() })
+                    DropdownMenuItem(text = { Text("Rename") }, onClick = { menuOpen = false; onRename() })
+                    if (!row.isDefault) {
+                        DropdownMenuItem(text = { Text("Set default") }, onClick = { menuOpen = false; onSetDefault() })
+                    }
+                    if (!row.isUpdateHost) {
+                        DropdownMenuItem(text = { Text("Use for updates") }, onClick = { menuOpen = false; onUseForUpdates() })
+                    }
+                    if (row.status is HostAvailability.IdentityChanged) {
+                        DropdownMenuItem(text = { Text("Fix identity") }, onClick = { menuOpen = false; onReplaceIdentity() })
+                    }
+                    DropdownMenuItem(text = { Text("Forget") }, onClick = { menuOpen = false; onForget() })
+                }
+            }
+        }
+        if (expanded) {
+            Spacer(Modifier.height(4.dp))
+            Text(
+                buildString {
+                    append("Exposure: ")
+                    append(row.exposure.toString().substringAfterLast('.').lowercase())
+                    append(" · id ").append(row.hostId)
+                    when (val status = row.status) {
+                        is HostAvailability.Incompatible -> append("\n").append(status.message)
+                        is HostAvailability.IdentityChanged -> {
+                            append("\nBridge now reports id ")
+                            append(status.reportedHostId.ifBlank { "(unknown)" })
+                            append(". Use Fix identity to repair or replace this profile.")
+                        }
+                        is HostAvailability.Offline -> append("\n").append(status.message)
+                        else -> Unit
+                    }
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(start = 30.dp, end = 8.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun HostBadge(label: String) {
+    Text(
+        label,
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier
+            .padding(start = 6.dp)
+            .border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f), RoundedCornerShape(4.dp))
+            .padding(horizontal = 4.dp, vertical = 1.dp),
+    )
+}
+
+private fun relativeTimeLabel(epochMs: Long): String =
+    dev.scoutr.app.ui.relativeTime(epochMs.toDouble())
+
+@Composable
+private fun RenameHostDialog(
+    row: HostRowUi,
+    onConfirm: (Pair<String, String>) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var name by remember { mutableStateOf(row.alias) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Rename host") },
+        text = {
+            OutlinedTextField(
+                value = name,
+                onValueChange = { name = it },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth().testTag("rename_host_field"),
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = { onConfirm(row.hostId to name.trim()) }, enabled = name.isNotBlank()) {
+                Text("Rename")
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
+@Composable
+private fun ForgetHostDialog(
+    viewModel: HostsViewModel,
+    row: HostRowUi,
+    scope: CoroutineScope,
+    onForgotten: (Boolean) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val needsDisposition = viewModel.forgetRequiresUpdateDisposition(row.hostId)
+    val otherIds = viewModel.otherHostAliases(row.hostId).keys.toList()
+    var choice by remember { mutableStateOf<Int?>(null) } // index into otherIds, or -1 = disable updates
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Forget ${row.alias}?") },
+        text = {
+            Column {
+                if (needsDisposition) {
+                    Text(
+                        "${row.alias} is the update host. Choose a replacement update host, or disable in-app updates.",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    otherIds.forEachIndexed { index, hostId ->
+                        Row(
+                            Modifier.fillMaxWidth().clickable { choice = index },
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            RadioButton(selected = choice == index, onClick = { choice = index })
+                            Text(
+                                "Move updates to ${viewModel.otherHostAliases(row.hostId)[hostId]}",
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
+                        }
+                    }
+                    Row(
+                        Modifier.fillMaxWidth().clickable { choice = -1 },
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        RadioButton(selected = choice == -1, onClick = { choice = -1 })
+                        Text("Disable in-app updates", style = MaterialTheme.typography.bodyMedium)
+                    }
+                } else {
+                    Text(
+                        "You'll need to pair again. Notifications from this host will stop.",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = !needsDisposition || choice != null,
+                onClick = {
+                    val disposition = when {
+                        !needsDisposition -> null
+                        choice == -1 -> UpdateHostDisposition.Disable
+                        else -> UpdateHostDisposition.UseExisting(otherIds[choice ?: -1])
+                    }
+                    scope.launch { onForgotten(viewModel.forget(row.hostId, disposition)) }
+                },
+                modifier = Modifier.testTag("settings_forget_confirm"),
+            ) {
+                Text("Forget", color = MaterialTheme.colorScheme.error)
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
+@Composable
+private fun ReplaceIdentityDialog(
+    viewModel: HostsViewModel,
+    row: HostRowUi,
+    scope: CoroutineScope,
+    onAddAsNew: () -> Unit,
+    onDone: (Boolean) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val reportedPaired = viewModel.reportedIdIsPaired(row.hostId)
+    val reportedId = viewModel.reportedHostId(row.hostId).orEmpty()
+
+    if (reportedPaired) {
+        // The reported id is already a profile; Replace/Add would only make a
+        // duplicate, so offer the same-id repair instead.
+        var token by remember { mutableStateOf("") }
+        AlertDialog(
+            onDismissRequest = onDismiss,
+            title = { Text("Refresh existing profile") },
+            text = {
+                Column {
+                    Text(
+                        "The bridge at ${row.url} now reports id $reportedId, which is already paired. " +
+                            "Pair again with its current token to refresh URL/token/exposure without touching alias, default, updates or pins.",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = token,
+                        onValueChange = { token = it },
+                        singleLine = true,
+                        label = { Text("Current bridge token") },
+                        modifier = Modifier.fillMaxWidth().testTag("identity_token_field"),
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = token.isNotBlank(),
+                    onClick = {
+                        scope.launch { onDone(viewModel.refreshExistingProfile(row.hostId, token.trim())) }
+                    },
+                ) { Text("Refresh") }
+            },
+            dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+        )
+        return
+    }
+
+    var token by remember { mutableStateOf("") }
+    var copyFlags by remember { mutableStateOf(false) }
+    // Replacing an enabled update host needs the same signing-key disposition
+    // as forgetting it: trust the replacement, or disable updates.
+    val needsDisposition = viewModel.forgetRequiresUpdateDisposition(row.hostId)
+    val otherIds = viewModel.otherHostAliases(row.hostId).keys.toList()
+    var choice by remember { mutableStateOf<Int?>(null) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Bridge identity changed") },
+        text = {
+            Column {
+                Text(
+                    "The bridge now reports id ${reportedId.ifBlank { "(unknown)" }}, which is not paired. " +
+                        "Replace this profile's identity with the new one, or pair it as a new host instead.",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = token,
+                    onValueChange = { token = it },
+                    singleLine = true,
+                    label = { Text("New bridge token") },
+                    modifier = Modifier.fillMaxWidth().testTag("identity_token_field"),
+                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(checked = copyFlags, onCheckedChange = { copyFlags = it })
+                    Text(
+                        "Move pin and archive flags",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
+                if (needsDisposition) {
+                    Spacer(Modifier.height(8.dp))
+                    otherIds.forEachIndexed { index, id ->
+                        val alias = viewModel.otherHostAliases(row.hostId)[id]
+                        Row(
+                            Modifier.fillMaxWidth().clickable { choice = index },
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            RadioButton(selected = choice == index, onClick = { choice = index })
+                            Text("Use $alias for updates", style = MaterialTheme.typography.bodyMedium)
+                        }
+                    }
+                    Row(
+                        Modifier.fillMaxWidth().clickable { choice = -1 },
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        RadioButton(selected = choice == -1, onClick = { choice = -1 })
+                        Text("Disable in-app updates", style = MaterialTheme.typography.bodyMedium)
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = token.isNotBlank() && (!needsDisposition || choice != null),
+                onClick = {
+                    val disposition = when {
+                        !needsDisposition -> null
+                        choice == -1 -> UpdateHostDisposition.Disable
+                        else -> UpdateHostDisposition.UseExisting(otherIds[choice ?: -1])
+                    }
+                    scope.launch {
+                        val replaced = viewModel.replaceIdentity(
+                            previousHostId = row.hostId,
+                            newToken = token.trim(),
+                            copyRetained = copyFlags,
+                            updateHostDisposition = disposition,
+                        )
+                        onDone(replaced)
+                    }
+                },
+            ) { Text("Replace") }
+        },
+        dismissButton = {
+            TextButton(onClick = {
+                onDismiss()
+                onAddAsNew()
+            }) { Text("Add as new host") }
+        },
+    )
+}

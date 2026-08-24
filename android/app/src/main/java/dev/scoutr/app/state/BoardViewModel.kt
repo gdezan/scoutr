@@ -2,366 +2,405 @@ package dev.scoutr.app.state
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import dev.scoutr.app.data.SessionAction
-import dev.scoutr.app.data.SessionDescriptor
-import dev.scoutr.app.data.SessionKey
-import dev.scoutr.app.data.BoardState
+import dev.scoutr.app.data.HostPaneKey
 import dev.scoutr.app.data.HostProfileKey
 import dev.scoutr.app.data.HostRegistryStore
+import dev.scoutr.app.data.HostRegistryState
 import dev.scoutr.app.data.LegacyMigrationState
-import dev.scoutr.app.data.ScoutrApiCompatibility
-import dev.scoutr.app.data.classifyScoutrApiCompatibility
-import dev.scoutr.app.data.formatScoutrApiIncompatibility
+import dev.scoutr.app.data.SessionDescriptor
+import dev.scoutr.app.data.SessionKey
 import dev.scoutr.app.net.AskAnswer
 import dev.scoutr.app.net.BridgeException
-import dev.scoutr.app.net.GenerationGuardedScoutrApi
 import dev.scoutr.app.net.HostClientFactory
 import dev.scoutr.app.net.HostConnectionBinding
-import dev.scoutr.app.net.ScoutrApi
-// The Board's own quick-answer eligibility rule, shared with the cards that
-// draw the controls so the check that submits cannot drift from the check that
-// offers.
+import dev.scoutr.app.net.HostIdentityChangedException
+import dev.scoutr.app.net.HostIncompatibleException
+import dev.scoutr.app.net.HostWorkCoordinator
 import dev.scoutr.app.ui.screens.quickAnswerOptions
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import kotlinx.coroutines.CancellationException
-import java.io.IOException
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
 
-data class BoardUiState(
-    val board: BoardState = BoardState(),
-    /** Host selected for this board snapshot; callbacks use this immutable key. */
-    val hostProfile: HostProfileKey? = null,
-    val loading: Boolean = false,
-    val isRefreshing: Boolean = false,
-    val connected: Boolean = false,
-    val error: String? = null,
-    val apiCompatibility: ScoutrApiCompatibility? = null,
-    /**
-     * Pane ids with a quick answer in flight. Membership is what makes a
-     * second tap a no-op, so it is set before the request leaves and cleared
-     * only once the request has settled.
-     */
-    val quickAnswering: Set<String> = emptySet(),
+/**
+ * One host's process-local Board snapshot. Sessions are kept verbatim from the
+ * last successful fetch; staleness and availability come from the shared
+ * [HostStatusRepository] so every surface agrees on one status.
+ */
+data class HostBoardState(
+    val sessions: List<SessionDescriptor> = emptyList(),
+    val fetchedAtMs: Long? = null,
 )
 
+/**
+ * The unified multi-host Board state. Raw per-host snapshots stay in
+ * [hostBoards]; the visible rows are derived by [BoardMerge] under the shared
+ * host filter, so one slow or blocked host never delays or clears another's.
+ */
+data class BoardUiState(
+    val hostBoards: Map<String, HostBoardState> = emptyMap(),
+    val statuses: Map<String, HostAvailability> = emptyMap(),
+    val profiles: Map<String, HostProfileKey> = emptyMap(),
+    val aliases: Map<String, String> = emptyMap(),
+    /** Settings order; also the selector's option order after All. */
+    val registryOrder: List<String> = emptyList(),
+    /** null means All hosts; shared with Sessions through [HostFilterStore]. */
+    val filter: String? = null,
+    val isRefreshing: Boolean = false,
+    val migrationMessage: String? = null,
+    val transientError: String? = null,
+    /** Pane keys with a quick answer in flight, keyed by host so ids cannot collide. */
+    val quickAnswering: Set<HostPaneKey> = emptySet(),
+) {
+    /** Merged rows for the current filter, globally ordered per [BoardMerge]. */
+    val hostedSessions: List<HostedSession>
+        get() = BoardMerge.hostedSessions(hostBoards, statuses, profiles, aliases, filter)
+
+    val board: dev.scoutr.app.data.BoardState
+        get() = BoardMerge.grouped(hostedSessions)
+
+    private val scopedHostIds: List<String>
+        get() = if (filter == null) registryOrder else registryOrder.filter { it == filter }
+
+    /**
+     * True while any host *in the selected scope* has reported a successful
+     * health check — an offline selected host must not hide behind another
+     * host's online status.
+     */
+    val connected: Boolean
+        get() = scopedHostIds.any { statuses[it] is HostAvailability.Online }
+
+    /**
+     * Whether at least one paired host can serve data right now. Blocked hosts
+     * (incompatible / identity-changed) do not count; offline hosts still do —
+     * their actions fail loudly instead of hiding the product.
+     */
+    val hasCompatibleHost: Boolean
+        get() = scopedHostIds.any { id -> statuses[id].usableForData() }
+
+    /** Incompatible / identity-changed hosts, shown as a compact status area. */
+    val hostIssues: List<HostIssue>
+        get() = BoardMerge.issues(scopedHostIds, aliases, statuses)
+
+    val needsYouCount: Int get() = board.needsYou.size
+
+    /** Alias shown on each card; null under a single-host filter (no redundancy). */
+    fun hostLabelFor(hostId: String): String? =
+        aliases[hostId]?.takeIf { filter == null && registryOrder.size > 1 }
+}
+
+/**
+ * Per-host workers owned by the screen lifecycle. Each worker probes its own
+ * binding and fetches `agents()` on the poll cadence inside a sibling job, so
+ * one host's failure stays local. Registry changes reconcile workers by
+ * `(hostId, connectionRevision)`; forget retires the old worker before its
+ * replacement could start.
+ *
+ * Every request runs through the identity-gated fixed-binding client, so an
+ * incompatible bridge or a foreign identity classifies into typed failures;
+ * responses are applied only while the captured revision still owns the host.
+ */
 class BoardViewModel internal constructor(
-    private var bridge: ScoutrApi?,
-    private val connectionAvailable: () -> Boolean,
-    initialState: BoardUiState,
+    private val hostClients: HostClientFactory,
+    private val registry: HostRegistryStore,
+    private val currentBinding: (String) -> HostConnectionBinding?,
+    private val work: HostWorkCoordinator,
+    private val hostStatus: HostStatusRepository,
+    private val hostFilter: HostFilterStore,
+    private val migrationState: StateFlow<LegacyMigrationState>?,
+    private val adoptLegacyMetadata: (Collection<SessionKey>) -> Unit,
     private val pollInterval: Duration,
-    private val bindDefaultFactory: (() -> Pair<HostProfileKey, ScoutrApi?>?)? = null,
-    private val hostRegistry: HostRegistryStore? = null,
-    private val migrationState: StateFlow<LegacyMigrationState>? = null,
-    private val adoptLegacyMetadata: (Collection<SessionKey>) -> Unit = {},
+    private val clock: () -> Long,
 ) : ViewModel() {
-    /** Production board binding: hostless UI, default profile selected at entry. */
+
     constructor(
         hostClients: HostClientFactory,
-        hostRegistry: HostRegistryStore,
+        registry: HostRegistryStore,
         currentBinding: (String) -> HostConnectionBinding?,
-        initialState: BoardUiState = BoardUiState(),
-        pollInterval: Duration = 3.seconds,
+        work: HostWorkCoordinator,
+        hostStatus: HostStatusRepository,
+        hostFilter: HostFilterStore,
         migrationState: StateFlow<LegacyMigrationState>? = null,
         adoptLegacyMetadata: (Collection<SessionKey>) -> Unit = {},
+        pollInterval: Duration = 3.seconds,
     ) : this(
-        bridge = null,
-        connectionAvailable = { hostRegistry.snapshot().profiles.isNotEmpty() || hostRegistry.snapshot().pendingLegacyConnection },
-        initialState = initialState,
-        pollInterval = pollInterval,
-        bindDefaultFactory = {
-            val state = hostRegistry.snapshot()
-            val profile = state.defaultHostId?.let { id -> state.profiles.firstOrNull { it.hostId == id } }
-            profile?.let { selected ->
-                currentBinding(selected.hostId)?.let { binding ->
-                    val key = HostProfileKey(selected.hostId, selected.profileGeneration)
-                    key to GenerationGuardedScoutrApi(
-                        hostRegistry,
-                        key,
-                        hostClients.api(binding),
-                        binding.connectionRevision,
-                    )
-                }
-            }
-        },
-        hostRegistry = hostRegistry,
+        hostClients = hostClients,
+        registry = registry,
+        currentBinding = currentBinding,
+        work = work,
+        hostStatus = hostStatus,
+        hostFilter = hostFilter,
         migrationState = migrationState,
         adoptLegacyMetadata = adoptLegacyMetadata,
+        pollInterval = pollInterval,
+        clock = System::currentTimeMillis,
     )
 
-    constructor(
-        bridge: ScoutrApi,
-        hostRegistry: HostRegistryStore,
-        initialState: BoardUiState = BoardUiState(),
-        pollInterval: Duration = 3.seconds,
-    ) : this(bridge, { hostRegistry.snapshot().profiles.isNotEmpty() }, initialState, pollInterval)
-
-    private val _ui = MutableStateFlow(initialState)
+    private val _ui = MutableStateFlow(BoardUiState())
     val ui: StateFlow<BoardUiState> = _ui.asStateFlow()
 
-    private val poller = Poller(viewModelScope)
-    private val connectionMutex = Mutex()
-    private val loadMutex = Mutex()
-    private var boundConnectionRevision: Long? = null
+    private var lifecycleActive = false
+    private var workerScope: CoroutineScope? = null
+    private val workerLock = Any()
 
-    val hasSavedConnection: Boolean get() = connectionAvailable()
+    /** One scheduled fetch loop per host; keyed and restarted by revision. */
+    private class Worker(val revision: Long) {
+        val mutex = Mutex()
+        var job: Job? = null
+    }
+
+    private val workers = HashMap<String, Worker>()
 
     init {
-        if (bindDefaultFactory != null) {
-            viewModelScope.launch {
-                hostRegistry?.states?.collect { bindToDefault() }
+        viewModelScope.launch {
+            registry.states.collect { state ->
+                applyRegistry(state)
+                if (lifecycleActive) reconcile(state)
             }
         }
-        migrationState?.let { state ->
+        viewModelScope.launch {
+            hostStatus.all.collect { statuses ->
+                _ui.update { it.copy(statuses = statuses) }
+            }
+        }
+        viewModelScope.launch {
+            hostFilter.selectedHostId.collect { selected ->
+                _ui.update { it.copy(filter = selected) }
+            }
+        }
+        migrationState?.let { flow ->
             viewModelScope.launch {
-                state.collect { migration ->
-                    if (migration == LegacyMigrationState.None) {
-                        bindToDefault()
-                    } else if (hostRegistry?.snapshot()?.profiles.isNullOrEmpty()) {
-                        _ui.update {
-                            it.copy(
-                                loading = migration == LegacyMigrationState.Pending ||
-                                    migration == LegacyMigrationState.Probing,
-                                connected = false,
-                                error = when (migration) {
-                                    LegacyMigrationState.Pending,
-                                    LegacyMigrationState.Probing -> "Checking saved bridge…"
-                                    is LegacyMigrationState.WaitingToRetry -> migration.message
-                                    LegacyMigrationState.None -> null
-                                },
-                            )
-                        }
+                flow.collect { migration ->
+                    _ui.update {
+                        it.copy(
+                            migrationMessage = when (migration) {
+                                LegacyMigrationState.None -> null
+                                LegacyMigrationState.Pending,
+                                LegacyMigrationState.Probing -> "Checking saved bridge…"
+                                is LegacyMigrationState.WaitingToRetry -> migration.message
+                            },
+                        )
                     }
                 }
             }
         }
-        if (hasSavedConnection && bindDefaultFactory == null) connect(host = "", token = "")
     }
 
-    private fun apiOrNull(): ScoutrApi? = bridge
-    private fun remoteActionsAllowed(): Boolean =
-        migrationState == null || migrationState.value == LegacyMigrationState.None
-
-    /** Rebinds the hostless board to the default profile when one appears. */
-    private fun bindToDefault() {
-        val selected = bindDefaultFactory?.invoke()
-        if (selected == null) {
-            bridge = null
-            boundConnectionRevision = null
-            _ui.update {
-                it.copy(
-                    hostProfile = null,
-                    loading = hostRegistry?.snapshot()?.pendingLegacyConnection == true,
-                    connected = false,
-                    error = if (hostRegistry?.snapshot()?.pendingLegacyConnection == true) "Checking saved bridge…" else null,
-                )
-            }
-            return
-        }
-        val key = selected.first
-        val revision = hostRegistry?.snapshot()?.profiles
-            ?.firstOrNull { it.hostId == key.hostId && it.profileGeneration == key.profileGeneration }
-            ?.connectionRevision
-        if (_ui.value.hostProfile == key && bridge != null && boundConnectionRevision == revision) return
-        boundConnectionRevision = revision
-        bridge = selected.second
+    private fun applyRegistry(state: HostRegistryState) {
         _ui.update {
             it.copy(
-                hostProfile = key,
-                board = BoardState(),
-                apiCompatibility = null,
-                quickAnswering = emptySet(),
-                error = null,
-                loading = true,
-                connected = false,
+                profiles = state.profiles.associate { profile ->
+                    profile.hostId to HostProfileKey(profile.hostId, profile.profileGeneration)
+                },
+                aliases = state.profiles.associate { it.hostId to it.alias },
+                registryOrder = state.profiles.map { it.hostId },
             )
         }
-        connect("", "")
     }
 
-    /** Connects to the stored (or newly saved) connection and starts the live board. */
-    fun connect(@Suppress("UNUSED_PARAMETER") host: String, @Suppress("UNUSED_PARAMETER") token: String) {
-        if (!hasSavedConnection) {
-            _ui.update { it.copy(error = "No connection configured") }
-            return
-        }
-        if (apiOrNull() == null) {
-            _ui.update { it.copy(loading = true, connected = false, error = "Checking saved bridge…") }
-            return
-        }
-        viewModelScope.launch {
-            probeConnection(showLoading = _ui.value.apiCompatibility !is ScoutrApiCompatibility.Incompatible)
-        }
-    }
+    // ── Screen lifecycle ──────────────────────────────────────────────────
 
-    private suspend fun probeConnection(showLoading: Boolean = false) = connectionMutex.withLock {
-        if (showLoading) _ui.update { it.copy(loading = true, error = null) }
-        val requestApi = apiOrNull() ?: return@withLock
-        val requestRevision = boundConnectionRevision
-        try {
-            val health = requestApi.health()
-            if (requestApi !== apiOrNull() || requestRevision != boundConnectionRevision) return@withLock
-            val compatibility = classifyScoutrApiCompatibility(health.api)
-            if (compatibility is ScoutrApiCompatibility.Incompatible) {
-                _ui.update {
-                    it.copy(
-                        board = BoardState(),
-                        loading = false,
-                        connected = false,
-                        error = formatScoutrApiIncompatibility(compatibility),
-                        apiCompatibility = compatibility,
-                    )
-                }
-                return@withLock
-            }
-            _ui.update {
-                it.copy(
-                    connected = health.ok && health.herdr?.connected == true,
-                    loading = false,
-                    error = null,
-                    apiCompatibility = ScoutrApiCompatibility.Compatible,
-                )
-            }
-            if (lifecycleActive) {
-                startLive()
-                loadBoard()
-            }
-        } catch (cancelled: CancellationException) {
-            throw cancelled
-        } catch (error: Exception) {
-            if (requestApi !== apiOrNull() || requestRevision != boundConnectionRevision) return@withLock
-            _ui.update { current ->
-                val incompatible = current.apiCompatibility as? ScoutrApiCompatibility.Incompatible
-                current.copy(
-                    loading = false,
-                    connected = false,
-                    error = incompatible?.let(::formatScoutrApiIncompatibility)
-                        ?: error.message
-                        ?: "connection failed",
-                )
-            }
-        }
-    }
-
-    // True while the board screen is STARTED. Only the lifecycle wrapper
-    // starts loops; connect() may restart them, but never resurrect them
-    // after a stop that raced the health probe.
-    private var lifecycleActive = false
-
-    /** Start the 3s board poll; no-op when already polling. */
+    /** Start per-host polling; only the screen lifecycle may call this. */
     fun startPolling() {
         if (lifecycleActive) return
         lifecycleActive = true
-        if (hasSavedConnection) startLive()
+        workerScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+        reconcile(registry.snapshot())
     }
 
     /** Stop the poll; in-flight one-shot actions are untouched. */
     fun stopPolling() {
         if (!lifecycleActive) return
         lifecycleActive = false
-        poller.stop()
+        synchronized(workerLock) {
+            workers.values.forEach { it.job?.cancel() }
+            workers.clear()
+        }
+        workerScope?.cancel()
+        workerScope = null
+        _ui.update { it.copy(isRefreshing = false) }
     }
 
     /**
-     * Forget: the pairing is gone, so stop polling and drop the board we
-     * fetched under it. This VM is activity-scoped and is not recreated when
-     * nav resets to Connect, so without this it would keep polling a cleared
-     * store. Re-pairing calls [connect] again, which restarts everything.
+     * Reconciles one worker per registered `(hostId, connectionRevision)`.
+     * Removals cancel and discard immediately; a revision change (credential
+     * refresh / identity replacement) restarts the worker for that host.
      */
-    fun disconnect() {
-        stopPolling()
-        _ui.value = BoardUiState()
-    }
-
-    private fun startLive() {
-        // Poll the bridge for the latest board state. A long-lived WebSocket
-        // is deliberately avoided here: an abrupt server close can crash the
-        // OkHttp reader, and the bridge already caches + re-snapshots anyway.
-        poller.start(pollInterval) {
-            if (_ui.value.apiCompatibility == ScoutrApiCompatibility.Compatible) {
-                loadBoard()
-            } else {
-                probeConnection()
+    private fun reconcile(state: HostRegistryState) {
+        val scope = workerScope ?: return
+        synchronized(workerLock) {
+            val alive = state.profiles.associateBy { it.hostId }
+            workers.entries.toList().forEach { (hostId, worker) ->
+                val profile = alive[hostId]
+                if (profile == null || profile.connectionRevision != worker.revision) {
+                    worker.job?.cancel()
+                    workers.remove(hostId)
+                    if (profile == null) discardHost(hostId)
+                }
+            }
+            alive.values.forEach { profile ->
+                if (workers[profile.hostId] == null) {
+                    val worker = Worker(profile.connectionRevision)
+                    // Registered before the launch: Main.immediate can run the
+                    // loop synchronously on this thread, and the cycle must see
+                    // its own worker.
+                    workers[profile.hostId] = worker
+                    worker.job = scope.launch { pollLoop(profile.hostId) }
+                }
             }
         }
     }
 
-    /** Request an immediate board refresh and expose its progress to the pull gesture. */
+    private suspend fun pollLoop(hostId: String) {
+        while (currentCoroutineContext().isActive) {
+            runCycle(hostId)
+            delay(pollInterval)
+        }
+    }
+
+    /**
+     * One identity-guarded fetch round for one host. Runs under the per-host
+     * mutex so a pull-to-refresh cannot double-fetch against the scheduled
+     * cycle, and inside [HostWorkCoordinator.trackIfActive] so retirement
+     * (forget / credential refresh) cancels and discards in flight work.
+     */
+    private suspend fun runCycle(hostId: String) {
+        val worker = synchronized(workerLock) { workers[hostId] } ?: return
+        worker.mutex.withLock {
+            if (!lifecycleActive) return
+            val snapshot = registry.snapshot()
+            val profile = snapshot.profiles.firstOrNull { it.hostId == hostId } ?: return
+            val binding = currentBinding(hostId)
+            if (binding == null) {
+                hostStatus.record(hostId, HostObservation.Failed("Host is not available"))
+                return
+            }
+            var observation: HostObservation? = null
+
+            work.trackIfActive(binding) {
+                try {
+                    val response = hostClients.api(binding).agents()
+                    // Discard unless the captured revision still owns the host
+                    // and the binding stayed admitted — cancellation alone can
+                    // lose that race.
+                    val current = registry.snapshot().profiles.firstOrNull { it.hostId == hostId }
+                    // Write-point admission recheck: retirement may land
+                    // between this check and the apply below, but never inside it.
+                    if (!work.isActive(binding) || current?.connectionRevision != binding.connectionRevision) {
+                        return@trackIfActive
+                    }
+                    applySessions(hostId, response.agents)
+                    observation = HostObservation.Succeeded(clock())
+                } catch (incompatible: HostIncompatibleException) {
+                    observation = HostObservation.Incompatible(
+                        incompatible.message ?: "Incompatible bridge protocol",
+                    )
+                } catch (changed: HostIdentityChangedException) {
+                    observation = HostObservation.IdentityChanged(changed.reportedHostId.orEmpty())
+                } catch (cancellation: CancellationException) {
+                    throw cancellation
+                } catch (failure: Exception) {
+                    // Keep this host's last snapshot; only its status goes stale.
+                    observation = HostObservation.Failed(failure.message ?: "lost connection")
+                }
+            }
+            // A retired binding's outcome is discarded, not recorded.
+            observation?.takeIf { work.isActive(binding) }?.let { hostStatus.record(hostId, it) }
+        }
+    }
+
+    private fun applySessions(hostId: String, sessions: List<SessionDescriptor>) {
+        adoptLegacyMetadata(sessions.mapNotNull(SessionDescriptor::key))
+        _ui.update {
+            it.copy(
+                hostBoards = it.hostBoards + (
+                    hostId to HostBoardState(
+                        sessions = sessions,
+                        fetchedAtMs = clock(),
+                    )
+                    ),
+            )
+        }
+    }
+
+    /** Forget: cancel the worker and drop the process-local snapshot. */
+    private fun discardHost(hostId: String) {
+        _ui.update { it.copy(hostBoards = it.hostBoards - hostId) }
+    }
+
+    // ── User actions ──────────────────────────────────────────────────────
+
+    /**
+     * Pull-to-refresh: starts all usable hosts' cycles concurrently and
+     * completes once they have settled. A failed host does not fail the
+     * gesture; its stale markers update independently.
+     */
     fun refreshBoard() {
-        if (_ui.value.isRefreshing || _ui.value.apiCompatibility != ScoutrApiCompatibility.Compatible) return
+        if (_ui.value.isRefreshing) return
+        val targets = registry.snapshot().profiles
+            .map { it.hostId }
+            .filter { id -> hostStatus.status(id).usableForData() }
         _ui.update { it.copy(isRefreshing = true) }
         viewModelScope.launch {
             try {
-                loadBoard()
+                targets.map { hostId ->
+                    launch { runCycle(hostId) }
+                }.forEach { it.join() }
             } finally {
                 _ui.update { it.copy(isRefreshing = false) }
             }
         }
     }
 
-    private suspend fun loadBoard() = loadMutex.withLock {
-        if (_ui.value.apiCompatibility != ScoutrApiCompatibility.Compatible) return@withLock
-        val requestApi = apiOrNull() ?: return@withLock
-        val requestRevision = boundConnectionRevision
-        try {
-            val response = requestApi.agents()
-            if (requestApi !== apiOrNull() || requestRevision != boundConnectionRevision) return@withLock
-            adoptLegacyMetadata(response.agents.mapNotNull(SessionDescriptor::key))
-            _ui.update {
-                it.copy(
-                    board = BoardState.group(response.agents),
-                    connected = true,
-                    error = null,
-                )
-            }
-        } catch (e: IOException) {
-            if (requestApi === apiOrNull() && requestRevision == boundConnectionRevision) {
-                _ui.update { it.copy(connected = false, error = e.message ?: "lost connection") }
-            }
-        } catch (c: CancellationException) {
-            throw c
-        } catch (_: Exception) {
-            // transient decode issues should not flap the board
-        }
+    /** Retry one host's cycle from a status card or banner action. */
+    fun retryHost(hostId: String) {
+        viewModelScope.launch { runCycle(hostId) }
     }
 
-    /** Surface a transient error (e.g. a failed session create) on the board. */
+    /** Shared with Sessions; null selects All hosts. */
+    fun selectFilter(hostId: String?) {
+        hostFilter.select(hostId)
+    }
+
+    private fun remoteActionsAllowed(): Boolean =
+        migrationState == null || migrationState.value == LegacyMigrationState.None
+
+    /** Surface a transient error on the board. */
     fun reportError(message: String) {
-        _ui.update { it.copy(error = message) }
+        _ui.update { it.copy(transientError = message) }
     }
 
-    /** Closes an agent's pane via the bridge control action (swipe-bar Close). */
-    fun closeAgent(paneId: String) {
+    /**
+     * Closes an agent's pane via the session's own host. The captured binding
+     * pins the route: a concurrent refresh makes the gated client throw stale
+     * rather than send an old pane's action to a new generation.
+     */
+    fun closeAgent(profile: HostProfileKey, paneId: String) {
         if (!remoteActionsAllowed()) {
             reportError("Finishing saved connection migration")
             return
         }
-        val incompatible = _ui.value.apiCompatibility as? ScoutrApiCompatibility.Incompatible
-        if (incompatible != null) {
-            reportError(formatScoutrApiIncompatibility(incompatible))
-            return
-        }
-        if (_ui.value.apiCompatibility != ScoutrApiCompatibility.Compatible) {
-            reportError("Checking bridge compatibility")
-            return
-        }
-        // Capture the pinned wrapper: after a rebind it throws stale instead of
-        // sending an old pane's action to a new host generation.
-        val requestApi = apiOrNull() ?: return
+        val binding = bindingForCurrent(profile) ?: return
         viewModelScope.launch {
             try {
-                requestApi.controlSession(paneId, SessionAction.Close)
-            } catch (e: IOException) {
+                hostClients.api(binding).controlSession(paneId, dev.scoutr.app.data.SessionAction.Close)
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (e: Exception) {
                 reportError(e.message ?: "could not close agent")
             }
         }
@@ -371,57 +410,47 @@ class BoardViewModel internal constructor(
      * Answer a Needs-you card's open ask straight from the Board.
      *
      * Only the whole round travels: exactly one [AskAnswer] built from the
-     * server's own question id and the server's own option label (never the
-     * truncated text the button drew). Eligibility and ids are re-read from
-     * the board this VM currently holds rather than the card the tap carried,
-     * because a poll may have replaced the ask in between. Nothing is marked
-     * answered locally — the Board refreshes after every outcome and lets
-     * `/api/agents` say what is still open.
+     * server's own question id and the server's own option label. Eligibility
+     * and ids are re-read from the owning host's snapshot, because a poll may
+     * have replaced the ask in between. Busy state is keyed by
+     * [dev.scoutr.app.data.HostPaneKey], so identical pane ids on two hosts
+     * never block each other.
      */
-    fun quickAnswer(agent: SessionDescriptor, optionLabel: String) {
+    fun quickAnswer(agent: HostedSession, optionLabel: String) {
         if (!remoteActionsAllowed()) {
             reportError("Finishing saved connection migration")
             return
         }
-        val incompatible = _ui.value.apiCompatibility as? ScoutrApiCompatibility.Incompatible
-        if (incompatible != null) {
-            reportError(formatScoutrApiIncompatibility(incompatible))
-            return
-        }
-        if (_ui.value.apiCompatibility != ScoutrApiCompatibility.Compatible) {
-            reportError("Checking bridge compatibility")
-            return
-        }
-        val paneId = agent.live?.paneId
+        val paneId = agent.session.live?.paneId
         if (paneId == null) {
             reportError("That agent is no longer running")
             return
         }
+        val busyKey = dev.scoutr.app.data.HostPaneKey(agent.profile, paneId)
         // The one guard against a double tap: the second call sees the first
         // still in flight and stops here, before any request is built.
-        if (paneId in _ui.value.quickAnswering) return
+        if (busyKey in _ui.value.quickAnswering) return
 
-        val attention = _ui.value.board.sessions
-            .firstOrNull { it.live?.paneId == paneId }
+        val attention = _ui.value.hostBoards[agent.profile.hostId]
+            ?.sessions
+            ?.firstOrNull { it.live?.paneId == paneId }
             ?.attention
         val question = attention?.currentQuestion
         val callId = attention?.callId
         val option = quickAnswerOptions(attention).firstOrNull { it.label == optionLabel }
         if (question == null || callId.isNullOrEmpty() || option == null) {
             viewModelScope.launch {
-                loadBoard()
+                runCycle(agent.profile.hostId)
                 reportError(QUICK_ANSWER_STALE)
             }
             return
         }
 
-        // Pinned wrapper: after a rebind it throws stale instead of answering on
-        // the new host generation.
-        val requestApi = apiOrNull() ?: return
-        _ui.update { it.copy(quickAnswering = it.quickAnswering + paneId, error = null) }
+        val binding = bindingForCurrent(agent.profile) ?: return
+        _ui.update { it.copy(quickAnswering = it.quickAnswering + busyKey, transientError = null) }
         viewModelScope.launch {
             val failure = try {
-                requestApi.answerAsk(
+                hostClients.api(binding).answerAsk(
                     paneId = paneId,
                     callId = callId,
                     answers = listOf(
@@ -434,13 +463,19 @@ class BoardViewModel internal constructor(
             } catch (e: Exception) {
                 e
             }
-            _ui.update { it.copy(quickAnswering = it.quickAnswering - paneId) }
+            _ui.update { it.copy(quickAnswering = it.quickAnswering - busyKey) }
             // Refresh on success and on failure alike: only the bridge knows
             // whether the ask is gone. The error is raised after the refresh
             // so the successful reload does not clear it.
-            loadBoard()
+            runCycle(agent.profile.hostId)
             failure?.let { reportError(quickAnswerErrorMessage(it)) }
         }
+    }
+
+    private fun bindingForCurrent(profile: HostProfileKey): HostConnectionBinding? {
+        val current = registry.snapshot().profiles.firstOrNull { it.hostId == profile.hostId }
+        if (current == null || current.profileGeneration != profile.profileGeneration) return null
+        return currentBinding(profile.hostId)
     }
 
     private fun quickAnswerErrorMessage(error: Exception): String = when {
@@ -451,7 +486,7 @@ class BoardViewModel internal constructor(
     }
 
     override fun onCleared() {
-        poller.stop()
+        stopPolling()
         super.onCleared()
     }
 

@@ -86,10 +86,12 @@ import dev.scoutr.app.ui.theme.DiffPalette
 import dev.scoutr.app.data.QuestionOption
 import dev.scoutr.app.data.SessionDescriptor
 import dev.scoutr.app.data.AgentStatus
-import dev.scoutr.app.data.ScoutrApiCompatibility
-import dev.scoutr.app.data.formatScoutrApiIncompatibility
 import dev.scoutr.app.state.BoardUiState
 import dev.scoutr.app.state.BoardViewModel
+import dev.scoutr.app.state.HostAvailability
+import dev.scoutr.app.state.HostedSession
+import dev.scoutr.app.ui.components.HostFilterOption
+import dev.scoutr.app.ui.components.HostFilterSelector
 import dev.scoutr.app.ui.components.AgentMark
 import dev.scoutr.app.ui.components.ConfirmDialog
 import dev.scoutr.app.ui.components.ReadableContentColumn
@@ -110,16 +112,21 @@ import kotlinx.coroutines.launch
  * status metadata; cards carry the active model and latest meaningful transcript
  * line so the user reads "what is it doing now" without opening the session.
  * Needs-you agents sort first and read strongest through red treatment and border.
+ *
+ * Multi-host: every row travels as a [HostedSession] bound to its own host, so
+ * open / review / close / answer always land on the bridge that owns the pane.
+ * A blocked host (incompatible / identity-changed) never renders rows; it gets
+ * a compact issue card instead.
  */
 @Composable
 fun BoardScreen(
-    onOpenAgent: (SessionDescriptor) -> Unit = {},
+    onOpenAgent: (HostedSession) -> Unit = {},
     viewModel: BoardViewModel,
     modifier: Modifier = Modifier,
-    onReviewAgent: (SessionDescriptor) -> Unit = {},
-    onCloseAgent: (SessionDescriptor) -> Unit = {},
+    onReviewAgent: (HostedSession) -> Unit = {},
+    onCloseAgent: (HostedSession) -> Unit = {},
     onResolveCompatibility: () -> Unit = {},
-    onQuickAnswer: (SessionDescriptor, String) -> Unit = {_, _ -> },
+    onQuickAnswer: (HostedSession, String) -> Unit = { _, _ -> },
     onRetryMigration: () -> Unit = {},
 ) {
     val ui by viewModel.ui.collectAsState()
@@ -140,9 +147,12 @@ fun BoardScreen(
     // Close stops a live pane, so it is gated the same way Sessions gates it:
     // a swipe is easy to trigger while scrolling, and every board card is by
     // definition a running agent.
-    var pendingClose by remember { mutableStateOf<SessionDescriptor?>(null) }
+    var pendingClose by remember { mutableStateOf<HostedSession?>(null) }
 
-    if (ui.loading && ui.board.total == 0) {
+    // Spinner only while nothing is paired yet; once hosts exist, issue
+    // cards and per-host states take over (a blocked board must not read as
+    // an endless load).
+    if (ui.registryOrder.isEmpty() || (ui.statuses.isEmpty() && ui.hostBoards.isEmpty())) {
         Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Text("Loading agents…", color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
@@ -152,7 +162,7 @@ fun BoardScreen(
     pendingClose?.let { agent ->
         ConfirmDialog(
             title = "Close agent?",
-            text = "Closing “${agent.cardTitle()}” stops its live pane. " +
+            text = "Closing “${agent.session.cardTitle()}” stops its live pane. " +
                 "The transcript is preserved and can be resumed from Sessions.",
             confirmLabel = "Close",
             onConfirm = {
@@ -192,14 +202,15 @@ fun BoardScreen(
                     compact = false,
                     reduceMotion = reduceMotion,
                     selectedPaneId = null,
+                    filterOptions = ui.filterOptions(),
+                    selectedHostId = ui.filter,
+                    onSelectHost = viewModel::selectFilter,
                     onOpenAgent = onOpenAgent,
                     onReviewAgent = onReviewAgent,
                     onCloseAgent = { pendingClose = it },
                     onQuickAnswer = onQuickAnswer,
-                    onRetry = {
-                        onRetryMigration()
-                        viewModel.connect("", "")
-                    },
+                    onRetryHost = viewModel::retryHost,
+                    onRefreshAll = { onRetryMigration(); viewModel.refreshBoard() },
                     onResolveCompatibility = onResolveCompatibility,
                 )
             }
@@ -207,11 +218,20 @@ fun BoardScreen(
     }
 }
 
+/** All + one chip per registered host, in registry order. */
+private fun BoardUiState.filterOptions(): List<HostFilterOption> = buildList {
+    if (registryOrder.size > 1) add(HostFilterOption(null, "All", null))
+    registryOrder.forEach { hostId ->
+        add(HostFilterOption(hostId, aliases[hostId] ?: hostId, statuses[hostId]))
+    }
+}
+
 /**
- * The board's list body: banners, the empty state, and the five status
- * sections. [BoardScreen] and the wide-window session panel share it and
- * supply their own PullToRefreshBox and LazyColumn, because their padding
- * differs — the Board clears its own FAB, the panel clears the panel's.
+ * The board's list body: the shared host-scope selector, blocked-host issue
+ * cards, banners, the empty state, and the five status sections. [BoardScreen]
+ * and the wide-window session panel share it and supply their own
+ * PullToRefreshBox and LazyColumn, because their padding differs — the Board
+ * clears its own FAB, the panel clears the panel's.
  *
  * Close is not confirmed here: each caller gates it the way its own surface
  * does, so [onCloseAgent] receives the raw request.
@@ -221,52 +241,91 @@ internal fun LazyListScope.boardListContent(
     compact: Boolean,
     reduceMotion: Boolean,
     selectedPaneId: String?,
-    onOpenAgent: (SessionDescriptor) -> Unit,
-    onReviewAgent: (SessionDescriptor) -> Unit,
-    onCloseAgent: (SessionDescriptor) -> Unit,
-    onQuickAnswer: (SessionDescriptor, String) -> Unit,
-    onRetry: () -> Unit,
+    filterOptions: List<HostFilterOption>,
+    selectedHostId: String?,
+    onSelectHost: (String?) -> Unit,
+    onOpenAgent: (HostedSession) -> Unit,
+    onReviewAgent: (HostedSession) -> Unit,
+    onCloseAgent: (HostedSession) -> Unit,
+    onQuickAnswer: (HostedSession, String) -> Unit,
+    onRetryHost: (String) -> Unit,
+    onRefreshAll: () -> Unit,
     onResolveCompatibility: () -> Unit,
 ) {
-    val incompatible = ui.apiCompatibility as? ScoutrApiCompatibility.Incompatible
-    if (incompatible != null) {
-        item {
-            CompatibilityBanner(
-                message = formatScoutrApiIncompatibility(incompatible),
-                onRetry = onRetry,
+    if (filterOptions.size > 1) {
+        item(key = "host_filter") {
+            HostFilterSelector(
+                options = filterOptions,
+                selectedHostId = selectedHostId,
+                onSelect = onSelectHost,
+                modifier = Modifier.padding(start = 4.dp, top = 4.dp),
+            )
+        }
+    }
+
+    // Blocked hosts surface as compact cards instead of silently vanishing;
+    // their rows are excluded from the merge, so without this they would only
+    // be visible as missing data.
+    ui.hostIssues.forEach { issue ->
+        item(key = "issue_${issue.hostId}") {
+            HostIssueCard(
+                message = issue.message,
+                reportedHostId = issue.reportedHostId,
+                alias = issue.alias,
+                onRetry = { onRetryHost(issue.hostId) },
                 onOpenSettings = onResolveCompatibility,
             )
         }
-    } else if (!ui.connected) {
-        item { DisconnectedBanner(error = ui.error, onRetry = onRetry) }
     }
 
-    if (incompatible == null) {
-        if (ui.board.total == 0) {
+    if (ui.hostIssues.isEmpty() && !ui.connected) {
+        item {
+            DisconnectedBanner(
+                error = ui.transientError ?: ui.migrationMessage,
+                onRetry = onRefreshAll,
+            )
+        }
+    }
+
+    val rows = ui.hostedSessions
+    if (rows.isEmpty()) {
+        if (ui.hostIssues.isEmpty()) {
             item {
                 Box(
                     Modifier.fillMaxWidth().padding(vertical = 80.dp),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Text("No agents running", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(
+                        text = if (selectedHostId == null) "No agents running" else "No agents on this host",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
             }
-        } else {
-            // Only needs-you cards carry quick answers; the other sections take
-            // the default no-op, as they did before the body was shared.
-            boardSection("Needs you", ui.board.needsYou, compact, selectedPaneId, onOpenAgent, reduceMotion, onReviewAgent, onCloseAgent, onQuickAnswer)
-            boardSection("Working", ui.board.working, compact, selectedPaneId, onOpenAgent, reduceMotion, onReviewAgent, onCloseAgent)
-            boardSection("Done", ui.board.done, compact, selectedPaneId, onOpenAgent, reduceMotion, onReviewAgent, onCloseAgent)
-            boardSection("Idle", ui.board.idle, compact, selectedPaneId, onOpenAgent, reduceMotion, onReviewAgent, onCloseAgent)
-            boardSection("Other", ui.board.unknown, compact, selectedPaneId, onOpenAgent, reduceMotion, onReviewAgent, onCloseAgent)
         }
+    } else {
+        fun section(status: AgentStatus) =
+            rows.filter { AgentStatus.fromWire(it.session.status) == status }
+        // Only needs-you cards carry quick answers; the other sections take
+        // the default no-op, as they did before the body was shared.
+        boardSection("Needs you", section(AgentStatus.NeedsYou), ui, compact, selectedPaneId, onOpenAgent, reduceMotion, onReviewAgent, onCloseAgent, onQuickAnswer)
+        boardSection("Working", section(AgentStatus.Working), ui, compact, selectedPaneId, onOpenAgent, reduceMotion, onReviewAgent, onCloseAgent)
+        boardSection("Done", section(AgentStatus.Done), ui, compact, selectedPaneId, onOpenAgent, reduceMotion, onReviewAgent, onCloseAgent)
+        boardSection("Idle", section(AgentStatus.Idle), ui, compact, selectedPaneId, onOpenAgent, reduceMotion, onReviewAgent, onCloseAgent)
+        boardSection("Other", section(AgentStatus.Unknown), ui, compact, selectedPaneId, onOpenAgent, reduceMotion, onReviewAgent, onCloseAgent)
     }
     item { Spacer(Modifier.height(24.dp)) }
 }
 
+/**
+ * One blocked host, compactly: what failed, whose identity answered when it is
+ * an identity change, and the two ways out — retry the probe, or manage the
+ * host in Settings.
+ */
 @Composable
-private fun CompatibilityBanner(
+private fun HostIssueCard(
     message: String,
+    reportedHostId: String?,
+    alias: String,
     onRetry: () -> Unit,
     onOpenSettings: () -> Unit,
 ) {
@@ -286,13 +345,16 @@ private fun CompatibilityBanner(
         Spacer(Modifier.width(10.dp))
         Column(Modifier.weight(1f)) {
             Text(
-                "Scoutr app and bridge do not match",
+                "$alias is unavailable",
                 color = MaterialTheme.colorScheme.onSurface,
                 fontWeight = FontWeight.Bold,
             )
             Spacer(Modifier.height(4.dp))
             Text(
-                message,
+                listOfNotNull(
+                    message,
+                    reportedHostId?.let { "Bridge now reports id $it" },
+                ).joinToString(" "),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 style = MaterialTheme.typography.bodySmall,
             )
@@ -307,7 +369,7 @@ private fun CompatibilityBanner(
                         .padding(top = 8.dp, end = 16.dp, bottom = 2.dp),
                 )
                 Text(
-                    "Open Settings",
+                    "Manage in Settings",
                     color = MaterialTheme.colorScheme.tertiary,
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier
@@ -323,14 +385,15 @@ private fun CompatibilityBanner(
 /** Adds a section header + its agent cards to the LazyList. */
 private fun LazyListScope.boardSection(
     title: String,
-    agents: List<SessionDescriptor>,
+    agents: List<HostedSession>,
+    ui: BoardUiState,
     compact: Boolean,
     selectedPaneId: String?,
-    onOpenAgent: (SessionDescriptor) -> Unit,
+    onOpenAgent: (HostedSession) -> Unit,
     reduceMotion: Boolean,
-    onReviewAgent: (SessionDescriptor) -> Unit,
-    onCloseAgent: (SessionDescriptor) -> Unit,
-    onQuickAnswer: (SessionDescriptor, String) -> Unit = { _, _ -> },
+    onReviewAgent: (HostedSession) -> Unit,
+    onCloseAgent: (HostedSession) -> Unit,
+    onQuickAnswer: (HostedSession, String) -> Unit = { _, _ -> },
 ) {
     if (agents.isEmpty()) return
     item(key = "header_$title") {
@@ -360,12 +423,34 @@ private fun LazyListScope.boardSection(
             )
         }
     }
-    items(agents, key = { requireNotNull(it.live).paneId }) { agent ->
+    // Host-qualified keys: identical pane ids on two bridges are distinct rows.
+    items(agents, key = { it.profile.hostId + ":" + requireNotNull(it.session.live).paneId }) { agent ->
+        // Per-host context rendered on the card itself: the alias only under
+        // the All scope, and a stale marker when that host's snapshot can no
+        // longer be refreshed.
+        val hostLabel = ui.hostLabelFor(agent.profile.hostId)
+        val staleLine = when (val availability = ui.statuses[agent.profile.hostId]) {
+            is HostAvailability.Offline -> {
+                val syncedAt = ui.hostBoards[agent.profile.hostId]?.fetchedAtMs
+                if (syncedAt != null) {
+                    "Offline · last synced ${dev.scoutr.app.ui.relativeTime(syncedAt.toDouble())}"
+                } else {
+                    "Offline"
+                }
+            }
+            else -> null
+        }
+        val paneId = agent.session.live?.paneId.orEmpty()
+        val answering = paneId.isNotEmpty() &&
+            dev.scoutr.app.data.HostPaneKey(agent.profile, paneId) in ui.quickAnswering
         AgentCardRow(
             agent,
+            hostLabel = hostLabel,
+            staleLine = staleLine,
+            answering = answering,
             onClick = { onOpenAgent(agent) },
             compact = compact,
-            selected = selectedPaneId != null && selectedPaneId == agent.live?.paneId,
+            selected = selectedPaneId != null && selectedPaneId == agent.session.live?.paneId,
             onReview = { onReviewAgent(agent) },
             onClose = { onCloseAgent(agent) },
             onQuickAnswer = { label -> onQuickAnswer(agent, label) },
@@ -377,6 +462,7 @@ private fun LazyListScope.boardSection(
         )
     }
 }
+
 
 @Composable
 private fun DisconnectedBanner(error: String?, onRetry: () -> Unit) {
@@ -438,7 +524,10 @@ private data class BoardAction(
  */
 @Composable
 private fun AgentCardRow(
-    agent: SessionDescriptor,
+    agent: HostedSession,
+    hostLabel: String?,
+    staleLine: String?,
+    answering: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     compact: Boolean = false,
@@ -447,12 +536,13 @@ private fun AgentCardRow(
     onClose: () -> Unit = {},
     onQuickAnswer: (String) -> Unit = {},
 ) {
+    val session = agent.session
     val scheme = MaterialTheme.colorScheme
     val clipboard = LocalClipboardManager.current
     val haptic = rememberHaptic()
     val context = LocalContext.current
     val copyPath = {
-        clipboard.setText(AnnotatedString(agent.cwd ?: agent.live?.workspaceId.orEmpty()))
+        clipboard.setText(AnnotatedString(session.cwd ?: session.live?.workspaceId.orEmpty()))
         haptic(HapticEvent.Confirm)
         Toast.makeText(context, "Copied path", Toast.LENGTH_SHORT).show()
     }
@@ -473,13 +563,16 @@ private fun AgentCardRow(
             actions = actions,
             selected = selected,
             compact = true,
+            hostLabel = hostLabel,
+            staleLine = staleLine,
+            answering = answering,
             onClick = onClick,
             onReview = onReview,
             onQuickAnswer = onQuickAnswer,
             modifier = modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(4.dp))
-                .testTag("panel_agent_card_${agent.live?.paneId}"),
+                .testTag("panel_agent_card_${session.live?.paneId}"),
         )
         return
     }
@@ -521,7 +614,7 @@ private fun AgentCardRow(
                             closeReveal()
                             action.onClick()
                         }
-                        .testTag("board_action_${action.key}_${agent.live?.paneId}"),
+                        .testTag("board_action_${action.key}_${session.live?.paneId}"),
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(
@@ -538,6 +631,9 @@ private fun AgentCardRow(
             actions = actions,
             selected = selected,
             compact = false,
+            hostLabel = hostLabel,
+            staleLine = staleLine,
+            answering = answering,
             onClick = { if (reveal.currentValue == BoardReveal.Open) closeReveal() else onClick() },
             onReview = onReview,
             onQuickAnswer = onQuickAnswer,
@@ -545,7 +641,7 @@ private fun AgentCardRow(
                 .offset { IntOffset(reveal.requireOffset().roundToInt(), 0) }
                 .anchoredDraggable(reveal, reverseDirection = false, orientation = Orientation.Horizontal)
                 .fillMaxWidth()
-                .testTag("agent_card_${agent.live?.paneId}"),
+                .testTag("agent_card_${session.live?.paneId}"),
         )
     }
 }
@@ -558,7 +654,7 @@ private fun AgentCardRow(
  */
 @Composable
 private fun AgentCardBody(
-    agent: SessionDescriptor,
+    agent: HostedSession,
     actions: List<BoardAction>,
     selected: Boolean,
     compact: Boolean,
@@ -566,8 +662,12 @@ private fun AgentCardBody(
     onReview: () -> Unit,
     onQuickAnswer: (String) -> Unit,
     modifier: Modifier = Modifier,
+    hostLabel: String? = null,
+    staleLine: String? = null,
+    answering: Boolean = false,
 ) {
-    val status = AgentStatus.fromWire(agent.status)
+    val session = agent.session
+    val status = AgentStatus.fromWire(session.status)
     val isNeedsYou = status == AgentStatus.NeedsYou
     val accent = statusColor(status)
     val scheme = MaterialTheme.colorScheme
@@ -604,10 +704,10 @@ private fun AgentCardBody(
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        AgentMark(agent.agentKind)
+                        AgentMark(session.agentKind)
                         Spacer(Modifier.width(6.dp))
                         Text(
-                            text = agent.cardTitle(),
+                            text = session.cardTitle(),
                             style = MaterialTheme.typography.titleMedium,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
@@ -615,7 +715,7 @@ private fun AgentCardBody(
                     }
                     // A needs-you agent's question is prose addressed to the
                     // user; everything else is the machine's own last move.
-                    agent.latestActivity?.takeIf { it.isNotBlank() }?.let { activity ->
+                    session.latestActivity?.takeIf { it.isNotBlank() }?.let { activity ->
                         Spacer(Modifier.height(2.dp))
                         Text(
                             text = if (isNeedsYou) activity else "▸ $activity",
@@ -630,23 +730,24 @@ private fun AgentCardBody(
                     // obviously risky about the repo state — final for a done
                     // agent, as-of-last-refresh for a running one.
                     val cardSummary = if (status == AgentStatus.Done) {
-                        agent.doneSummary?.let { it to false }
+                        session.doneSummary?.let { it to false }
                     } else {
-                        agent.liveSummary?.let { it to true }
+                        session.liveSummary?.let { it to true }
                     }
                     cardSummary?.let { (summary, live) ->
                         CardSummaryBlock(
                             summary = summary,
-                            paneId = agent.live?.paneId.orEmpty(),
+                            paneId = session.live?.paneId.orEmpty(),
                             live = live,
                             onReview = onReview,
                         )
                     }
                     if (isNeedsYou) {
                         AttentionBlock(
-                            attention = agent.attention,
-                            paneId = agent.live?.paneId.orEmpty(),
-                            cardTitle = agent.cardTitle(),
+                            attention = session.attention,
+                            paneId = session.live?.paneId.orEmpty(),
+                            cardTitle = session.cardTitle(),
+                            busy = answering,
                             onQuickAnswer = onQuickAnswer,
                             onOpen = onClick,
                         )
@@ -655,26 +756,39 @@ private fun AgentCardBody(
                     // Machine facts: which project, on which model. The project
                     // name is what the user recognises the card by, so it reads
                     // above the transcript line's weight, not below it.
+                    val machineFacts = buildList {
+                        add(projectFolderName(session.cwd) ?: session.live?.workspaceId.orEmpty())
+                        hostLabel?.let(::add)
+                        session.model?.let { add(shortModel(it)) }
+                    }.joinToString(" · ")
                     Text(
-                        text = listOfNotNull(
-                            projectFolderName(agent.cwd) ?: agent.live?.workspaceId.orEmpty(),
-                            agent.model?.let { shortModel(it) },
-                        ).joinToString(" · "),
+                        text = machineFacts,
                         style = ScoutrType.monoMeta,
                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
+                    // Only shown while that host's snapshot cannot refresh:
+                    // the row itself is deliberately kept rather than dropped.
+                    staleLine?.let { stale ->
+                        Text(
+                            text = stale,
+                            style = ScoutrType.monoMeta,
+                            color = MaterialTheme.colorScheme.error.copy(alpha = 0.8f),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
                 }
                 Spacer(Modifier.width(12.dp))
-                TimeInState(status, agent.statusSinceMs ?: agent.updatedAtMs)
+                TimeInState(status, session.statusSinceMs ?: session.updatedAtMs)
                 Box {
                     androidx.compose.material3.IconButton(
                         onClick = { menuOpen = true },
                         modifier = Modifier
                             .size(28.dp)
-                            .testTag("agent_actions_${agent.live?.paneId}")
-                            .semantics { contentDescription = "Agent actions for ${agent.cardTitle()}" },
+                            .testTag("agent_actions_${session.live?.paneId}")
+                            .semantics { contentDescription = "Agent actions for ${session.cardTitle()}" },
                     ) {
                         Icon(
                             Icons.Default.MoreVert,
@@ -695,7 +809,7 @@ private fun AgentCardBody(
                                     action.onClick()
                                 },
                                 leadingIcon = { Icon(action.icon, contentDescription = null) },
-                                modifier = Modifier.testTag("board_menu_${action.key}_${agent.live?.paneId}"),
+                                modifier = Modifier.testTag("board_menu_${action.key}_${session.live?.paneId}"),
                             )
                         }
                     }
@@ -805,6 +919,7 @@ private fun AttentionBlock(
     cardTitle: String,
     onQuickAnswer: (String) -> Unit,
     onOpen: () -> Unit,
+    busy: Boolean = false,
 ) {
     if (attention == null) return
     val question = attentionQuestionText(attention)
@@ -841,6 +956,7 @@ private fun AttentionBlock(
         ) {
             options.forEach { option ->
                 OutlinedButton(
+                    enabled = !busy,
                     shape = MaterialTheme.shapes.small,
                     // The server's own label is what travels; the button text
                     // is only what fits.

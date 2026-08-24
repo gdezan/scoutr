@@ -108,10 +108,13 @@ import dev.scoutr.app.data.AgentStatus
 import dev.scoutr.app.data.SessionCatalogItem
 import dev.scoutr.app.data.encode
 import dev.scoutr.app.state.HistoryItem
+import dev.scoutr.app.state.HostAvailability
 import dev.scoutr.app.state.HistoryUiState
 import dev.scoutr.app.state.HistoryScope
 import dev.scoutr.app.state.ResumedSession
 import dev.scoutr.app.state.SessionHistoryViewModel
+import dev.scoutr.app.ui.components.HostFilterOption
+import dev.scoutr.app.ui.components.HostFilterSelector
 import dev.scoutr.app.ui.components.ReadableContentColumn
 
 /** The Sessions tab: catalog of stored and live pi sessions with lifecycle actions. */
@@ -143,12 +146,19 @@ fun HistoryScreen(
     var anchors by rememberSaveable(stateSaver = HistoryAnchorMapSaver) {
         mutableStateOf(emptyMap())
     }
-    val repoTabs = remember(ui.items) { repositoryTabs(ui.items) }
+    // Merged rows are derived per state change: membership comes from the
+    // multi-host snapshots, pin/archive flags from one batched store read.
+    val historyItems = remember(viewModel, ui) { viewModel.items(ui) }
+    // Anchor math only needs "is any source capped"; the per-host copy lines
+    // carry the details.
+    val catalogTruncated = ui.truncatedAliases().isNotEmpty() ||
+        ui.hostCatalogs.values.any { it.truncated }
+    val repoTabs = remember(historyItems) { repositoryTabs(historyItems) }
     // A search or refresh can remove the selected repository from the current
     // catalog. Render All instead of leaving an invisible filter active.
     val activeRepoFilter = repoFilter.takeIf { it in repoTabs } ?: "All"
-    val sortedItems = remember(ui.items, scopeFilter, activeRepoFilter) {
-        sortedHistoryItems(ui.items, scopeFilter, activeRepoFilter)
+    val sortedItems = remember(historyItems, scopeFilter, activeRepoFilter) {
+        sortedHistoryItems(historyItems, scopeFilter, activeRepoFilter)
     }
     var pendingTabRestore by remember { mutableStateOf<String?>(null) }
     var anchorCaptureEnabled by remember { mutableStateOf(true) }
@@ -158,7 +168,7 @@ fun HistoryScreen(
         if (sortedItems.isNotEmpty() && pendingTabRestore == anchorKey) {
             val target = resolveHistoryAnchor(anchors[anchorKey], sortedItems)
             val targetIndex = target?.let {
-                historyListIndex(sortedItems, it.index, ui.truncated, it.headerVisible)
+                historyListIndex(sortedItems, it.index, catalogTruncated, it.headerVisible)
             } ?: 0
             anchorCaptureEnabled = false
             historyListState.scrollToItem(
@@ -186,6 +196,19 @@ fun HistoryScreen(
         modifier = modifier.fillMaxSize(),
         contentTag = "history_content",
     ) {
+        if (ui.registryOrder.size > 1) {
+            HostFilterSelector(
+                options = buildList {
+                    add(HostFilterOption(null, "All", null))
+                    ui.registryOrder.forEach { hostId ->
+                        add(HostFilterOption(hostId, ui.aliases[hostId] ?: hostId, ui.statuses[hostId]))
+                    }
+                },
+                selectedHostId = ui.filter,
+                onSelect = viewModel::selectFilter,
+                modifier = Modifier.padding(bottom = 8.dp),
+            )
+        }
         Row(
             Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
@@ -223,28 +246,33 @@ fun HistoryScreen(
                 }
             },
         )
-        if (!ui.connected && ui.error != null) {
+        if (!ui.connected && ui.transientError != null) {
             OfflineBanner(onRetry = viewModel::retry)
         }
-        if (ui.error != null && ui.connected) {
-            ErrorBanner(message = ui.error ?: "Something went wrong", onDismiss = { /* poll heals */ })
+        if (ui.transientError != null && ui.connected) {
+            ErrorBanner(message = ui.transientError ?: "Something went wrong", onDismiss = { /* poll heals */ })
         }
         Box(Modifier.weight(1f)) {
-            if (ui.loading && ui.items.isEmpty()) {
+            if (ui.loading && historyItems.isEmpty()) {
                 Text("Loading sessions…", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.fillMaxWidth().padding(vertical = 48.dp))
             } else {
                 HistoryList(
                     ui = ui,
+                    items = historyItems,
                     scope = scopeFilter,
                     sorted = sortedItems,
                     listState = historyListState,
                     onOpen = { item ->
-                        if (viewModel.ui.value.busySessionKey == null) {
+                        if (viewModel.remoteActionsEnabled(item) &&
+                            viewModel.ui.value.busySessionKey == null
+                        ) {
                             scope.launch { viewModel.resume(item)?.let(onOpenSession) }
                         }
                     },
                     onFork = { item ->
-                        if (viewModel.ui.value.busySessionKey == null) {
+                        if (viewModel.remoteActionsEnabled(item) &&
+                            viewModel.ui.value.busySessionKey == null
+                        ) {
                             scope.launch { viewModel.fork(item)?.let(onOpenSession) }
                         }
                     },
@@ -254,7 +282,7 @@ fun HistoryScreen(
                     onTogglePin = viewModel::togglePin,
                     onToggleArchive = viewModel::toggleArchive,
                     onReview = onReview,
-                    isBusy = { item -> ui.busySessionKey == viewModel.hostSessionKey(item.session.key) },
+                    isBusy = { item -> ui.busySessionKey == viewModel.hostSessionKey(item) },
                 )
             }
         }
@@ -391,6 +419,7 @@ private fun RepoTabs(selected: String, repositories: List<String>, onSelect: (St
 @Composable
 private fun HistoryList(
     ui: HistoryUiState,
+    items: List<HistoryItem>,
     scope: HistoryScope,
     sorted: List<HistoryItem>,
     listState: LazyListState,
@@ -429,10 +458,12 @@ private fun HistoryList(
         // the date header's own top padding (§9c).
         verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
-        if (ui.truncated) {
-            item {
+        // Under All, each capped host gets its own honest line; a single
+        // global count would imply one bridge's cap is everyone's.
+        ui.truncatedAliases().forEach { alias ->
+            item(key = "history_truncated_$alias") {
                 Text(
-                    "Results are capped; refine the search to see more.",
+                    "Showing latest $HISTORY_CATALOG_LIMIT from $alias",
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
                     modifier = Modifier.padding(vertical = 4.dp),
@@ -461,11 +492,18 @@ private fun HistoryList(
                     )
                 }
             }
-            item(key = historyItem.session.key.encode()) {
+            item(key = historyItem.hostId + ":" + historyItem.session.key.encode()) {
+                val availability = ui.statuses[historyItem.hostId]
                 HistoryRow(
                     item = historyItem,
                     busy = isBusy(historyItem),
                     busyLabel = ui.busyLabel,
+                    hostLabel = ui.aliases[historyItem.hostId]?.takeIf {
+                        ui.filter == null && ui.registryOrder.size > 1
+                    },
+                    offlineSinceMs = (availability as? HostAvailability.Offline)
+                        ?.let { ui.hostCatalogs[historyItem.hostId]?.fetchedAtMs },
+                    remoteEnabled = availability !is HostAvailability.Offline,
                     onOpen = { onOpen(historyItem) },
                     onFork = { onFork(historyItem) },
                     onRename = { onRename(historyItem) },
@@ -533,7 +571,9 @@ internal fun sortedHistoryItems(items: List<HistoryItem>, scope: HistoryScope, r
     return visible.sortedWith(
         compareByDescending<HistoryItem> { it.pinned }
             .thenByDescending { it.session.active }
-            .thenByDescending { it.session.updatedAt },
+            .thenByDescending { it.session.updatedAt }
+            // Deterministic cross-host ties: alias, then host id.
+            .thenBy { it.hostId },
     )
 }
 
@@ -685,6 +725,9 @@ private fun HistoryRow(
     busy: Boolean,
     busyLabel: String?,
     onOpen: () -> Unit,
+    hostLabel: String? = null,
+    offlineSinceMs: Long? = null,
+    remoteEnabled: Boolean = true,
     onFork: () -> Unit,
     onRename: () -> Unit,
     onClose: () -> Unit,
@@ -721,10 +764,10 @@ private fun HistoryRow(
         // mark. RateReview's speech-bubble-and-pencil both misread as "comment"
         // and collided with the Rename pencil sitting right next to it.
         add(RowAction("review", "Review", Icons.Outlined.Code, scheme.onSurfaceVariant, onReview))
-        // Rename persists the title in the pi session file; claude sessions
-        // (agentKind != pi) reject it at the bridge, so the action is only
-        // offered where it works.
-        if (session.agentKind == "pi") {
+        // Offline rows keep local actions only; close/delete are remote.
+        // Rename persists the title in the pi session file (remote), and claude
+        // sessions (agentKind != pi) reject it at the bridge anyway.
+        if (session.agentKind == "pi" && remoteEnabled) {
             add(RowAction("rename", "Rename", Icons.Outlined.DriveFileRenameOutline, scheme.onSurfaceVariant, onRename))
         }
         add(RowAction("pin", if (item.pinned) "Unpin" else "Pin", Icons.Outlined.PushPin, scheme.onSurfaceVariant, onTogglePin))
@@ -735,10 +778,12 @@ private fun HistoryRow(
             scheme.onSurfaceVariant,
             onToggleArchive,
         ))
-        if (session.active) {
-            add(RowAction("close", "Close", Icons.Outlined.Close, scheme.onSurfaceVariant, onClose))
-        } else {
-            add(RowAction("delete", "Delete", Icons.Outlined.Delete, scheme.error, onDelete))
+        if (remoteEnabled) {
+            if (session.active) {
+                add(RowAction("close", "Close", Icons.Outlined.Close, scheme.onSurfaceVariant, onClose))
+            } else {
+                add(RowAction("delete", "Delete", Icons.Outlined.Delete, scheme.error, onDelete))
+            }
         }
     }
     val density = LocalDensity.current
@@ -842,17 +887,20 @@ private fun HistoryRow(
                                 text = { Text(if (session.active) "Open" else "Resume") },
                                 leadingIcon = { Icon(Icons.Default.PlayArrow, contentDescription = null) },
                                 onClick = { menuOpen = false; onOpen() },
+                                enabled = remoteEnabled,
                             )
                             if (session.agentKind == "pi") {
                                 DropdownMenuItem(
                                     text = { Text("Fork") },
                                     leadingIcon = { Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null) },
                                     onClick = { menuOpen = false; onFork() },
+                                    enabled = remoteEnabled,
                                 )
                                 DropdownMenuItem(
                                     text = { Text("Rename") },
                                     leadingIcon = { Icon(Icons.Default.DriveFileRenameOutline, contentDescription = null) },
                                     onClick = { menuOpen = false; onRename() },
+                                    enabled = remoteEnabled,
                                 )
                             }
                             DropdownMenuItem(
@@ -870,6 +918,7 @@ private fun HistoryRow(
                                     text = { Text("Close") },
                                     leadingIcon = { Icon(Icons.Default.Close, contentDescription = null) },
                                     onClick = { menuOpen = false; onClose() },
+                                    enabled = remoteEnabled,
                                 )
                             }
                             DropdownMenuItem(
@@ -881,7 +930,7 @@ private fun HistoryRow(
                                 text = { Text("Delete") },
                                 leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null) },
                                 onClick = { menuOpen = false; onDelete() },
-                                enabled = !session.active,
+                                enabled = !session.active && remoteEnabled,
                             )
                         }
                     }
@@ -900,15 +949,27 @@ private fun HistoryRow(
                 // One mono line of machine facts, on the board's `~/repo · model`
                 // pattern — the full path is what forced this row to wrap (§9a).
                 Text(
-                    text = listOfNotNull(
-                        shortenHostPath(session.cwd),
-                        session.model?.let(::shortModel),
-                    ).joinToString(" · "),
+                    text = buildList {
+                        shortenHostPath(session.cwd)?.let(::add)
+                        hostLabel?.let(::add)
+                        session.model?.let(::shortModel)?.let(::add)
+                    }.joinToString(" · "),
                     style = ScoutrType.monoMeta,
                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
+                // The row itself is deliberately kept while its host cannot be
+                // reached; this line says how stale it may be.
+                offlineSinceMs?.let { syncedAt ->
+                    Text(
+                        text = "Offline · last synced ${relativeTime(syncedAt.toDouble())}",
+                        style = ScoutrType.monoMeta,
+                        color = MaterialTheme.colorScheme.error.copy(alpha = 0.8f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
                 if (busy) {
                     Spacer(Modifier.height(8.dp))
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1020,3 +1081,6 @@ private fun ErrorBanner(message: String, onDismiss: () -> Unit) {
         Text(message, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
     }
 }
+
+/** The bounded per-host catalog window Sessions fetches and shows. */
+internal const val HISTORY_CATALOG_LIMIT = 200

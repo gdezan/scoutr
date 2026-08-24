@@ -53,6 +53,7 @@ import dev.scoutr.app.ui.motion.rememberHaptic
 import dev.scoutr.app.ui.motion.useReduceMotion
 import dev.scoutr.app.ui.screens.CommandPalette
 import dev.scoutr.app.ui.screens.NewSessionSheet
+import dev.scoutr.app.ui.screens.TerminalTargetSheet
 import dev.scoutr.app.ui.screens.PanelSelection
 import dev.scoutr.app.ui.screens.SessionPanel
 
@@ -97,6 +98,9 @@ fun ScoutrAppNav(deepLink: MutableState<ScoutrDeepLink?>) {
                 appInstance.container.hostClients,
                 appInstance.container.hostRegistry,
                 currentBinding = appInstance.container::currentHostBinding,
+                work = appInstance.container.hostWorkCoordinator,
+                hostStatus = appInstance.container.hostStatus,
+                hostFilter = appInstance.container.hostFilter,
                 migrationState = appInstance.container.migration.state,
                 adoptLegacyMetadata = appInstance.container.migration::adoptPendingMetadata,
             )
@@ -169,10 +173,20 @@ fun ScoutrAppNav(deepLink: MutableState<ScoutrDeepLink?>) {
     }
     val openSettings: () -> Unit = { navController.navigate(AppRoutes.SETTINGS) }
 
+    // Global terminal: with several hosts, make the target explicit before any
+    // WebSocket or hierarchy request goes out. One host opens directly.
+    var terminalTargetOpen by remember { mutableStateOf(false) }
+    var terminalTargetSelection by remember { mutableStateOf<HostProfileKey?>(null) }
     val openTerminal: () -> Unit = {
-        defaultProfileKey?.let { profile ->
-            markExplicitTarget(profile)
-            navController.navigate(AppRoutes.terminal(profile)) { launchSingleTop = true }
+        val target = defaultProfileKey
+        if (target != null) {
+            if (registryState.profiles.size > 1) {
+                terminalTargetSelection = target
+                terminalTargetOpen = true
+            } else {
+                markExplicitTarget(target)
+                navController.navigate(AppRoutes.terminal(target)) { launchSingleTop = true }
+            }
         }
         Unit
     }
@@ -184,6 +198,9 @@ fun ScoutrAppNav(deepLink: MutableState<ScoutrDeepLink?>) {
     }
 
     var showNewSession by remember { mutableStateOf(false) }
+    // The sheet's selected host starts on the persistent default; switching the
+    // selector swaps in that host's own view model, so delayed loads from a
+    // previous host cannot land in the new host's form.
     var newSessionProfile by remember { mutableStateOf<HostProfileKey?>(null) }
     val openNewSession: () -> Unit = {
         defaultProfileKey?.let {
@@ -193,15 +210,6 @@ fun ScoutrAppNav(deepLink: MutableState<ScoutrDeepLink?>) {
         }
         Unit
     }
-    val newSessionViewModel: NewSessionViewModel? = defaultProfileKey?.let { profile ->
-        val api = container.routeApi(profile, defaultConnectionRevision)
-        if (api == null) null else viewModel(
-            factory = viewModelFactory<NewSessionViewModel> {
-                NewSessionViewModel(api, it.container.launcherSettingsStore.forHost(profile.hostId))
-            },
-            key = "new_session_${profile.encode()}_$defaultConnectionRevision",
-        )
-    }
 
     val onPaired = {
         container.registerCachedFcmToken()
@@ -210,12 +218,8 @@ fun ScoutrAppNav(deepLink: MutableState<ScoutrDeepLink?>) {
             popUpTo(AppRoutes.CONNECT) { inclusive = true }
         }
     }
-    val onPairingForgotten = {
-        container.forgetConnection()
-    }
-
     BoxWithConstraints {
-        val compatible = boardUi.apiCompatibility == ScoutrApiCompatibility.Compatible
+        val compatible = boardUi.hasCompatibleHost
         val isWide = maxWidth >= WIDE_WINDOW_BREAKPOINT
         val showPanel = isWide && isShellRoute(currentRoute) && compatible
         val showBottomBar = !isWide && compatible && Destination.isDestinationRoute(currentRoute)
@@ -248,24 +252,23 @@ fun ScoutrAppNav(deepLink: MutableState<ScoutrDeepLink?>) {
                         viewModel = boardViewModel,
                         selection = selection,
                         onOpenSession = { agent ->
-                            val profile = boardUi.hostProfile
-                            agent.live?.let {
-                                if (profile != null) {
-                                    markExplicitTarget(profile)
-                                    navController.navigateToChatFromPanel(profile, agent.key, it.paneId, it.status)
-                                }
+                            val session = agent.session
+                            session.live?.let {
+                                markExplicitTarget(agent.profile)
+                                navController.navigateToChatFromPanel(agent.profile, session.key, it.paneId, it.status)
                             }
                         },
                         onReviewAgent = { agent ->
-                            val profile = boardUi.hostProfile
-                            agent.cwd?.let { cwd -> if (profile != null) openReview(profile, cwd) }
+                            agent.session.cwd?.let { cwd -> openReview(agent.profile, cwd) }
                         },
                         onCloseAgent = { agent ->
-                            boardUi.hostProfile?.let(::markExplicitTarget)
-                            agent.live?.let { boardViewModel.closeAgent(it.paneId) }
+                            markExplicitTarget(agent.profile)
+                            agent.session.live?.let {
+                                boardViewModel.closeAgent(agent.profile, it.paneId)
+                            }
                         },
                         onQuickAnswer = { agent, label ->
-                            boardUi.hostProfile?.let(::markExplicitTarget)
+                            markExplicitTarget(agent.profile)
                             boardViewModel.quickAnswer(agent, label)
                         },
                         onNewSession = openNewSession,
@@ -323,25 +326,81 @@ fun ScoutrAppNav(deepLink: MutableState<ScoutrDeepLink?>) {
                     )
                     chatDestination(navController, container, openReview, ::markExplicitTarget)
                     fileDestinations(navController, container)
-                    usageDestination(container, isWide)
+                    usageDestination(navController, container, isWide)
                     reviewDestination(navController, container, isWide)
                     terminalDestination(navController, container)
-                    settingsDestination(navController, container, onPairingForgotten)
+                    settingsDestination(navController, container) {
+                        // HostsViewModel did the forgetting; here we only clear
+                        // host-bound back stack entries and land on Connect.
+                        navController.navigate(AppRoutes.CONNECT) {
+                            popUpTo(navController.graph.id) { inclusive = true }
+                        }
+                    }
                 }
             }
         }
 
-        if (showNewSession && newSessionViewModel != null) {
-            NewSessionSheet(
-                viewModel = newSessionViewModel,
-                onDismiss = { showNewSession = false },
-                onCreated = { paneId ->
-                    (newSessionProfile ?: defaultProfileKey)?.let { profile ->
+        val sessionTarget = newSessionProfile
+        if (showNewSession && sessionTarget != null) {
+            val selectionRevision = registryState.connectionRevision(sessionTarget)
+            val selectionApi = container.routeApi(sessionTarget, selectionRevision)
+            if (selectionApi == null) {
+                // The selected host vanished or lost its binding while the
+                // sheet was open; fall back to the default on next open.
+                showNewSession = false
+            } else {
+                // Only composes while the sheet is shown.
+                val newSessionViewModel: NewSessionViewModel = viewModel(
+                    factory = viewModelFactory<NewSessionViewModel> { appInstance ->
+                        NewSessionViewModel(
+                            selectionApi,
+                            appInstance.container.launcherSettingsStore.forHost(sessionTarget.hostId),
+                        )
+                    },
+                    key = "new_session_${sessionTarget.encode()}_$selectionRevision",
+                )
+                val hostStatuses = container.hostStatus.all.collectAsState().value
+                val hostOptions = registryState.profiles.map { entry ->
+                    dev.scoutr.app.ui.screens.NewSessionHostOption(
+                        profile = HostProfileKey(entry.hostId, entry.profileGeneration),
+                        alias = entry.alias,
+                        usable = when (hostStatuses[entry.hostId]) {
+                            is dev.scoutr.app.state.HostAvailability.Online -> true
+                            else -> false
+                        },
+                    )
+                }
+                NewSessionSheet(
+                    viewModel = newSessionViewModel,
+                    onDismiss = { showNewSession = false },
+                    selectedProfile = sessionTarget,
+                    hosts = hostOptions,
+                    onSelectHost = { newSessionProfile = it },
+                    onCreated = { profile, paneId ->
+                        // Route with the captured profile only — never a later
+                        // selection made after Create was tapped.
                         markExplicitTarget(profile)
                         showNewSession = false
-                        navController.navigate(AppRoutes.bootstrapChat(profile, paneId, AppRoutes.ChatArgs.DEFAULT_STATUS))
-                    }
+                        navController.navigate(
+                            AppRoutes.bootstrapChat(profile, paneId, AppRoutes.ChatArgs.DEFAULT_STATUS),
+                        )
+                    },
+                )
+            }
+        }
+
+        if (terminalTargetOpen) {
+            TerminalTargetSheet(
+                registryState = registryState,
+                statuses = boardUi.statuses,
+                initialSelection = terminalTargetSelection,
+                onSelect = { terminalTargetSelection = it },
+                onConfirm = { target: HostProfileKey ->
+                    terminalTargetOpen = false
+                    markExplicitTarget(target)
+                    navController.navigate(AppRoutes.terminal(target)) { launchSingleTop = true }
                 },
+                onDismiss = { terminalTargetOpen = false },
             )
         }
 
@@ -353,6 +412,8 @@ fun ScoutrAppNav(deepLink: MutableState<ScoutrDeepLink?>) {
             }
             OverlayPresence(reduceMotion = useReduceMotion()) {
                 CommandPalette(
+                    hostAlias = registryState.profiles
+                        .firstOrNull { it.hostId == defaultProfileKey?.hostId }?.alias,
                     onDismiss = {
                         paletteViewModel.close()
                         paletteOpen = false

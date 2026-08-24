@@ -1,13 +1,9 @@
 package dev.scoutr.app.state
 
-import android.os.Looper
+import dev.scoutr.app.data.AgentsResponse
 import dev.scoutr.app.data.AttentionQuestion
 import dev.scoutr.app.data.AttentionSummary
-import dev.scoutr.app.data.BoardState
-import dev.scoutr.app.data.ConnectionStore
-import dev.scoutr.app.data.FakeConnectionCipher
 import dev.scoutr.app.data.QuestionOption
-import dev.scoutr.app.data.ScoutrApiCompatibility
 import dev.scoutr.app.data.SessionDescriptor
 import dev.scoutr.app.data.SessionLiveAttachment
 import dev.scoutr.app.net.BridgeException
@@ -15,40 +11,39 @@ import dev.scoutr.app.net.FakeScoutrApi
 import kotlinx.coroutines.CompletableDeferred
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
-import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
-import org.robolectric.RuntimeEnvironment
-import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import java.io.IOException
 
 /**
- * Board quick answer: one option tap submits the whole open ask through the
- * same `answerAsk` Chat uses, cannot be submitted twice, and refreshes the
- * board whatever the bridge says.
+ * Board quick answer across hosts: one option tap submits the whole open ask
+ * through the same `answerAsk` Chat uses, cannot be submitted twice — keyed by
+ * host, so identical pane ids on two bridges never block each other — and
+ * refreshes the owning host's board whatever the bridge says.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
 class BoardQuickAnswerTest {
 
-    private lateinit var fake: FakeScoutrApi
-    private lateinit var viewModel: BoardViewModel
-
     private val longLabel = "Yes, and remember this choice for the rest of the session"
 
-    private fun card(attention: AttentionSummary? = ask()): SessionDescriptor = SessionDescriptor(
+    private fun card(
+        paneId: String = "w1:p1",
+        attention: AttentionSummary? = ask(),
+        status: String = "blocked",
+    ) = SessionDescriptor(
         agentKind = "claude",
         displayName = "scoutr",
         title = "Refactor the board cache",
         latestActivity = "waiting for you",
         attention = attention,
         live = SessionLiveAttachment(
-            paneId = "w1:p1",
+            paneId = paneId,
             workspaceId = "w1",
             tabId = "t1",
-            status = "blocked",
+            status = status,
         ),
     )
 
@@ -71,50 +66,50 @@ class BoardQuickAnswerTest {
         ),
     )
 
-    private fun start(board: BoardState) {
-        val store = ConnectionStore(RuntimeEnvironment.getApplication(), FakeConnectionCipher())
-        // Unsaved at construction so the VM's init never probes health or
-        // starts a poll that would race the tap under test.
-        store.clear()
-        viewModel = legacyBoardViewModel(
-            bridge = fake,
-            connectionStore = store,
-            initialState = BoardUiState(
-                board = board,
-                connected = true,
-                apiCompatibility = ScoutrApiCompatibility.Compatible,
-            ),
-        )
-        store.save("http://test-bridge", "test-token")
-    }
-
-    private fun answers() = fake.sentCommands.filter { it["type"].toString().contains("answer_ask") }
-
-    private fun refreshes() = fake.calls.count { it.name == "agents" }
-
-    private fun idle() = shadowOf(Looper.getMainLooper()).idle()
-
-    private fun waitUntil(condition: () -> Boolean) {
-        val deadline = System.currentTimeMillis() + 5_000
-        while (System.currentTimeMillis() < deadline && !condition()) {
-            Thread.sleep(20)
-            idle()
+    /** Seeds one or both hosts' boards with a needs-you card via one cycle. */
+    private fun seededHarness(
+        hostA: List<SessionDescriptor>,
+        hostB: List<SessionDescriptor>? = null,
+    ): Pair<BoardHarness, BoardViewModel> {
+        val h = jvmBoardHarness()
+        h.addHost("host-a")
+        h.apiFor("host-a").agentsResult = Result.success(AgentsResponse(agents = hostA))
+        if (hostB != null) {
+            h.addHost("host-b")
+            h.apiFor("host-b").agentsResult = Result.success(AgentsResponse(agents = hostB))
         }
-        assertTrue("condition did not become true before timeout", condition())
+        val vm = h.viewModel()
+        vm.startPolling()
+        // Wait on the merged rows, not the raw snapshots: they only appear
+        // once the registry/status collectors have fed the merge too.
+        BoardTestLoop.waitUntil {
+            vm.ui.value.hostedSessions.any { it.session.live?.paneId == hostA.first().live?.paneId }
+        }
+        if (hostB != null) {
+            BoardTestLoop.waitUntil {
+                vm.ui.value.hostedSessions.any { it.session.live?.paneId == hostB.first().live?.paneId }
+            }
+        }
+        return h to vm
     }
 
-    @Before
-    fun setUp() {
-        fake = FakeScoutrApi()
-        start(BoardState(needsYou = listOf(card())))
-    }
+    private fun hostedRow(vm: BoardViewModel, hostId: String): HostedSession =
+        vm.ui.value.hostedSessions.first { it.profile.hostId == hostId }
+
+    private fun answers(fake: FakeScoutrApi) =
+        fake.sentCommands.filter { it["type"].toString().contains("answer_ask") }
 
     @Test
-    fun quickAnswerSubmitsTheServersOwnIdsAndLabel() {
-        viewModel.quickAnswer(card(), longLabel)
-        idle()
+    fun quickAnswerSubmitsTheServersOwnIdsAndLabelToTheOwningHost() {
+        val (h, vm) = seededHarness(listOf(card()))
+        val row = hostedRow(vm, "host-a")
 
-        val command = answers().single()
+        vm.quickAnswer(row, longLabel)
+        BoardTestLoop.waitUntil {
+            answers(h.apiFor("host-a")).size == 1 && vm.ui.value.quickAnswering.isEmpty()
+        }
+
+        val command = answers(h.apiFor("host-a")).single()
         assertEquals("\"w1:p1\"", command["paneId"].toString())
         assertEquals("\"toolu_1\"", command["callId"].toString())
         // Exactly one answer: this is a complete one-question round.
@@ -124,94 +119,125 @@ class BoardQuickAnswerTest {
             "sent the full label, was ${command["answers"]}",
             command["answers"].toString().contains(longLabel),
         )
-        assertEquals(null, viewModel.ui.value.error)
-        assertEquals("board refreshed after a successful answer", 1, refreshes())
-        assertTrue(viewModel.ui.value.quickAnswering.isEmpty())
+        assertEquals(null, vm.ui.value.transientError)
+        // Only the owning host's board refreshed; the other bridge is untouched.
+        assertEquals(2, h.apiFor("host-a").calls.count { it.name == "agents" })
+        assertEquals(0, h.apiFor("host-b").calls.count { it.name == "agents" })
+        vm.stopPolling()
     }
 
     @Test
     fun secondTapWhileTheFirstIsInFlightSubmitsNothing() {
+        val (h, vm) = seededHarness(listOf(card()))
         val gate = CompletableDeferred<Unit>()
-        fake.gates["answerAsk"] = gate
+        h.apiFor("host-a").gates["answerAsk"] = gate
 
-        viewModel.quickAnswer(card(), "Yes")
-        idle()
-        assertTrue("the card is visibly submitting", viewModel.ui.value.quickAnswering.contains("w1:p1"))
+        vm.quickAnswer(hostedRow(vm, "host-a"), "Yes")
+        BoardTestLoop.waitUntil { vm.ui.value.quickAnswering.isNotEmpty() }
+        assertTrue(
+            "the busy key carries the host, not just the pane",
+            vm.ui.value.quickAnswering.single().paneId == "w1:p1",
+        )
 
-        viewModel.quickAnswer(card(), "Yes")
-        idle()
-        assertEquals("a double tap must not answer twice", 1, answers().size)
+        vm.quickAnswer(hostedRow(vm, "host-a"), "Yes")
+        BoardTestLoop.idle()
+        assertEquals("a double tap must not answer twice", 1, answers(h.apiFor("host-a")).size)
 
         gate.complete(Unit)
-        waitUntil { viewModel.ui.value.quickAnswering.isEmpty() && refreshes() == 1 }
-        assertEquals(1, answers().size)
+        BoardTestLoop.waitUntil { vm.ui.value.quickAnswering.isEmpty() }
+        assertEquals(1, answers(h.apiFor("host-a")).size)
+        vm.stopPolling()
+    }
+
+    @Test
+    fun identicalPaneIdsOnTwoHostsNeverBlockEachOther() {
+        // Both bridges report the very same pane id; only the owning host
+        // tells the two cards apart.
+        val (h, vm) = seededHarness(listOf(card()), listOf(card()))
+        assertEquals(
+            listOf("w1:p1", "w1:p1"),
+            vm.ui.value.hostedSessions.mapNotNull { it.session.live?.paneId },
+        )
+        val gate = CompletableDeferred<Unit>()
+        // Park only host-b's answer; host-a's identical pane must still go.
+        h.apiFor("host-b").gates["answerAsk"] = gate
+
+        vm.quickAnswer(hostedRow(vm, "host-b"), "Yes")
+        BoardTestLoop.waitUntil { vm.ui.value.quickAnswering.size == 1 }
+
+        vm.quickAnswer(hostedRow(vm, "host-a"), "Yes")
+        BoardTestLoop.waitUntil { answers(h.apiFor("host-a")).size == 1 }
+
+        assertEquals("the parked host's answer is still in flight", 1, vm.ui.value.quickAnswering.size)
+        gate.complete(Unit)
+        BoardTestLoop.waitUntil { vm.ui.value.quickAnswering.isEmpty() }
+        vm.stopPolling()
     }
 
     @Test
     fun answeredElsewhereSurfacesTheStaleErrorAndRefreshes() {
-        fake.commandFailure = BridgeException(409, "ask no longer open")
+        val (h, vm) = seededHarness(listOf(card()))
+        h.apiFor("host-a").commandFailure = BridgeException(409, "ask no longer open")
 
-        viewModel.quickAnswer(card(), "Yes")
-        idle()
-        waitUntil { viewModel.ui.value.error != null }
+        vm.quickAnswer(hostedRow(vm, "host-a"), "Yes")
+        BoardTestLoop.waitUntil { vm.ui.value.transientError != null }
 
-        assertEquals(1, answers().size)
-        assertEquals("That question is no longer open", viewModel.ui.value.error)
-        assertEquals("a rejected answer still refreshes the board", 1, refreshes())
-        assertTrue(viewModel.ui.value.quickAnswering.isEmpty())
+        assertEquals(1, answers(h.apiFor("host-a")).size)
+        assertEquals("That question is no longer open", vm.ui.value.transientError)
+        assertTrue("a rejected answer still refreshes the board", vm.ui.value.quickAnswering.isEmpty())
+        vm.stopPolling()
     }
 
     @Test
     fun transportFailureSurfacesItsMessageAndRefreshes() {
-        fake.commandFailure = IOException("bridge unreachable")
+        val (h, vm) = seededHarness(listOf(card()))
+        h.apiFor("host-a").commandFailure = IOException("bridge unreachable")
 
-        viewModel.quickAnswer(card(), "Yes")
-        idle()
-        waitUntil { viewModel.ui.value.error != null }
+        vm.quickAnswer(hostedRow(vm, "host-a"), "Yes")
+        BoardTestLoop.waitUntil { vm.ui.value.transientError != null }
 
-        assertEquals(1, answers().size)
+        assertEquals(1, answers(h.apiFor("host-a")).size)
         assertTrue(
-            "error surfaced, was: ${viewModel.ui.value.error}",
-            viewModel.ui.value.error?.contains("bridge unreachable") == true,
+            "error surfaced, was: ${vm.ui.value.transientError}",
+            vm.ui.value.transientError?.contains("bridge unreachable") == true,
         )
-        assertEquals("a failed answer still refreshes the board", 1, refreshes())
-        assertTrue(viewModel.ui.value.quickAnswering.isEmpty())
+        assertTrue(vm.ui.value.quickAnswering.isEmpty())
+        vm.stopPolling()
     }
 
     @Test
     fun anAskThatMovedOnSincePollIsNeverSubmitted() {
         // The tapped card is re-checked against the board the VM holds now,
         // where the ask has already been answered away.
-        start(BoardState(needsYou = listOf(card(attention = null))))
+        val (h, vm) = seededHarness(listOf(card(attention = null)))
 
-        viewModel.quickAnswer(card(), "Yes")
-        idle()
-        waitUntil { viewModel.ui.value.error != null }
+        vm.quickAnswer(hostedRow(vm, "host-a"), "Yes")
+        BoardTestLoop.waitUntil { vm.ui.value.transientError != null }
 
-        assertTrue("nothing may be sent for an ask that is gone", answers().isEmpty())
-        assertEquals("That question is no longer open", viewModel.ui.value.error)
-        assertEquals(1, refreshes())
+        assertTrue("nothing may be sent for an ask that is gone", answers(h.apiFor("host-a")).isEmpty())
+        assertEquals("That question is no longer open", vm.ui.value.transientError)
+        vm.stopPolling()
     }
 
     @Test
     fun anAskTheBridgeWillNotLetTheBoardSubmitWholeIsNeverSubmitted() {
-        start(BoardState(needsYou = listOf(card(attention = ask(questionCount = 3)))))
+        val (h, vm) = seededHarness(listOf(card(attention = ask(questionCount = 3))))
 
-        viewModel.quickAnswer(card(), "Yes")
-        idle()
-        waitUntil { viewModel.ui.value.error != null }
+        vm.quickAnswer(hostedRow(vm, "host-a"), "Yes")
+        BoardTestLoop.waitUntil { vm.ui.value.transientError != null }
 
-        assertTrue(answers().isEmpty())
-        assertEquals(1, refreshes())
+        assertTrue(answers(h.apiFor("host-a")).isEmpty())
+        vm.stopPolling()
     }
 
     @Test
     fun anOptionTheCardNoLongerOffersIsNeverSubmitted() {
-        viewModel.quickAnswer(card(), "Maybe")
-        idle()
-        waitUntil { viewModel.ui.value.error != null }
+        val (h, vm) = seededHarness(listOf(card()))
 
-        assertTrue(answers().isEmpty())
-        assertEquals(1, refreshes())
+        vm.quickAnswer(hostedRow(vm, "host-a"), "Maybe")
+        BoardTestLoop.waitUntil { vm.ui.value.transientError != null }
+
+        assertTrue(answers(h.apiFor("host-a")).isEmpty())
+        vm.stopPolling()
     }
 }

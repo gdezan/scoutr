@@ -1,278 +1,254 @@
 package dev.scoutr.app.state
 
 import android.os.Looper
-import dev.scoutr.app.data.CatalogAction
-import dev.scoutr.app.data.SessionAction
-import dev.scoutr.app.data.ConnectionStore
-import dev.scoutr.app.data.FakeConnectionCipher
-import dev.scoutr.app.data.HealthResponse
-import dev.scoutr.app.data.HerdrInfo
+import dev.scoutr.app.data.AgentsResponse
 import dev.scoutr.app.data.LegacyMigrationState
-import dev.scoutr.app.data.REQUIRED_SCOUTR_API_FEATURES
-import dev.scoutr.app.data.ScoutrApiCompatibility
-import dev.scoutr.app.data.ScoutrApiInfo
+import dev.scoutr.app.data.SessionAction
+import dev.scoutr.app.data.SessionDescriptor
+import dev.scoutr.app.data.SessionLiveAttachment
 import dev.scoutr.app.net.BridgeException
 import dev.scoutr.app.net.FakeScoutrApi
+import dev.scoutr.app.net.HostIdentityChangedException
+import dev.scoutr.app.net.HostIncompatibleException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
-import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
-import org.robolectric.RuntimeEnvironment
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import java.io.IOException
-import kotlin.time.Duration.Companion.milliseconds
 
-/** Board swipe-bar Close: posts the control action and surfaces failures. */
+/**
+ * Multi-host Board workers: per-host fetch cycles stay independent, blocked
+ * hosts are classified into issue cards instead of rows, and one host's
+ * failure never delays or clears another's snapshot.
+ */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
 class BoardViewModelTest {
 
-    private lateinit var fake: FakeScoutrApi
-    private lateinit var viewModel: BoardViewModel
+    private fun card(
+        paneId: String = "w1:p1",
+        title: String = "Refactor the board cache",
+        updatedAtMs: Double? = 1_000.0,
+    ) = SessionDescriptor(
+        agentKind = "claude",
+        displayName = "scoutr",
+        title = title,
+        updatedAtMs = updatedAtMs,
+        latestActivity = "waiting for you",
+        live = SessionLiveAttachment(
+            paneId = paneId,
+            workspaceId = "w1",
+            tabId = "t1",
+            status = "working",
+        ),
+    )
 
-    @Before
-    fun setUp() {
-        fake = FakeScoutrApi()
-        val app = RuntimeEnvironment.getApplication()
-        val connectionStore = ConnectionStore(app, FakeConnectionCipher())
-        // Unsaved at construction: the VM init never connects, so no health
-        // probe and no poll loop interfere with the control POST below.
-        connectionStore.clear()
-        viewModel = legacyBoardViewModel(
-            bridge = fake,
-            connectionStore = connectionStore,
-            initialState = BoardUiState(
-                connected = true,
-                apiCompatibility = ScoutrApiCompatibility.Compatible,
-            ),
-        )
-        connectionStore.save("http://test-bridge", "test-token")
+    private fun harness(vararg hostIds: String): BoardHarness {
+        val h = jvmBoardHarness()
+        hostIds.forEach { h.addHost(it) }
+        return h
     }
 
-    private fun controls(): List<Map<String, Any?>> =
+    private fun controls(fake: dev.scoutr.app.net.FakeScoutrApi) =
         fake.calls.filter { it.name == "controlSession" }.map { it.args }
 
     @Test
-    fun closeAgentPostsControlActionAndStaysQuiet() {
-        runBlocking { viewModel.closeAgent("p1") }
-        // The response resumption is posted to the (paused) main looper;
-        // idle it so the coroutine actually processes the response.
+    fun closeAgentPostsControlActionOnTheSessionsOwnHost() {
+        val h = harness("host-a", "host-b")
+        val vm = h.viewModel()
+        vm.startPolling()
+        val profile = vm.ui.value.profileKeyOf("host-a")!!
+
+        runBlocking { vm.closeAgent(profile, "p1") }
         shadowOf(Looper.getMainLooper()).idle()
-        val control = controls().single()
+
+        // The action lands only on the named host's bridge.
+        assertEquals(0, h.apiFor("host-b").calls.count { it.name == "controlSession" })
+        val control = controls(h.apiFor("host-a")).single()
         assertEquals("p1", control["paneId"])
         assertEquals(SessionAction.Close, control["action"])
-        assertTrue("no error on success", viewModel.ui.value.error == null)
+        assertNull("no error on success", vm.ui.value.transientError)
+        vm.stopPolling()
     }
 
     @Test
     fun closeAgentSurfacesBridgeError() {
+        val h = harness("host-a")
+        val fake = h.apiFor("host-a")
         fake.controlResult = Result.failure(BridgeException(500, "pane not found"))
-        runBlocking { viewModel.closeAgent("p1") }
-        // The 500 resumption is posted to the (paused) main looper; idle it so
-        // closeAgent's catch + reportError actually run.
+        val vm = h.viewModel()
+        vm.startPolling()
+        val profile = vm.ui.value.profileKeyOf("host-a")!!
+
+        runBlocking { vm.closeAgent(profile, "p1") }
         shadowOf(Looper.getMainLooper()).idle()
-        waitUntil { viewModel.ui.value.error?.contains("pane not found") == true }
-        assertTrue(
-            "error surfaced, was: ${viewModel.ui.value.error}",
-            viewModel.ui.value.error?.contains("pane not found") == true,
-        )
+        BoardTestLoop.waitUntil { vm.ui.value.transientError?.contains("pane not found") == true }
+        vm.stopPolling()
     }
 
     @Test
-    fun refreshBoardTracksProgressAndIgnoresDuplicatePulls() {
+    fun refreshTracksProgressIgnoresDuplicatePullsAndWaitsForThePollCycle() {
+        val h = harness("host-a")
         val gate = CompletableDeferred<Unit>()
-        fake.gates["agents"] = gate
-
-        viewModel.refreshBoard()
+        h.apiFor("host-a").gates["agents"] = gate
+        val vm = h.viewModel()
+        vm.startPolling()
         shadowOf(Looper.getMainLooper()).idle()
-        assertTrue("manual refresh should be visible while agents are loading", viewModel.ui.value.isRefreshing)
+        assertEquals(1, h.apiFor("host-a").calls.count { it.name == "agents" })
 
-        viewModel.refreshBoard()
+        vm.refreshBoard()
         shadowOf(Looper.getMainLooper()).idle()
-        assertEquals(1, fake.calls.count { it.name == "agents" })
+        assertTrue("manual refresh should be visible while agents are loading", vm.ui.value.isRefreshing)
+
+        // The duplicate pull is dropped, and the queued cycle cannot start
+        // while the scheduled one still holds the per-host mutex.
+        vm.refreshBoard()
+        shadowOf(Looper.getMainLooper()).idle()
+        assertEquals(1, h.apiFor("host-a").calls.count { it.name == "agents" })
 
         gate.complete(Unit)
-        waitUntil { !viewModel.ui.value.isRefreshing }
-        assertTrue("manual refresh should settle after agents load", !viewModel.ui.value.isRefreshing)
+        BoardTestLoop.waitUntil {
+            h.apiFor("host-a").calls.count { it.name == "agents" } == 2 &&
+                !vm.ui.value.isRefreshing
+        }
+        vm.stopPolling()
     }
 
     @Test
-    fun refreshBoardWaitsForInFlightPoll() {
+    fun forgettingAHostCancelsItsWorkerAndDropsItsRowsWithoutTouchingTheOtherHost() {
+        val h = harness("host-a", "host-b")
+        h.apiFor("host-a").agentsResult = Result.success(AgentsResponse(agents = listOf(card())))
+        h.apiFor("host-b").agentsResult = Result.success(AgentsResponse(agents = listOf(card(paneId = "w2:p9"))))
+        val vm = h.viewModel()
+        vm.startPolling()
+        BoardTestLoop.waitUntil { vm.ui.value.sessionsFor("host-a").isNotEmpty() }
+        BoardTestLoop.waitUntil { vm.ui.value.sessionsFor("host-b").isNotEmpty() }
+        assertEquals("both hosts merged under All", 2, vm.ui.value.board.total)
+
+        // Park host-b's next cycle so "did its worker die" is provable without
+        // waiting out the interval, then forget it.
         val gate = CompletableDeferred<Unit>()
-        fake.gates["agents"] = gate
-        viewModel.startPolling()
-        shadowOf(Looper.getMainLooper()).idle()
-        assertEquals(1, fake.calls.count { it.name == "agents" })
-
-        viewModel.refreshBoard()
-        shadowOf(Looper.getMainLooper()).idle()
-        assertTrue(viewModel.ui.value.isRefreshing)
-        assertEquals("manual refresh must not overlap the poll", 1, fake.calls.count { it.name == "agents" })
-
-        gate.complete(Unit)
-        waitUntil { fake.calls.count { it.name == "agents" } == 2 && !viewModel.ui.value.isRefreshing }
-        viewModel.stopPolling()
-    }
-
-    @Test
-    fun disconnectStopsPollingAndClearsTheBoard() {
-        val connectionStore = ConnectionStore(RuntimeEnvironment.getApplication(), FakeConnectionCipher())
-        viewModel.reportError("stale")
-
-        // Park the loop inside its first tick so "did the poll die" is provable
-        // without waiting out the 3s interval.
-        val gate = CompletableDeferred<Unit>()
-        fake.gates["agents"] = gate
-        viewModel.startPolling()
-        shadowOf(Looper.getMainLooper()).idle()
-        assertEquals(1, fake.calls.count { it.name == "agents" })
-
-        // Forget's order: the pairing goes first, then the VM is told to let go.
-        connectionStore.clear()
-        viewModel.disconnect()
+        h.apiFor("host-b").gates["agents"] = gate
+        h.forgetHost("host-b")
         shadowOf(Looper.getMainLooper()).idle()
 
-        assertEquals(BoardUiState(), viewModel.ui.value)
-        assertTrue("hasSavedConnection must follow the cleared store", !viewModel.hasSavedConnection)
+        assertTrue("forgotten host leaves the merged rows", !vm.ui.value.hostBoards.containsKey("host-b"))
+        assertEquals(1, vm.ui.value.board.total)
 
-        // The parked poll was cancelled: releasing it neither repopulates the
-        // board nor schedules another round against the cleared pairing.
+        // Releasing the parked call neither repopulates the board nor counts
+        // as a new fetch for the removed worker.
         gate.complete(Unit)
         shadowOf(Looper.getMainLooper()).idle()
-        assertEquals(BoardUiState(), viewModel.ui.value)
-        assertEquals(1, fake.calls.count { it.name == "agents" })
+        assertTrue(!vm.ui.value.hostBoards.containsKey("host-b"))
+        vm.stopPolling()
     }
 
     @Test
-    fun incompatibleSavedPairingIsRetainedAndFeaturePollingIsGated() {
-        val store = ConnectionStore(RuntimeEnvironment.getApplication(), FakeConnectionCipher()).also {
-            it.clear()
-            it.save("https://saved-bridge.test", "saved-token")
-        }
-        fake.healthResult = Result.success(
-            HealthResponse(
-                ok = true,
-                api = ScoutrApiInfo(protocol = 3),
-                herdr = HerdrInfo(connected = true),
-            ),
-        )
+    fun incompatibleHostIsClassifiedIntoAnIssueCardAndExcludedFromRows() {
+        val h = harness("host-a", "host-b")
+        h.apiFor("host-a").agentsResult = Result.success(AgentsResponse(agents = listOf(card())))
+        h.apiFor("host-b").agentsResult =
+            Result.failure(HostIncompatibleException("host-b"))
+        val vm = h.viewModel()
+        vm.startPolling()
+        BoardTestLoop.waitUntil { vm.ui.value.hostIssues.isNotEmpty() }
 
-        val incompatibleViewModel = legacyBoardViewModel(fake, store)
-        incompatibleViewModel.startPolling()
-        waitUntil { incompatibleViewModel.ui.value.apiCompatibility is ScoutrApiCompatibility.Incompatible }
-
-        assertEquals("https://saved-bridge.test", store.saved?.host)
-        assertTrue(!incompatibleViewModel.ui.value.connected)
-        assertTrue(incompatibleViewModel.ui.value.error!!.contains("bridge protocol 3"))
-        assertEquals(0, fake.calls.count { it.name == "agents" })
-
-        incompatibleViewModel.refreshBoard()
-        shadowOf(Looper.getMainLooper()).idle()
-        assertEquals("manual refresh must stay gated", 0, fake.calls.count { it.name == "agents" })
-        incompatibleViewModel.stopPolling()
+        val issue = vm.ui.value.hostIssues.single()
+        assertEquals("host-b", issue.hostId)
+        assertTrue(vm.ui.value.statuses["host-b"] is HostAvailability.Incompatible)
+        // The healthy host keeps rendering; the blocked one contributes no rows.
+        BoardTestLoop.waitUntil { vm.ui.value.sessionsFor("host-a").isNotEmpty() }
+        assertEquals(listOf("w1:p1"), vm.ui.value.board.sessions.mapNotNull { it.live?.paneId })
+        vm.stopPolling()
     }
 
     @Test
-    fun supportedHealthRetryClearsIncompatibilityAndRestartsPolling() {
-        val store = ConnectionStore(RuntimeEnvironment.getApplication(), FakeConnectionCipher()).also {
-            it.clear()
-            it.save("https://saved-bridge.test", "saved-token")
-        }
-        fake.healthResult = Result.success(
-            HealthResponse(ok = true, api = ScoutrApiInfo(protocol = 3), herdr = HerdrInfo(connected = true)),
-        )
-        val recoveringViewModel = legacyBoardViewModel(fake, store)
-        recoveringViewModel.startPolling()
-        waitUntil { recoveringViewModel.ui.value.apiCompatibility is ScoutrApiCompatibility.Incompatible }
+    fun identityChangedHostSurfacesTheReportedIdAsAnIssue() {
+        val h = harness("host-a")
+        h.apiFor("host-a").agentsResult =
+            Result.failure(HostIdentityChangedException("host-a", "host-rogue"))
+        val vm = h.viewModel()
+        vm.startPolling()
+        BoardTestLoop.waitUntil { vm.ui.value.hostIssues.isNotEmpty() }
 
-        fake.healthResult = Result.success(
-            HealthResponse(
-                ok = true,
-                api = ScoutrApiInfo(protocol = 2, features = REQUIRED_SCOUTR_API_FEATURES),
-                herdr = HerdrInfo(connected = true),
-            ),
+        val issue = vm.ui.value.hostIssues.single()
+        assertEquals("host-rogue", issue.reportedHostId)
+        assertEquals(
+            HostAvailability.IdentityChanged("host-rogue"),
+            vm.ui.value.statuses["host-a"],
         )
-        recoveringViewModel.connect("", "")
-
-        waitUntil {
-            recoveringViewModel.ui.value.apiCompatibility == ScoutrApiCompatibility.Compatible &&
-                fake.calls.any { it.name == "agents" }
-        }
-        assertTrue(recoveringViewModel.ui.value.connected)
-        recoveringViewModel.stopPolling()
+        assertTrue("a fully blocked board renders no rows", vm.ui.value.board.total == 0)
+        vm.stopPolling()
     }
 
     @Test
-    fun transientInitialHealthFailureRetriesTheHandshakeBeforeFeaturePolling() {
-        val store = ConnectionStore(RuntimeEnvironment.getApplication(), FakeConnectionCipher()).also {
-            it.clear()
-            it.save("https://saved-bridge.test", "saved-token")
-        }
-        var healthCalls = 0
-        fake.onCall = { name, _ ->
-            if (name == "health") {
-                healthCalls += 1
-                if (healthCalls == 1) {
-                    Result.failure<HealthResponse>(IOException("temporarily offline"))
-                } else {
-                    Result.success(
-                        HealthResponse(
-                            ok = true,
-                            api = ScoutrApiInfo(protocol = 2, features = REQUIRED_SCOUTR_API_FEATURES),
-                            herdr = HerdrInfo(connected = true),
-                        ),
-                    )
-                }
-            } else {
-                null
-            }
-        }
+    fun offlineFailureKeepsLastSnapshotAndMarksStale() {
+        val h = harness("host-a")
+        h.apiFor("host-a").agentsResult = Result.success(AgentsResponse(agents = listOf(card())))
+        val vm = h.viewModel()
+        vm.startPolling()
+        BoardTestLoop.waitUntil { vm.ui.value.sessionsFor("host-a").isNotEmpty() }
 
-        val selfHealingViewModel = legacyBoardViewModel(fake, store, pollInterval = 10.milliseconds)
-        selfHealingViewModel.startPolling()
+        h.apiFor("host-a").agentsResult = Result.failure(IOException("bridge unreachable"))
+        vm.retryHost("host-a")
+        BoardTestLoop.waitUntil { vm.ui.value.statuses["host-a"] is HostAvailability.Offline }
 
-        waitUntil {
-            healthCalls >= 2 &&
-                selfHealingViewModel.ui.value.apiCompatibility == ScoutrApiCompatibility.Compatible &&
-                fake.calls.any { it.name == "agents" }
-        }
-        val firstAgentsCall = fake.calls.indexOfFirst { it.name == "agents" }
-        assertTrue(fake.calls.take(firstAgentsCall).count { it.name == "health" } >= 2)
-        selfHealingViewModel.stopPolling()
+        // The deliberately-kept snapshot survives so rows show a stale marker
+        // instead of vanishing mid-read.
+        assertTrue(vm.ui.value.sessionsFor("host-a").isNotEmpty())
+        assertEquals("bridge unreachable", (vm.ui.value.statuses["host-a"] as HostAvailability.Offline).message)
+        vm.stopPolling()
+    }
+
+    @Test
+    fun mergeOrdersGloballyByRecencyAndFilterNarrowsToOneHost() {
+        val h = harness("host-a", "host-b")
+        h.apiFor("host-a").agentsResult = Result.success(
+            AgentsResponse(agents = listOf(card(paneId = "a:old", updatedAtMs = 100.0))),
+        )
+        h.apiFor("host-b").agentsResult = Result.success(
+            AgentsResponse(agents = listOf(card(paneId = "b:new", updatedAtMs = 900.0))),
+        )
+        val vm = h.viewModel()
+        vm.startPolling()
+        BoardTestLoop.waitUntil { vm.ui.value.board.total == 2 }
+
+        assertEquals(
+            "newest row leads regardless of host",
+            listOf("b:new", "a:old"),
+            vm.ui.value.hostedSessions.mapNotNull { it.session.live?.paneId },
+        )
+
+        vm.selectFilter("host-a")
+        BoardTestLoop.waitUntil { vm.ui.value.filter == "host-a" }
+        assertEquals(
+            listOf("a:old"),
+            vm.ui.value.hostedSessions.mapNotNull { it.session.live?.paneId },
+        )
+        vm.stopPolling()
     }
 
     @Test
     fun pendingLegacyMetadataBlocksRemoteBoardActions() {
-        val migrating = BoardViewModel(
-            bridge = fake,
-            connectionAvailable = { true },
-            initialState = BoardUiState(
-                connected = true,
-                apiCompatibility = ScoutrApiCompatibility.Compatible,
-            ),
-            pollInterval = 3_000.milliseconds,
+        val h = harness("host-a")
+        val migrating = h.viewModel(
             migrationState = MutableStateFlow(LegacyMigrationState.Pending),
         )
+        migrating.startPolling()
+        val profile = migrating.ui.value.profileKeyOf("host-a")!!
 
-        migrating.closeAgent("p1")
+        migrating.closeAgent(profile, "p1")
         shadowOf(Looper.getMainLooper()).idle()
 
-        assertEquals(0, fake.calls.count { it.name == "controlSession" })
-        assertEquals("Finishing saved connection migration", migrating.ui.value.error)
-    }
-
-    private fun waitUntil(condition: () -> Boolean) {
-        val deadline = System.currentTimeMillis() + 5_000
-        while (System.currentTimeMillis() < deadline && !condition()) {
-            Thread.sleep(20)
-            shadowOf(Looper.getMainLooper()).idle()
-        }
-        assertTrue("condition did not become true before timeout", condition())
+        assertEquals(0, h.apiFor("host-a").calls.count { it.name == "controlSession" })
+        assertEquals("Finishing saved connection migration", migrating.ui.value.transientError)
+        migrating.stopPolling()
     }
 }

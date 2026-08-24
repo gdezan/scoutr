@@ -13,18 +13,6 @@ import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
 
 /** Test-only factories for fixtures that intentionally exercise legacy preference migration. */
-fun legacyBoardViewModel(
-    bridge: ScoutrApi,
-    connectionStore: ConnectionStore,
-    initialState: BoardUiState = BoardUiState(),
-    pollInterval: Duration = 3.seconds,
-): BoardViewModel = BoardViewModel(
-    bridge = bridge,
-    connectionAvailable = { connectionStore.saved != null },
-    initialState = initialState,
-    pollInterval = pollInterval,
-)
-
 @Suppress("FunctionName")
 fun TerminalViewModel(
     api: ScoutrApi,
@@ -49,21 +37,6 @@ fun TerminalViewModel(
         hostAvailable = { connectionStore.saved != null },
     )
 }
-
-@Suppress("FunctionName")
-fun SessionHistoryViewModel(
-    bridge: ScoutrApi,
-    connectionStore: ConnectionStore,
-    store: SessionCatalogStore,
-    initialState: HistoryUiState = HistoryUiState(),
-): SessionHistoryViewModel = SessionHistoryViewModel(
-    bridge = bridge,
-    store = store,
-    hostId = connectionStore.saved?.hostId ?: "legacy-test-host",
-    profile = null,
-    connectionAvailable = { connectionStore.saved != null },
-    initialState = initialState,
-)
 
 @Suppress("FunctionName")
 fun CommandPaletteViewModel(

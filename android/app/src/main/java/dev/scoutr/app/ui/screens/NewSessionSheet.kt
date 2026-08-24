@@ -66,14 +66,30 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.foundation.text.KeyboardOptions
 
+/** One selectable target in the sheet's host selector. */
+data class NewSessionHostOption(
+    val profile: dev.scoutr.app.data.HostProfileKey,
+    val alias: String,
+    /** Only an online bridge may create sessions. */
+    val usable: Boolean,
+)
+
 /** Fast session launcher with focused folder and model pickers. */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
+
 fun NewSessionSheet(
     viewModel: NewSessionViewModel,
     onDismiss: () -> Unit,
-    onCreated: (paneId: String) -> Unit,
+    /** The sheet owns exactly one host's VM; creation reports that same host. */
+    selectedProfile: dev.scoutr.app.data.HostProfileKey,
+    hosts: List<NewSessionHostOption> = emptyList(),
+    onSelectHost: (dev.scoutr.app.data.HostProfileKey) -> Unit = {},
+    onCreated: (profile: dev.scoutr.app.data.HostProfileKey, paneId: String) -> Unit,
 ) {
+    val hostUsable = hosts
+        .firstOrNull { it.profile == selectedProfile }
+        ?.usable ?: true
     val ui by viewModel.ui.collectAsState()
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var showModelPicker by rememberSaveable { mutableStateOf(false) }
@@ -83,7 +99,7 @@ fun NewSessionSheet(
     LaunchedEffect(ui.created) {
         ui.created?.let {
             viewModel.consumeCreatedSession()
-            onCreated(it.paneId)
+            onCreated(selectedProfile, it.paneId)
         }
     }
 
@@ -104,6 +120,25 @@ fun NewSessionSheet(
                 .navigationBarsPadding(),
         ) {
             LauncherHeader(onDismiss)
+            if (hosts.size > 1) {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp, vertical = 10.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    hosts.forEach { option ->
+                        // Selection freezes while a create is in flight: the
+                        // route must be captured against one settled host.
+                        FilterChip(
+                            selected = option.profile == selectedProfile,
+                            onClick = { if (!ui.creating) onSelectHost(option.profile) },
+                            enabled = !ui.creating,
+                            label = { Text(option.alias, maxLines = 1) },
+                        )
+                    }
+                }
+            }
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             LazyColumn(
                 modifier = Modifier.weight(1f).testTag("new_session_content"),
@@ -153,6 +188,7 @@ fun NewSessionSheet(
                 ui = ui,
                 onSavePreset = { showPresetDialog = true },
                 onCreate = viewModel::create,
+                createEnabled = hostUsable,
             )
         }
     }
@@ -414,6 +450,7 @@ private fun LauncherActions(
     ui: NewSessionUiState,
     onSavePreset: () -> Unit,
     onCreate: () -> Unit,
+    createEnabled: Boolean = true,
 ) {
     Row(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 14.dp),
@@ -431,7 +468,8 @@ private fun LauncherActions(
         Button(
             shape = MaterialTheme.shapes.small,
             onClick = onCreate,
-            enabled = ui.canCreate,
+            // An offline or blocked target cannot accept a new pane.
+            enabled = ui.canCreate && createEnabled,
             modifier = Modifier.weight(1f).heightIn(min = 48.dp).testTag("create_session"),
         ) {
             if (ui.creating) {

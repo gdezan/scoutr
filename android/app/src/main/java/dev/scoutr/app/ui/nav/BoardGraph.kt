@@ -65,24 +65,23 @@ internal fun NavGraphBuilder.boardDestination(
         ) { innerBoard ->
             BoardScreen(
                 onOpenAgent = { agent ->
-                    val profile = boardViewModel.ui.value.hostProfile
-                    agent.live?.let {
-                        if (profile != null) {
-                            markHostUsed(profile)
-                            navController.navigateToChat(profile, agent.key, it.paneId, it.status)
-                        }
+                    val session = agent.session
+                    session.live?.let {
+                        markHostUsed(agent.profile)
+                        navController.navigateToChat(agent.profile, session.key, it.paneId, it.status)
                     }
                 },
                 onReviewAgent = { agent ->
-                    val profile = boardViewModel.ui.value.hostProfile
-                    agent.cwd?.let { cwd -> if (profile != null) openReview(profile, cwd) }
+                    agent.session.cwd?.let { cwd -> openReview(agent.profile, cwd) }
                 },
                 onCloseAgent = { agent ->
-                    boardViewModel.ui.value.hostProfile?.let(markHostUsed)
-                    agent.live?.let { boardViewModel.closeAgent(it.paneId) }
+                    markHostUsed(agent.profile)
+                    agent.session.live?.let {
+                        boardViewModel.closeAgent(agent.profile, it.paneId)
+                    }
                 },
                 onQuickAnswer = { agent, label ->
-                    boardViewModel.ui.value.hostProfile?.let(markHostUsed)
+                    markHostUsed(agent.profile)
                     boardViewModel.quickAnswer(agent, label)
                 },
                 onResolveCompatibility = onSettings,

@@ -15,6 +15,7 @@ import java.net.URLEncoder
  */
 object AppRoutes {
     const val CONNECT = "connect"
+    const val CONNECT_ADD = "connect/add"
     const val CONNECT_REFRESH = "connect/refresh?hostProfile={hostProfile}"
 
     /** One source with the shell predicate; see ui/nav/ShellRoute.kt. */

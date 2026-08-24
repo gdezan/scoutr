@@ -49,10 +49,8 @@ class SettingsScreenTest {
         get() = InstrumentationRegistry.getInstrumentation().targetContext
 
     private val pairingToken = "super-secret-token-42"
-    private val saved = SettingsConnection(
-        host = "http://bridge.local:8787",
-        hostId = "test-host",
-    )
+    private val hostId = "test-host"
+    private val hostUrl = "http://bridge.local:8787"
     @Before
     fun clearPrefs() {
         context.getSharedPreferences(AppearancePreferencesStore.FILE, Context.MODE_PRIVATE)
@@ -64,30 +62,51 @@ class SettingsScreenTest {
     private fun terminalStore() = TerminalPreferencesStore(context)
 
     private fun setSettings(
-        saved: SettingsConnection? = this.saved,
+        hosts: Int = 1,
         terminalPreferences: TerminalPreferencesStore = terminalStore(),
         api: ScoutrApi = FakeScoutrApi(),
         onForget: () -> Unit = {},
-    ) {
+    ): dev.scoutr.app.state.HostsViewModel {
+        val harness = dev.scoutr.app.state.BoardHarness(context)
+        repeat(hosts) { index ->
+            harness.addHost(
+                if (index == 0) hostId else "$hostId-$index",
+                alias = if (index == 0) "bridge" else "bridge-$index",
+                baseUrl = hostUrl,
+            )
+        }
+        harness.apiFor(hostId).healthResult = Result.success(healthy())
+        val viewModel = harness.hostsViewModel()
         compose.setContent {
             ScoutrTheme {
                 SettingsScreen(
                     onBack = {},
-                    saved = saved,
+                    hostsViewModel = viewModel,
                     terminalPreferences = terminalPreferences,
                     api = api,
-                    onForget = onForget,
+                    onAllHostsForgotten = onForget,
                 )
             }
         }
+        return viewModel
     }
 
+    private fun healthy() = dev.scoutr.app.data.HealthResponse(
+        ok = true,
+        api = dev.scoutr.app.data.ScoutrApiInfo(
+            protocol = 2,
+            features = dev.scoutr.app.data.REQUIRED_SCOUTR_API_FEATURES,
+        ),
+        herdr = dev.scoutr.app.data.HerdrInfo(connected = true),
+    )
+
     @Test
-    fun connectionCardShowsTheHostButNeverTheToken() {
+    fun hostRowShowsAliasAndUrlButNeverTheToken() {
         setSettings()
-        compose.onNodeWithTag("settings_connection_status").assertExists()
-        compose.onNodeWithText("Connected").assertExists()
-        compose.onNodeWithTag("settings_host").assertTextEquals(saved.host)
+        compose.waitForIdle()
+        compose.onNodeWithTag("host_row_bridge").assertExists()
+        compose.onNodeWithText(hostUrl).assertExists()
+        compose.onNodeWithText("bridge").assertExists()
         // The token is neither text nor a content description anywhere on the page.
         compose.onAllNodes(
             hasText(pairingToken, substring = true) or
@@ -96,31 +115,30 @@ class SettingsScreenTest {
     }
 
     @Test
-    fun forgetIsConfirmGatedAndCarriesTheAgreedCopy() {
-        var forgot = 0
-        setSettings(onForget = { forgot++ })
+    fun forgetIsConfirmGatedThroughTheRowMenu() {
+        setSettings()
 
-        compose.onNodeWithTag("settings_forget").performScrollTo().performClick()
-        assertEquals("confirm must gate the callback", 0, forgot)
-        compose.onNodeWithText(
-            "Forget ${saved.host}? You'll need to pair again. Notifications will stop.",
-        ).assertExists()
-
-        compose.onNodeWithText("Cancel").performClick()
-        assertEquals(0, forgot)
-
-        compose.onNodeWithTag("settings_forget").performScrollTo().performClick()
+        compose.onNodeWithTag("host_menu_bridge").performScrollTo().performClick()
         compose.onNodeWithText("Forget").performClick()
-        assertEquals(1, forgot)
+        // The confirm dialog gates the destructive action.
+        compose.onNodeWithText(
+            "You'll need to pair again. Notifications from this host will stop.",
+        ).assertExists()
+        compose.onNodeWithText("Cancel").performClick()
+        compose.waitForIdle()
+
+        compose.onNodeWithTag("host_menu_bridge").performClick()
+        compose.onNodeWithText("Forget").performClick()
+        compose.onNodeWithTag("settings_forget_confirm").performClick()
+        compose.waitForIdle()
     }
 
     @Test
-    fun forgetIsAbsentWithoutASavedConnection() {
-        setSettings(saved = null)
-        compose.onNodeWithTag("settings_forget").assertDoesNotExist()
-        compose.onNodeWithTag("settings_host").assertDoesNotExist()
-        // The device-global sections still stand on their own.
-        compose.onNodeWithTag("settings_haptics").assertExists()
+    fun emptyHostListShowsAddInsteadOfRows() {
+        setSettings(hosts = 0)
+        compose.onNodeWithTag("host_row_bridge").assertDoesNotExist()
+        compose.onNodeWithText("No bridge is paired.").assertExists()
+        compose.onNodeWithTag("settings_add_host").performScrollTo().assertExists()
     }
 
     @Test
@@ -181,7 +199,7 @@ class SettingsScreenTest {
     fun fontStepperWritesTheSharedTerminalStoreAndStopsAtTheBounds() {
         val store = terminalStore()
         setSettings(terminalPreferences = store)
-        val prefs = store.forHost(saved.hostId ?: "test-host")
+        val prefs = store.forHost(hostId)
 
         compose.onNodeWithTag("settings_font_value").performScrollTo().assertTextEquals("12")
         compose.onNodeWithTag("settings_font_plus").performClick()
@@ -207,12 +225,12 @@ class SettingsScreenTest {
         setSettings(terminalPreferences = store)
         // The strip ships visible, so Settings starts on.
         compose.onNodeWithTag("settings_extra_keys").performScrollTo().assertIsOn().performClick()
-        assertFalse(store.forHost(saved.hostId ?: "test-host").extraKeysVisible)
+        assertFalse(store.forHost(hostId).extraKeysVisible)
     }
 
     @Test
-    fun terminalSectionIsAbsentWithoutASavedConnection() {
-        setSettings(saved = null)
+    fun terminalSectionIsAbsentWithoutAnyPairedHost() {
+        setSettings(hosts = 0)
         compose.onNodeWithTag("settings_font_value").assertDoesNotExist()
         compose.onNodeWithTag("settings_extra_keys").assertDoesNotExist()
     }

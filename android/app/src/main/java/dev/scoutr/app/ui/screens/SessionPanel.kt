@@ -34,6 +34,7 @@ import dev.scoutr.app.data.ScoutrApiCompatibility
 import dev.scoutr.app.data.SessionDescriptor
 import dev.scoutr.app.data.encode
 import dev.scoutr.app.state.BoardViewModel
+import dev.scoutr.app.state.HostedSession
 import dev.scoutr.app.ui.components.AppTopBar
 import dev.scoutr.app.ui.components.ConfirmDialog
 import dev.scoutr.app.ui.components.PullRefreshIndicator
@@ -68,10 +69,10 @@ data class PanelSelection(val sessionKey: String? = null, val paneId: String? = 
 fun SessionPanel(
     viewModel: BoardViewModel,
     selection: PanelSelection?,
-    onOpenSession: (SessionDescriptor) -> Unit,
-    onReviewAgent: (SessionDescriptor) -> Unit,
-    onCloseAgent: (SessionDescriptor) -> Unit,
-    onQuickAnswer: (SessionDescriptor, String) -> Unit,
+    onOpenSession: (HostedSession) -> Unit,
+    onReviewAgent: (HostedSession) -> Unit,
+    onCloseAgent: (HostedSession) -> Unit,
+    onQuickAnswer: (HostedSession, String) -> Unit,
     onNewSession: () -> Unit,
     onSettings: () -> Unit,
     onTerminal: () -> Unit,
@@ -95,11 +96,11 @@ fun SessionPanel(
 
     // Close stops a live pane, so the panel confirms it exactly as the Board
     // and Sessions do.
-    var pendingClose by remember { mutableStateOf<SessionDescriptor?>(null) }
+    var pendingClose by remember { mutableStateOf<HostedSession?>(null) }
     pendingClose?.let { agent ->
         ConfirmDialog(
             title = "Close agent?",
-            text = "Closing “${agent.cardTitle()}” stops its live pane. " +
+            text = "Closing “${agent.session.cardTitle()}” stops its live pane. " +
                 "The transcript is preserved and can be resumed from Sessions.",
             confirmLabel = "Close",
             onConfirm = {
@@ -110,7 +111,7 @@ fun SessionPanel(
         )
     }
 
-    val compatible = ui.apiCompatibility == ScoutrApiCompatibility.Compatible
+    val compatible = ui.hasCompatibleHost
     val reduceMotion = useReduceMotion()
     val refreshState = rememberPullToRefreshState()
 
@@ -124,7 +125,10 @@ fun SessionPanel(
         // weight, not fillMaxSize: fillMaxSize resolves to the whole window
         // height and pushes the list — and its FAB — below the header.
         Box(Modifier.weight(1f).fillMaxWidth()) {
-            if (ui.loading && ui.board.total == 0) {
+            // Spinner only while nothing is paired yet; once hosts exist, issue
+    // cards and per-host states take over (a blocked board must not read as
+    // an endless load).
+    if (ui.registryOrder.isEmpty() || (ui.statuses.isEmpty() && ui.hostBoards.isEmpty())) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Text("Loading agents…", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
@@ -150,13 +154,17 @@ fun SessionPanel(
                             compact = true,
                             reduceMotion = reduceMotion,
                             selectedPaneId = selectedPaneId(ui.board.sessions, selection),
+                            filterOptions = panelFilterOptions(ui),
+                            selectedHostId = ui.filter,
+                            onSelectHost = viewModel::selectFilter,
                             onOpenAgent = onOpenSession,
                             onReviewAgent = onReviewAgent,
                             onCloseAgent = { pendingClose = it },
                             onQuickAnswer = onQuickAnswer,
-                            onRetry = {
+                            onRetryHost = viewModel::retryHost,
+                            onRefreshAll = {
                                 onRetryMigration()
-                                viewModel.connect("", "")
+                                viewModel.refreshBoard()
                             },
                             onResolveCompatibility = onResolveCompatibility,
                         )
@@ -205,4 +213,12 @@ private fun selectedPaneId(
         sessions.firstOrNull { it.key?.encode() == key }?.live?.paneId
     }
     return byKey ?: selection.paneId
+}
+
+/** All + one chip per registered host, mirroring the Board's selector. */
+private fun panelFilterOptions(ui: dev.scoutr.app.state.BoardUiState): List<dev.scoutr.app.ui.components.HostFilterOption> = buildList {
+    if (ui.registryOrder.size > 1) add(dev.scoutr.app.ui.components.HostFilterOption(null, "All", null))
+    ui.registryOrder.forEach { hostId ->
+        add(dev.scoutr.app.ui.components.HostFilterOption(hostId, ui.aliases[hostId] ?: hostId, ui.statuses[hostId]))
+    }
 }

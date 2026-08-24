@@ -153,7 +153,12 @@ class NewSessionSheetTest {
             androidx.compose.runtime.CompositionLocalProvider(
                 androidx.compose.ui.platform.LocalDensity provides androidx.compose.ui.unit.Density(1f, 1.3f),
             ) {
-                NewSessionSheet(viewModel = vm, onDismiss = {}, onCreated = {})
+                NewSessionSheet(
+                    viewModel = vm,
+                    onDismiss = {},
+                    selectedProfile = dev.scoutr.app.data.HostProfileKey("host-a", 1),
+                    onCreated = { _, _ -> },
+                )
             }
         }
 
@@ -176,7 +181,12 @@ class NewSessionSheetTest {
             models = """{"ok":true,"catalog":{"providers":[]}}""",
         )
         val vm = NewSessionViewModel(bridge(), launcherSettingsStore())
-        compose.setContent { NewSessionSheet(viewModel = vm, onDismiss = {}, onCreated = {}) }
+        compose.setContent { NewSessionSheet(
+                    viewModel = vm,
+                    onDismiss = {},
+                    selectedProfile = dev.scoutr.app.data.HostProfileKey("host-a", 1),
+                    onCreated = { _, _ -> },
+                ) }
 
         waitFor("open_folder_picker")
         compose.onNodeWithTag("open_folder_picker").performScrollTo().performClick()
@@ -196,7 +206,12 @@ class NewSessionSheetTest {
             devGate = devGate,
         )
         val vm = NewSessionViewModel(bridge(readTimeoutSeconds = 30), launcherSettingsStore())
-        compose.setContent { NewSessionSheet(viewModel = vm, onDismiss = {}, onCreated = {}) }
+        compose.setContent { NewSessionSheet(
+                    viewModel = vm,
+                    onDismiss = {},
+                    selectedProfile = dev.scoutr.app.data.HostProfileKey("host-a", 1),
+                    onCreated = { _, _ -> },
+                ) }
         try {
             waitFor("open_folder_picker")
             compose.onNodeWithTag("open_folder_picker").performScrollTo().performClick()
@@ -224,7 +239,12 @@ class NewSessionSheetTest {
             models = """{"ok":true,"catalog":{"providers":[]}}""",
         )
         val vm = NewSessionViewModel(bridge(), launcherSettingsStore())
-        compose.setContent { NewSessionSheet(viewModel = vm, onDismiss = {}, onCreated = {}) }
+        compose.setContent { NewSessionSheet(
+                    viewModel = vm,
+                    onDismiss = {},
+                    selectedProfile = dev.scoutr.app.data.HostProfileKey("host-a", 1),
+                    onCreated = { _, _ -> },
+                ) }
 
         waitFor("open_folder_picker")
         compose.onNodeWithTag("open_folder_picker").performScrollTo().performClick()
@@ -249,7 +269,12 @@ class NewSessionSheetTest {
         val vm = NewSessionViewModel(bridge(), launcherSettingsStore())
         var createdPane: String? = null
         compose.setContent {
-            NewSessionSheet(viewModel = vm, onDismiss = {}, onCreated = { createdPane = it })
+            NewSessionSheet(
+                viewModel = vm,
+                onDismiss = {},
+                selectedProfile = dev.scoutr.app.data.HostProfileKey("host-a", 1),
+                onCreated = { _, pane -> createdPane = pane },
+            )
         }
 
         compose.onNodeWithTag("open_folder_picker").performScrollTo().performClick()
@@ -295,7 +320,12 @@ class NewSessionSheetTest {
 
         val vm = NewSessionViewModel(bridge(), launcherSettingsStore())
         compose.setContent {
-            NewSessionSheet(viewModel = vm, onDismiss = {}, onCreated = {})
+            NewSessionSheet(
+                    viewModel = vm,
+                    onDismiss = {},
+                    selectedProfile = dev.scoutr.app.data.HostProfileKey("host-a", 1),
+                    onCreated = { _, _ -> },
+                )
         }
 
         waitFor("quick_pick_Dev")
@@ -323,7 +353,12 @@ class NewSessionSheetTest {
         )
 
         val vm = NewSessionViewModel(bridge(), launcherSettingsStore())
-        compose.setContent { NewSessionSheet(viewModel = vm, onDismiss = {}, onCreated = {}) }
+        compose.setContent { NewSessionSheet(
+                    viewModel = vm,
+                    onDismiss = {},
+                    selectedProfile = dev.scoutr.app.data.HostProfileKey("host-a", 1),
+                    onCreated = { _, _ -> },
+                ) }
 
         compose.onNodeWithTag("new_session_content").performScrollToNode(hasTestTag("open_model_picker"))
         compose.onNodeWithTag("open_model_picker").performClick()
@@ -366,7 +401,12 @@ class NewSessionSheetTest {
             models = longModelCatalog(),
         )
         val vm = NewSessionViewModel(bridge(), launcherSettingsStore())
-        compose.setContent { NewSessionSheet(viewModel = vm, onDismiss = {}, onCreated = {}) }
+        compose.setContent { NewSessionSheet(
+                    viewModel = vm,
+                    onDismiss = {},
+                    selectedProfile = dev.scoutr.app.data.HostProfileKey("host-a", 1),
+                    onCreated = { _, _ -> },
+                ) }
         compose.onNodeWithTag("new_session_content").performScrollToNode(hasTestTag("open_model_picker"))
         compose.onNodeWithTag("open_model_picker").performClick()
         waitFor("model_item_alpha/model-00")

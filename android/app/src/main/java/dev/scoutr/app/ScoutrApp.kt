@@ -11,6 +11,7 @@ import dev.scoutr.app.data.UpdateHostDisposition
 import dev.scoutr.app.data.NotificationPreferencesStore
 import dev.scoutr.app.data.SharedPreferencesLauncherSettingsStore
 import dev.scoutr.app.data.SharedPreferencesSessionCatalogStore
+import dev.scoutr.app.data.SessionSnapshotStore
 import dev.scoutr.app.data.TerminalPreferencesStore
 import dev.scoutr.app.net.DefaultHostClientFactory
 import dev.scoutr.app.net.HostClientFactory
@@ -83,12 +84,16 @@ class AppContainer(application: Application) {
         writeIfRegistered = hostRegistry::writeIfRegistered,
     )
     val sessionCatalogStore = SharedPreferencesSessionCatalogStore(appContext)
+    val sessionSnapshots = SessionSnapshotStore(appContext.filesDir)
     val terminalPreferences = TerminalPreferencesStore(appContext, hostRegistry::writeIfRegistered)
     val performanceCounters = PerformanceCounters()
     val muteStore = MuteStore(appContext)
     val notificationPreferencesStore = NotificationPreferencesStore(appContext)
     val notifications = NotificationPresenter(appContext, muteStore, notificationPreferencesStore)
-
+    /** Shared Board/Sessions host filter; null means All hosts. Process-local only. */
+    val hostFilter = dev.scoutr.app.state.HostFilterStore()
+    /** Process-local per-host reachability/compatibility status. */
+    val hostStatus: dev.scoutr.app.state.HostStatusRepository
     private val okHttp = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
@@ -115,6 +120,11 @@ class AppContainer(application: Application) {
         )
         hostClients = concreteHostClients
         hostWorkCoordinator = concreteHostClients.work()
+        hostStatus = dev.scoutr.app.state.HostStatusRepository(
+            clients = hostClients,
+            bindingFor = ::currentHostBinding,
+            work = hostWorkCoordinator,
+        )
     }
 
     val pushRegistrations: PushRegistrationManager
@@ -163,18 +173,6 @@ class AppContainer(application: Application) {
         hostLifecycle.attachPushRegistrations(pushRegistrations)
     }
 
-
-    fun forgetConnection() {
-        val state = hostRegistry.snapshot()
-        val hostId = state.defaultHostId ?: return
-        val replacement = state.profiles.firstOrNull { it.hostId != hostId }
-        val disposition = if (state.updateHostId == hostId && replacement != null) {
-            UpdateHostDisposition.UseExisting(replacement.hostId)
-        } else {
-            null
-        }
-        forgetHost(hostId, disposition)
-    }
 
     fun forgetHost(hostId: String, updateHostDisposition: UpdateHostDisposition? = null) {
         applicationScope.launch {
@@ -302,6 +300,9 @@ class AppContainer(application: Application) {
         terminalPreferences.clearHost(hostId)
         launcherSettingsStore.clearHost(hostId)
         dev.scoutr.app.state.ReviewStore(appContext, hostId).clearHost(hostId)
+        sessionSnapshots.clear(hostId)
+        hostStatus.remove(hostId)
+        hostFilter.resetIfSelected(hostId)
     }
 
     private fun defaultHostId(): String? = hostRegistry.snapshot().defaultHostId

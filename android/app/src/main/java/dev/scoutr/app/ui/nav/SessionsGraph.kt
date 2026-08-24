@@ -26,28 +26,31 @@ internal fun NavGraphBuilder.sessionsDestination(
     markHostUsed: (HostProfileKey) -> Unit = {},
 ) {
     composable(Destination.Sessions.route) {
-        val registryState by container.hostRegistry.states.collectAsState()
-        val profile = registryState.defaultHostId?.let { id ->
-            registryState.profiles.firstOrNull { it.hostId == id }
-        }?.let { HostProfileKey(it.hostId, it.profileGeneration) }
-        val connectionRevision = registryState.connectionRevision(profile)
-        val api = profile?.let { container.routeApi(it, connectionRevision) }
-        if (profile == null || api == null) {
+        // Sessions is a hostless shell entry over per-host workers: one VM for
+        // the whole registry, cache-first, with the shared host filter. It no
+        // longer binds a single default profile at entry.
+        val hasHosts = container.hostRegistry.snapshot().profiles.isNotEmpty()
+        if (!hasHosts) {
             HostUnavailableScreen(if (container.hostRegistry.snapshot().pendingLegacyConnection) {
                 "Checking the saved bridge…"
-            } else hostUnavailableReason(profile))
+            } else "No bridge is paired yet")
             return@composable
         }
         val historyViewModel: SessionHistoryViewModel = viewModel(
-            factory = viewModelFactory<SessionHistoryViewModel> {
+            factory = viewModelFactory<SessionHistoryViewModel> { appInstance ->
                 SessionHistoryViewModel(
-                    bridge = api,
-                    profile = profile,
-                    store = it.container.sessionCatalogStore,
-                    adoptLegacyMetadata = it.container.migration::adoptPendingMetadata,
+                    hostClients = appInstance.container.hostClients,
+                    registry = appInstance.container.hostRegistry,
+                    currentBinding = appInstance.container::currentHostBinding,
+                    work = appInstance.container.hostWorkCoordinator,
+                    hostStatus = appInstance.container.hostStatus,
+                    snapshots = appInstance.container.sessionSnapshots,
+                    catalogStore = appInstance.container.sessionCatalogStore,
+                    hostFilter = appInstance.container.hostFilter,
+                    adoptLegacyMetadata = appInstance.container.migration::adoptPendingMetadata,
                 )
             },
-            key = "sessions_${profile.encode()}_$connectionRevision",
+            key = "sessions_history",
         )
         TabScaffold(
             title = "Sessions",
@@ -56,7 +59,9 @@ internal fun NavGraphBuilder.sessionsDestination(
         ) { innerSessions ->
             HistoryScreen(
                 onOpenSession = { resumed ->
-                    val target = resumed.profile ?: profile
+                    // The resumed session names its own host; the VM resolved
+                    // it from the row, so there is no default-host fallback.
+                    val target = requireNotNull(resumed.profile)
                     markHostUsed(target)
                     navController.navigateToChat(
                         target,
@@ -65,7 +70,10 @@ internal fun NavGraphBuilder.sessionsDestination(
                         AppRoutes.ChatArgs.DEFAULT_STATUS,
                     )
                 },
-                onReview = { item -> openReview(profile, item.session.cwd) },
+                onReview = { item ->
+                    val profileKey = historyViewModel.ui.value.profiles[item.hostId]
+                    if (profileKey != null) openReview(profileKey, item.session.cwd)
+                },
                 viewModel = historyViewModel,
                 modifier = Modifier.padding(innerSessions),
             )

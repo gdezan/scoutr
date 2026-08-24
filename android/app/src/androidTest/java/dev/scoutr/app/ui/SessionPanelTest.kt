@@ -23,9 +23,7 @@ import dev.scoutr.app.data.SessionDescriptor
 import dev.scoutr.app.data.SessionKey
 import dev.scoutr.app.data.encode
 import dev.scoutr.app.data.liveSessionFixture
-import dev.scoutr.app.state.BoardUiState
 import dev.scoutr.app.state.BoardViewModel
-import dev.scoutr.app.state.legacyBoardViewModel
 import dev.scoutr.app.ui.screens.PanelSelection
 import dev.scoutr.app.ui.screens.SessionPanel
 import dev.scoutr.app.ui.theme.ScoutrTheme
@@ -61,24 +59,12 @@ class SessionPanelTest {
     private fun showPanel(
         agents: List<SessionDescriptor>,
         selection: PanelSelection? = null,
-        onOpenSession: (SessionDescriptor) -> Unit = {},
-        onCloseAgent: (SessionDescriptor) -> Unit = {},
+        onOpenSession: (dev.scoutr.app.state.HostedSession) -> Unit = {},
+        onCloseAgent: (dev.scoutr.app.state.HostedSession) -> Unit = {},
         currentRoute: String? = null,
         onSelectDestination: (String) -> Unit = {},
     ) {
-        val context = InstrumentationRegistry.getInstrumentation().targetContext
-        val connection = ConnectionStore(context).apply { clear() }
-        // Unsaved connection: the VM init never polls, so the UI stays static.
-        val bridge = dev.scoutr.app.net.BridgeClient(okhttp3.OkHttpClient(), connection)
-        val viewModel = legacyBoardViewModel(
-            bridge,
-            connection,
-            initialState = BoardUiState(
-                board = BoardState.group(agents),
-                connected = true,
-                apiCompatibility = ScoutrApiCompatibility.Compatible,
-            ),
-        )
+        val viewModel = StaticBoards.boardViewModel(agents)
         compose.setContent {
             ScoutrTheme {
                 Box(Modifier.width(320.dp)) {
@@ -106,7 +92,9 @@ class SessionPanelTest {
         showPanel(listOf(agent("p1", "Fix billing bug")))
 
         compose.onNodeWithTag("board_session_panel").assertIsDisplayed()
-        compose.onNodeWithText("Board").assertIsDisplayed()
+        // Two "Board" texts exist by design: the header title and the nav row
+        // label. Assert the header one is displayed.
+        compose.onAllNodesWithText("Board")[0].assertIsDisplayed()
         compose.onNodeWithContentDescription("NEEDS YOU 1").assertIsDisplayed()
         compose.onNodeWithTag("panel_agent_card_p1").assertIsDisplayed()
         compose.onNodeWithTag("panel_new_session").assertIsDisplayed()
@@ -182,7 +170,7 @@ class SessionPanelTest {
     @Test
     fun tappingARowOpensThatSession() {
         var opened: String? = null
-        showPanel(listOf(agent("p1", "Fix billing bug")), onOpenSession = { opened = it.live?.paneId })
+        showPanel(listOf(agent("p1", "Fix billing bug")), onOpenSession = { opened = it.session.live?.paneId })
 
         compose.onNodeWithTag("panel_agent_card_p1").performClick()
         compose.waitForIdle()
@@ -192,7 +180,7 @@ class SessionPanelTest {
     @Test
     fun closeFromThePanelStaysConfirmationGated() {
         var closed: String? = null
-        showPanel(listOf(agent("p1", "Fix billing bug")), onCloseAgent = { closed = it.live?.paneId })
+        showPanel(listOf(agent("p1", "Fix billing bug")), onCloseAgent = { closed = it.session.live?.paneId })
 
         compose.onNodeWithTag("agent_actions_p1").performClick()
         compose.onNodeWithTag("board_menu_close_p1").performClick()

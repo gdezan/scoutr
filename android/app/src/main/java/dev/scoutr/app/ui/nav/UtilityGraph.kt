@@ -1,6 +1,13 @@
 package dev.scoutr.app.ui.nav
 
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Text
+import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -19,6 +26,7 @@ import dev.scoutr.app.data.encode
 import dev.scoutr.app.state.ReviewViewModel
 import dev.scoutr.app.state.TerminalViewModel
 import dev.scoutr.app.state.UsageViewModel
+import dev.scoutr.app.state.HostsViewModel
 import dev.scoutr.app.state.viewModelFactory
 import dev.scoutr.app.ui.screens.ConnectScreen
 import dev.scoutr.app.ui.screens.HostUnavailableScreen
@@ -36,6 +44,16 @@ internal fun NavGraphBuilder.connectDestination(
 ) {
     composable(AppRoutes.CONNECT) {
         ConnectScreen(onConnected = onPaired)
+    }
+    // Add-another-host entry from Settings. A distinct route so the shell's
+    // "already paired → leave Connect" guard does not bounce it; after a
+    // successful pair we return to the Hosts list that launched it.
+    composable(AppRoutes.CONNECT_ADD) {
+        ConnectScreen(
+            onConnected = {
+                navController.popBackStack(AppRoutes.SETTINGS, inclusive = false)
+            },
+        )
     }
     composable(
         AppRoutes.CONNECT_REFRESH,
@@ -58,7 +76,11 @@ internal fun NavGraphBuilder.connectDestination(
 }
 
 /** Usage resolves the default only when the hostless shell entry is opened. */
-internal fun NavGraphBuilder.usageDestination(container: AppContainer, isWide: Boolean) {
+internal fun NavGraphBuilder.usageDestination(
+    navController: NavHostController,
+    container: AppContainer,
+    isWide: Boolean,
+) {
     composable(
         route = Destination.Usage.pattern,
         arguments = listOf(
@@ -81,7 +103,36 @@ internal fun NavGraphBuilder.usageDestination(container: AppContainer, isWide: B
             key = "usage_${profile.encode()}_$connectionRevision",
         )
         TabScaffold(title = "Usage", ownsBottomInset = isWide) { innerUsage ->
-            UsageScreen(viewModel = usageViewModel, modifier = Modifier.padding(innerUsage))
+            Column(Modifier.padding(innerUsage)) {
+                // Inline selector above the content: choosing another host
+                // replaces this concrete route instead of merging totals.
+                if (registryState.profiles.size > 1) {
+                    val statuses by container.hostStatus.all.collectAsState()
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        registryState.profiles.forEach { entry ->
+                            val key = HostProfileKey(entry.hostId, entry.profileGeneration)
+                            val online =
+                                statuses[entry.hostId] is dev.scoutr.app.state.HostAvailability.Online
+                            FilterChip(
+                                selected = entry.hostId == profile?.hostId,
+                                onClick = {
+                                    if (entry.hostId != profile?.hostId) {
+                                        navController.navigate(AppRoutes.usage(key))
+                                    }
+                                },
+                                enabled = online || entry.hostId == profile?.hostId,
+                                label = { Text(entry.alias, maxLines = 1) },
+                            )
+                        }
+                    }
+                }
+                UsageScreen(viewModel = usageViewModel)
+            }
         }
     }
 }
@@ -182,31 +233,33 @@ internal fun NavGraphBuilder.terminalDestination(navController: NavHostControlle
 internal fun NavGraphBuilder.settingsDestination(
     navController: NavHostController,
     container: AppContainer,
-    onForget: () -> Unit,
+    /** Runs after HostsViewModel already forgot the final host; navigate only. */
+    onAllHostsForgotten: () -> Unit,
 ) {
     composable(AppRoutes.SETTINGS) {
         val registryState by container.hostRegistry.states.collectAsState()
-        val current = registryState.defaultHostId?.let { id ->
-            registryState.profiles.firstOrNull { it.hostId == id }
-        }
         val updateHost = registryState.updateHostId?.let { id ->
             registryState.profiles.firstOrNull { it.hostId == id }
         }
         val updateBinding = updateHost
             ?.takeIf { registryState.inAppUpdatesEnabled }
             ?.let { container.currentHostBinding(it.hostId) }
-        val replacementUpdateHost = current
-            ?.takeIf { it.hostId == registryState.updateHostId }
-            ?.let { selected -> registryState.profiles.firstOrNull { it.hostId != selected.hostId } }
-        val saved = current?.let { profile ->
-            SettingsConnection(
-                host = profile.baseUrl,
-                hostId = profile.hostId,
-            )
-        }
+
+        val hostsViewModel: HostsViewModel = viewModel(
+            factory = viewModelFactory<HostsViewModel> { appInstance ->
+                HostsViewModel(
+                    registry = appInstance.container.hostRegistry,
+                    lifecycle = appInstance.container.hostLifecycle,
+                    hostStatus = appInstance.container.hostStatus,
+                    currentBinding = appInstance.container::currentHostBinding,
+                    work = appInstance.container.hostWorkCoordinator,
+                )
+            },
+            key = "settings_hosts",
+        )
+
         SettingsScreen(
             onBack = { navController.popBackStack() },
-            saved = saved,
             terminalPreferences = container.terminalPreferences,
             api = updateBinding?.let(container.hostClients::api),
             trackUpdateWork = { work ->
@@ -218,15 +271,9 @@ internal fun NavGraphBuilder.settingsDestination(
             updateHostOptions = registryState.profiles.associate { it.hostId to it.alias },
             onSelectUpdateHost = { hostId -> container.hostRegistry.confirmUpdateHost(hostId) },
             onDisableUpdates = container.hostRegistry::disableUpdates,
-            onRefreshConnection = current?.let { profile ->
-                {
-                    navController.navigate(
-                        AppRoutes.refreshConnection(HostProfileKey(profile.hostId, profile.profileGeneration)),
-                    )
-                }
-            },
-            forgetUpdateHostAlias = replacementUpdateHost?.alias,
-            onForget = onForget,
+            hostsViewModel = hostsViewModel,
+            onAddHost = { navController.navigate(AppRoutes.CONNECT_ADD) },
+            onAllHostsForgotten = onAllHostsForgotten,
         )
     }
 }

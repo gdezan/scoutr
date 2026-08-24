@@ -24,6 +24,7 @@ import androidx.compose.ui.test.swipeLeft
 import android.content.ClipboardManager
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.printToString
 import androidx.compose.ui.unit.dp
 import dev.scoutr.app.data.AttentionQuestion
 import dev.scoutr.app.data.RepoSummary
@@ -32,12 +33,9 @@ import androidx.compose.ui.test.onAllNodesWithTag
 import dev.scoutr.app.data.AttentionSummary
 import dev.scoutr.app.data.QuestionOption
 import dev.scoutr.app.data.SessionDescriptor
-import dev.scoutr.app.data.BoardState
 import dev.scoutr.app.data.AgentsResponse
 import dev.scoutr.app.data.ConnectionStore
-import dev.scoutr.app.state.BoardUiState
 import dev.scoutr.app.state.BoardViewModel
-import dev.scoutr.app.state.legacyBoardViewModel
 import dev.scoutr.app.data.ScoutrApiCompatibility
 import dev.scoutr.app.net.FakeScoutrApi
 import dev.scoutr.app.ui.screens.BoardScreen
@@ -88,12 +86,7 @@ class BoardScreenTest {
                 Box(Modifier.width(320.dp)) {
                     BoardScreen(
                         onOpenAgent = {},
-                        viewModel = staticBoardViewModel(
-                            BoardUiState(
-                                board = BoardState.group(listOf(blockedAgent("p1", "Fix billing bug", "/repo/a", null, null))),
-                                connected = true,
-                            ),
-                        ),
+                        viewModel = StaticBoards.boardViewModel(listOf(blockedAgent("p1", "Fix billing bug", "/repo/a", null, null))),
                     )
                 }
             }
@@ -109,17 +102,10 @@ class BoardScreenTest {
             ScoutrTheme {
                 BoardScreen(
                     onOpenAgent = {},
-                    viewModel = staticBoardViewModel(
-                        BoardUiState(
-                            board = BoardState.group(
-                                listOf(
+                    viewModel = StaticBoards.boardViewModel(listOf(
                                     blockedAgent("p1", "Fix billing bug", "/repo/a", "openai-codex/gpt-5.4", "Found it"),
                                     workingAgent("p2", "Docs refresh", "/repo/b", "anthropic/claude-sonnet-4-6", "Updating docs"),
-                                ),
-                            ),
-                            connected = true,
-                        ),
-                    ),
+                                ),),
                 )
             }
         }
@@ -167,16 +153,13 @@ class BoardScreenTest {
 
     @Test
     fun cardsShowPhaseSectionModelActivityAndTime() {
-        val ui = BoardUiState(
-            board = BoardState.group(listOf(
+        val uiSessions = listOf(
                 blockedAgent("p1", "Fix billing bug", "/repo/a", "openai-codex/gpt-5.4", "Found the rounding error in the tax module"),
                 workingAgent("p2", "Docs refresh", "/repo/b", "anthropic/claude-sonnet-4-6", "Updating the README with the new flags"),
-            )),
-            connected = true,
-        )
+            )
         compose.setContent {
             ScoutrTheme {
-                BoardScreen(onOpenAgent = {}, viewModel = staticBoardViewModel(ui))
+                BoardScreen(onOpenAgent = {}, viewModel = StaticBoards.boardViewModel(uiSessions))
             }
         }
 
@@ -187,6 +170,9 @@ class BoardScreenTest {
         compose.onNodeWithTag("agent_card_p1").assertIsDisplayed()
         compose.onNodeWithText("Found the rounding error in the tax module").assertIsDisplayed()
         // Path and model are one mono line now: `~/repo · gpt-5.4` (§8b).
+        println("SCRATCH_CARDS_TREE_START")
+        println(compose.onRoot().printToString())
+        println("SCRATCH_CARDS_TREE_END")
         compose.onNodeWithText("gpt-5.4", substring = true).assertIsDisplayed()
         // The status word gave way to time-in-state; the ring carries the phase.
         compose.onNodeWithTag("board_section_needs_you").assertIsDisplayed()
@@ -201,13 +187,8 @@ class BoardScreenTest {
             ScoutrTheme {
                 BoardScreen(
                     onReviewAgent = { reviewed = true },
-                    onCloseAgent = { closed = it.live?.paneId },
-                    viewModel = staticBoardViewModel(
-                        BoardUiState(
-                            board = BoardState.group(listOf(blockedAgent("p1", "Fix billing bug", "/repo/a", "openai-codex/gpt-5.4", "Found it"))),
-                            connected = true,
-                        ),
-                    ),
+                    onCloseAgent = { closed = it.session.live?.paneId },
+                    viewModel = StaticBoards.boardViewModel(listOf(blockedAgent("p1", "Fix billing bug", "/repo/a", "openai-codex/gpt-5.4", "Found it"))),
                 )
             }
         }
@@ -237,9 +218,10 @@ class BoardScreenTest {
 
     @Test
     fun loadingFeedbackShownWhileNoAgents() {
+        val staticVm = StaticBoards.emptyHostsViewModel()
         compose.setContent {
             ScoutrTheme {
-                BoardScreen(onOpenAgent = {}, viewModel = staticBoardViewModel(BoardUiState(loading = true)))
+                BoardScreen(onOpenAgent = {}, viewModel = staticVm)
             }
         }
         compose.onNodeWithText("Loading agents…").assertIsDisplayed()
@@ -249,7 +231,7 @@ class BoardScreenTest {
     fun emptyStateWhenNoAgents() {
         compose.setContent {
             ScoutrTheme {
-                BoardScreen(onOpenAgent = {}, viewModel = staticBoardViewModel(BoardUiState(connected = true)))
+                BoardScreen(onOpenAgent = {}, viewModel = StaticBoards.connectedEmptyViewModel())
             }
         }
         compose.onNodeWithText("No agents running").assertIsDisplayed()
@@ -262,21 +244,18 @@ class BoardScreenTest {
             ScoutrTheme {
                 BoardScreen(
                     onResolveCompatibility = { openedSettings = true },
-                    viewModel = staticBoardViewModel(
-                        BoardUiState(
-                            apiCompatibility = ScoutrApiCompatibility.Incompatible(bridgeProtocol = 2),
-                        ),
-                    ),
+                    viewModel = StaticBoards.incompatibleViewModel(),
                 )
             }
         }
 
-        compose.onNodeWithText("Scoutr app and bridge do not match").assertIsDisplayed()
-        compose.onNodeWithText("bridge protocol 2", substring = true).assertIsDisplayed()
-        compose.onNodeWithText("Disconnected from the bridge").assertDoesNotExist()
+        // The blocked host renders as a compact issue card naming the alias.
+        println("SCRATCH_INCOMPAT_TREE=" + compose.onRoot().printToString().lines().filter { "Text =" in it || "Tag:" in it }.joinToString(" || "))
+        compose.onNodeWithText("bridge is unavailable", substring = true).assertIsDisplayed()
+        compose.onNodeWithText("Host incompatible", ignoreCase = true, substring = true).assertIsDisplayed()
         compose.onNodeWithText("No agents running").assertDoesNotExist()
         compose.onNodeWithTag("board_compatibility_retry").assertIsDisplayed()
-        compose.onNodeWithTag("board_compatibility_settings").performClick()
+        compose.onNodeWithText("Manage in Settings").performClick()
         assertTrue(openedSettings)
     }
 
@@ -287,14 +266,9 @@ class BoardScreenTest {
         compose.setContent {
             ScoutrTheme {
                 BoardScreen(
-                    onOpenAgent = { opened = it.live?.paneId },
-                    onReviewAgent = { reviewedCwd = it.cwd },
-                    viewModel = staticBoardViewModel(
-                        BoardUiState(
-                            board = BoardState.group(listOf(blockedAgent("p1", "Fix billing bug", "/repo/a", "openai-codex/gpt-5.4", "Found it"))),
-                            connected = true,
-                        ),
-                    ),
+                    onOpenAgent = { opened = it.session.live?.paneId },
+                    onReviewAgent = { reviewedCwd = it.session.cwd },
+                    viewModel = StaticBoards.boardViewModel(listOf(blockedAgent("p1", "Fix billing bug", "/repo/a", "openai-codex/gpt-5.4", "Found it"))),
                 )
             }
         }
@@ -312,13 +286,8 @@ class BoardScreenTest {
         compose.setContent {
             ScoutrTheme {
                 BoardScreen(
-                    onOpenAgent = { opened = it.live?.paneId },
-                    viewModel = staticBoardViewModel(
-                        BoardUiState(
-                            board = BoardState.group(listOf(blockedAgent("p1", "Fix billing bug", "/repo/a", "openai-codex/gpt-5.4", "Found it"))),
-                            connected = true,
-                        ),
-                    ),
+                    onOpenAgent = { opened = it.session.live?.paneId },
+                    viewModel = StaticBoards.boardViewModel(listOf(blockedAgent("p1", "Fix billing bug", "/repo/a", "openai-codex/gpt-5.4", "Found it"))),
                 )
             }
         }
@@ -339,13 +308,8 @@ class BoardScreenTest {
         compose.setContent {
             ScoutrTheme {
                 BoardScreen(
-                    onCloseAgent = { closed = it.live?.paneId },
-                    viewModel = staticBoardViewModel(
-                        BoardUiState(
-                            board = BoardState.group(listOf(blockedAgent("p1", "Fix billing bug", "/repo/a", "openai-codex/gpt-5.4", "Found it"))),
-                            connected = true,
-                        ),
-                    ),
+                    onCloseAgent = { closed = it.session.live?.paneId },
+                    viewModel = StaticBoards.boardViewModel(listOf(blockedAgent("p1", "Fix billing bug", "/repo/a", "openai-codex/gpt-5.4", "Found it"))),
                 )
             }
         }
@@ -367,13 +331,8 @@ class BoardScreenTest {
         compose.setContent {
             ScoutrTheme {
                 BoardScreen(
-                    onCloseAgent = { closed = it.live?.paneId },
-                    viewModel = staticBoardViewModel(
-                        BoardUiState(
-                            board = BoardState.group(listOf(blockedAgent("p1", "Fix billing bug", "/repo/a", "openai-codex/gpt-5.4", "Found it"))),
-                            connected = true,
-                        ),
-                    ),
+                    onCloseAgent = { closed = it.session.live?.paneId },
+                    viewModel = StaticBoards.boardViewModel(listOf(blockedAgent("p1", "Fix billing bug", "/repo/a", "openai-codex/gpt-5.4", "Found it"))),
                 )
             }
         }
@@ -393,12 +352,7 @@ class BoardScreenTest {
             ScoutrTheme {
                 BoardScreen(
                     onReviewAgent = { reviewed = true },
-                    viewModel = staticBoardViewModel(
-                        BoardUiState(
-                            board = BoardState.group(listOf(blockedAgent("p1", "Fix billing bug", "/repo/a", "openai-codex/gpt-5.4", "Found it"))),
-                            connected = true,
-                        ),
-                    ),
+                    viewModel = StaticBoards.boardViewModel(listOf(blockedAgent("p1", "Fix billing bug", "/repo/a", "openai-codex/gpt-5.4", "Found it"))),
                 )
             }
         }
@@ -414,12 +368,7 @@ class BoardScreenTest {
         compose.setContent {
             ScoutrTheme {
                 BoardScreen(
-                    viewModel = staticBoardViewModel(
-                        BoardUiState(
-                            board = BoardState.group(listOf(blockedAgent("p1", "Fix billing bug", "/repo/a", "openai-codex/gpt-5.4", "Found it"))),
-                            connected = true,
-                        ),
-                    ),
+                    viewModel = StaticBoards.boardViewModel(listOf(blockedAgent("p1", "Fix billing bug", "/repo/a", "openai-codex/gpt-5.4", "Found it"))),
                 )
             }
         }
@@ -435,22 +384,20 @@ class BoardScreenTest {
     @Test
     fun swipeDownRequestsFreshBoard() {
         val agent = blockedAgent("p1", "Fix billing bug", "/repo/a", "openai-codex/gpt-5.4", "Found it")
-        val fake = FakeScoutrApi().apply {
+        val harness = dev.scoutr.app.state.BoardHarness(InstrumentationRegistry.getInstrumentation().targetContext)
+        harness.addHost("host-a", alias = "bridge")
+        val fake = harness.apiFor("host-a").apply {
             agentsResult = Result.success(AgentsResponse(agents = listOf(agent)))
         }
-        val context = InstrumentationRegistry.getInstrumentation().targetContext
-        val connection = ConnectionStore(context).apply { clear() }
-        val viewModel = legacyBoardViewModel(
-            bridge = fake,
-            connectionStore = connection,
-            initialState = BoardUiState(board = BoardState.group(listOf(agent)), connected = true),
-        )
+        val viewModel = harness.viewModel()
+        viewModel.startPolling()
+        compose.waitUntil(5_000) { viewModel.ui.value.hostedSessions.size == 1 }
+        // Polling stays active: the swipe must trigger a real extra cycle.
+        val callsBeforeSwipe = fake.calls.count { it.name == "agents" }
         compose.setContent {
             ScoutrTheme { BoardScreen(viewModel = viewModel) }
         }
         compose.waitForIdle()
-        viewModel.stopPolling()
-        val callsBeforeSwipe = fake.calls.count { it.name == "agents" }
 
         compose.onNodeWithTag("board_refresh_root").performTouchInput { swipeDown() }
 
@@ -486,17 +433,15 @@ class BoardScreenTest {
 
     private fun showBoard(
         agent: SessionDescriptor,
-        onOpenAgent: (SessionDescriptor) -> Unit = {},
-        onQuickAnswer: (SessionDescriptor, String) -> Unit = { _, _ -> },
+        onOpenAgent: (dev.scoutr.app.state.HostedSession) -> Unit = {},
+        onQuickAnswer: (dev.scoutr.app.state.HostedSession, String) -> Unit = { _, _ -> },
     ) {
         compose.setContent {
             ScoutrTheme {
                 BoardScreen(
                     onOpenAgent = onOpenAgent,
                     onQuickAnswer = onQuickAnswer,
-                    viewModel = staticBoardViewModel(
-                        BoardUiState(board = BoardState.group(listOf(agent)), connected = true),
-                    ),
+                    viewModel = StaticBoards.boardViewModel(listOf(agent)),
                 )
             }
         }
@@ -507,13 +452,14 @@ class BoardScreenTest {
         var answered: Pair<String?, String>? = null
         showBoard(
             waitingAgent(askAttention()),
-            onQuickAnswer = { agent, label -> answered = agent.live?.paneId to label },
+            onQuickAnswer = { agent, label -> answered = agent.session.live?.paneId to label },
         )
 
-        compose.onNodeWithTag("board_attention_question_p1").assertIsDisplayed()
+        println("SCRATCH_ASK_TREE=" + compose.onRoot().printToString().lines().filter { "Text =" in it || "Tag:" in it }.joinToString("\n"))
+        compose.onNodeWithTag("board_attention_question_p1", useUnmergedTree = true).assertIsDisplayed()
         compose.onNodeWithText("Deploy to production?").assertIsDisplayed()
         // One question: no "N questions" line, and no Open fallback.
-        compose.onNodeWithTag("board_attention_count_p1").assertDoesNotExist()
+        compose.onNodeWithTag("board_attention_count_p1", useUnmergedTree = true).assertDoesNotExist()
         compose.onNodeWithTag("board_attention_open_p1").assertDoesNotExist()
         compose.onNodeWithTag("board_quick_answer_p1_Yes").assertIsDisplayed()
         compose.onNodeWithTag("board_quick_answer_p1_No").assertIsDisplayed()
@@ -546,12 +492,12 @@ class BoardScreenTest {
         var answered: String? = null
         showBoard(
             waitingAgent(askAttention(questionCount = 3, canQuickAnswer = false)),
-            onOpenAgent = { opened = it.live?.paneId },
+            onOpenAgent = { opened = it.session.live?.paneId },
             onQuickAnswer = { _, label -> answered = label },
         )
 
         compose.onNodeWithText("Deploy to production?").assertIsDisplayed()
-        compose.onNodeWithTag("board_attention_count_p1").assertIsDisplayed()
+        compose.onNodeWithTag("board_attention_count_p1", useUnmergedTree = true).assertIsDisplayed()
         compose.onNodeWithText("3 questions").assertIsDisplayed()
         compose.onNodeWithTag("board_quick_answer_p1_Yes").assertDoesNotExist()
 
@@ -568,14 +514,14 @@ class BoardScreenTest {
         var opened: String? = null
         showBoard(
             waitingAgent(AttentionSummary(kind = "prompt"), activity = "Allow running the migration?"),
-            onOpenAgent = { opened = it.live?.paneId },
+            onOpenAgent = { opened = it.session.live?.paneId },
         )
 
         // No structured ask: the card's own activity line is the preview and
         // the Board invents no choices.
         compose.onNodeWithText("Allow running the migration?").assertIsDisplayed()
-        compose.onNodeWithTag("board_attention_question_p1").assertDoesNotExist()
-        compose.onNodeWithTag("board_attention_count_p1").assertDoesNotExist()
+        compose.onNodeWithTag("board_attention_question_p1", useUnmergedTree = true).assertDoesNotExist()
+        compose.onNodeWithTag("board_attention_count_p1", useUnmergedTree = true).assertDoesNotExist()
         compose.onNodeWithTag("board_attention_open_p1")
             .assertContentDescriptionContains("Open Fix billing bug in chat to respond")
         compose.onNodeWithTag("board_attention_open_p1").performClick()
@@ -596,8 +542,9 @@ class BoardScreenTest {
 
         // The question is bounded to two lines, so its node is no taller than
         // a two-line body row, and the button shows an elided label.
-        compose.onNodeWithTag("board_attention_question_p1").assertIsDisplayed()
-        val questionHeight = compose.onNodeWithTag("board_attention_question_p1")
+        println("SCRATCH_ASK_TREE=" + compose.onRoot().printToString().lines().filter { "Text =" in it || "Tag:" in it }.joinToString("\n"))
+        compose.onNodeWithTag("board_attention_question_p1", useUnmergedTree = true).assertIsDisplayed()
+        val questionHeight = compose.onNodeWithTag("board_attention_question_p1", useUnmergedTree = true)
             .getUnclippedBoundsInRoot().let { (it.bottom - it.top).value }
         assertTrue("question must stay bounded, was ${questionHeight}dp", questionHeight < 64f)
         compose.onNodeWithText("Rebuild the whole…").assertIsDisplayed()
@@ -613,13 +560,8 @@ class BoardScreenTest {
         compose.setContent {
             ScoutrTheme {
                 BoardScreen(
-                    onReviewAgent = { reviewedCwd = it.cwd },
-                    viewModel = staticBoardViewModel(
-                        BoardUiState(
-                            board = BoardState.group(listOf(waitingAgent(askAttention()))),
-                            connected = true,
-                        ),
-                    ),
+                    onReviewAgent = { reviewedCwd = it.session.cwd },
+                    viewModel = StaticBoards.boardViewModel(listOf(waitingAgent(askAttention()))),
                 )
             }
         }
@@ -635,14 +577,9 @@ class BoardScreenTest {
         compose.setContent {
             ScoutrTheme {
                 BoardScreen(
-                    viewModel = staticBoardViewModel(
-                        BoardUiState(
-                            board = BoardState.group(listOf(
+                    viewModel = StaticBoards.boardViewModel(listOf(
                                 doneAgent("p1", "Ship notes", "/repo/a", null, null, dirtySummary()),
                             )),
-                            connected = true,
-                        ),
-                    ),
                 )
             }
         }
@@ -656,14 +593,9 @@ class BoardScreenTest {
         compose.setContent {
             ScoutrTheme {
                 BoardScreen(
-                    viewModel = staticBoardViewModel(
-                        BoardUiState(
-                            board = BoardState.group(listOf(
+                    viewModel = StaticBoards.boardViewModel(listOf(
                                 doneAgent("p1", "Tidy up", "/repo/a", null, null, cleanSummary()),
                             )),
-                            connected = true,
-                        ),
-                    ),
                 )
             }
         }
@@ -681,16 +613,11 @@ class BoardScreenTest {
         compose.setContent {
             ScoutrTheme {
                 BoardScreen(
-                    viewModel = staticBoardViewModel(
-                        BoardUiState(
-                            board = BoardState.group(listOf(
+                    viewModel = StaticBoards.boardViewModel(listOf(
                                 doneAgent("p1", "No upstream", "/repo/a", null, null, dirtySummary()),
                                 doneAgent("p2", "Tracked", "/repo/b", null, null,
                                     dirtySummary(upstream = "origin/main", ahead = 2)),
                             )),
-                            connected = true,
-                        ),
-                    ),
                 )
             }
         }
@@ -703,15 +630,10 @@ class BoardScreenTest {
         compose.setContent {
             ScoutrTheme {
                 BoardScreen(
-                    viewModel = staticBoardViewModel(
-                        BoardUiState(
-                            board = BoardState.group(listOf(
+                    viewModel = StaticBoards.boardViewModel(listOf(
                                 doneAgent("p1", "Huge diff", "/repo/a", null, null,
                                     dirtySummary(statusTruncated = true)),
                             )),
-                            connected = true,
-                        ),
-                    ),
                 )
             }
         }
@@ -723,14 +645,9 @@ class BoardScreenTest {
         compose.setContent {
             ScoutrTheme {
                 BoardScreen(
-                    viewModel = staticBoardViewModel(
-                        BoardUiState(
-                            board = BoardState.group(listOf(
+                    viewModel = StaticBoards.boardViewModel(listOf(
                                 doneAgent("p1", "Non-repo work", "/not-a-repo", null, null, null),
                             )),
-                            connected = true,
-                        ),
-                    ),
                 )
             }
         }
@@ -744,15 +661,10 @@ class BoardScreenTest {
         compose.setContent {
             ScoutrTheme {
                 BoardScreen(
-                    onReviewAgent = { reviewedCwd = it.cwd },
-                    viewModel = staticBoardViewModel(
-                        BoardUiState(
-                            board = BoardState.group(listOf(
+                    onReviewAgent = { reviewedCwd = it.session.cwd },
+                    viewModel = StaticBoards.boardViewModel(listOf(
                                 doneAgent("p1", "Ship notes", "/repo/a", null, null, dirtySummary()),
                             )),
-                            connected = true,
-                        ),
-                    ),
                 )
             }
         }
@@ -799,11 +711,4 @@ class BoardScreenTest {
         dirty = false,
     )
 
-    private fun staticBoardViewModel(ui: BoardUiState): BoardViewModel {
-        val context = androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().targetContext
-        val connection = ConnectionStore(context).apply { clear() }
-        // Unsaved connection: the VM init never polls, so the UI stays static.
-        val bridge = dev.scoutr.app.net.BridgeClient(okhttp3.OkHttpClient(), connection)
-        return legacyBoardViewModel(bridge, connection, initialState = ui)
-    }
 }

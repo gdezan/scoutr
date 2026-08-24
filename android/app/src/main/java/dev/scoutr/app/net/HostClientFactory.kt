@@ -27,9 +27,10 @@ data class HostConnectionBinding(
 )
 
 /** Identity-gate failure for a bridge that no longer reports the registered host. */
-class HostIdentityChangedException(expectedHostId: String, reportedHostId: String?) :
-    IOException("Host identity changed: expected $expectedHostId, reported ${reportedHostId ?: "none"}")
-
+class HostIdentityChangedException(
+    val expectedHostId: String,
+    val reportedHostId: String?,
+) : IOException("Host identity changed: expected $expectedHostId, reported ${reportedHostId ?: "none"}")
 /** Identity-gate failure for a bridge missing the required API contract. */
 class HostIncompatibleException(hostId: String) : IOException("Host incompatible: $hostId")
 

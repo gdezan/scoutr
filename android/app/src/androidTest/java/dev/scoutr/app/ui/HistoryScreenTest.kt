@@ -173,7 +173,9 @@ class HistoryScreenTest {
     private fun firstVisibleSessionPath(listState: LazyListState): String? =
         listState.layoutInfo.visibleItemsInfo
             .filter { it.index >= listState.firstVisibleItemIndex }
-            .mapNotNull { it.key as? String }
+            // Rows are host-qualified ("hostId:sk1…"); strip the host prefix
+            // before decoding the session key.
+            .mapNotNull { entry -> (entry.key as? String)?.substringAfter(':') }
             .mapNotNull { dev.scoutr.app.data.decodeSessionKey(it)?.path }
             .firstOrNull()
 
@@ -207,10 +209,26 @@ class HistoryScreenTest {
 
     private fun viewModel(store: SessionCatalogStore = RecordingStore()): SessionHistoryViewModel {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
-        val connection = ConnectionStore(context)
-        connection.save(server.url("/").toString().trimEnd('/'), "test_token")
-        val bridge = BridgeClient(OkHttpClient.Builder().readTimeout(5, TimeUnit.SECONDS).build(), connection)
-        return SessionHistoryViewModel(bridge, connection, store)
+        val baseUrl = server.url("/").toString().trimEnd('/')
+        val bridge = dev.scoutr.app.net.BridgeClient(
+            OkHttpClient.Builder().readTimeout(5, TimeUnit.SECONDS).build(),
+            ConnectionStore(context).apply { save(baseUrl, "test_token") },
+        )
+        // One host backed by the real transport against the local server.
+        val clients = object : dev.scoutr.app.net.HostClientFactory {
+            override fun api(hostId: String) = bridge
+            override fun terminal(hostId: String) =
+                error("terminal transport is not used by HistoryScreenTest")
+
+            override fun topologyFeedFactory(hostId: String) =
+                error("topology feeds are not used by HistoryScreenTest")
+
+            override fun probe(host: String, token: String) =
+                error("pairing probes are not used by HistoryScreenTest")
+        }
+        val harness = dev.scoutr.app.state.BoardHarness(context, clients = clients)
+        harness.addHost("host-a", alias = "bridge", baseUrl = baseUrl, token = "test_token")
+        return harness.historyViewModel(catalogStore = store)
     }
 
     private fun setContent(vm: SessionHistoryViewModel, listState: LazyListState? = null) {
@@ -521,7 +539,7 @@ class HistoryScreenTest {
 
         removed = setOf(removedPath)
         vm.retry()
-        compose.waitUntil(5_000) { vm.ui.value.items.none { it.session.path in removed } }
+        compose.waitUntil(5_000) { vm.items().none { it.session.path in removed } }
         compose.waitForIdle()
         selectScope("Active")
         compose.waitForIdle()
@@ -555,7 +573,7 @@ class HistoryScreenTest {
 
         removed = removedIndexes.map { "/sessions/active-${it.toString().padStart(2, '0')}.jsonl" }.toSet()
         vm.retry()
-        compose.waitUntil(5_000) { vm.ui.value.items.none { it.session.path in removed } }
+        compose.waitUntil(5_000) { vm.items().none { it.session.path in removed } }
         compose.waitForIdle()
         selectScope("Active")
         compose.waitForIdle()
@@ -587,7 +605,7 @@ class HistoryScreenTest {
 
         removed = removedIndexes.map { "/sessions/active-${it.toString().padStart(2, '0')}.jsonl" }.toSet()
         vm.retry()
-        compose.waitUntil(5_000) { vm.ui.value.items.none { it.session.path in removed } }
+        compose.waitUntil(5_000) { vm.items().none { it.session.path in removed } }
         compose.waitForIdle()
         selectScope("Active")
         compose.waitForIdle()

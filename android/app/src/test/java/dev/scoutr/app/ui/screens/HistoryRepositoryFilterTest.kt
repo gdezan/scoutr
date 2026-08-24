@@ -76,6 +76,7 @@ class HistoryRepositoryFilterTest {
         updatedAt: Double,
         status: String? = null,
     ) = HistoryItem(
+        hostId = "host-a",
         session = dev.scoutr.app.data.catalogSessionFixture(
             key = dev.scoutr.app.data.SessionKey("pi", "/sessions/$id.jsonl"),
             cwd = cwd,
