@@ -18,7 +18,7 @@ export const filesRoutes: Route[] = [
 async function files(ctx: RouteContext): Promise<RouteResult> {
   const cwd = ctx.query.get("cwd");
   if (!cwd) return { status: 400, body: { ok: false, error: "missing cwd" } };
-  if (cwd.length > 4096 || /[\u0000-\u001f\u007f]/.test(cwd)) {
+  if (cwd.length > 4096 || /\p{Cc}/u.test(cwd)) {
     return { status: 400, body: { ok: false, error: "invalid cwd" } };
   }
   const cwds = activeAgentCwds(ctx.deps.feed.snapshot);

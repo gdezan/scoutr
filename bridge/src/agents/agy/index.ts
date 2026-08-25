@@ -159,14 +159,14 @@ export async function agyControl(herdr: HerdrPort, params: ControlParams): Promi
       return;
     }
     case "set_model": {
-      if (!text || text.length > 200 || /[\u0000-\u001f\u007f]/.test(text)) {
+      if (!text || text.length > 200 || /\p{Cc}/u.test(text)) {
         throw new Error("valid model is required");
       }
       await herdr.paneSendInput(paneId, `/model ${text}`, ["Enter"]);
       return;
     }
     case "set_thinking": {
-      if (!text || text.length > 200 || /[\u0000-\u001f\u007f]/.test(text)) {
+      if (!text || text.length > 200 || /\p{Cc}/u.test(text)) {
         throw new Error("valid effort level is required");
       }
       await herdr.paneSendInput(paneId, `/effort ${text}`, ["Enter"]);

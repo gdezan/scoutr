@@ -210,7 +210,7 @@ export const MAX_ANSWER_LENGTH = 4000;
 
 export function sanitizeAnswerText(text: string): string {
   const singleLine = text.replace(/[\r\n\u2028\u2029]+/g, " ");
-  const clean = singleLine.replace(/[\u0000-\u001f\u007f]/g, "").trim();
+  const clean = singleLine.replace(/\p{Cc}/gu, "").trim();
   return clean.length > MAX_ANSWER_LENGTH ? clean.slice(0, MAX_ANSWER_LENGTH) : clean;
 }
 

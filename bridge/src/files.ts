@@ -83,7 +83,7 @@ export async function listFiles(requested: string, includeHidden = false): Promi
  * whether a file exists. Paged reads keep each filesystem response bounded.
  */
 export function readWorkspaceFile(requested: string, cwds: string[], options?: FileReadOptions): FileRead {
-  if (!requested || requested.length > 4096 || /[\u0000-\u001f\u007f]/.test(requested)) {
+  if (!requested || requested.length > 4096 || /\p{Cc}/u.test(requested)) {
     throw new FileReadError("invalid file path", 400);
   }
   if (!isAbsolute(requested)) throw new FileReadError("file path must be absolute", 400);

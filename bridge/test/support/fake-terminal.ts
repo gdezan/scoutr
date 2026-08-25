@@ -90,7 +90,8 @@ export class FakeTerminalProcess implements TerminalProcess {
 
   /** Scripted events from tests. */
   emitBytes(bytes: Buffer, options: Partial<{ seq: number; full: boolean; width: number; height: number }> = {}): void {
-    for (const listener of [...this.listeners]) {
+    const snapshot = [...this.listeners];
+    for (const listener of snapshot) {
       listener({
         type: "bytes",
         bytes,
@@ -103,11 +104,13 @@ export class FakeTerminalProcess implements TerminalProcess {
   }
 
   emitClosed(code: TerminalClosedCode, reason?: string): void {
-    for (const listener of [...this.listeners]) listener({ type: "closed", code, reason });
+    const closedSnapshot = [...this.listeners];
+    for (const listener of closedSnapshot) listener({ type: "closed", code, reason });
   }
 
   emitError(message: string): void {
-    for (const listener of [...this.listeners]) listener({ type: "error", code: "invalid-record", message });
+    const errorSnapshot = [...this.listeners];
+    for (const listener of errorSnapshot) listener({ type: "error", code: "invalid-record", message });
   }
 }
 

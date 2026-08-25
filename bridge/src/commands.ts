@@ -5,7 +5,7 @@ const MAX_ASK_QUESTIONS = 8;
 import { answerAsk, dismissAsk, type AnswerDeps } from "./answers.js";
 import { CommandError } from "./errors.js";
 import { readSession } from "./routes/sessions.js";
-import { MAX_PROMPT_LENGTH, PROMPT_FORBIDDEN_CHAR } from "./sessions.js";
+import { MAX_PROMPT_LENGTH, promptHasForbiddenChar } from "./sessions.js";
 import type { SessionSnapshot } from "./herdr/types.js";
 import type { ServerDeps, JsonValue } from "./routes/types.js";
 
@@ -74,7 +74,7 @@ export async function steerSession(deps: ServerDeps, target: string, text: strin
   if (
     text.length === 0 ||
     text.length > MAX_PROMPT_LENGTH ||
-    PROMPT_FORBIDDEN_CHAR.test(text)
+    promptHasForbiddenChar(text)
   ) {
     throw new CommandError("steer text must be plain text without control characters");
   }
@@ -177,7 +177,7 @@ export function validateSlashCommand(text: string): string {
     throw new CommandError("slash command text must be 1 to 10000 characters");
   }
   const normalized = text.replace(/\r\n|\r|\n/g, " ");
-  if (!normalized.startsWith("/") || !/^\/[^\s\u0000-\u001f\u007f]+(?:[ \t][^\r\n\u0000-\u001f\u007f]*)?$/.test(normalized)) {
+  if (!normalized.startsWith("/") || !/^\/[^\s\p{Cc}]+(?:[ \t][^\r\n\p{Cc}]*)?$/u.test(normalized)) {
     throw new CommandError("invalid slash command text");
   }
   return normalized;

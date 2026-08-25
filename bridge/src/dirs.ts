@@ -1,7 +1,7 @@
 import { readdirSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { BridgeError } from "./errors.js";
-import { join, resolve, sep } from "node:path";
+import { resolve, sep } from "node:path";
 
 export interface DirListing {
   /** Absolute, resolved directory the listing is for. */

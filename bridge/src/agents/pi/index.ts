@@ -29,7 +29,7 @@ import { readCommandsCatalog } from "./commands.js";
 
 const MAX_MODEL_LENGTH = 200;
 const PI_SHIFT_TAB_SEQUENCE = "\u001b[Z";
-const CONTROL_CHAR = /[\u0000-\u001f\u007f]/;
+const CONTROL_CHAR = /\p{Cc}/u;
 
 /** pi's documented `--thinking` levels (README: Model Options). */
 export const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;

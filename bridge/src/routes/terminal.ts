@@ -8,21 +8,6 @@ export const terminalRoutes: Route[] = [
   { method: "POST", path: "/api/terminal/hierarchy", handle: terminalHierarchy },
 ];
 
-/**
- * Discriminated hierarchy commands (design contract, Slice 4). `operation`
- * selects the exact herdr call; `selectedPaneId` is the Android selection at
- * tap/confirmation time and only influences cwd fallback and post-mutation
- * selection — it never changes herdr desktop focus.
- */
-type TerminalHierarchyCommand =
-  | { operation: "create_tab"; workspaceId: string; selectedPaneId?: string }
-  | { operation: "create_workspace"; cwd: string; label?: string; selectedPaneId?: string }
-  | { operation: "rename_pane"; paneId: string; label: string; selectedPaneId?: string }
-  | { operation: "rename_tab"; tabId: string; label: string; selectedPaneId?: string }
-  | { operation: "rename_workspace"; workspaceId: string; label: string; selectedPaneId?: string }
-  | { operation: "close_pane"; paneId: string; selectedPaneId?: string }
-  | { operation: "close_tab"; tabId: string; selectedPaneId?: string; expectedPaneCount: number }
-  | { operation: "close_workspace"; workspaceId: string; selectedPaneId?: string; expectedPaneCount: number };
 type CloseTarget = { kind: "pane" | "tab" | "workspace"; targetId: string };
 const OPERATIONS = new Set<unknown>([
   "create_tab",

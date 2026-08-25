@@ -119,7 +119,7 @@ export async function resolveCatalogSessionKey(key: SessionKey): Promise<{ path:
 
 export async function renameStoredSession(path: string, name: string): Promise<void> {
   const cleanName = name.trim();
-  if (!cleanName || cleanName.length > MAX_SESSION_TITLE_LENGTH || /[\u0000-\u001f\u007f]/.test(cleanName)) {
+  if (!cleanName || cleanName.length > MAX_SESSION_TITLE_LENGTH || /\p{Cc}/u.test(cleanName)) {
     throw new SessionCatalogError(`name must be 1 to ${MAX_SESSION_TITLE_LENGTH} printable characters`);
   }
   const { path: target, backend } = await resolveCatalogSessionPath(path);
@@ -141,7 +141,7 @@ export async function listSessionCatalog(options: ListSessionCatalogOptions = {}
     throw new SessionCatalogError(`limit must be an integer from 1 to ${MAX_LIMIT}`);
   }
   const query = options.query?.trim() ?? "";
-  if (query.length > MAX_QUERY_LENGTH || /[\u0000-\u001f\u007f]/.test(query)) {
+  if (query.length > MAX_QUERY_LENGTH || /\p{Cc}/u.test(query)) {
     throw new SessionCatalogError("invalid query");
   }
 

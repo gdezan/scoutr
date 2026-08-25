@@ -214,7 +214,7 @@ export class TerminalSessionBroker {
     // Grace sessions hold a pane whose socket is gone: a new connection
     // claiming the pane (typically the same device reconnecting) replaces
     // it instead of tripping the ownership conflict.
-    for (const candidate of [...this.sessions.values()]) {
+    for (const candidate of this.sessions.values()) {
       if (candidate.identity === identity) continue;
       if (candidate.paneId !== hello.paneId || candidate.phase !== "grace") continue;
       candidate.endByBroker("replaced");
@@ -434,7 +434,8 @@ class TerminalSessionImpl implements Session {
       this.earlyEvents.push(event);
       return;
     }
-    for (const listener of [...this.listeners]) listener(event);
+    const snapshot = [...this.listeners];
+    for (const listener of snapshot) listener(event);
   }
 
   sendInput(bytes: Buffer): boolean {

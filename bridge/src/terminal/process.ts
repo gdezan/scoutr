@@ -264,7 +264,10 @@ function spawnArgs(mode: TerminalMode, options: TerminalOpenOptions): string[] {
  * session requirement. Output is reflowed by compactScrollback for the phone
  * grid before the broker emits it ahead of the replay frame.
  */
-const SGR_AT_END = /\x1b\[([0-9;]*)m$/;
+// ESC is built into the patterns at runtime: a literal control character in a
+// regex trips the no-control-regex lint, and \p{Cc} would widen the match past ESC.
+const ESC = "\x1b";
+const SGR_AT_END = new RegExp(`${ESC}\\[([0-9;]*)m$`);
 const RESET_PARAMS = /^(0|00|)$/;
 
 function trimRowTail(row: string): string {
@@ -284,7 +287,7 @@ function trimRowTail(row: string): string {
   // (its visible content ends styled, e.g. `\x1b[31mtext` or `\x1b[1mbold`),
   // restore default so the removed padding's styling cannot leak into the
   // next row. The LAST SGR in the row (wherever it sits) is the end state.
-  const anySgr = /\x1b\[([0-9;]*)m/g;
+  const anySgr = new RegExp(`${ESC}\\[([0-9;]*)m`, "g");
   let match: RegExpExecArray | null = null;
   let lastParams: string | null = null;
   while ((match = anySgr.exec(out)) !== null) lastParams = match[1] ?? null;
@@ -584,12 +587,14 @@ class HerdrTerminalProcess implements TerminalProcess {
 
   private emit(record: TerminalRecord): void {
     const consumedByHandshake = this.onceListeners.size > 0;
-    for (const l of [...this.onceListeners]) {
+    const once = [...this.onceListeners];
+    for (const l of once) {
       this.onceListeners.delete(l);
       l(record);
     }
     if (this.listeners.size > 0) {
-      for (const l of [...this.listeners]) l(record);
+      const snapshot = [...this.listeners];
+      for (const l of snapshot) l(record);
       return;
     }
     // The handshake frame is retained on replayFrame and must not be

@@ -1,4 +1,4 @@
-import { basename, isAbsolute, relative, resolve } from "node:path";
+import { basename, resolve } from "node:path";
 import { canonicalPath } from "../dirs.js";
 import {
   entryText,

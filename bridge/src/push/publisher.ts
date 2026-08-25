@@ -64,12 +64,14 @@ export class FcmPublisher {
 
   /** Panes gone from the snapshot resolve, then are forgotten. */
   prune(paneIds: ReadonlySet<string>): void {
-    for (const paneId of [...this.blockedPanes]) {
+    const blocked = [...this.blockedPanes];
+    for (const paneId of blocked) {
       if (paneIds.has(paneId)) continue;
       this.blockedPanes.delete(paneId);
       void this.ping("resolve", paneId);
     }
-    for (const paneId of [...this.donePanes]) {
+    const done = [...this.donePanes];
+    for (const paneId of done) {
       if (paneIds.has(paneId)) continue;
       this.donePanes.delete(paneId);
     }

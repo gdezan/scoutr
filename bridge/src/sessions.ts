@@ -2,7 +2,6 @@ import type { HerdrPort } from "./herdr/port.js";
 import type { PaneInfo, SessionSnapshot } from "./herdr/types.js";
 import { BridgeError } from "./errors.js";
 import { canonicalPath, resolveAllowedDir } from "./dirs.js";
-import type { Transcript } from "./transcript.js";
 import { resolveCatalogSessionPath } from "./session-catalog.js";
 import { backendFor, resolveBackendForPane } from "./agents/registry.js";
 import type { AgentBackend, ControlAction, ControlParams } from "./agents/types.js";
@@ -52,8 +51,11 @@ export class SessionsError extends BridgeError {
 const MAX_MODEL_LENGTH = 200;
 const MAX_NAME_LENGTH = 100;
 export const MAX_PROMPT_LENGTH = 100_000;
-const CONTROL_CHAR = /[\u0000-\u001f\u007f]/;
-export const PROMPT_FORBIDDEN_CHAR = /[\u0000\u007f]/;
+const CONTROL_CHAR = /\p{Cc}/u;
+/** A prompt may carry newlines; NUL truncates argv and DEL garbles PTY input. */
+export function promptHasForbiddenChar(text: string): boolean {
+  return text.includes("\u0000") || text.includes("\u007f");
+}
 const AGENT_START_TIMEOUT_MS = 8_000;
 const AGENT_POLL_MS = 100;
 
@@ -97,7 +99,7 @@ export function validateCreateSessionParams(params: CreateSessionParams): void {
     if (params.initialPrompt.length > MAX_PROMPT_LENGTH) {
       throw new SessionsError(`initialPrompt is too long (max ${MAX_PROMPT_LENGTH} characters)`);
     }
-    if (PROMPT_FORBIDDEN_CHAR.test(params.initialPrompt)) throw new SessionsError("initialPrompt must not contain NUL or DEL");
+    if (promptHasForbiddenChar(params.initialPrompt)) throw new SessionsError("initialPrompt must not contain NUL or DEL");
   }
 }
 

@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { createServer, type Server, type ServerResponse } from "node:http";
+import { createServer, type ServerResponse } from "node:http";
 import type { Duplex } from "node:stream";
 import { WebSocketServer, WebSocket } from "ws";
 import type { FeedMessage } from "./herdr/feed.js";
@@ -83,7 +83,7 @@ function sendFile(response: ServerResponse, file: RouteFile): Promise<void> {
 }
 
 export function createScoutrServer(deps: ServerDeps, options: CreateServerOptions = {}): ScoutrServer {
-  const { herdr, feed, usage, config, publisher } = deps;
+  const { feed, config, publisher } = deps;
   const metrics = deps.metrics ?? new BridgeMetrics();
   const token = config.token;
   const listen = options.listen ?? true;

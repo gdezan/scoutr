@@ -1,5 +1,4 @@
 import { canonicalPath } from "../dirs.js";
-import type { SessionSnapshot } from "../herdr/types.js";
 import { backendFor } from "../agents/registry.js";
 import type { Route, RouteContext, RouteResult } from "./types.js";
 
@@ -7,7 +6,7 @@ export const commandsRoutes: Route[] = [{ method: "GET", path: "/api/commands", 
 
 async function commands(ctx: RouteContext): Promise<RouteResult> {
   const cwd = ctx.query.get("cwd") ?? undefined;
-  if (cwd && (cwd.length > 4096 || /[\u0000-\u001f\u007f]/.test(cwd))) {
+  if (cwd && (cwd.length > 4096 || /\p{Cc}/u.test(cwd))) {
     return { status: 400, body: { ok: false, error: "invalid cwd" } };
   }
   if (cwd) {

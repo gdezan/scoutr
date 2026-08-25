@@ -38,12 +38,6 @@ type MutableRouteMetrics = {
   statuses: Map<number, number>;
 };
 
-type MutableSocketMetrics = {
-  opened: number;
-  closed: number;
-  active: number;
-};
-
 /**
  * Process-local metrics for repeatable performance experiments.
  *

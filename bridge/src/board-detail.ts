@@ -1,4 +1,3 @@
-import { basename } from "node:path";
 import { inspectSessionFile, entryText, type Transcript } from "./transcript.js";
 import { TranscriptStateCache } from "./transcript-state-cache.js";
 import { backendForSessionPath } from "./agents/registry.js";

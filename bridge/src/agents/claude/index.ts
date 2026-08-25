@@ -347,7 +347,7 @@ export async function claudeControl(herdr: HerdrPort, params: ControlParams): Pr
     case "set_model": {
       // Same control-character guard as the pi adapter: the text goes into a
       // PTY, so anything that could alter submission is rejected outright.
-      if (!text || text.length > 200 || /[\u0000-\u001f\u007f]/.test(text)) {
+      if (!text || text.length > 200 || /\p{Cc}/u.test(text)) {
         throw new Error("valid model is required");
       }
       // The app addresses a model by its picker key (`anthropic/claude-opus-5`);

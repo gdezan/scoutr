@@ -1,4 +1,3 @@
-import type { SessionSnapshot } from "../herdr/types.js";
 import { SCOUTR_API_FEATURES, SCOUTR_API_PROTOCOL } from "../api-protocol.js";
 import type { Route, RouteContext, RouteResult } from "./types.js";
 
