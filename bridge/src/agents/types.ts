@@ -1,5 +1,6 @@
 import type { HerdrPort } from "../herdr/port.js";
 import type { AgentSessionInfo } from "../herdr/types.js";
+import type { AgentTask } from "../agent-tasks.js";
 import type { QuestionEntry } from "../questions.js";
 import type { Transcript, TranscriptReadOpts } from "../transcript.js";
 
@@ -108,6 +109,11 @@ export interface AgentBackend {
   /** Read only model/thinking metadata, exactly once or from an append byte range. */
   readTranscriptState(path: string, fromByte?: number): Promise<Transcript>;
   renameStoredSession?(path: string, title: string): Promise<void>;
+
+  /** Current implementation tasks reconstructed from a parsed full transcript. */
+  extractTasks(transcript: Transcript): AgentTask[];
+  /** Current implementation tasks read independently of Chat's bounded initial page. */
+  readTasks(path: string): Promise<AgentTask[]>;
 
   extractQuestions(transcript: Transcript): QuestionEntry[];
   /**

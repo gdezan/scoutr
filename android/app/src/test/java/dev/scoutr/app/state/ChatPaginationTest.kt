@@ -1,5 +1,6 @@
 package dev.scoutr.app.state
 
+import dev.scoutr.app.data.AgentTask
 import dev.scoutr.app.data.AgentsResponse
 import dev.scoutr.app.data.ContentBlock
 import dev.scoutr.app.data.QuestionEntry
@@ -70,6 +71,8 @@ class ChatPaginationTest {
         since: String? = null,
         beforeCursor: String? = null,
         hasMoreBefore: Boolean = false,
+        lastEntryId: String? = entries.lastOrNull()?.entryId,
+        tasks: List<AgentTask> = emptyList(),
         questions: List<QuestionEntry> = emptyList(),
     ) = SessionReadResponse(
         ok = true,
@@ -77,7 +80,9 @@ class ChatPaginationTest {
         path = "/repo/sessions/s.jsonl",
         since = since,
         entries = entries,
+        tasks = tasks,
         questions = questions,
+        lastEntryId = lastEntryId,
         beforeCursor = beforeCursor,
         hasMoreBefore = hasMoreBefore,
     )
@@ -201,6 +206,57 @@ class ChatPaginationTest {
         assertEquals(listOf("e1", "e2", "e3", "e4"), vm.ui.value.entries.map { it.entryId })
         assertFalse(vm.ui.value.hasOlderEntries)
         assertFalse(vm.ui.value.loadingOlderEntries)
+    }
+
+    @Test
+    fun staleLoadOlderDoesNotReplaceCurrentTasks() {
+        val current = AgentTask(id = "current", subject = "Current", status = "in_progress")
+        fake.sessionResult = Result.success(
+            page(
+                entries = listOf(entry("e3"), entry("e4")),
+                beforeCursor = "e3",
+                hasMoreBefore = true,
+                tasks = listOf(current),
+            ),
+        )
+        val vm = newViewModel()
+        vm.startPolling()
+        vm.awaitRefreshSettled()
+
+        fake.sessionResult = Result.success(
+            page(entries = listOf(entry("e1"), entry("e2")), lastEntryId = "e3", tasks = emptyList()),
+        )
+        vm.loadOlderEntries()
+        pumpUntil("older page merged") { vm.ui.value.entries.size == 4 }
+        vm.stopPolling()
+
+        assertEquals(listOf(current), vm.ui.value.tasks)
+    }
+
+    @Test
+    fun loadOlderAppliesNewerTaskSnapshot() {
+        val old = AgentTask(id = "old", subject = "Old", status = "in_progress")
+        val latest = AgentTask(id = "latest", subject = "Latest", status = "completed")
+        fake.sessionResult = Result.success(
+            page(
+                entries = listOf(entry("e3"), entry("e4")),
+                beforeCursor = "e3",
+                hasMoreBefore = true,
+                tasks = listOf(old),
+            ),
+        )
+        val vm = newViewModel()
+        vm.startPolling()
+        vm.awaitRefreshSettled()
+
+        fake.sessionResult = Result.success(
+            page(entries = listOf(entry("e1"), entry("e2")), lastEntryId = "e5", tasks = listOf(latest)),
+        )
+        vm.loadOlderEntries()
+        pumpUntil("newer task snapshot applied") { vm.ui.value.tasks == listOf(latest) }
+        vm.stopPolling()
+
+        assertEquals(listOf(latest), vm.ui.value.tasks)
     }
 
     @Test

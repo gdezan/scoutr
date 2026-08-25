@@ -107,6 +107,10 @@ export interface Transcript {
   modelObservationSeen?: boolean;
   /** Internal parser signal used to merge incremental metadata scans. */
   thinkingLevelObservationSeen?: boolean;
+  /** Internal branch ancestry, including non-display records such as compactions. */
+  parentById?: ReadonlyMap<string, string | null>;
+  /** Internal active branch leaf, which may be a non-display record. */
+  branchLeafId?: string | null;
   /** Last entry id — usable as an incremental cursor. Set in every read mode. */
   lastEntryId: string | null;
   /** User-assigned name, from the newest session_info record; null if unnamed. */

@@ -8,6 +8,7 @@ import {
   type Transcript,
   type TranscriptEntry,
 } from "../transcript.js";
+import type { AgentTask } from "../agent-tasks.js";
 import { SessionDerivedStateCache, type SessionDerivedState } from "../session-derived-state.js";
 import type { QuestionEntry } from "../questions.js";
 import { backendForSessionPath } from "../agents/registry.js";
@@ -28,7 +29,9 @@ interface SessionReadResult {
   exists: boolean;
   since: string | null;
   entries: TranscriptEntry[];
-  /** Structured question cards, derived from the same entries. */
+  /** Current implementation tasks confirmed by this session. */
+  tasks: AgentTask[];
+  /** Structured question cards confirmed by this session. */
   questions: QuestionEntry[];
   model: string | null;
   thinkingLevel: string | null;
@@ -231,6 +234,7 @@ export async function readSession(
       exists: false,
       since,
       entries: [],
+      tasks: [],
       questions: [],
       model: null,
       thinkingLevel: null,
@@ -282,6 +286,7 @@ export async function readSession(
     exists: true,
     since: cursor,
     entries,
+    tasks: backend.extractTasks(session),
     questions: backend.extractQuestions(session),
     model: session.model,
     thinkingLevel: session.thinkingLevel,
@@ -332,6 +337,7 @@ async function readBoundedInitialPage(
     exists: true,
     since: null,
     entries,
+    tasks: derived.tasks,
     questions: derived.questions,
     // The tail window can open after the model_change still in force, so the
     // exact scan wins whenever it observed one.

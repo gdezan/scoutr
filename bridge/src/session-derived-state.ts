@@ -1,5 +1,6 @@
 import { inspectSessionFile } from "./transcript.js";
 import { TranscriptStateCache } from "./transcript-state-cache.js";
+import type { AgentTask } from "./agent-tasks.js";
 import type { AgentBackend } from "./agents/types.js";
 import type { QuestionEntry } from "./questions.js";
 
@@ -23,6 +24,8 @@ export interface SessionDerivedState {
   /** False leaves whatever the display read itself observed in force. */
   modelObservationSeen: boolean;
   thinkingLevelObservationSeen: boolean;
+  /** Current implementation tasks confirmed by this session's transcript. */
+  tasks: AgentTask[];
   /** Every question card of the session, answered and open. */
   questions: QuestionEntry[];
 }
@@ -64,6 +67,7 @@ export class SessionDerivedStateCache {
     // page that unlocks a composer the agent is still blocking on, so the
     // read failure surfaces as the session read's failure instead.
     const questions = await backend.readQuestions(path);
+    const tasks = await backend.readTasks(path);
     // Model and thinking level are: a null field is honest, a stale one is not.
     const exact = await this.stateCache.read(path, backend, info).catch(() => null);
     const state: SessionDerivedState = {
@@ -71,6 +75,7 @@ export class SessionDerivedStateCache {
       thinkingLevel: exact?.thinkingLevel ?? null,
       modelObservationSeen: exact?.modelObservationSeen === true,
       thinkingLevelObservationSeen: exact?.thinkingLevelObservationSeen === true,
+      tasks,
       questions,
     };
     const after = await inspectSessionFile(path);

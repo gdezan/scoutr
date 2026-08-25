@@ -213,6 +213,8 @@ export const agyBackend: AgentBackend = {
   resolveSessionPath: agyResolveSessionPath,
   readTranscript: agyReadTranscript,
   readTranscriptState: agyReadTranscriptState,
+  extractTasks: () => [],
+  readTasks: async () => [],
   extractQuestions: (transcript) => extractAgyQuestions(transcript.entries),
   readQuestions: agyReadQuestions,
   answerAsk: agyAnswerAsk,

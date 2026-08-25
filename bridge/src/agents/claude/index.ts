@@ -30,6 +30,7 @@ import {
 } from "./pending-asks.js";
 import { extractAskPreamble } from "./ask-preamble.js";
 import { claudeAskPlan } from "./questionnaire.js";
+import { extractClaudeAgentTasks } from "./tasks.js";
 
 /** Claude config dir honors CLAUDECONFIGDIR (default ~/.claude), like the herdr hook. */
 export function claudeConfigDir(): string {
@@ -144,6 +145,10 @@ export async function claudeReadTranscriptState(path: string, fromByte?: number)
   if (tail.modelObservationSeen) return tail;
   const opts: TranscriptReadOpts = { metadataOnly: true, exactMetadata: true };
   return parseClaudeTranscript(await readTranscriptText(path, opts), opts);
+}
+
+export async function claudeReadTasks(path: string) {
+  return extractClaudeAgentTasks(await claudeReadTranscript(path));
 }
 
 export function claudeExtractQuestions(transcript: Transcript): QuestionEntry[] {
@@ -392,6 +397,8 @@ export const claudeBackend: AgentBackend = {
   resolveSessionPath: claudeResolveSessionPath,
   readTranscript: claudeReadTranscript,
   readTranscriptState: claudeReadTranscriptState,
+  extractTasks: extractClaudeAgentTasks,
+  readTasks: claudeReadTasks,
   extractQuestions: claudeExtractQuestions,
   readQuestions: claudeReadQuestions,
   questionStateStamp: claudeQuestionStateStamp,

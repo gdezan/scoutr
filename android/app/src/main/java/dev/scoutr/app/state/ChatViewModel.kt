@@ -3,6 +3,7 @@ package dev.scoutr.app.state
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import dev.scoutr.app.data.AgentTask
 import dev.scoutr.app.data.HostProfileKey
 import dev.scoutr.app.data.SessionAction
 import dev.scoutr.app.data.SessionKey
@@ -330,6 +331,8 @@ private fun keepPendingMessage(
 data class ChatUiState(
     val entries: List<SessionEntry> = emptyList(),
     val pendingMessages: List<PendingUserMessage> = emptyList(),
+    /** Current read-only implementation tasks; deleted tasks are hidden by the UI. */
+    val tasks: List<AgentTask> = emptyList(),
     /** Structured ask_user_question cards derived from session events. */
     val questions: List<QuestionEntry> = emptyList(),
     /** Half-filled ask rounds, keyed by tool call id. Nothing here has been sent. */
@@ -624,13 +627,18 @@ class ChatViewModel(
                     before = cursor,
                     limit = INITIAL_SESSION_PAGE_LIMIT,
                 )
-                _ui.update {
-                    it.copy(
-                        entries = prependSessionEntries(it.entries, response.entries),
+                _ui.update { current ->
+                    val responseHasCurrentTaskSnapshot = response.lastEntryId?.let { responseLeaf ->
+                        current.entries.lastOrNull()?.entryId == responseLeaf ||
+                            current.entries.none { entry -> entry.entryId == responseLeaf }
+                    } == true
+                    current.copy(
+                        entries = prependSessionEntries(current.entries, response.entries),
+                        tasks = if (responseHasCurrentTaskSnapshot) response.tasks else current.tasks,
                         beforeCursor = response.beforeCursor,
                         hasOlderEntries = response.hasMoreBefore,
                         loadingOlderEntries = false,
-                        questions = mergeQuestions(it.questions, response.questions),
+                        questions = mergeQuestions(current.questions, response.questions),
                     )
                 }
             } catch (c: CancellationException) {
@@ -893,6 +901,7 @@ class ChatViewModel(
                 val incremental = response.since != null
                 it.copy(
                     entries = mergeSessionEntries(it.entries, response.entries, incremental = incremental),
+                    tasks = response.tasks,
                     questions = questions,
                     askDrafts = drafts,
                     dismissedCallIds = pruneDismissedAsks(it.dismissedCallIds, questions),

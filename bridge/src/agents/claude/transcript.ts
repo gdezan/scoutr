@@ -10,6 +10,7 @@ import {
   type TranscriptReadOpts,
 } from "../../transcript.js";
 import { peelClaudeCommandInvocation, skillInvocationPreview } from "../../skill-invocation.js";
+import { claudeTaskResultSchema } from "./tasks.js";
 
 /**
  * The Claude Code JSONL parser (~/.claude/projects/<encoded-cwd>/<session-uuid>.jsonl).
@@ -76,12 +77,14 @@ const claudeRecord = v.looseObject({
 type DecodedClaudeRecord = v.InferOutput<typeof claudeRecord>;
 
 export function parseClaudeTranscript(text: string, opts: TranscriptReadOpts = {}): Transcript {
+  const parentById = new Map<string, string | null>();
   const transcript: Transcript = {
     version: 3,
     id: "",
     cwd: "",
     timestamp: "",
     entries: [],
+    parentById,
     model: null,
     thinkingLevel: null,
     lastEntryId: null,
@@ -102,6 +105,10 @@ export function parseClaudeTranscript(text: string, opts: TranscriptReadOpts = {
     const parsed = v.safeParse(claudeRecord, raw);
     if (!parsed.success) continue;
     const rec: DecodedClaudeRecord = parsed.output;
+    if (rec.uuid) {
+      parentById.set(rec.uuid, rec.parentUuid ?? null);
+      transcript.branchLeafId = rec.uuid;
+    }
 
     const type = rec.type ?? "";
     const timestamp = rec.timestamp ?? "";
@@ -183,6 +190,13 @@ function parseUserRecord(rec: DecodedClaudeRecord): TranscriptEntry | null {
   const result = resultParsed.output;
 
   const answersParsed = v.safeParse(claudeAnswersSchema, rec.toolUseResult);
+  const questionDetails = claudeQuestionAnswers(answersParsed.success ? answersParsed.output : undefined);
+  const taskParsed = v.safeParse(claudeTaskResultSchema, rec.toolUseResult);
+  const taskDetails = taskParsed.success && (
+    taskParsed.output.task ||
+    taskParsed.output.taskId !== undefined ||
+    taskParsed.output.success !== undefined
+  ) ? taskParsed.output : undefined;
   const entry: TranscriptEntry = {
     entryId,
     parentId,
@@ -191,10 +205,9 @@ function parseUserRecord(rec: DecodedClaudeRecord): TranscriptEntry | null {
     content: [],
     toolCallId: result.tool_use_id,
     isError: result.is_error ?? false,
-    // Only the AskUserQuestion answers are kept as structured details;
-    // the rest of `toolUseResult` (file contents, command output) would
-    // ride along on every transcript poll for no reader.
-    details: claudeQuestionAnswers(answersParsed.success ? answersParsed.output : undefined) ?? undefined,
+    // Keep only small, reader-owned result slices; arbitrary tool results can
+    // contain whole files or command output and must not ride on every poll.
+    details: questionDetails ?? taskDetails,
   };
   const textRaw = v.safeParse(toolResultContentSchema, result.content);
   const text = textRaw.success ? toolResultText(textRaw.output) : "";

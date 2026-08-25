@@ -201,6 +201,18 @@ data class SessionDescriptor(
     val blocked: Boolean get() = status == "blocked"
 }
 
+/** Read-only implementation task reconstructed from the agent transcript. */
+@Serializable
+data class AgentTask(
+    val id: String,
+    val subject: String,
+    val description: String? = null,
+    val activeForm: String? = null,
+    val status: String = "pending",
+    val blockedBy: List<String> = emptyList(),
+    val owner: String? = null,
+)
+
 @Serializable
 data class SessionReadResponse(
     val ok: Boolean = true,
@@ -212,6 +224,7 @@ data class SessionReadResponse(
     val model: String? = null,
     val thinkingLevel: String? = null,
     val entries: List<SessionEntry> = emptyList(),
+    val tasks: List<AgentTask> = emptyList(),
     val questions: List<QuestionEntry> = emptyList(),
     val preview: String? = null,
     val lastEntryId: String? = null,

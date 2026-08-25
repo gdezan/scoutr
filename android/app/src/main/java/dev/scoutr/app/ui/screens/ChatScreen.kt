@@ -44,6 +44,7 @@ import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.Checklist
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.MoreVert
@@ -71,6 +72,8 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.material3.Text
@@ -135,6 +138,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import dev.scoutr.app.data.AgentTask
 import dev.scoutr.app.data.AppearancePreferencesStore
 import dev.scoutr.app.data.SessionAction
 import dev.scoutr.app.data.toSessionActions
@@ -228,6 +232,11 @@ fun ChatScreen(
     var renameOpen by remember { mutableStateOf(false) }
     var closeOpen by rememberSaveable { mutableStateOf(false) }
     var configurationOpen by rememberSaveable { mutableStateOf(false) }
+    var taskSheetOpen by rememberSaveable { mutableStateOf(false) }
+    val hasVisibleTasks = visibleAgentTasks(ui.tasks).isNotEmpty()
+    LaunchedEffect(hasVisibleTasks) {
+        if (!hasVisibleTasks) taskSheetOpen = false
+    }
 
     Column(modifier.fillMaxSize()) {
         ChatHeader(
@@ -239,6 +248,8 @@ fun ChatScreen(
             capabilities = ui.capabilities,
             agentKind = ui.agentKind,
             status = if (viewModel.waitingForAnswer) "needs you" else ui.agentStatus,
+            tasks = ui.tasks,
+            onOpenTasks = { taskSheetOpen = true },
             showThinking = showThinking,
             expandTools = expandTools,
             onToggleThinking = { showThinking = !showThinking },
@@ -487,6 +498,10 @@ fun ChatScreen(
         )
     }
 
+    if (taskSheetOpen) {
+        AgentTasksSheet(tasks = ui.tasks, onDismiss = { taskSheetOpen = false })
+    }
+
     if (configurationOpen) {
         ConversationConfigSheet(
             ui = ui,
@@ -527,6 +542,8 @@ private fun ChatHeader(
     capabilities: List<String>?,
     agentKind: String?,
     status: String,
+    tasks: List<AgentTask>,
+    onOpenTasks: () -> Unit,
     showThinking: Boolean,
     expandTools: Boolean,
     onToggleThinking: () -> Unit,
@@ -578,6 +595,32 @@ private fun ChatHeader(
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.testTag("chat_header_meta"),
                 )
+            }
+            val visibleTasks = visibleAgentTasks(tasks)
+            if (visibleTasks.isNotEmpty()) {
+                val completed = visibleTasks.count { it.status == "completed" }
+                Surface(
+                    shape = RoundedCornerShape(4.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainer,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(4.dp))
+                        .clickable(onClick = onOpenTasks)
+                        .testTag("chat_tasks"),
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        Icon(
+                            Icons.Default.Checklist,
+                            contentDescription = "Tasks",
+                            modifier = Modifier.size(16.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Text("$completed/${visibleTasks.size}", style = ScoutrType.monoFact)
+                    }
+                }
             }
             var menuOpen by remember { mutableStateOf(false) }
             Box {
@@ -723,6 +766,133 @@ private fun ChatHeader(
     }
 }
 
+internal fun visibleAgentTasks(tasks: List<AgentTask>): List<AgentTask> =
+    tasks.filter { it.status != "deleted" }
+
+internal fun isAgentTaskBlocked(task: AgentTask, tasksById: Map<String, AgentTask>): Boolean =
+    task.blockedBy.any { dependencyId -> tasksById[dependencyId]?.status != "completed" }
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun AgentTasksSheet(tasks: List<AgentTask>, onDismiss: () -> Unit) {
+    val visible = visibleAgentTasks(tasks)
+    val byId = visible.associateBy { it.id }
+    val inProgress = visible.filter { it.status == "in_progress" }
+    val pending = visible.filter { it.status == "pending" }
+    val completed = visible.filter { it.status == "completed" }
+    var completedExpanded by rememberSaveable { mutableStateOf(false) }
+
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(max = 640.dp)
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            Text("Tasks", style = MaterialTheme.typography.titleLarge)
+            AgentTaskSection("IN PROGRESS", inProgress, byId)
+            AgentTaskSection("PENDING", pending, byId)
+            if (completed.isNotEmpty()) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(4.dp))
+                            .clickable { completedExpanded = !completedExpanded }
+                            .padding(vertical = 6.dp)
+                            .testTag("completed_tasks_toggle"),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(
+                            if (completedExpanded) Icons.Default.KeyboardArrowDown else Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                            contentDescription = if (completedExpanded) "Collapse completed tasks" else "Expand completed tasks",
+                            modifier = Modifier.size(18.dp),
+                        )
+                        Text("COMPLETED", style = ScoutrType.monoSection, modifier = Modifier.weight(1f))
+                        Text(completed.size.toString(), style = ScoutrType.monoFact)
+                    }
+                    if (completedExpanded) {
+                        completed.forEach { task -> AgentTaskRow(task, blocked = false) }
+                    }
+                }
+            }
+            Spacer(Modifier.height(16.dp))
+        }
+    }
+}
+
+@Composable
+private fun AgentTaskSection(
+    label: String,
+    tasks: List<AgentTask>,
+    tasksById: Map<String, AgentTask>,
+) {
+    if (tasks.isEmpty()) return
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(label, style = ScoutrType.monoSection, modifier = Modifier.weight(1f))
+            Text(tasks.size.toString(), style = ScoutrType.monoFact)
+        }
+        tasks.forEach { task ->
+            val blocked = isAgentTaskBlocked(task, tasksById)
+            AgentTaskRow(task, blocked)
+        }
+    }
+}
+
+@Composable
+private fun AgentTaskRow(task: AgentTask, blocked: Boolean) {
+    Surface(
+        shape = RoundedCornerShape(6.dp),
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        modifier = Modifier.fillMaxWidth().testTag("task_row"),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.Top,
+        ) {
+            Box(
+                Modifier
+                    .padding(top = 5.dp)
+                    .size(8.dp)
+                    .background(
+                        if (task.status == "completed") MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                        CircleShape,
+                    ),
+            )
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text(
+                    task.subject,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = if (task.status == "completed") {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    } else {
+                        MaterialTheme.colorScheme.onSurface
+                    },
+                )
+                task.description?.takeIf { it.isNotBlank() }?.let { description ->
+                    Text(
+                        description,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            if (blocked) {
+                Text(
+                    "BLOCKED",
+                    style = ScoutrType.monoSection,
+                    color = MaterialTheme.colorScheme.tertiary,
+                    modifier = Modifier.testTag("task_blocked"),
+                )
+            }
+        }
+    }
+}
 /** Quiet/Warning/Critical → the DESIGN.md status color for each tone. */
 @Composable
 private fun ContextTone.color(): Color = when (this) {

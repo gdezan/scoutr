@@ -119,15 +119,21 @@ const piRecord = v.variant("type", [
   piMessageRecord,
 ]);
 
+const piParentRecord = v.looseObject({
+  id: v.string(),
+  parentId: v.nullable(v.string()),
+});
 type PiRecord = v.InferOutput<typeof piRecord>;
 
 export function parsePiTranscript(text: string, opts: TranscriptReadOpts = {}): Transcript {
+  const parentById = new Map<string, string | null>();
   const transcript: Transcript = {
     version: 3,
     id: "",
     cwd: "",
     timestamp: "",
     entries: [],
+    parentById,
     model: null,
     thinkingLevel: null,
     lastEntryId: null,
@@ -144,6 +150,11 @@ export function parsePiTranscript(text: string, opts: TranscriptReadOpts = {}): 
       raw = JSON.parse(line);
     } catch {
       continue; // tolerate stray lines in a live-growing file
+    }
+    const parent = v.safeParse(piParentRecord, raw);
+    if (parent.success) {
+      parentById.set(parent.output.id, parent.output.parentId);
+      transcript.branchLeafId = parent.output.id;
     }
     const parsed = v.safeParse(piRecord, raw);
     if (!parsed.success) continue; // custom or malformed records are not transcript entries

@@ -23,6 +23,7 @@ import type {
   ModelsCatalog,
 } from "../types.js";
 import { piAskPlan } from "./questionnaire.js";
+import { extractPiAgentTasks, readPiAgentTasks } from "./tasks.js";
 import { parsePiTranscript, writePiSessionTitle } from "./transcript.js";
 import { readModelsCatalog } from "./models.js";
 import { readCommandsCatalog } from "./commands.js";
@@ -274,6 +275,8 @@ export const piBackend: AgentBackend = {
   readTranscript: piReadTranscript,
   readTranscriptState: piReadTranscriptState,
   renameStoredSession: piRenameStoredSession,
+  extractTasks: extractPiAgentTasks,
+  readTasks: readPiAgentTasks,
   extractQuestions: piExtractQuestions,
   readQuestions: piReadQuestions,
   answerAsk: piAnswerAsk,
