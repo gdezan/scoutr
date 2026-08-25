@@ -171,6 +171,12 @@ class AppContainer(application: Application) {
             applicationScope,
         )
         hostLifecycle.attachPushRegistrations(pushRegistrations)
+        // A fresh process has no live connection slots, so every host starts
+        // inactive. Restore them: a background FCM wake-up (dead or killed
+        // process — exactly when pushes matter) must be able to resolve a
+        // target and fetch before any foreground reconcile runs. Retirement
+        // is also in-memory, so a restart legitimately resets to clean slate.
+        hostRegistry.snapshot().profiles.forEach(hostLifecycle::activate)
     }
 
 

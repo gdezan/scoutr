@@ -66,6 +66,7 @@ export interface HerdrFeed {
   readonly snapshot: SessionSnapshot | null;
   onMessage(handler: (message: FeedMessage) => void): () => void;
   removeMessage(handler: (message: FeedMessage) => void): void;
+  refreshSnapshot(resync: boolean): Promise<void>;
   start(): Promise<void>;
   stop(): Promise<void>;
 }
@@ -79,7 +80,7 @@ export class HerdrEventFeed implements HerdrFeed {
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
   private rebuildTimer: ReturnType<typeof setTimeout> | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-  private refreshSeq = 0;
+  private refreshChain: Promise<void> = Promise.resolve();
   private lastSnapshot: SessionSnapshot | null = null;
   private readonly handlers = new Set<(message: FeedMessage) => void>();
 
@@ -133,13 +134,23 @@ export class HerdrEventFeed implements HerdrFeed {
     this.handle = null;
   }
 
-  private async refreshSnapshot(resync: boolean): Promise<void> {
-    // Generation guard: periodic and rebuild-triggered refreshes can
-    // overlap; an older request finishing last must not overwrite a newer
-    // snapshot (or re-emit it as fresh).
-    const seq = ++this.refreshSeq;
+  /**
+   * Pull a fresh snapshot; serialized so callers never resolve against a
+   * stale cache. Public because close handling must prune against the
+   * post-close world, not the cached pre-close snapshot.
+   */
+  async refreshSnapshot(resync: boolean): Promise<void> {
+    // Chained behind any in-flight refresh: if a caller awaits its own
+    // refresh while another one started earlier, it must observe at least
+    // that earlier result — otherwise close-time pruning could read a
+    // pre-close snapshot even though a refresh completed.
+    const run = this.refreshChain.catch(() => {}).then(() => this.doRefresh(resync));
+    this.refreshChain = run;
+    return run;
+  }
+
+  private async doRefresh(resync: boolean): Promise<void> {
     const snapshot = await this.client.snapshot();
-    if (seq !== this.refreshSeq) return;
     this.lastSnapshot = snapshot;
     this.emitAll({ type: "snapshot", snapshot, resync });
   }

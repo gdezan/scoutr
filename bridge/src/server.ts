@@ -121,10 +121,17 @@ export function createScoutrServer(deps: ServerDeps, options: CreateServerOption
     } else if (CLOSE_KINDS.has(message.kind)) {
       // A closed pane leaves a stale "closed" status entry behind; prune all
       // entries whose pane is no longer in the live snapshot.
-      const livePanes = new Set((feed.snapshot?.panes ?? []).map((pane) => pane.pane_id));
-      tracker.prune(livePanes);
-      boardDetail.prune(snapshotPaths(feed.snapshot));
-      publisher?.prune(livePanes);
+      const pruneFromSnapshot = () => {
+        const livePanes = new Set((feed.snapshot?.panes ?? []).map((pane) => pane.pane_id));
+        tracker.prune(livePanes);
+        boardDetail.prune(snapshotPaths(feed.snapshot));
+        void publisher?.prune(livePanes);
+      };
+      pruneFromSnapshot();
+      // The cached snapshot still contains the pane until the feed's rebuild
+      // lands, so the pass above can be a no-op; re-prune once it catches up
+      // or notifications would outlive their pane.
+      void feed.refreshSnapshot(true).then(pruneFromSnapshot).catch(() => {});
     }
   });
 

@@ -12,7 +12,7 @@
 
 import { readFile } from "node:fs/promises";
 
-export type PingKind = "blocked" | "resolve" | "done";
+export type PingKind = "blocked" | "resolve" | "done" | "errored";
 
 /** One registered phone. */
 export interface PushDevice {
@@ -61,6 +61,7 @@ const SEND_TIMEOUT_MS = 10_000;
 const DELIVERY = {
   blocked: { priority: "high", ttl: "900s" },
   done: { priority: "high", ttl: "900s" },
+  errored: { priority: "high", ttl: "900s" },
   resolve: { priority: "normal", ttl: "3600s" },
 };
 

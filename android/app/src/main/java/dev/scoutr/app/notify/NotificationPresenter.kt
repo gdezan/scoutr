@@ -85,6 +85,29 @@ class NotificationPresenter(
         )
     }
 
+    /**
+     * The conversation stopped on a failed model call (repeated 5xx and the
+     * agent gave up). Same attention class as blocked — the agent cannot
+     * proceed without the user — so it shares the needs-you slot, channel,
+     * preference, and Reply/Mute actions; only the text differs. Replying is
+     * the natural recovery: it steers the pane, e.g. "continue".
+     */
+    fun showErrored(session: SessionDescriptor) {
+        val paneId = session.live?.paneId ?: return
+        showErroredLegacy(paneId, session)
+    }
+
+    fun showErrored(profile: HostProfileKey, session: SessionDescriptor) {
+        val paneId = session.live?.paneId ?: return
+        val workspace = session.cwd?.trimEnd('/')?.substringAfterLast('/').orEmpty()
+        val title = if (workspace.isEmpty()) session.displayName else "${session.displayName} · $workspace"
+        postErrored(
+            HostPaneKey(profile, paneId),
+            title,
+            bodyWithBranch("Stopped on an error", session.liveSummary),
+        )
+    }
+
     /** Degraded notifications still retain the host-qualified destination. */
     fun showDegraded(paneId: String) {
         if (!preferencesStore.blockedEnabled) return
@@ -108,6 +131,17 @@ class NotificationPresenter(
     fun showDegradedDone(profile: HostProfileKey, paneId: String) {
         if (!preferencesStore.doneEnabled) return
         postDone(HostPaneKey(profile, paneId), "An agent finished", "Tap to open Scoutr")
+    }
+
+    /** Fetch failed after retries; still a real error stop, just unnamed. */
+    fun showDegradedErrored(paneId: String) {
+        if (!preferencesStore.blockedEnabled) return
+        postErroredLegacy(paneId, "An agent stopped", "Tap to open Scoutr")
+    }
+
+    fun showDegradedErrored(profile: HostProfileKey, paneId: String) {
+        if (!preferencesStore.blockedEnabled) return
+        postErrored(HostPaneKey(profile, paneId), "An agent stopped", "Tap to open Scoutr")
     }
 
     /** Cancels both status slots for one generation-qualified pane. */
@@ -265,6 +299,59 @@ class NotificationPresenter(
             .addAction(NotificationMuteReceiver.muteAction(context, key))
             .build()
         manager.notify(tagOf(key), slotOf(key), notification)
+        syncBlockedSummary()
+    }
+
+    /** Shares the blocked slot: one pane cannot be both, and latest wins. */
+    private fun postErrored(key: HostPaneKey, title: String, body: String) {
+        if (!preferencesStore.blockedEnabled) return
+        if (muteStore.isMuted(key)) return
+        ensureChannels()
+        val notification = NotificationCompat.Builder(context, CHANNEL_NEEDS_YOU)
+            .setSmallIcon(R.drawable.ic_scoutr_notification)
+            .setColor(ACCENT)
+            .setContentTitle(title)
+            .setContentText(body)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+            .setAutoCancel(true)
+            .setOnlyAlertOnce(true)
+            .setGroup(GROUP_KEY)
+            .setContentIntent(openPaneIntent(key, ERRORED))
+            .addAction(NotificationReplyReceiver.replyAction(context, key))
+            .addAction(NotificationMuteReceiver.muteAction(context, key))
+            .build()
+        manager.notify(tagOf(key), slotOf(key), notification)
+        syncBlockedSummary()
+    }
+
+    private fun showErroredLegacy(paneId: String, session: SessionDescriptor) {
+        if (!preferencesStore.blockedEnabled) return
+        val workspace = session.cwd?.trimEnd('/')?.substringAfterLast('/').orEmpty()
+        val title = if (workspace.isEmpty()) session.displayName else "${session.displayName} · $workspace"
+        postErroredLegacy(paneId, title, bodyWithBranch("Stopped on an error", session.liveSummary))
+    }
+
+    /** Legacy panes carry no profile key; same slot and actions as blocked. */
+    private fun postErroredLegacy(paneId: String, title: String, body: String) {
+        if (!preferencesStore.blockedEnabled) return
+        if (muteStore.isMuted(paneId)) return
+        ensureChannels()
+        val notification = NotificationCompat.Builder(context, CHANNEL_NEEDS_YOU)
+            .setSmallIcon(R.drawable.ic_scoutr_notification)
+            .setColor(ACCENT)
+            .setContentTitle(title)
+            .setContentText(body)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+            .setAutoCancel(true)
+            .setOnlyAlertOnce(true)
+            .setGroup(GROUP_KEY)
+            .setContentIntent(openPaneIntentLegacy(paneId, ERRORED))
+            .addAction(NotificationReplyReceiver.replyAction(context, paneId))
+            .addAction(NotificationMuteReceiver.muteAction(context, paneId))
+            .build()
+        manager.notify(slotOf(paneId), notification)
         syncBlockedSummary()
     }
 
@@ -460,6 +547,7 @@ class NotificationPresenter(
         const val DONE_SUMMARY_ID = 0x5C0F7B
 
         private const val BLOCKED = "blocked"
+        private const val ERRORED = "errored"
         private const val DONE = "done"
         private const val ACCENT = 0xFFE5484D.toInt()
         private const val DONE_SLOT_XOR = 0x40000000.toInt()

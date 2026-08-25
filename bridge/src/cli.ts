@@ -159,8 +159,16 @@ async function main(): Promise<void> {
         if (config.fcmServiceAccountPath) {
           try {
             const devices = await JsonDeviceRegistry.open(config.configDir);
+            const { makeErrorStopInspector } = await import("./push/stopped-on-error.js");
             push = {
-              publisher: new FcmPublisher(await createFcmSender(config.fcmServiceAccountPath), devices, config.hostId),
+              publisher: new FcmPublisher(
+                await createFcmSender(config.fcmServiceAccountPath),
+                devices,
+                config.hostId,
+                // Settle-to-idle events ask this whether the transcript ends in
+                // a failed model call; only then does the phone get woken.
+                makeErrorStopInspector(feed),
+              ),
               devices,
             };
           } catch (error) {

@@ -28,9 +28,9 @@ import java.io.IOException
 
 /**
  * The FCM service is a thin Firebase wrapper. These tests pin the handler
- * it calls: a background `blocked` ping posts the identity notification,
- * a foreground ping posts nothing, a fetch failure degrades after retries,
- * and a `resolve` ping cancels the slot.
+ * it calls: a background `blocked` or `errored` ping posts the identity
+ * notification (needs-you class), a foreground ping posts nothing, a fetch
+ * failure degrades after retries, and a `resolve` ping cancels the slot.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
@@ -131,6 +131,67 @@ class ScoutrMessagingServiceTest {
         )
 
         assertTrue(slots().isEmpty())
+    }
+
+    @Test
+    fun erroredPingWhileBackgroundedPostsStoppedNotification() = runTest {
+        handler().handle(
+            mapOf(
+                FcmPingHandler.KEY_KIND to FcmPingHandler.KIND_ERRORED,
+                FcmPingHandler.KEY_PANE_ID to "w1:p1",
+            ),
+        )
+
+        assertEquals(1, slots().size)
+        val extras = slots().single().notification.extras
+        assertEquals("pi · scoutr", extras.getString("android.title"))
+        assertEquals("Stopped on an error", extras.getString("android.text"))
+    }
+
+    @Test
+    fun erroredPingWhileForegroundedPostsNothing() = runTest {
+        handler(foregrounded = true).handle(
+            mapOf(
+                FcmPingHandler.KEY_KIND to FcmPingHandler.KIND_ERRORED,
+                FcmPingHandler.KEY_PANE_ID to "w1:p1",
+            ),
+        )
+
+        assertTrue(slots().isEmpty())
+        assertTrue(api.calls.none { it.name == "agents" })
+    }
+
+    @Test
+    fun failingAgentsFetchOnErroredPostsDegradedAfterRetries() = runTest {
+        api.agentsResult = Result.failure(IOException("offline"))
+
+        handler().handle(
+            mapOf(
+                FcmPingHandler.KEY_KIND to FcmPingHandler.KIND_ERRORED,
+                FcmPingHandler.KEY_PANE_ID to "w1:p1",
+            ),
+        )
+
+        assertEquals(3, api.calls.count { it.name == "agents" })
+        val extras = slots().single().notification.extras
+        assertEquals("An agent stopped", extras.getString("android.title"))
+        assertEquals("Tap to open Scoutr", extras.getString("android.text"))
+    }
+
+    @Test
+    fun erroredSharesTheBlockedSlotSoLatestWins() = runTest {
+        presenter.showBlocked(blocked("w1:p1"))
+
+        handler().handle(
+            mapOf(
+                FcmPingHandler.KEY_KIND to FcmPingHandler.KIND_ERRORED,
+                FcmPingHandler.KEY_PANE_ID to "w1:p1",
+            ),
+        )
+
+        val slots = slots()
+        assertEquals(1, slots.size)
+        assertEquals("Stopped on an error", slots.single().notification.extras.getString("android.text"))
     }
 
     @Test

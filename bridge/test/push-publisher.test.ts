@@ -130,8 +130,7 @@ test("pruning a blocked pane resolves it; an unblocked one sends nothing", async
   await publisher.handleEvent(statusEvent("w1:p2", "working"));
   sender.sent.length = 0;
 
-  publisher.prune(new Set<string>());
-  await Promise.resolve();
+  await publisher.prune(new Set<string>());
 
   assert.deepEqual(sender.sent, [{ kind: "resolve", paneId: "w1:p1" }]);
 });
@@ -141,8 +140,7 @@ test("a pruned pane is forgotten, so it can block again", async () => {
   const publisher = new FcmPublisher(sender, fakeDevices());
 
   await publisher.handleEvent(statusEvent("w1:p1", "blocked"));
-  publisher.prune(new Set<string>());
-  await Promise.resolve();
+  await publisher.prune(new Set<string>());
   sender.sent.length = 0;
 
   assert.equal(await publisher.handleEvent(statusEvent("w1:p1", "blocked")), true);
@@ -178,4 +176,158 @@ test("a token FCM rejects is unregistered", async () => {
   await publisher.handleEvent(statusEvent("w1:p1", "blocked"));
 
   assert.deepEqual(devices.unregistered, ["dead-token"]);
+});
+
+test("settling idle onto a failed model call pings errored once", async () => {
+  const sender = fakeSender();
+  let stopped = true;
+  const publisher = new FcmPublisher(sender, fakeDevices(), "host-a", async () => stopped);
+
+  assert.equal(await publisher.handleEvent(statusEvent("w1:p1", "idle")), true);
+  // herdr only emits on change, but a repeated settle must not re-ping.
+  assert.equal(await publisher.handleEvent(statusEvent("w1:p1", "idle")), false);
+
+  assert.deepEqual(sender.sent, [{ kind: "errored", paneId: "w1:p1" }]);
+  assert.equal(stopped, true);
+});
+
+test("a clean finish settles idle without any ping", async () => {
+  const sender = fakeSender();
+  const publisher = new FcmPublisher(sender, fakeDevices(), "host-a", async () => false);
+
+  assert.equal(await publisher.handleEvent(statusEvent("w1:p1", "idle")), false);
+
+  assert.deepEqual(sender.sent, []);
+});
+
+test("the agent moving again resolves the errored notification and re-arms", async () => {
+  const sender = fakeSender();
+  const publisher = new FcmPublisher(sender, fakeDevices(), "host-a", async () => true);
+
+  await publisher.handleEvent(statusEvent("w1:p1", "idle"));
+  await publisher.handleEvent(statusEvent("w1:p1", "working"));
+  sender.sent.length = 0;
+
+  // The user continued; the next failure must notify again, not stay deduped.
+  assert.equal(await publisher.handleEvent(statusEvent("w1:p1", "idle")), true);
+  assert.deepEqual(sender.sent, [{ kind: "errored", paneId: "w1:p1" }]);
+});
+
+test("blocked and done also clear an errored stop", async () => {
+  const sender = fakeSender();
+  const publisher = new FcmPublisher(sender, fakeDevices(), "host-a", async () => true);
+
+  await publisher.handleEvent(statusEvent("w1:p1", "idle"));
+  await publisher.handleEvent(statusEvent("w1:p1", "blocked"));
+  await publisher.handleEvent(statusEvent("w1:p2", "idle"));
+  await publisher.handleEvent(statusEvent("w1:p2", "done"));
+
+  assert.deepEqual(sender.sent, [
+    { kind: "errored", paneId: "w1:p1" },
+    { kind: "resolve", paneId: "w1:p1" },
+    { kind: "blocked", paneId: "w1:p1" },
+    { kind: "errored", paneId: "w1:p2" },
+    { kind: "resolve", paneId: "w1:p2" },
+    { kind: "done", paneId: "w1:p2" },
+  ]);
+});
+
+test("pruning an errored pane resolves it so the tray does not outlive the pane", async () => {
+  const sender = fakeSender();
+  const publisher = new FcmPublisher(sender, fakeDevices(), "host-a", async () => true);
+
+  await publisher.handleEvent(statusEvent("w1:p1", "idle"));
+  sender.sent.length = 0;
+
+  await publisher.prune(new Set<string>());
+
+  assert.deepEqual(sender.sent, [{ kind: "resolve", paneId: "w1:p1" }]);
+});
+
+test("without a probe, settling idle sends nothing (pre-error-stop behavior)", async () => {
+  const sender = fakeSender();
+  const publisher = new FcmPublisher(sender, fakeDevices());
+
+  assert.equal(await publisher.handleEvent(statusEvent("w1:p1", "idle")), false);
+  assert.deepEqual(sender.sent, []);
+});
+
+test("a working event that lands while the probe is in flight resolves the ping", async () => {
+  const sender = fakeSender();
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  const publisher = new FcmPublisher(sender, fakeDevices(), "host-a", async () => {
+    await gate;
+    return true;
+  });
+
+  // The idle probe is still awaiting the transcript when the agent moves.
+  const settle = publisher.handleEvent(statusEvent("w1:p1", "idle"));
+  const moved = publisher.handleEvent(statusEvent("w1:p1", "working"));
+  release();
+  assert.equal(await settle, true);
+  assert.equal(await moved, true);
+
+  assert.deepEqual(sender.sent, [
+    { kind: "errored", paneId: "w1:p1" },
+    { kind: "resolve", paneId: "w1:p1" },
+  ]);
+});
+
+test("a turn that ends done on a failed model call pings errored, not done", async () => {
+  const sender = fakeSender();
+  let stopped = true;
+  const publisher = new FcmPublisher(sender, fakeDevices(), "host-a", async () => stopped);
+
+  await publisher.handleEvent(statusEvent("w1:p1", "working"));
+  assert.equal(await publisher.handleEvent(statusEvent("w1:p1", "done")), true);
+
+  assert.deepEqual(sender.sent, [{ kind: "errored", paneId: "w1:p1" }]);
+});
+
+test("a clean done with a probe still pings done and re-arms after movement", async () => {
+  const sender = fakeSender();
+  let stopped = false;
+  const publisher = new FcmPublisher(sender, fakeDevices(), "host-a", async () => stopped);
+
+  await publisher.handleEvent(statusEvent("w1:p1", "working"));
+  assert.equal(await publisher.handleEvent(statusEvent("w1:p1", "done")), true);
+  assert.deepEqual(sender.sent, [{ kind: "done", paneId: "w1:p1" }]);
+
+  // The user continued; this time the model dies again.
+  await publisher.handleEvent(statusEvent("w1:p1", "working"));
+  stopped = true;
+  sender.sent.length = 0;
+  assert.equal(await publisher.handleEvent(statusEvent("w1:p1", "done")), true);
+  assert.deepEqual(sender.sent, [{ kind: "errored", paneId: "w1:p1" }]);
+});
+
+test("an errored stop is cleared when the agent works again or blocks later", async () => {
+  const sender = fakeSender();
+  const publisher = new FcmPublisher(sender, fakeDevices(), "host-a", async () => true);
+
+  await publisher.handleEvent(statusEvent("w1:p1", "done"));
+  await publisher.handleEvent(statusEvent("w1:p1", "working"));
+
+  assert.deepEqual(sender.sent, [
+    { kind: "errored", paneId: "w1:p1" },
+    { kind: "resolve", paneId: "w1:p1" },
+  ]);
+});
+
+test("a probe failure on a done transition falls back to the normal done ping", async () => {
+  const sender = fakeSender();
+  const publisher = new FcmPublisher(
+    sender,
+    fakeDevices(),
+    "host-a",
+    async () => {
+      throw new Error("transcript vanished");
+    },
+  );
+
+  await publisher.handleEvent(statusEvent("w1:p1", "working"));
+  assert.equal(await publisher.handleEvent(statusEvent("w1:p1", "done")), true);
+
+  assert.deepEqual(sender.sent, [{ kind: "done", paneId: "w1:p1" }]);
 });

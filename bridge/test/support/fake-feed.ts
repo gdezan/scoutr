@@ -33,6 +33,9 @@ export function fakeFeed(initial: SessionSnapshot | null = null): HerdrFeed & Fa
     emit(message) {
       for (const handler of handlers) handler(message);
     },
+    // Snapshots only change through setSnapshot in tests, so a refresh is a
+    // no-op that keeps the close-path re-prune synchronous-friendly.
+    refreshSnapshot: async () => {},
     start: async () => {},
     stop: async () => {},
   };

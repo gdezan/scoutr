@@ -73,6 +73,12 @@ class FcmPingHandler(
             } else {
                 handleDone(target, paneId)
             }
+
+            KIND_ERRORED -> if (target == null) {
+                handleErroredLegacy(paneId)
+            } else {
+                handleErrored(target, paneId)
+            }
         }
     }
 
@@ -179,6 +185,63 @@ class FcmPingHandler(
             }
         }
     }
+    private suspend fun handleErroredLegacy(paneId: String) {
+        if (isForegrounded()) return
+        val targetApi = api ?: return
+        for ((attempt, waitMs) in ERRORED_FETCH_RETRY_DELAYS_MS.withIndex()) {
+            if (waitMs > 0) delayMs(waitMs)
+            try {
+                val session = targetApi.agents().agents.find { it.live?.paneId == paneId }
+                if (session != null) {
+                    presenter.showErrored(session)
+                    return
+                }
+                // The pane is gone or no longer listed — a resolve we lost,
+                // not a fetch failure. Posting a degraded alert would be a lie.
+                return
+            } catch (c: CancellationException) {
+                throw c
+            } catch (e: Exception) {
+                Log.w(TAG, "FCM errored fetch failed", e)
+                if (attempt == ERRORED_FETCH_RETRY_DELAYS_MS.lastIndex) presenter.showDegradedErrored(paneId)
+            }
+        }
+    }
+
+    private suspend fun handleErrored(target: Target, paneId: String) {
+        val work = workCoordinator
+        if (work != null) {
+            work.trackIfActive(target.binding) { handleErroredTracked(target, paneId) }
+        } else {
+            handleErroredTracked(target, paneId)
+        }
+    }
+
+    private suspend fun handleErroredTracked(target: Target, paneId: String) {
+        if (isForegrounded()) return
+        val targetApi = apiFor(target) ?: return
+        for ((attempt, waitMs) in ERRORED_FETCH_RETRY_DELAYS_MS.withIndex()) {
+            if (waitMs > 0) delayMs(waitMs)
+            if (!isCurrent(target)) return
+            try {
+                val session = targetApi.agents().agents.find { it.live?.paneId == paneId }
+                if (session != null) {
+                    postIfCurrent(target) { presenter.showErrored(target.profile, session) }
+                    return
+                }
+                // The pane is gone or no longer listed — a resolve we lost,
+                // not a fetch failure. Posting a degraded alert would be a lie.
+                return
+            } catch (c: CancellationException) {
+                throw c
+            } catch (e: Exception) {
+                Log.w(TAG, "FCM errored fetch failed", e)
+                if (attempt == ERRORED_FETCH_RETRY_DELAYS_MS.lastIndex) {
+                    postIfCurrent(target) { presenter.showDegradedErrored(target.profile, paneId) }
+                }
+            }
+        }
+    }
 
     private fun postIfCurrent(target: Target, post: () -> Unit) {
         if (!isCurrent(target)) return
@@ -245,9 +308,11 @@ class FcmPingHandler(
         const val KIND_BLOCKED = "blocked"
         const val KIND_RESOLVE = "resolve"
         const val KIND_DONE = "done"
+        const val KIND_ERRORED = "errored"
 
         val BLOCKED_FETCH_RETRY_DELAYS_MS = longArrayOf(0L, 1_000L, 4_000L)
         val DONE_FETCH_RETRY_DELAYS_MS = BLOCKED_FETCH_RETRY_DELAYS_MS
+        val ERRORED_FETCH_RETRY_DELAYS_MS = BLOCKED_FETCH_RETRY_DELAYS_MS
 
         private const val TAG = "FcmPingHandler"
     }
