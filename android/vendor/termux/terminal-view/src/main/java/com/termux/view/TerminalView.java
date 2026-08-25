@@ -464,9 +464,18 @@ public final class TerminalView extends View {
      */
     public void refreshEmulator() {
         if (mTermSession == null) return;
-        mEmulator = mTermSession.getEmulator();
+        TerminalEmulator emulator = mTermSession.getEmulator();
+        // A fresh emulator object means a remote stream generation reset (or a pane
+        // switch): the new screen replay owns the viewport, so pin to the bottom
+        // regardless of where the reader was scrolled in the previous generation.
+        boolean generationReset = emulator != mEmulator;
+        mEmulator = emulator;
         if (mTerminalCursorBlinkerRunnable != null) {
             mTerminalCursorBlinkerRunnable.setEmulator(mEmulator);
+        }
+        if (generationReset) {
+            if (isSelectingText()) stopTextSelectionMode();
+            mTopRow = 0;
         }
         onScreenUpdated();
     }
@@ -499,14 +508,13 @@ public final class TerminalView extends View {
         }
 
         if (!skipScrolling && mTopRow != 0) {
-            // Scroll down if not already there.
-            if (mTopRow < -3) {
-                // Awaken scroll bars only if scrolling a noticeable amount
-                // - we do not want visible scroll bars during normal typing
-                // of one row at a time.
-                awakenScrollBars();
-            }
-            mTopRow = 0;
+            // Scoutr follow policy: only a viewport already at the bottom follows live
+            // output. While the reader is scrolled back into the transcript, hold what
+            // they are reading steady by compensating for rows the emulator scrolled
+            // off. Upstream instead snapped to the bottom on every update; see
+            // android/vendor/termux/UPSTREAM.md.
+            mTopRow -= mEmulator.getScrollCounter();
+            if (mTopRow < -rowsInHistory) mTopRow = -rowsInHistory;
         }
 
         mEmulator.clearScrollCounter();

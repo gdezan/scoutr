@@ -83,9 +83,16 @@ Scoutr's `RemoteTerminalSession` replaces its `TerminalEmulator` on every remote
 replaces an emulator inside a live session. The view's private `mEmulator` reference would
 otherwise stay stale and repaint the previous generation's content forever. Added the public
 `refreshEmulator()` method, which re-fetches the emulator from the attached session, re-points the
-cursor blinker at it, and repaints. The app wires it as the session's `onScreenUpdated` callback
-(`TerminalScreen`). Added `scrollTerminalHistoryByPage(int)` so the app can expose page controls
-that work without keyboard focus. All other `TerminalView` behavior is untouched.
+cursor blinker at it, pins the viewport to the bottom when the emulator object changed (a fresh
+replay owns the viewport after a generation reset), and repaints. The app wires it as the
+session's `onScreenUpdated` callback (`TerminalScreen`). Added `scrollTerminalHistoryByPage(int)`
+so the app can expose page controls that work without keyboard focus. One behavior block was
+rewritten: upstream's `onScreenUpdated` snapped the viewport to the bottom on every screen
+update, which yanked the reader down whenever an agent streamed output. Scoutr follows live
+output only while the viewport is already at the bottom; while scrolled back it holds position by
+compensating for rows the emulator scrolled off (`mTopRow -= getScrollCounter()`, clamped to the
+transcript). Regression-tested app-side in `TerminalScrollFollowTest`. All other `TerminalView`
+behavior is untouched.
 
 `TerminalEmulator` and the rest of `com.termux.terminal` are untouched, so all upstream emulator
 tests still pass unmodified.

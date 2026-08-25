@@ -20,6 +20,10 @@ is no `pane.read` or read-only-output fallback.
   confirmation, disconnected, resumed, renamed, and closed.
 - Unsupported Herdr capabilities remain visible as a terminal destination with
   a precise capability explanation; they do not fall back to Chat output.
+- The viewport follows live output only while already pinned at the bottom. Scrolling
+  back into the transcript freezes what is on screen against incoming output (agent
+  streams included); a generation replay — pane switch, reconnect, takeover — re-pins
+  to the bottom.
 - Terminal traffic uses the dedicated authenticated `/ws/terminal` WebSocket.
   Hierarchy snapshots and mutations use typed authenticated HTTP. Terminal
   bytes are binary and are not sent through the ordinary JSON `/ws` feed.
