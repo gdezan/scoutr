@@ -845,10 +845,10 @@ private fun HeaderConfigurationChip(
 }
 
 /**
- * The transcript stream. Opens at the last message and follows new ones while
- * the user is at the bottom; scrolling up stops the follow and shows a
- * scroll-to-end button. Auto-scroll is guarded against out-of-range indices so
- * concurrent appends can never crash it.
+ * The transcript stream. Opens at the last message; new rows pull the list
+ * only while it is fully scrolled down (see isChatListAtEnd) — a reader in
+ * history, whether dragging or flinging, is never chased and gets a
+ * scroll-to-end button instead.
  */
 /** Rows of the chat list in emission order; see ChatList. */
 internal sealed interface ChatRow {
@@ -909,6 +909,7 @@ internal fun buildChatRows(
 @Composable
 fun ChatList(
     entries: List<SessionEntry>,
+    state: LazyListState = rememberLazyListState(),
     showThinking: Boolean = true,
     expandTools: Boolean = false,
     markdownCodeFontSizeSp: Float = AppearancePreferencesStore.DEFAULT_MARKDOWN_CODE_FONT_SIZE_SP,
@@ -934,7 +935,7 @@ fun ChatList(
     onAskDismiss: (callId: String) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
-    val listState = rememberLazyListState()
+    val listState = state
     val indicatorMode = workingIndicatorMode(starting, agentStatus, hasPendingQuestion)
 
     val reduceMotion = useReduceMotion()
@@ -972,11 +973,6 @@ fun ChatList(
             .toMap()
     }
 
-    // Follow state is the user's intent, not a transient position reading:
-    // true while pinned to the end, false once a drag ends away from it, and
-    // true again when a drag ends at the true end or the button is tapped.
-    var followNew by remember { mutableStateOf(true) }
-
     // One owner of programmatic scroll-to-end (plan 007): a newer request —
     // open-at-bottom, append-follow, or the button — cancels and replaces the
     // prior one, and a finger drag cancels it too. Cancellation rethrows.
@@ -985,17 +981,17 @@ fun ChatList(
     val scrollScope = rememberCoroutineScope()
     var scrollJob by remember { mutableStateOf<Job?>(null) }
 
-    // A finger drag always wins: it stops any programmatic movement, and the
-    // position where it ends re-derives follow intent.
+    // A finger drag always wins over programmatic movement: cancel any
+    // running scroll-to-end the instant a drag starts. Whether future content
+    // may pull the list is never stored here — it is re-read from position at
+    // the moment that content arrives, so no gesture can leave stale intent
+    // behind.
     LaunchedEffect(listState) {
         listState.interactionSource.interactions.collect { interaction ->
-            when (interaction) {
-                is DragInteraction.Start -> scrollJob?.cancel()
-                is DragInteraction.Stop, is DragInteraction.Cancel ->
-                    followNew = !listState.canScrollForward
-            }
+            if (interaction is DragInteraction.Start) scrollJob?.cancel()
         }
     }
+
 
     val rows: List<ChatRow> = remember(entries, pendingMessages, questions, indicatorMode) {
         buildChatRows(entries, pendingMessages, questions, indicatorMode)
@@ -1015,7 +1011,6 @@ fun ChatList(
 
     fun scrollToEnd() {
         scrollJob?.cancel()
-        followNew = true
         lateinit var job: Job
         job = scrollScope.launch {
             try {
@@ -1032,18 +1027,40 @@ fun ChatList(
 
     // Open-at-bottom: the moment content first arrives (and whenever the list
     // goes empty→non-empty again, e.g. a session switch) jump to the very end
-    // unconditionally. Gating this on followNew would race the first layout,
-    // which briefly reports "not at bottom" while the list is still at the top.
+    // unconditionally. Gating this on the at-end position check would race the
+    // first layout, which briefly reports "not at end" while the list is still
+    // at the top.
     LaunchedEffect(hasContent) {
         if (hasContent) scrollToEnd()
     }
 
-    // Follow appends while the user is at the bottom; a drag away from the end
-    // stops it. The keys are the tail row's identity only: a status-only
+    // Reader intent, maintained from measured position only: flush with the end
+    // means "wants the tail"; any settled position off it means detached. The
+    // live signal updates from layout; a settled detachment (not our own
+    // convergence mid-flight) also clears the frozen verdict below.
+    var prevAtEnd by remember { mutableStateOf(true) }
+    var atEndNow by remember { mutableStateOf(true) }
+    LaunchedEffect(listState) {
+        snapshotFlow { isChatListAtEnd(listState) }.collect { atEnd ->
+            atEndNow = atEnd
+            if (!atEnd && scrollJob?.isActive != true) prevAtEnd = false
+        }
+    }
+
+    // Follow new content only for a reader that was fully scrolled down when
+    // the change landed. The frozen verdict is what makes that readable:
+    // once the new rows measure, they have already pushed a glued reader off
+    // the end by their own height, so the live check alone would refuse to
+    // follow and the transcript would drift away one append at a time.
+    // Prepends, drags, flings, and parked readers all read detached and are
+    // never chased. The keys are the tail row's identity only: a status-only
     // change (the indicator's mode or label) never moves the bottom edge, so
     // it must not issue a scroll request (plan 007).
     LaunchedEffect(rows.size, lastItemKey) {
-        if (followNew && hasContent) scrollToEnd()
+        if (!hasContent) return@LaunchedEffect
+        val follow = atEndNow || prevAtEnd
+        if (follow) scrollToEnd()
+        prevAtEnd = follow
     }
 
     // Load older history when the user is near the top. One request per
@@ -1074,6 +1091,12 @@ fun ChatList(
         if (loadingOlderEntries) return@LaunchedEffect
         val index = rows.indexOfFirst { keyOf(it) == anchor.first }
         if (index >= 0) {
+            // The restore owns the viewport for one jump; a running
+            // scroll-to-end must not fight it for position. A drag in
+            // progress cancels this jump instead (the scroll mutex gives the
+            // finger priority); the anchor stays set and the next entries or
+            // loading flip re-runs it.
+            scrollJob?.cancel()
             listState.scrollToItem(index, anchor.second)
             olderScrollAnchor = null
         }
@@ -1160,16 +1183,10 @@ fun ChatList(
                 }
             }
         }
-        // canScrollForward is computed against LazyColumn's estimated extent,
-        // so it can read false mid-list while a tall unmeasured tail item sits
-        // below the viewport. Combine it with the last-visible-row check: the
-        // FAB must show whenever the last row is anywhere off-screen.
+        // The FAB shows whenever the list is not fully scrolled down — the
+        // same measured predicate that decides whether new content follows.
         val notAtBottom by remember(listState) {
-            derivedStateOf {
-                val info = listState.layoutInfo
-                val lastVisible = info.visibleItemsInfo.lastOrNull()?.index ?: 0
-                listState.canScrollForward || lastVisible < info.totalItemsCount - 1
-            }
+            derivedStateOf { !isChatListAtEnd(listState) }
         }
         AnimatedVisibility(
             // Hidden while a programmatic scroll settles so rapid taps spawn
@@ -1196,6 +1213,22 @@ fun ChatList(
             }
         }
     }
+}
+
+/**
+ * True when the transcript is fully scrolled down: nothing left to scroll
+ * forward and the tail row composed flush with the viewport. This is the one
+ * contract both follow-the-tail and the scroll-to-end button read.
+ *
+ * `canScrollForward` alone is not trusted: LazyColumn computes it against
+ * estimated extents, so it can read false mid-list while a tall unmeasured
+ * tail item sits below the viewport. The tail-visible check is measured fact
+ * about the last layout and anchors the estimate read.
+ */
+private fun isChatListAtEnd(state: LazyListState): Boolean {
+    val info = state.layoutInfo
+    val lastVisible = info.visibleItemsInfo.lastOrNull()?.index ?: -1
+    return !state.canScrollForward && lastVisible == info.totalItemsCount - 1
 }
 
 /**
