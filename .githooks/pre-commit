@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# Lint only the staged bridge sources this commit is about to add.
+#
+# `npm run lint` is still the tree-wide gate. A hook that reprints every
+# diagnostic in the tree trains agents to abandon the task and "fix the
+# backlog". Staged-only keeps the list equal to the change.
+#
+# Set SCOUTR_NO_LINT=1 to skip.
+set -euo pipefail
+
+[ "${SCOUTR_NO_LINT:-0}" = "1" ] && exit 0
+
+repo="$(git rev-parse --show-toplevel)"
+cd "$repo"
+
+# Rebases and merges replay history; do not fail them on today's rules.
+git_dir="$(git rev-parse --git-dir)"
+for marker in rebase-merge rebase-apply MERGE_HEAD CHERRY_PICK_HEAD; do
+  [ -e "$git_dir/$marker" ] && exit 0
+done
+
+staged=()
+while IFS= read -r path; do
+  case "$path" in
+    bridge/tools/oxlint/*) continue ;;
+    bridge/*.ts | bridge/*.tsx | bridge/*.js | bridge/*.mjs | bridge/*.cjs)
+      staged+=("$path")
+      ;;
+  esac
+done < <(git diff --cached --name-only --diff-filter=ACMR -- bridge)
+
+if [ "${#staged[@]}" -eq 0 ]; then
+  exit 0
+fi
+
+rel=()
+for path in "${staged[@]}"; do
+  rel+=("${path#bridge/}")
+done
+
+cd "$repo/bridge"
+if ! npx oxlint --config oxlint.config.ts "${rel[@]}"; then
+  echo "pre-commit: oxlint failed on staged bridge files. Fix those files only — do not sweep the tree." >&2
+  echo "pre-commit: SCOUTR_NO_LINT=1 skips this hook." >&2
+  exit 1
+fi

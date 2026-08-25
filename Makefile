@@ -37,4 +37,4 @@ android-test:
 
 hooks:
 	@git config core.hooksPath .githooks
-	@echo 'git hooks -> .githooks (post-commit auto-tags; SCOUTR_NO_AUTOTAG=1 to skip)'
+	@echo 'git hooks -> .githooks (post-commit auto-tags; pre-commit oxlint on staged bridge files)'

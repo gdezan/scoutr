@@ -38,10 +38,12 @@ Choose the narrowest check that can produce useful evidence:
 Prefer incremental Gradle work. Use `--rerun-tasks` only after evidence of stale
 or incorrectly skipped output, not as a default.
 
-`npm run lint` (oxlint) is a gate. Fix only the diagnostics in files this
-change already touches. A repo-wide anti-slop sweep is its own job — do not
-start one because lint printed a long list. Do not disable anti-slop rules or
-launder types with `as unknown as` to silence them.
+`npm run lint` (oxlint) is a gate. The pre-commit hook lints only staged
+bridge files, so a failed commit is the files you staged — not a license to
+sweep the tree. Fix only the diagnostics in files this change already
+touches. A repo-wide anti-slop sweep is its own job. Do not disable anti-slop
+rules or launder types with `as unknown as` to silence them. `SCOUTR_NO_LINT=1`
+skips the hook.
 A focused Android JVM class should print results shortly after
 `:app:testDebugUnitTest` starts. Silence there is a hang: inspect
 `GradleWorkerMain` / the test process, then stop waiting. Robolectric parking
