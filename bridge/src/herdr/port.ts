@@ -34,6 +34,16 @@ export interface HerdrPort {
   paneSendText(pane_id: string, text: string): Promise<void>;
   agentPrompt(target: string, text: string): Promise<JsonValue>;
   agentGet(target: string, timeoutMs?: number): Promise<JsonValue>;
+  /**
+   * Read a pane's rendered output.
+   *
+   * `source` picks the snapshot: `visible` is the current screen and is the
+   * only one herdr will take of a pane that is *working* — a pane blocked on
+   * a questionnaire or permission prompt included. `recent` and
+   * `recent_unwrapped` reach back through the scrollback, which herdr can
+   * only capture by scrolling an idle pane, so they fail `agent_not_idle`
+   * on a busy one however few `lines` are asked for.
+   */
   agentRead(
     target: string,
     source: string,

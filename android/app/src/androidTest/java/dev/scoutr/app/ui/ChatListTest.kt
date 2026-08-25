@@ -336,6 +336,10 @@ class ChatListTest {
         val answered = QuestionEntry(
             id = "call1#0",
             callId = "call1",
+            // An answered ask renders only once its anchor entry is loaded, so
+            // the card cannot jump to the top during reverse pagination (see
+            // ChatTranscriptRowsTest.answeredQuestionWithoutAnchorIsOmitted).
+            entryId = "qa-1",
             question = "Proceed?",
             header = "Confirm",
             options = emptyList(),
