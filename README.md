@@ -555,7 +555,6 @@ For deeper host, bridge, emulator, and tunnel diagnostics, see [`docs/dev-workfl
 
 ## Known limits
 
-- One bridge/host per app installation; multi-host pairing is future work.
 - Terminal ownership and lifetime have explicit constraints documented in [`docs/terminal.md`](./docs/terminal.md).
 - Backend capabilities differ. Claude and Antigravity do not expose every control/model/session behavior that pi does.
 - Time-in-state depends on agent lifecycle events being available from Herdr.
