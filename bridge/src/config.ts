@@ -137,7 +137,8 @@ async function resolveFcmServiceAccountPath(
 
 /** A malformed or absent persisted id becomes a fresh one; the token is never touched. */
 function resolveHostId(raw: string | number | boolean | null | undefined): string {
-  return typeof raw === "string" && HOST_ID_PATTERN.test(raw) ? raw : generateHostId();
+  const parsed = v.safeParse(v.pipe(v.string(), v.regex(HOST_ID_PATTERN)), raw);
+  return parsed.success ? parsed.output : generateHostId();
 }
 
 export async function loadOrCreateConfig(path = defaultConfigPath()): Promise<BridgeConfig> {

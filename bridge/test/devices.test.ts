@@ -5,6 +5,7 @@ import { after, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { createScoutrServer, type ScoutrServer } from "../src/server.js";
 import { JsonDeviceRegistry, MAX_TOKEN_LENGTH } from "../src/push/devices.js";
+import type { JsonBody } from "../src/routes/types.js";
 import { fakeHerdr } from "./support/fake-herdr.js";
 import { fakeFeed } from "./support/fake-feed.js";
 import { FakeTerminalLauncher } from "./support/fake-terminal.js";
@@ -13,6 +14,14 @@ import { FakeTerminalLauncher } from "./support/fake-terminal.js";
 
 const PORT = 8798;
 const TOKEN = "test_token_for_devices_00001";
+
+interface DeviceRequestBody extends JsonBody {
+  profileGeneration?: string | number | null;
+}
+
+interface PushHealthResponse {
+  push: { fcm: boolean };
+}
 
 let server: ScoutrServer;
 let devices: JsonDeviceRegistry;
@@ -32,7 +41,8 @@ before(async () => {
       panes: [],
       agents: [],
       layouts: [],
-    }) as never,
+    }),
+    // SAFETY: these tests never call usage; the stub fills an unused ServerDeps field.
     usage: { all: async () => ({}) } as never,
     config: { configDir: "/tmp/scoutr-test-config", hostId: "host_test", token: TOKEN, port: PORT, exposure: { kind: "tailscale" } },
     terminal: new FakeTerminalLauncher(),
@@ -45,14 +55,14 @@ after(async () => {
 });
 
 async function post(
-  body: unknown,
+  body: DeviceRequestBody,
   token = TOKEN,
   path = "/api/devices",
 ): Promise<{ status: number; data: any }> {
   const response = await fetch(`http://127.0.0.1:${PORT}${path}`, {
     method: "POST",
     headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-    body: typeof body === "string" ? body : JSON.stringify(body),
+    body: JSON.stringify(body),
   });
   return { status: response.status, data: await response.json() };
 }
@@ -124,7 +134,7 @@ describe("POST /api/devices", () => {
     const response = await fetch(`http://127.0.0.1:${PORT}/api/health`, {
       headers: { authorization: `Bearer ${TOKEN}` },
     });
-    const health = (await response.json()) as { push: { fcm: boolean } };
+    const health: PushHealthResponse = await response.json();
     // This bridge has no service-account path configured.
     assert.deepEqual(health.push, { fcm: false });
   });

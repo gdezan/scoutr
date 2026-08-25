@@ -14,7 +14,34 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const SERVICE_SCRIPT = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "scripts", "bridge-service.mjs");
 const helper = await import(pathToFileURL(SERVICE_SCRIPT).href);
 
-const darwinPaths = (overrides: Record<string, unknown> = {}) =>
+interface ServicePathOverrides {
+  platform?: string;
+  repoRoot?: string;
+  home?: string;
+  nodePath?: string;
+  herdrBin?: string | null;
+  xdgConfigHome?: string;
+}
+
+interface ServiceStatusJson {
+  manager: string;
+  service: string;
+  active: boolean;
+  pid: number | null;
+  startedAtMs: number | null;
+  definitionPath: string;
+  installed: boolean;
+  definitionCurrent: boolean;
+  detail: { activeState: string; subState: string };
+  problem: string | null;
+}
+
+function parseServiceStatus(raw: string): ServiceStatusJson {
+  // SAFETY: the bridge-service status command emits this stable JSON contract.
+  return JSON.parse(raw) as ServiceStatusJson;
+}
+
+const darwinPaths = (overrides: ServicePathOverrides = {}) =>
   helper.resolveServicePaths({
     platform: "darwin",
     repoRoot: "/Users/dev/scoutr",
@@ -24,7 +51,7 @@ const darwinPaths = (overrides: Record<string, unknown> = {}) =>
     ...overrides,
   });
 
-const linuxPaths = (overrides: Record<string, unknown> = {}) =>
+const linuxPaths = (overrides: ServicePathOverrides = {}) =>
   helper.resolveServicePaths({
     platform: "linux",
     repoRoot: "/home/dev/scoutr",
@@ -125,11 +152,11 @@ test("status --json reports the stable shape check-deployed consumes", async () 
       encoding: "utf8",
       env: { ...process.env, XDG_CONFIG_HOME: configHome },
     });
-    const status = JSON.parse(out);
+    const status = parseServiceStatus(out);
     assert.equal(status.manager, process.platform === "darwin" ? "launchd" : "systemd");
-    assert.equal(typeof status.active, "boolean");
-    assert.ok(status.pid === null || typeof status.pid === "number");
-    assert.ok(status.startedAtMs === null || typeof status.startedAtMs === "number");
+    assert.ok(status.active === true || status.active === false);
+    assert.ok(status.pid === null || Number.isFinite(status.pid));
+    assert.ok(status.startedAtMs === null || Number.isFinite(status.startedAtMs));
     assert.equal(status.installed, false);
     assert.equal(status.definitionCurrent, false);
     assert.ok(status.definitionPath.startsWith(configHome) || process.platform === "darwin");

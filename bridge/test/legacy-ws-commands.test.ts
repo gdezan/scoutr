@@ -54,13 +54,19 @@ function makeSnapshot(agent: string | null): SessionSnapshot {
   };
 }
 
-function makeDeps(agent?: "pi" | "claude"): { herdr: ReturnType<typeof fakeHerdr>; deps: ServerDeps } {
+interface LegacyTestDeps {
+  herdr: ReturnType<typeof fakeHerdr>;
+  deps: ServerDeps;
+}
+
+function makeDeps(agent?: "pi" | "claude"): LegacyTestDeps {
   const herdr = fakeHerdr();
   return {
     herdr,
     deps: {
       herdr,
       feed: fakeFeed(makeSnapshot(agent ?? null)),
+      // SAFETY: these tests never call usage; the stub fills an unused ServerDeps field.
       usage: {} as never,
       config: { configDir: "/tmp/scoutr-test-config", hostId: "host_test", token: "x".repeat(16), port: 1 },
       terminal: new FakeTerminalLauncher(),
@@ -111,10 +117,12 @@ describe("legacy WS mutation frames (pre-commands.http.v1 APKs)", () => {
 
   test("the adapter adds no validation of its own — rejections come from the shared operation", async () => {
     const { herdr, deps } = makeDeps();
+    // SAFETY: malformed frames intentionally bypass the typed command union to test runtime validation.
     await assert.rejects(
       () => handleLegacyWsCommand({ type: "slash_command", paneId: "p1", text: "/compact\u001b" } as never, deps),
       /invalid slash command/,
     );
+    // SAFETY: malformed frames intentionally bypass the typed command union to test runtime validation.
     await assert.rejects(
       () => handleLegacyWsCommand({ type: "steer", target: "", text: "x" } as never, deps),
       /target and text/,
@@ -124,6 +132,7 @@ describe("legacy WS mutation frames (pre-commands.http.v1 APKs)", () => {
 
   test("unknown commands throw", async () => {
     const { herdr, deps } = makeDeps();
+    // SAFETY: the unknown command is intentionally outside the wire union.
     await assert.rejects(() => handleLegacyWsCommand({ type: "explode" } as never, deps), /unknown command/);
     assert.deepEqual(herdr.sent, []);
   });

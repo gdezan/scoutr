@@ -252,7 +252,7 @@ async function claudeUserAgent(statePath: string): Promise<string> {
     const parsed = v.safeParse(stateFileSchema, JSON.parse(await readFile(statePath, "utf8")));
     if (!parsed.success) return `claude-code/${CLAUDE_FALLBACK_VERSION}`;
     const version = parsed.output.lastOnboardingVersion;
-    if (typeof version === "string" && /^\d+\.\d+/.test(version)) return `claude-code/${version}`;
+    if (version && /^\d+\.\d+/.test(version)) return `claude-code/${version}`;
   } catch {
     // Fall through to the pinned version; a plausible UA still beats none.
   }

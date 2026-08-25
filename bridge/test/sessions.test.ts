@@ -4,23 +4,51 @@ import { join } from "node:path";
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { createSession, controlSession, launchStoredSession, SessionsError, THINKING_LEVELS } from "../src/sessions.js";
+import type { HerdrPort } from "../src/herdr/port.js";
+import type { SessionSnapshot } from "../src/herdr/types.js";
+import type { SentParams } from "./support/fake-herdr.js";
 import { piLaunchCommand, thinkingLevelKeys } from "../src/agents/pi/index.js";
+import type { ControlAction } from "../src/agents/types.js";
 import { shellQuote } from "../src/shell.js";
 import { FileWorkspaceRootStore } from "../src/workspace-roots.js";
 import { pane, snapshot, tab, workspace } from "./support/snapshot.js";
 
-function fakeHerdr(overrides: Record<string, unknown> = {}) {
-  const calls: { method: string; params: any }[] = [];
+type WorkspaceCreateParams = Parameters<HerdrPort["workspaceCreate"]>[0];
+type TabCreateParams = Parameters<HerdrPort["tabCreate"]>[0];
+
+interface FakeHerdrOverrides {
+  workspaceCreate?: { workspace: { workspace_id?: string }; root_pane?: { pane_id?: string } };
+  tabCreate?: { tab?: { tab_id?: string }; root_pane?: { pane_id?: string } };
+  workspaceCloseError?: Error;
+  paneSendInputError?: Error;
+  agentPromptError?: Error;
+  snapshotError?: Error;
+  snapshot?: SessionSnapshot;
+}
+
+interface FakeCall {
+  method: string;
+  params: SentParams;
+}
+
+function fakeHerdr(overrides: FakeHerdrOverrides = {}): HerdrPort & { calls: FakeCall[] } {
+  const calls: FakeCall[] = [];
   let snapshotReads = 0;
-  const herdr = {
+  const herdr: HerdrPort & { calls: FakeCall[] } = {
     calls,
-    async workspaceCreate(params: unknown) {
+    async workspaceCreate(params: WorkspaceCreateParams) {
       calls.push({ method: "workspace.create", params });
       return overrides.workspaceCreate ?? { workspace: { workspace_id: "ws1" }, root_pane: { pane_id: "p1" } };
     },
-    async tabCreate(params: unknown) {
+    async tabCreate(params: TabCreateParams) {
       calls.push({ method: "tab.create", params });
-      return overrides.tabCreate ?? { tab: { tab_id: "t1" }, root_pane: { pane_id: "p1" } };
+      if (overrides.tabCreate) {
+        return {
+          tab: overrides.tabCreate.tab ?? { tab_id: undefined },
+          root_pane: overrides.tabCreate.root_pane,
+        };
+      }
+      return { tab: { tab_id: "t1" }, root_pane: { pane_id: "p1" } };
     },
     async tabRename(tab_id: string, label: string) {
       calls.push({ method: "tab.rename", params: { tab_id, label } });
@@ -62,15 +90,10 @@ function fakeHerdr(overrides: Record<string, unknown> = {}) {
       // Only the first read fails: the launch must survive a snapshot outage
       // at workspace-lookup time and still detect the agent afterwards.
       if (overrides.snapshotError && snapshotReads++ === 0) throw overrides.snapshotError;
-      return overrides.snapshot ?? {
-        panes: [{ pane_id: "p1", workspace_id: "ws1", tab_id: "t1", agent: "pi" }],
-        workspaces: [],
-        tabs: [],
-        agents: [],
-      };
+      return overrides.snapshot ?? snapshot([pane({ pane_id: "p1", workspace_id: "ws1", tab_id: "t1", agent: "pi" })]);
     },
   };
-  return herdr as never;
+  return herdr;
 }
 
 const cwd = homedir();
@@ -281,7 +304,7 @@ describe("createSession workspace reuse", () => {
     const created = await createSession(herdr, { cwd, model: "m" });
 
     assert.equal(created.workspaceId, "ws0");
-    assert.deepEqual((herdr.calls[1].params as { workspace_id: string }).workspace_id, "ws0");
+    assert.equal(herdr.calls[1].params.workspace_id, "ws0");
   });
 
   it("closes only its own tab when a launch into a reused workspace fails", async () => {
@@ -368,7 +391,7 @@ describe("launchStoredSession", () => {
       const herdr = fakeHerdr();
       const created = await launchStoredSession(herdr, { path, mode: "resume" });
       assert.deepEqual(created, { workspaceId: "ws1", paneId: "p1" });
-      assert.equal((herdr.calls[1].params as { cwd: string }).cwd, outsideCwd);
+      assert.equal(herdr.calls[1].params.cwd, outsideCwd);
     } finally {
       await rm(root, { recursive: true, force: true });
       await rm(outsideCwd, { recursive: true, force: true });
@@ -393,7 +416,7 @@ describe("launchStoredSession", () => {
     try {
       const herdr = fakeHerdr();
       await launchStoredSession(herdr, { path, mode: "resume" });
-      assert.equal((herdr.calls[1].params as { cwd: string }).cwd, root);
+      assert.equal(herdr.calls[1].params.cwd, root);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -451,7 +474,7 @@ describe("controlSession", () => {
     await assert.rejects(controlSession(herdr, { paneId: "p2", action: "fork" }), /claude does not support fork/);
     await assert.rejects(
       controlSession(herdr, { paneId: "p2", action: "fork" }),
-      (error: unknown) => error instanceof SessionsError && error.status === 400,
+      (error) => error instanceof SessionsError && error.status === 400,
     );
   });
 
@@ -487,8 +510,8 @@ describe("controlSession", () => {
   });
 
   it("rename of an unknown pane fails with 404", async () => {
-    const herdr = fakeHerdr({ snapshot: { panes: [], workspaces: [], tabs: [], agents: [] } });
-    await assert.rejects(controlSession(herdr, { paneId: "nope", action: "rename", text: "n" }), (error: unknown) => {
+    const herdr = fakeHerdr({ snapshot: snapshot([]) });
+    await assert.rejects(controlSession(herdr, { paneId: "nope", action: "rename", text: "n" }), (error) => {
       assert.ok(error instanceof SessionsError);
       assert.equal(error.status, 404);
       return true;
@@ -563,7 +586,8 @@ describe("controlSession", () => {
 
   it("rejects an unknown action", async () => {
     const herdr = fakeHerdr();
-    await assert.rejects(controlSession(herdr, { paneId: "p1", action: "explode" as never }), SessionsError);
+    // SAFETY: this test intentionally sends an unsupported wire action to exercise the default rejection.
+    await assert.rejects(controlSession(herdr, { paneId: "p1", action: "explode" as ControlAction }), SessionsError);
   });
 });
 

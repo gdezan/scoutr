@@ -5,7 +5,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { attachRepoSummaries, deriveSessionDescriptors } from "../src/routes/agents.js";
-import type { BoardRepoSummaryCache } from "../src/board-repo-summary.js";
+import { BoardRepoSummaryCache } from "../src/board-repo-summary.js";
 import type { SessionDescriptor } from "../src/session-model.js";
 import { sessionWorkspaceRoots } from "../src/routes/review.js";
 import { snapshotPaths } from "../src/server.js";
@@ -166,18 +166,15 @@ describe("attachRepoSummaries", () => {
   /** Records which cwds were asked for and can fail on demand. */
   function stubCache(behavior: (cwd: string) => Promise<typeof summary>) {
     const requested: string[] = [];
-    return {
-      requested,
-      cache: {
-        summaryFor: (cwd: string) => {
-          requested.push(cwd);
-          return behavior(cwd);
-        },
-      } as unknown as BoardRepoSummaryCache,
+    const cache = new BoardRepoSummaryCache();
+    cache.summaryFor = (cwd: string) => {
+      requested.push(cwd);
+      return behavior(cwd);
     };
+    return { requested, cache };
   }
 
-  function descriptor(status: string, cwd: string | null) {
+  function descriptor(status: string, cwd: string | null): SessionDescriptor {
     return {
       key: null,
       agentKind: "pi",
@@ -195,7 +192,7 @@ describe("attachRepoSummaries", () => {
       doneSummary: null,
       liveSummary: null,
       live: { paneId: "p1", workspaceId: "ws1", tabId: "t1", status, statusSinceMs: null },
-    } as SessionDescriptor;
+    };
   }
 
   test("asks only for live agents that carry a cwd", async () => {

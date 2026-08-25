@@ -15,7 +15,13 @@ import {
 import { parseClaudeTranscript } from "../src/agents/claude/transcript.js";
 import { readClaudeCommandsCatalog } from "../src/agents/claude/commands.js";
 import { claudeDeliverInitialPrompt, claudeExtractQuestions, claudeReadTranscriptState } from "../src/agents/claude/index.js";
+import type { AgentReadResponse } from "../src/herdr/client.js";
+import type { ContentBlock, ToolCallBlock } from "../src/transcript.js";
 import { fakeHerdr } from "./support/fake-herdr.js";
+
+interface ClaudeUserRecordExtra {
+  aiTitle?: string;
+}
 
 /** CLAUDECONFIGDIR honing: point the claude adapter at a temp store. */
 async function claudeStore(): Promise<string> {
@@ -25,7 +31,7 @@ async function claudeStore(): Promise<string> {
   return config;
 }
 
-function userRecord(uuid: string, content: string, extra: Record<string, unknown> = {}): Record<string, unknown> {
+function userRecord(uuid: string, content: string, extra: ClaudeUserRecordExtra = {}) {
   return {
     type: "user",
     uuid,
@@ -38,7 +44,7 @@ function userRecord(uuid: string, content: string, extra: Record<string, unknown
   };
 }
 
-function toolResultRecord(uuid: string, toolUseId: string): Record<string, unknown> {
+function toolResultRecord(uuid: string, toolUseId: string) {
   return {
     type: "user",
     uuid,
@@ -51,7 +57,7 @@ function toolResultRecord(uuid: string, toolUseId: string): Record<string, unkno
   };
 }
 
-function assistantRecord(uuid: string, blocks: unknown[]): Record<string, unknown> {
+function assistantRecord(uuid: string, blocks: unknown[]) {
   return {
     type: "assistant",
     uuid,
@@ -66,6 +72,26 @@ function assistantRecord(uuid: string, blocks: unknown[]): Record<string, unknow
     },
     requestId: "req-1",
   };
+}
+
+function agentReadResponse(text: string): AgentReadResponse {
+  return {
+    type: "pane_read",
+    read: {
+      pane_id: "p1",
+      workspace_id: "ws1",
+      tab_id: "t1",
+      source: "recent_unwrapped",
+      format: "text",
+      text,
+      revision: 0,
+      truncated: false,
+    },
+  };
+}
+
+function isToolCallBlock(block: ContentBlock): block is ToolCallBlock {
+  return block.type === "toolCall" && "id" in block && "name" in block && "arguments" in block;
 }
 
 describe("claude adapter", () => {
@@ -212,7 +238,7 @@ describe("claude adapter", () => {
       assert.equal(await claudeResolveSessionPath(ref), join(dir, `${id}.jsonl`));
     });
     it("returns null for an unknown id without a cwd", async () => {
-      const config = await claudeStore();
+      await claudeStore();
       const ref = { source: "herdr:claude", agent: "claude", kind: "id" as const, value: "nope" };
       assert.equal(await claudeResolveSessionPath(ref), null);
     });
@@ -289,10 +315,10 @@ describe("claude adapter", () => {
         ...base,
         agentRead: async () => {
           reads += 1;
-          return { read: { text: reads >= 3 ? "\u276f Reply with exactly: HI there" : "" } } as never;
+          return agentReadResponse(reads >= 3 ? "\u276f Reply with exactly: HI there" : "");
         },
       };
-      await claudeDeliverInitialPrompt(herdr as never, "p1", "Reply with exactly: HI there", [1, 1]);
+      await claudeDeliverInitialPrompt(herdr, "p1", "Reply with exactly: HI there", [1, 1]);
       const prompts = base.sent.filter((c) => c.method === "agentPrompt");
       assert.equal(prompts.length, 2, "attempt 1 re-reads before re-sending, so the drop is recovered with one retry");
       assert.equal(reads, 3, "pre-send check + post-send verification per attempt");
@@ -308,10 +334,10 @@ describe("claude adapter", () => {
           reads += 1;
           // First read (post-send verification) misses the echo; the pre-send
           // read on the next attempt sees it in a wider window.
-          return { read: { text: reads >= 2 ? "\u276f Hello there" : "" } } as never;
+          return agentReadResponse(reads >= 2 ? "\u276f Hello there" : "");
         },
       };
-      await claudeDeliverInitialPrompt(herdr as never, "p1", "Hello there", [1, 1]);
+      await claudeDeliverInitialPrompt(herdr, "p1", "Hello there", [1, 1]);
       const prompts = base.sent.filter((c) => c.method === "agentPrompt");
       assert.equal(prompts.length, 1, "marker visible pre-send → no second agentPrompt");
     });
@@ -323,7 +349,7 @@ describe("claude adapter", () => {
           throw new Error("pane gone");
         },
       };
-      await claudeDeliverInitialPrompt(herdr as never, "p1", "Hello there", [1, 1]);
+      await claudeDeliverInitialPrompt(herdr, "p1", "Hello there", [1, 1]);
       const prompts = base.sent.filter((c) => c.method === "agentPrompt");
       assert.equal(prompts.length, 1, "unverifiable pane → never blind-resend");
     });
@@ -331,9 +357,9 @@ describe("claude adapter", () => {
       const base = fakeHerdr();
       const herdr = {
         ...base,
-        agentRead: async () => ({ read: { text: "\u276f Hello there" } }) as never,
+        agentRead: async () => agentReadResponse("\u276f Hello there"),
       };
-      await claudeDeliverInitialPrompt(herdr as never, "p1", "Hello there", [1, 1]);
+      await claudeDeliverInitialPrompt(herdr, "p1", "Hello there", [1, 1]);
       const prompts = base.sent.filter((c) => c.method === "agentPrompt");
       assert.equal(prompts.length, 1);
     });
@@ -398,13 +424,13 @@ describe("claude adapter", () => {
   describe("AskUserQuestion", () => {
     /** The shape Claude Code writes: the call carries the questions... */
     function askRecords(questions: unknown[], answers?: Record<string, string>): string {
-      const lines: Record<string, unknown>[] = [
+      const lines = [
         assistantRecord("a1", [
           { type: "tool_use", id: "toolu_ask", name: "AskUserQuestion", input: { questions } },
         ]),
       ];
       if (answers) {
-        lines.push({
+        const answerRecord = {
           type: "user",
           uuid: "u2",
           parentUuid: "a1",
@@ -416,7 +442,8 @@ describe("claude adapter", () => {
             ],
           },
           toolUseResult: { questions, answers, annotations: {} },
-        });
+        };
+        lines.push(answerRecord);
       }
       return lines.map((line) => JSON.stringify(line)).join("\n");
     }
@@ -530,7 +557,8 @@ describe("claude adapter", () => {
       assert.equal(toolUse.model, "claude-sonnet-4-6");
       assert.equal(toolUse.stopReason, "end_turn");
       assert.deepEqual(toolUse.usage, { input: 10, output: 20 });
-      const call = toolUse.content.find((b) => b.type === "toolCall") as { type: string; id: string; name: string; arguments: unknown };
+      const call = toolUse.content.find(isToolCallBlock);
+      assert.ok(call);
       assert.deepEqual(call, { type: "toolCall", id: "toolu_1", name: "Bash", arguments: { command: "git status" } });
       const result = transcript.entries[2];
       assert.equal(result.role, "toolResult");

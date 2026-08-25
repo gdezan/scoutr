@@ -9,7 +9,13 @@ import { piReadQuestions } from "../src/agents/pi/index.js";
 
 const TOOL_CALL_ID = "call_abc123|fc_xyz789";
 
-function assistantWithQuestion(callId: string = TOOL_CALL_ID, args: unknown): TranscriptEntry {
+interface AskQuestionArguments {
+  questions?: object[];
+  notQuestions?: boolean;
+  command?: string;
+}
+
+function assistantWithQuestion(callId: string = TOOL_CALL_ID, args: AskQuestionArguments): TranscriptEntry {
   return {
     entryId: "msg_ask",
     parentId: null,

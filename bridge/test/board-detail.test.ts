@@ -18,7 +18,18 @@ import type { QuestionEntry } from "../src/questions.js";
 
 let nextId = 0;
 
-function sessionLine(type: string, fields: Record<string, unknown>, ts: string): string {
+interface SessionMessage {
+  role: string;
+  content: string | Array<{ type: string; text: string }>;
+}
+
+interface SessionLineFields {
+  provider?: string;
+  modelId?: string;
+  message?: SessionMessage;
+}
+
+function sessionLine(type: string, fields: SessionLineFields, ts: string) {
   nextId += 1;
   return JSON.stringify({ type, id: `r${nextId}`, timestamp: ts, ...fields });
 }

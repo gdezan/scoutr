@@ -27,7 +27,7 @@ function fixtureJsonl(): string {
   );
 }
 
-function fixtureDir(): { dir: string; agentDir: string; file: string } {
+function fixtureDir() {
   const dir = mkdtempSync(join(tmpdir(), "scoutr-session-"));
   const agentDir = join(dir, "agent");
   const sessionsDir = join(agentDir, "sessions");

@@ -58,7 +58,19 @@ const TOPOLOGY_EVENTS = new Set([
 /** Fixed delay before resubscribing after a failed subscribe attempt. */
 const SUBSCRIBE_RETRY_MS = 1_000;
 
-export class HerdrEventFeed {
+/**
+ * Public snapshot and event surface the server and tests drive.
+ * `HerdrEventFeed` is the live-socket implementation.
+ */
+export interface HerdrFeed {
+  readonly snapshot: SessionSnapshot | null;
+  onMessage(handler: (message: FeedMessage) => void): () => void;
+  removeMessage(handler: (message: FeedMessage) => void): void;
+  start(): Promise<void>;
+  stop(): Promise<void>;
+}
+
+export class HerdrEventFeed implements HerdrFeed {
   private readonly client: HerdrClient;
   private handle: SubscriptionHandle | null = null;
   private stopped = false;

@@ -3,6 +3,7 @@ import { after, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { createScoutrServer, type ScoutrServer } from "../src/server.js";
 import { SCOUTR_API_FEATURES } from "../src/api-protocol.js";
+import type { JsonBody } from "../src/routes/types.js";
 import type { PaneInfo } from "../src/herdr/types.js";
 import { fakeHerdr } from "./support/fake-herdr.js";
 import { fakeFeed } from "./support/fake-feed.js";
@@ -18,6 +19,19 @@ import { FakeTerminalLauncher } from "./support/fake-terminal.js";
 const PORT = 8795;
 const TOKEN = "test_token_for_commands_0001";
 const cwd = homedir();
+
+interface CommandAnswer {
+  questionId: string;
+  selectedLabels: string[];
+}
+
+interface CommandRequestBody extends JsonBody {
+  answers?: CommandAnswer[] | string;
+}
+
+interface CommandsHealthResponse {
+  api: { features: string[] };
+}
 
 const PANE: PaneInfo = {
   pane_id: "p1",
@@ -58,7 +72,8 @@ before(() => {
       panes: [PANE],
       agents: [],
       layouts: [],
-    }) as never,
+    }),
+    // SAFETY: these tests never call usage; the stub fills an unused ServerDeps field.
     usage: { all: async () => ({}) } as never,
     config: { configDir: "/tmp/scoutr-test-config", hostId: "host_test", token: TOKEN, port: PORT },
     terminal: new FakeTerminalLauncher(),
@@ -69,13 +84,17 @@ after(async () => {
   await server.close();
 });
 
-async function post(path: string, body: unknown, token = TOKEN): Promise<{ status: number; data: any }> {
+async function rawPost(path: string, body: string, token = TOKEN): Promise<{ status: number; data: any }> {
   const response = await fetch(`http://127.0.0.1:${PORT}${path}`, {
     method: "POST",
     headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-    body: typeof body === "string" ? body : JSON.stringify(body),
+    body,
   });
   return { status: response.status, data: await response.json() };
+}
+
+async function post(path: string, body: CommandRequestBody, token = TOKEN): Promise<{ status: number; data: any }> {
+  return rawPost(path, JSON.stringify(body), token);
 }
 
 describe("HTTP session command routes", () => {
@@ -84,7 +103,7 @@ describe("HTTP session command routes", () => {
     const response = await fetch(`http://127.0.0.1:${PORT}/api/health`, {
       headers: { authorization: `Bearer ${TOKEN}` },
     });
-    const health = (await response.json()) as { api: { features: string[] } };
+    const health: CommandsHealthResponse = await response.json();
     assert.ok(health.api.features.includes("commands.http.v1"));
   });
 
@@ -166,7 +185,7 @@ describe("HTTP session command routes", () => {
     assert.equal(badAnswers.status, 400);
     assert.match(badAnswers.data.error, /answers must be an array/);
 
-    const badJson = await post("/api/sessions/p1/steer", "{not json");
+    const badJson = await rawPost("/api/sessions/p1/steer", "{not json");
     assert.equal(badJson.status, 400);
     assert.match(badJson.data.error, /valid JSON/);
 

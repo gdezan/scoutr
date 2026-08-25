@@ -134,17 +134,17 @@ describe("readWorkspaceFile", () => {
   });
 
   it("rejects lexical and symlink escapes before returning file contents", () => {
-    assert.throws(() => readWorkspaceFile(join(outside, "secret.txt"), [workspace]), (error: unknown) => {
+    assert.throws(() => readWorkspaceFile(join(outside, "secret.txt"), [workspace]), (error) => {
       assert.ok(error instanceof FileReadError);
       assert.equal(error.status, 403);
       return true;
     });
-    assert.throws(() => readWorkspaceFile(join(workspace, "escape.txt"), [workspace]), (error: unknown) => {
+    assert.throws(() => readWorkspaceFile(join(workspace, "escape.txt"), [workspace]), (error) => {
       assert.ok(error instanceof FileReadError);
       assert.equal(error.status, 403);
       return true;
     });
-    assert.throws(() => readWorkspaceFile(join(workspace, "escape-dir", "missing.md"), [workspace]), (error: unknown) => {
+    assert.throws(() => readWorkspaceFile(join(workspace, "escape-dir", "missing.md"), [workspace]), (error) => {
       assert.ok(error instanceof FileReadError);
       assert.equal(error.status, 403);
       return true;
@@ -199,7 +199,7 @@ describe("readWorkspaceFile", () => {
   });
 
   it("rejects invalid paths", () => {
-    assert.throws(() => readWorkspaceFile("relative.txt", [workspace]), (error: unknown) => {
+    assert.throws(() => readWorkspaceFile("relative.txt", [workspace]), (error) => {
       assert.ok(error instanceof FileReadError);
       assert.equal(error.status, 400);
       return true;

@@ -11,6 +11,19 @@ import type { Transcript } from "../src/transcript.js";
 
 const SESSION = "9f1c2d3e-0000-0000-0000-000000000001";
 
+interface ClaudeHookEntry {
+  matcher?: string;
+  hooks: Array<{ type: string; command: string }>;
+}
+
+interface ClaudeSettings {
+  model?: string;
+  hooks: {
+    PreToolUse: ClaudeHookEntry[];
+    PostToolUse: ClaudeHookEntry[];
+  };
+}
+
 function emptyTranscript(id = SESSION): Transcript {
   return {
     version: 3,
@@ -170,7 +183,8 @@ describe("claude hook installation", () => {
     );
     const first = await installClaudeHook(HOOK_COMMAND, path);
     assert.equal(first.changed, true);
-    const settings = JSON.parse(await readFile(path, "utf8")) as Record<string, any>;
+    // SAFETY: installClaudeHook writes the tested Claude settings shape with both hook arrays.
+    const settings = JSON.parse(await readFile(path, "utf8")) as ClaudeSettings;
     assert.equal(settings.model, "opus");
     assert.equal(settings.hooks.PreToolUse.length, 2);
     assert.equal(settings.hooks.PreToolUse[0].matcher, "Bash");
@@ -185,7 +199,8 @@ describe("claude hook installation", () => {
     const path = join(dir, "nested", "settings.json");
     const result = await installClaudeHook(HOOK_COMMAND, path);
     assert.equal(result.changed, true);
-    const settings = JSON.parse(await readFile(path, "utf8")) as Record<string, any>;
+    // SAFETY: installClaudeHook writes the tested Claude settings shape with both hook arrays.
+    const settings = JSON.parse(await readFile(path, "utf8")) as ClaudeSettings;
     assert.equal(settings.hooks.PreToolUse[0].hooks[0].command, HOOK_COMMAND);
   });
 });

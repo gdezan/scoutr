@@ -8,7 +8,7 @@ function configWith(exposure: ExposureConfig): BridgeConfig {
 }
 
 /** Records whether Tailscale discovery ran at all — the core provider invariant. */
-function discovery(result: string | null): { calls: number; discoverTailscaleUrl: () => Promise<string | null> } {
+function discovery(result: string | null) {
   const spy = {
     calls: 0,
     discoverTailscaleUrl: async (): Promise<string | null> => {
@@ -70,7 +70,7 @@ describe("resolveExposure", () => {
 
     test(`fails with actionable guidance when ${kind} has no public URL`, async () => {
       const deps = discovery("artemis.tail7dc568.ts.net");
-      await assert.rejects(() => resolveExposure(configWith({ kind }), deps), (error: unknown) => {
+      await assert.rejects(() => resolveExposure(configWith({ kind }), deps), (error) => {
         assert.ok(error instanceof ExposureError);
         assert.match(error.message, /exposure\.publicUrl/);
         return true;
@@ -82,7 +82,7 @@ describe("resolveExposure", () => {
   test("rejects an http cloudflare URL rather than rewriting its scheme", async () => {
     await assert.rejects(
       () => resolveExposure(configWith({ kind: "cloudflare", publicUrl: "http://scoutr.example.com" }), discovery(null)),
-      (error: unknown) => {
+      (error) => {
         assert.ok(error instanceof ExposureError);
         assert.match(error.message, /https:\/\//);
         return true;

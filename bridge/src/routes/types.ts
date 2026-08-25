@@ -1,4 +1,4 @@
-import type { HerdrEventFeed } from "../herdr/feed.js";
+import type { HerdrFeed } from "../herdr/feed.js";
 import type { HerdrPort } from "../herdr/port.js";
 import type { UsageService } from "../usage/providers.js";
 import type { BridgeConfig } from "../config.js";
@@ -36,7 +36,7 @@ export type { JsonValue };
 /** Everything the HTTP + WS layers need beyond the caller-provided wiring. */
 export interface ServerDeps {
   herdr: HerdrPort;
-  feed: HerdrEventFeed;
+  feed: HerdrFeed;
   usage: UsageService;
   config: BridgeConfig;
   /** Optional process-local counters for HTTP and WebSocket experiments. */

@@ -17,7 +17,19 @@ function editsOf(transcript: Transcript): FileEditBlock[] {
     .filter((block): block is FileEditBlock => block.type === "fileEdit");
 }
 
-function claudeResult(toolUseResult: unknown, text = "done"): string {
+interface ClaudeToolUseResult {
+  filePath?: string;
+  type?: string;
+  structuredPatch?: unknown;
+}
+
+interface PiToolUseDetails {
+  patch?: string;
+  diff?: string;
+  snapshotId?: string;
+}
+
+function claudeResult(toolUseResult: ClaudeToolUseResult | undefined, text = "done"): string {
   return JSON.stringify({
     type: "user",
     uuid: "u1",
@@ -30,7 +42,7 @@ function claudeResult(toolUseResult: unknown, text = "done"): string {
   });
 }
 
-function piResult(details: unknown, toolName = "edit"): string {
+function piResult(details: PiToolUseDetails | undefined, toolName = "edit"): string {
   return JSON.stringify({
     type: "message",
     id: "e1",

@@ -9,7 +9,6 @@ import {
 } from "../src/commands.js";
 import { BridgeError } from "../src/errors.js";
 import { fakeHerdr } from "./support/fake-herdr.js";
-import type { ServerDeps } from "../src/routes/types.js";
 import { fakeFeed } from "./support/fake-feed.js";
 import { FakeTerminalLauncher } from "./support/fake-terminal.js";
 import type { PaneInfo, SessionSnapshot } from "../src/herdr/types.js";
@@ -65,13 +64,14 @@ function makeSnapshot(agent: string | null): SessionSnapshot {
   };
 }
 
-function makeDeps(agent?: "pi" | "claude"): { herdr: ReturnType<typeof fakeHerdr>; deps: ServerDeps } {
+function makeDeps(agent?: "pi" | "claude") {
   const herdr = fakeHerdr();
   return {
     herdr,
     deps: {
       herdr,
       feed: fakeFeed(makeSnapshot(agent ?? null)),
+      // SAFETY: these command tests never call the usage service.
       usage: {} as never,
       config: { configDir: "/tmp/scoutr-test-config", hostId: "host_test", token: "x".repeat(16), port: 1 },
       terminal: new FakeTerminalLauncher(),
@@ -80,7 +80,7 @@ function makeDeps(agent?: "pi" | "claude"): { herdr: ReturnType<typeof fakeHerdr
 }
 
 /** The HTTP status a rejected operation carries, so routes need no mapping table. */
-async function statusOf(run: () => Promise<unknown>): Promise<number> {
+async function statusOf(run: () => Promise<void>): Promise<number> {
   try {
     await run();
   } catch (error) {
@@ -107,7 +107,7 @@ describe("shared session command operations", () => {
   test("steerSession requires target and text", async () => {
     const { deps } = makeDeps();
     await assert.rejects(() => steerSession(deps, "", "x"), /target and text/);
-    assert.equal(await statusOf(() => steerSession(deps, "", "x")), 400);
+    assert.equal(await statusOf(async () => { await steerSession(deps, "", "x"); }), 400);
   });
 
   test("steerSession rejects NUL/DEL control characters", async () => {
@@ -121,7 +121,7 @@ describe("shared session command operations", () => {
 
   test("steerSession rejects a prompt past the create-session limit", async () => {
     const { herdr, deps } = makeDeps();
-    assert.equal(await statusOf(() => steerSession(deps, "p1", "x".repeat(100_001))), 400);
+    assert.equal(await statusOf(async () => { await steerSession(deps, "p1", "x".repeat(100_001)); }), 400);
     assert.deepEqual(herdr.sent, []);
   });
 
@@ -138,7 +138,7 @@ describe("shared session command operations", () => {
   test("answerSessionAsk strips control characters before sending", async () => {
     const { herdr, deps } = makeDeps();
     await answerSessionAsk(deps, { paneId: "p1", text: "a\u0000b\u001bc" });
-    assert.equal((herdr.sent[0]?.params as { text: string }).text, "abc");
+    assert.equal(herdr.sent[0]?.params.text, "abc");
   });
 
   test("answerSessionAsk rejects an unbounded selectedLabels list", async () => {
@@ -148,7 +148,7 @@ describe("shared session command operations", () => {
         answerSessionAsk(deps, {
           paneId: "p1",
           callId: "call",
-          answers: [{ questionId: "call#0", selectedLabels: new Array(33).fill("Yes") }],
+          answers: [{ questionId: "call#0", selectedLabels: Array.from({ length: 33 }, () => "Yes") }],
         }),
       /bounded list of option labels/,
     );
@@ -164,7 +164,7 @@ describe("shared session command operations", () => {
 
   test("answerSessionAsk rejects a round longer than any ask can be", async () => {
     const { deps } = makeDeps("pi");
-    const answers = new Array(9).fill({ questionId: "call#0", selectedLabels: ["Yes"] });
+    const answers = Array.from({ length: 9 }, () => ({ questionId: "call#0", selectedLabels: ["Yes"] }));
     await assert.rejects(() => answerSessionAsk(deps, { paneId: "p1", callId: "call", answers }), /bounded list/);
   });
 
@@ -177,9 +177,9 @@ describe("shared session command operations", () => {
     const { deps } = makeDeps("pi");
     // The pane has no session file, so no question carries this call id.
     assert.equal(
-      await statusOf(() =>
-        answerSessionAsk(deps, { paneId: "p1", callId: "toolu_gone", answers: [{ questionId: "toolu_gone#0", text: "Yes" }] }),
-      ),
+      await statusOf(async () => {
+        await answerSessionAsk(deps, { paneId: "p1", callId: "toolu_gone", answers: [{ questionId: "toolu_gone#0", text: "Yes" }] });
+      }),
       409,
     );
   });
@@ -210,7 +210,7 @@ describe("shared session command operations", () => {
 
   test("dismissSessionAsk requires a pane", async () => {
     const { deps } = makeDeps("pi");
-    assert.equal(await statusOf(() => dismissSessionAsk(deps, "")), 400);
+    assert.equal(await statusOf(async () => { await dismissSessionAsk(deps, ""); }), 400);
   });
 
   test("runSlashCommand sends the validated command plus Enter", async () => {
@@ -234,7 +234,7 @@ describe("shared session command operations", () => {
   test("runSlashCommand rejects terminal control input", async () => {
     const { herdr, deps } = makeDeps();
     await assert.rejects(() => runSlashCommand(deps, "p1", "/compact\u001b"), /invalid slash command/);
-    assert.equal(await statusOf(() => runSlashCommand(deps, "p1", "/compact\u001b")), 400);
+    assert.equal(await statusOf(async () => { await runSlashCommand(deps, "p1", "/compact\u001b"); }), 400);
     assert.deepEqual(herdr.sent, []);
   });
 
@@ -261,10 +261,10 @@ describe("shared session command operations", () => {
       ...makeSnapshot(null),
       panes: [],
     });
-    assert.equal(await statusOf(() => runSlashCommand(deps, "ghost", "/compact")), 404);
-    assert.equal(await statusOf(() => sendSessionText(deps, "ghost", "hello")), 404);
-    assert.equal(await statusOf(() => dismissSessionAsk(deps, "ghost")), 404);
-    assert.equal(await statusOf(() => answerSessionAsk(deps, { paneId: "ghost", text: "yes" })), 404);
+    assert.equal(await statusOf(async () => { await runSlashCommand(deps, "ghost", "/compact"); }), 404);
+    assert.equal(await statusOf(async () => { await sendSessionText(deps, "ghost", "hello"); }), 404);
+    assert.equal(await statusOf(async () => { await dismissSessionAsk(deps, "ghost"); }), 404);
+    assert.equal(await statusOf(async () => { await answerSessionAsk(deps, { paneId: "ghost", text: "yes" }); }), 404);
     // Nothing was attempted against herdr: the pane check runs first.
     assert.deepEqual(herdr.sent, []);
   });

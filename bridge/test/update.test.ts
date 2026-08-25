@@ -119,11 +119,12 @@ test("the download route refuses until a build is ready, then streams the file",
   const root = await fakeCheckout(bytes);
   const builder = new ApkBuilder(async () => {});
   const route = download(createUpdateRoutes(builder));
+  // SAFETY: the download route tests do not inspect request context fields.
   const ctx = {} as RouteContext;
 
   await assert.rejects(
     async () => route.handle(ctx),
-    (error: unknown) => error instanceof BridgeError && error.status === 409,
+    (error) => error instanceof BridgeError && error.status === 409,
   );
 
   builder.start(root, identity);
@@ -150,7 +151,8 @@ test("the download route surfaces the build failure reason in its 409", async ()
   await settle(builder);
 
   await assert.rejects(
+    // SAFETY: the download route tests do not inspect request context fields.
     async () => route.handle({} as RouteContext),
-    (error: unknown) => error instanceof BridgeError && error.status === 409 && /gradle exploded/.test(error.message),
+    (error) => error instanceof BridgeError && error.status === 409 && /gradle exploded/.test(error.message),
   );
 });

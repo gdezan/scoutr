@@ -27,7 +27,7 @@
  *     sockets, releases every child, and cancels grace timers.
  */
 
-import type { HerdrEventFeed } from "../herdr/feed.js";
+import type { HerdrFeed } from "../herdr/feed.js";
 import { TerminalOwnershipConflictError } from "./process.js";
 import type { TerminalHello, TerminalClosedReason } from "./protocol.js";
 import type {
@@ -96,7 +96,7 @@ export type TerminalHelloResult =
 export interface TerminalBrokerOptions {
   launcher: TerminalLauncher;
   /** Snapshot source; hello paneIds are validated against it. */
-  feed: HerdrEventFeed;
+  feed: HerdrFeed;
   /** Socket-loss grace before releasing the child (default TERMINAL_GRACE_MS). */
   graceMs?: number;
   /** Structured lifecycle logging (pane/generation/transition, no content). */

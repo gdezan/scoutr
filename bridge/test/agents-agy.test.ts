@@ -4,7 +4,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import {
-  agyBackend,
   agyControl,
   agyLaunchCommand,
   agyOwnsSessionPath,
@@ -18,6 +17,7 @@ import { readAgyCommandsCatalog } from "../src/agents/agy/commands.js";
 import { extractAgyQuestions } from "../src/agents/agy/questions.js";
 import { backendFor, getBackendOrNull, knownBackends } from "../src/agents/registry.js";
 import { fakeHerdr } from "./support/fake-herdr.js";
+import type { TranscriptEntry } from "../src/transcript.js";
 
 async function agyStore(): Promise<string> {
   const config = await mkdtemp(join(tmpdir(), "scoutr-agy-"));
@@ -168,7 +168,7 @@ describe("agy adapter", () => {
   });
 
   /** One open ask as transcript entries, so answer tests use real card ids. */
-  function askEntries(questions: unknown[]) {
+  function askEntries(questions: unknown[]): TranscriptEntry[] {
     return [
       {
         entryId: "step-1",
@@ -177,12 +177,12 @@ describe("agy adapter", () => {
         role: "assistant",
         content: [{ type: "toolCall", id: "q-call-1", name: "ask_question", arguments: { questions } }],
       },
-    ] as any;
+    ];
   }
 
   describe("questions", () => {
     it("extracts ask_question tool calls and answers", () => {
-      const entries = [
+      const entries: TranscriptEntry[] = [
         {
           entryId: "step-1",
           parentId: null,
@@ -217,7 +217,7 @@ describe("agy adapter", () => {
         },
       ];
 
-      const questions = extractAgyQuestions(entries as any);
+      const questions = extractAgyQuestions(entries);
       assert.equal(questions.length, 1);
       assert.equal(questions[0]?.question, "Which database to use?");
       assert.equal(questions[0]?.options.length, 2);

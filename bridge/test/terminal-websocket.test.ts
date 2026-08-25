@@ -18,6 +18,17 @@ import type { SessionSnapshot } from "../src/herdr/types.js";
 import { fakeHerdr } from "./support/fake-herdr.js";
 import { fakeFeed } from "./support/fake-feed.js";
 import { FakeTerminalLauncher } from "./support/fake-terminal.js";
+import type {
+  TerminalClientMessage,
+  TerminalClosedMessage,
+  TerminalErrorMessage,
+  TerminalHello,
+  TerminalOwnershipMessage,
+  TerminalReadyMessage,
+  TerminalServerMessage,
+} from "../src/terminal/protocol.js";
+import { UsageService } from "../src/usage/providers.js";
+
 const PORT = 8791;
 const TOKEN = "test_token_for_terminal_ws_0001";
 
@@ -55,6 +66,16 @@ class UpgradeRejected extends Error {
 
 /** One real ws client plus an ordered message log. */
 type TerminalMessage = { kind: "text" | "binary"; data: Buffer };
+type ServerMessageType = TerminalServerMessage["type"];
+
+interface HealthResponse {
+  terminal: { capability: { status: string; herdrVersion: string; protocol: number } };
+}
+
+function parseServerMessage(data: Buffer): TerminalServerMessage {
+  // SAFETY: every text frame consumed by this test client is a server message emitted by the terminal adapter.
+  return JSON.parse(data.toString()) as TerminalServerMessage;
+}
 
 class TestClient {
   readonly messages: TerminalMessage[] = [];
@@ -72,7 +93,7 @@ class TestClient {
       const buffer = Buffer.isBuffer(data) ? data : Buffer.from(data);
       const message: TerminalMessage = { kind: isBinary ? "binary" : "text", data: buffer };
       this.messages.push(message);
-      for (const waiter of [...this.waiters]) {
+      for (const waiter of this.waiters) {
         if (waiter.predicate(message)) {
           this.waiters.delete(waiter);
           clearTimeout(waiter.timer);
@@ -92,7 +113,7 @@ class TestClient {
     });
   }
 
-  send(obj: unknown): void {
+  send(obj: TerminalClientMessage): void {
     this.ws.send(JSON.stringify(obj));
   }
 
@@ -104,8 +125,8 @@ class TestClient {
     this.ws.send(text);
   }
 
-  textTypes(): string[] {
-    return this.messages.filter((m) => m.kind === "text").map((m) => (JSON.parse(m.data.toString()) as { type: string }).type);
+  textTypes(): ServerMessageType[] {
+    return this.messages.filter((m) => m.kind === "text").map((m) => parseServerMessage(m.data).type);
   }
 
   /** First message (from the front) matching the predicate. */
@@ -125,15 +146,20 @@ class TestClient {
     });
   }
 
-  waitForType(type: string, timeoutMs = 5000): Promise<Record<string, unknown>> {
+  waitForType(type: "ready", timeoutMs?: number): Promise<TerminalReadyMessage>;
+  waitForType(type: "ownership", timeoutMs?: number): Promise<TerminalOwnershipMessage>;
+  waitForType(type: "closed", timeoutMs?: number): Promise<TerminalClosedMessage>;
+  waitForType(type: "error", timeoutMs?: number): Promise<TerminalErrorMessage>;
+  waitForType(type: ServerMessageType, timeoutMs?: number): Promise<TerminalServerMessage>;
+  waitForType(type: ServerMessageType, timeoutMs = 5000): Promise<TerminalServerMessage> {
     return this.waitFor((m) => {
       if (m.kind !== "text") return false;
       try {
-        return (JSON.parse(m.data.toString()) as { type: string }).type === type;
+        return parseServerMessage(m.data).type === type;
       } catch {
         return false;
       }
-    }, timeoutMs).then((m) => JSON.parse(m.data.toString()) as Record<string, unknown>);
+    }, timeoutMs).then((m) => parseServerMessage(m.data));
   }
 
   waitClosed(timeoutMs = 5000): Promise<{ code: number; reason: string }> {
@@ -178,7 +204,7 @@ async function openClient(headers?: Record<string, string>): Promise<TestClient>
   return new TestClient(ws);
 }
 
-async function hello(client: TestClient, helloMsg: Record<string, unknown>): Promise<Record<string, unknown>> {
+async function hello(client: TestClient, helloMsg: TerminalHello): Promise<TerminalReadyMessage> {
   client.send(helloMsg);
   return client.waitForType("ready");
 }
@@ -202,7 +228,7 @@ describe("terminal websocket contract (offline)", () => {
     server = createScoutrServer({
       herdr: fakeHerdr(),
       feed,
-      usage: { all: async () => ({}) } as never,
+      usage: new UsageService(),
       config: { configDir: "/tmp/scoutr-test-config", hostId: "host_test", token: TOKEN, port: PORT },
       terminal: launcher,
       terminalOptions: { graceMs: 120 },
@@ -250,9 +276,8 @@ describe("terminal websocket contract (offline)", () => {
     const response = await fetch(`http://127.0.0.1:${PORT}/api/health`, {
       headers: { authorization: `Bearer ${TOKEN}` },
     });
-    const health = (await response.json()) as {
-      terminal: { capability: { status: string; herdrVersion: string; protocol: number } };
-    };
+    // SAFETY: the health endpoint returns the documented terminal capability shape.
+    const health = (await response.json()) as HealthResponse;
     assert.equal(response.status, 200);
     assert.deepEqual(health.terminal.capability, { status: "supported", herdrVersion: "0.8.0", protocol: 19 });
   });
@@ -300,7 +325,7 @@ describe("terminal websocket contract (offline)", () => {
     await hello(client, { type: "hello", version: 1, paneId: "w1:p1", cols: 120, rows: 30, intent: "auto" });
     await client.waitFor((m) => m.kind === "binary");
     const wire = client.messages.map((m) =>
-      m.kind === "text" ? (JSON.parse(m.data.toString()) as { type: string }).type : m.data.toString("utf8"),
+      m.kind === "text" ? parseServerMessage(m.data).type : m.data.toString("utf8"),
     );
     assert.deepEqual(wire, ["ready", "history-row\n", "\x1b[2Jreplay:control"]);
     client.close();
@@ -351,7 +376,7 @@ describe("terminal websocket contract (offline)", () => {
   test("pane gone emits closed(pane_closed); a fresh hello starts a new generation", async () => {
     const client = await openClient();
     const ready = await hello(client, { type: "hello", version: 1, paneId: "w1:p1", cols: 120, rows: 30, intent: "auto" });
-    const firstGen = ready.generation as number;
+    const firstGen = ready.generation;
     launcher.last()!.emitClosed("terminal-gone", "terminal attach ended: pane not found");
     const closed = await client.waitForType("closed");
     assert.equal(closed.reason, "pane_closed");
@@ -359,7 +384,7 @@ describe("terminal websocket contract (offline)", () => {
 
     const client2 = await openClient();
     const ready2 = await hello(client2, { type: "hello", version: 1, paneId: "w1:p1", cols: 120, rows: 30, intent: "auto" });
-    assert.ok((ready2.generation as number) > firstGen);
+    assert.ok(ready2.generation > firstGen);
     client2.close();
     await client2.waitClosed();
   });
@@ -425,12 +450,12 @@ describe("terminal websocket contract (offline)", () => {
     const clientA = await openClient();
     const readyA = await hello(clientA, { type: "hello", version: 1, paneId: "w1:p1", cols: 120, rows: 30, intent: "auto" });
     const procA = launcher.last()!;
-    const genA = readyA.generation as number;
+    const genA = readyA.generation;
 
     // The second device attaches a different pane: no replacement occurs.
     const clientB = await openClient();
     const readyB = await hello(clientB, { type: "hello", version: 1, paneId: "w1:p2", cols: 120, rows: 30, intent: "auto" });
-    assert.ok((readyB.generation as number) > genA);
+    assert.ok(readyB.generation > genA);
 
     // Neither socket was replaced: no closed frame, both children held.
     await new Promise((resolve) => setTimeout(resolve, 60));
@@ -474,7 +499,7 @@ describe("terminal websocket contract (offline)", () => {
     assert.equal(launcher.opens.length, opensBefore + 2);
     assert.notEqual(launcher.last(), procA);
     assert.equal(procA.releasedFlag, true);
-    assert.ok((ready.generation as number) > (readyA.generation as number));
+    assert.ok(ready.generation > readyA.generation);
     clientB.close();
     await clientB.waitClosed();
   });
@@ -591,10 +616,7 @@ describe("terminal adapter backpressure (fake socket)", () => {
     }
   }
 
-  function makeConnection(options: { broker: TerminalSessionBroker; now?: () => number }): {
-    socket: FakeSocket;
-    conn: TerminalConnection;
-  } {
+  function makeConnection(options: { broker: TerminalSessionBroker; now?: () => number }) {
     const socket = new FakeSocket();
     const conn = new TerminalConnection(socket, {
       broker: options.broker,
@@ -611,7 +633,7 @@ describe("terminal adapter backpressure (fake socket)", () => {
     return { socket, conn };
   }
 
-  function makeFreshEnv(): { launcher: FakeTerminalLauncher; feed: ReturnType<typeof fakeFeed> } {
+  function makeFreshEnv() {
     return { launcher: new FakeTerminalLauncher(), feed: fakeFeed(snapshotWithPanes(["w1:p1"])) };
   }
 

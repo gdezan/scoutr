@@ -212,7 +212,7 @@ test("ownership conflict rejects with TerminalOwnershipConflictError", async () 
   const env = makeEnv("conflict");
   await assert.rejects(
     open(env),
-    (err: unknown) =>
+    (err) =>
       err instanceof TerminalOwnershipConflictError &&
       err.message.includes("already has an attached client") &&
       err.code === "ownership-conflict",
@@ -223,7 +223,7 @@ test("terminal-gone closed reason rejects as a startup error", async () => {
   const env = makeEnv("gone");
   await assert.rejects(
     open(env),
-    (err: unknown) => err instanceof TerminalStartupError && err.code === "handshake-closed" && err.message.includes("not found"),
+    (err) => err instanceof TerminalStartupError && err.code === "handshake-closed" && err.message.includes("not found"),
   );
 });
 
@@ -231,7 +231,7 @@ test("stderr before handshake fails open with the stderr tail", async () => {
   const env = makeEnv("stderr-startup");
   await assert.rejects(
     open(env),
-    (err: unknown) =>
+    (err) =>
       err instanceof TerminalStartupError && err.code === "process-exited" && err.message.includes("fatal: herdr configuration is broken"),
   );
 });
@@ -240,7 +240,7 @@ test("exit before the first frame fails open", async () => {
   const env = makeEnv("exit-before-frame");
   await assert.rejects(
     open(env),
-    (err: unknown) => err instanceof TerminalStartupError && err.code === "process-exited" && err.message.includes("code 1"),
+    (err) => err instanceof TerminalStartupError && err.code === "process-exited" && err.message.includes("code 1"),
   );
 });
 
@@ -248,7 +248,7 @@ test("no frame within the handshake bound fails open", async () => {
   const env = makeEnv("hang", { handshakeTimeoutMs: 250 });
   await assert.rejects(
     open(env),
-    (err: unknown) => err instanceof TerminalStartupError && err.code === "handshake-timeout",
+    (err) => err instanceof TerminalStartupError && err.code === "handshake-timeout",
   );
 });
 
@@ -256,7 +256,7 @@ test("invalid JSON record kills the session as a typed error", async () => {
   const env = makeEnv("invalid-json");
   await assert.rejects(
     open(env),
-    (err: unknown) => err instanceof TerminalStartupError && err.code === "invalid-json",
+    (err) => err instanceof TerminalStartupError && err.code === "invalid-json",
   );
 });
 
@@ -264,7 +264,7 @@ test("invalid base64 record kills the session as a typed error", async () => {
   const env = makeEnv("invalid-base64");
   await assert.rejects(
     open(env),
-    (err: unknown) => err instanceof TerminalStartupError && err.code === "invalid-base64",
+    (err) => err instanceof TerminalStartupError && err.code === "invalid-base64",
   );
 });
 
@@ -272,7 +272,7 @@ test("over-long record line is rejected before allocation", async () => {
   const env = makeEnv("huge-line");
   await assert.rejects(
     open(env),
-    (err: unknown) => err instanceof TerminalStartupError && err.code === "line-too-long",
+    (err) => err instanceof TerminalStartupError && err.code === "line-too-long",
   );
 });
 
@@ -386,18 +386,18 @@ test("spawn failure is a typed startup error", async () => {
   const launcher = new HerdrTerminalLauncher({ bin: "/nonexistent/herdr" });
   await assert.rejects(
     launcher.open({ target: "w1:p1", mode: "control", takeover: false, cols: 80, rows: 24 }),
-    (err: unknown) => err instanceof TerminalStartupError && err.code === "spawn" && err.message.includes("nonexistent"),
+    (err) => err instanceof TerminalStartupError && err.code === "spawn" && err.message.includes("nonexistent"),
   );
 });
 
 test("bounds: invalid targets and grids are rejected before spawn", async () => {
   const env = makeEnv("ok");
-  await assert.rejects(open(env, { cols: 0 }), (err: unknown) => err instanceof TerminalBoundsError);
-  await assert.rejects(open(env, { rows: 0 }), (err: unknown) => err instanceof TerminalBoundsError);
-  await assert.rejects(open(env, { cols: 501 }), (err: unknown) => err instanceof TerminalBoundsError);
+  await assert.rejects(open(env, { cols: 0 }), (err) => err instanceof TerminalBoundsError);
+  await assert.rejects(open(env, { rows: 0 }), (err) => err instanceof TerminalBoundsError);
+  await assert.rejects(open(env, { cols: 501 }), (err) => err instanceof TerminalBoundsError);
   await assert.rejects(
     env.launcher.open({ target: "w1\np1", mode: "control", takeover: false, cols: 80, rows: 24 }),
-    (err: unknown) => err instanceof TerminalBoundsError,
+    (err) => err instanceof TerminalBoundsError,
   );
 });
 
@@ -442,7 +442,8 @@ test("probe: a newer herdr that broke the contract still fails, on evidence", as
   const cap = await env.launcher.probe("w1:p1");
   assert.equal(cap.status, "unsupported");
   assert.ok(cap.status === "unsupported" && cap.installedVersion === "0.10.0");
-  assert.match((cap as { reason: string }).reason, /observer handshake failed/);
+  if (cap.status !== "unsupported") assert.fail("expected an unsupported capability");
+  assert.match(cap.reason, /observer handshake failed/);
 });
 
 test("probe: unparseable version output", async () => {

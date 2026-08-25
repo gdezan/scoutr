@@ -6,7 +6,7 @@ import {
   peelPiSkillInvocation,
   skillInvocationPreview,
 } from "../src/skill-invocation.js";
-import { entryText, type TranscriptEntry } from "../src/transcript.js";
+import { entryText, type ContentBlock, type SkillBlock, type TextBlock, type TranscriptEntry } from "../src/transcript.js";
 import { parsePiTranscript } from "../src/agents/pi/transcript.js";
 import { parseClaudeTranscript } from "../src/agents/claude/transcript.js";
 
@@ -16,6 +16,14 @@ References are relative to /home/u/.agents/skills/grilling.
 # Grill me
 Ask hard questions.
 </skill>`;
+
+function isSkillBlock(block: ContentBlock | undefined): block is SkillBlock {
+  return block?.type === "skill" && "name" in block && "text" in block && "command" in block;
+}
+
+function isTextBlock(block: ContentBlock | undefined): block is TextBlock {
+  return block?.type === "text" && "text" in block;
+}
 
 function userEntry(content: TranscriptEntry["content"]): TranscriptEntry {
   return {
@@ -34,10 +42,13 @@ describe("skill invocation", () => {
       blocks.map((block) => block.type),
       ["skill", "text"],
     );
-    const skill = blocks[0] as { name: string; text: string };
+    const skill = blocks[0];
+    assert.ok(isSkillBlock(skill));
     assert.equal(skill.name, "grill-me");
     assert.match(skill.text, /Ask hard questions/);
-    assert.equal((blocks[1] as { text: string }).text, "on the preferred approach");
+    const leftover = blocks[1];
+    assert.ok(isTextBlock(leftover));
+    assert.equal(leftover.text, "on the preferred approach");
   });
 
   it("drops later skill tags", () => {
@@ -47,8 +58,12 @@ describe("skill invocation", () => {
       blocks.map((block) => block.type),
       ["skill", "text"],
     );
-    assert.equal((blocks[0] as { name: string }).name, "grill-me");
-    assert.equal((blocks[1] as { text: string }).text, "still here");
+    const skill = blocks[0];
+    assert.ok(isSkillBlock(skill));
+    assert.equal(skill.name, "grill-me");
+    const leftover = blocks[1];
+    assert.ok(isTextBlock(leftover));
+    assert.equal(leftover.text, "still here");
   });
 
   it("lifts a leading /skill:name with empty body", () => {
@@ -132,14 +147,18 @@ describe("skill invocation", () => {
     const blocks = peelClaudeCommandInvocation(
       "<command-name>/review</command-name>\n<command-contents>Review the diff.</command-contents>\n<command-args>the bridge</command-args>",
     );
-    assert.equal((blocks?.[0] as { text: string }).text, "Review the diff.");
+    const skill = blocks?.[0];
+    assert.ok(isSkillBlock(skill));
+    assert.equal(skill.text, "Review the diff.");
   });
 
   it("keeps text the CLI appended outside the command tags", () => {
     const blocks = peelClaudeCommandInvocation(
       "<command-name>/review</command-name>\n<command-args>the bridge</command-args>\n[Image #1]",
     );
-    assert.equal((blocks?.[1] as { text: string }).text, "the bridge\n[Image #1]");
+    const leftover = blocks?.[1];
+    assert.ok(isTextBlock(leftover));
+    assert.equal(leftover.text, "the bridge\n[Image #1]");
   });
 
   it("leaves an ordinary Claude prompt alone", () => {
@@ -181,8 +200,10 @@ describe("skill invocation", () => {
     const transcript = parsePiTranscript(line);
     const [skill, leftover] = transcript.entries[0]!.content;
     assert.equal(skill?.type, "skill");
-    assert.equal((skill as { name: string }).name, "missing");
-    assert.equal((skill as { text: string }).text, "");
-    assert.equal((leftover as { text: string }).text, "please");
+    assert.ok(isSkillBlock(skill));
+    assert.equal(skill.name, "missing");
+    assert.equal(skill.text, "");
+    assert.ok(isTextBlock(leftover));
+    assert.equal(leftover.text, "please");
   });
 });

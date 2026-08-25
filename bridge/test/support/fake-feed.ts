@@ -1,4 +1,4 @@
-import type { HerdrEventFeed, FeedMessage } from "../../src/herdr/feed.js";
+import type { HerdrFeed, FeedMessage } from "../../src/herdr/feed.js";
 import type { SessionSnapshot } from "../../src/herdr/types.js";
 
 export interface FakeFeedExtras {
@@ -8,10 +8,10 @@ export interface FakeFeedExtras {
 }
 
 /**
- * In-memory HerdrEventFeed: a settable snapshot and handler fan-out, so the
+ * In-memory HerdrFeed: a settable snapshot and handler fan-out, so the
  * server's WS streaming and snapshot-dependent routes run offline.
  */
-export function fakeFeed(initial: SessionSnapshot | null = null): HerdrEventFeed & FakeFeedExtras {
+export function fakeFeed(initial: SessionSnapshot | null = null): HerdrFeed & FakeFeedExtras {
   let snapshot = initial;
   const handlers = new Set<(message: FeedMessage) => void>();
   return {
@@ -35,5 +35,5 @@ export function fakeFeed(initial: SessionSnapshot | null = null): HerdrEventFeed
     },
     start: async () => {},
     stop: async () => {},
-  } as unknown as HerdrEventFeed & FakeFeedExtras;
+  };
 }

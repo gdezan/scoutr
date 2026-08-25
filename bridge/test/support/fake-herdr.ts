@@ -1,11 +1,28 @@
-import type { AgentReadResponse } from "../../src/herdr/client.js";
 import type { HerdrPort } from "../../src/herdr/port.js";
 import type { SessionSnapshot } from "../../src/herdr/types.js";
 
 /** One recorded herdr call: the port method and the named arguments it received. */
+export interface SentParams {
+  cwd?: string | null;
+  label?: string | null;
+  focus?: boolean;
+  workspace_id?: string | null;
+  tab_id?: string;
+  pane_id?: string;
+  text?: string;
+  keys?: string[];
+  target?: string;
+  timeoutMs?: number;
+  source?: string;
+  lines?: number;
+  format?: string;
+  stripAnsi?: boolean;
+  requestTimeoutMs?: number;
+}
+
 export interface SentInput {
   method: keyof HerdrPort;
-  params: Record<string, unknown>;
+  params: SentParams;
 }
 
 export interface FakeHerdrExtras {
@@ -139,7 +156,7 @@ export function fakeHerdr(initial: Partial<SessionSnapshot> = {}): HerdrPort & F
           revision: 0,
           truncated: false,
         },
-      } as AgentReadResponse;
+      };
     },
   };
 

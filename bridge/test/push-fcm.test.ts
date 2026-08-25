@@ -6,9 +6,27 @@ import { join } from "node:path";
 import { HttpV1FcmSender } from "../src/push/fcm.js";
 import { JsonDeviceRegistry } from "../src/push/devices.js";
 
+interface FcmMessageData {
+  kind: string;
+  paneId: string;
+  hostId?: string;
+  profileGeneration?: string;
+}
+
+interface FcmMessage {
+  token: string;
+  data: FcmMessageData;
+  android: { priority: string; ttl: string };
+  notification?: object;
+}
+
+interface FcmRequest {
+  message: FcmMessage;
+}
+
 /** Capture every FCM request without touching the network. */
 function stubFetch(respond: (call: number) => { status: number; body?: string }) {
-  const calls: Array<{ url: string; authorization: string; body: unknown }> = [];
+  const calls: Array<{ url: string; authorization: string; body: FcmRequest }> = [];
   const fetchImpl: typeof fetch = async (url, init) => {
     const headers = new Headers(init?.headers);
     calls.push({
@@ -54,7 +72,7 @@ test("a generation-qualified ping carries exactly the host and profile generatio
       android: { priority: "high", ttl: "900s" },
     },
   });
-  const data = (calls[0]!.body as { message: { data: Record<string, unknown> } }).message.data;
+  const data = calls[0]!.body.message.data;
   assert.deepEqual(Object.keys(data).sort(), ["hostId", "kind", "paneId", "profileGeneration"]);
 });
 
@@ -75,9 +93,9 @@ test("no payload ever carries a notification block or agent text", async () => {
   const { fetchImpl, calls } = stubFetch(() => ({ status: 200 }));
   await senderWith(fetchImpl).send(["device-a"], "blocked", "w1:p1", "host-a");
 
-  const message = (calls[0]!.body as { message: Record<string, unknown> }).message;
+  const message = calls[0]!.body.message;
   assert.equal(message.notification, undefined);
-  assert.deepEqual(Object.keys(message.data as object).sort(), ["kind", "paneId"]);
+  assert.deepEqual(Object.keys(message.data).sort(), ["kind", "paneId"]);
 });
 
 test("a 404 reports the token for unregistration, other failures do not", async () => {

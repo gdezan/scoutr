@@ -8,13 +8,34 @@ import type { SessionSnapshot } from "../src/herdr/types.js";
 import { RouteTable, dispatchRoute } from "../src/routes/dispatcher.js";
 import { buildRoutes } from "../src/routes/index.js";
 import type { DispatchRequest, RouteContext, RouteResult } from "../src/routes/types.js";
-import { fakeHerdr, type FakeHerdrExtras } from "./support/fake-herdr.js";
+import { fakeHerdr, type FakeHerdrExtras, type SentParams } from "./support/fake-herdr.js";
 import { pane, snapshot, tab, workspace } from "./support/snapshot.js";
 
 const TOKEN = "terminal_hierarchy_test_token_0001";
 const table = new RouteTable(buildRoutes());
 
 type FakeHerdr = HerdrPort & FakeHerdrExtras;
+
+interface HierarchyBody {
+  operation?: string | number;
+  workspaceId?: string | number;
+  selectedPaneId?: string | number;
+  cwd?: string | number;
+  label?: string | number;
+  paneId?: string | number;
+  tabId?: string | number;
+  expectedPaneCount?: string | number;
+}
+
+interface ErrorBody {
+  error: string;
+}
+
+interface HierarchySuccessBody {
+  ok: boolean;
+  selectedPaneId: string | null;
+  snapshot: SessionSnapshot;
+}
 
 /** The fake returns the same snapshot on every read; sequence pre/post for the route's two reads. */
 function sequencedSnapshots(fake: FakeHerdr, pre: SessionSnapshot, post: SessionSnapshot): FakeHerdr {
@@ -29,7 +50,8 @@ function sequencedSnapshots(fake: FakeHerdr, pre: SessionSnapshot, post: Session
 }
 
 function depsFor(fake: HerdrPort): RouteContext["deps"] {
-  return { herdr: fake, config: { configDir: "/tmp/scoutr-test-config", hostId: "host_test", token: TOKEN } } as unknown as RouteContext["deps"];
+  // SAFETY: the hierarchy routes only read herdr and config; the other route dependencies are unused by this offline dispatch.
+  return { herdr: fake, config: { configDir: "/tmp/scoutr-test-config", hostId: "host_test", token: TOKEN } } as RouteContext["deps"];
 }
 
 function streamOf(chunks: Buffer[]): AsyncIterable<Buffer> {
@@ -48,7 +70,7 @@ function request(overrides: Partial<DispatchRequest> = {}): DispatchRequest {
   };
 }
 
-async function postHierarchy(deps: RouteContext["deps"], body: unknown): Promise<RouteResult> {
+async function postHierarchy(deps: RouteContext["deps"], body: HierarchyBody): Promise<RouteResult> {
   return dispatchRoute(
     table,
     request({ body: streamOf([Buffer.from(JSON.stringify(body))]) }),
@@ -56,13 +78,19 @@ async function postHierarchy(deps: RouteContext["deps"], body: unknown): Promise
   );
 }
 
-function recorded(fake: FakeHerdr, method: keyof HerdrPort): Record<string, unknown>[] {
+function recorded(fake: FakeHerdr, method: keyof HerdrPort): SentParams[] {
   return fake.sent.filter((call) => call.method === method).map((call) => call.params);
 }
 
-function okBody(result: RouteResult): { ok: boolean; selectedPaneId: string | null; snapshot: SessionSnapshot } {
+function okBody(result: RouteResult): HierarchySuccessBody {
   assert.equal(result.status, 200);
-  return result.body as { ok: boolean; selectedPaneId: string | null; snapshot: SessionSnapshot };
+  // SAFETY: a 200 hierarchy mutation response is the route's documented success body.
+  return result.body as HierarchySuccessBody;
+}
+
+function errorBody(result: RouteResult): ErrorBody {
+  // SAFETY: these assertions are used only after the route has returned an error status.
+  return result.body as ErrorBody;
 }
 
 describe("terminal hierarchy route", () => {
@@ -78,7 +106,7 @@ describe("terminal hierarchy route", () => {
     for (const body of [{ operation: "explode" }, {}, { operation: 42 }]) {
       const result = await postHierarchy(depsFor(fake), body);
       assert.equal(result.status, 400);
-      assert.match((result.body as { error: string }).error, /unknown hierarchy operation/);
+      assert.match(errorBody(result).error, /unknown hierarchy operation/);
     }
     assert.equal(fake.sent.length, 0);
   });
@@ -152,7 +180,7 @@ describe("create_tab", () => {
     const fake = fakeHerdr(snapshot([pane()], [tab()], [workspace()]));
     const result = await postHierarchy(depsFor(fake), { operation: "create_tab", workspaceId: "ws-ghost", selectedPaneId: "p1" });
     assert.equal(result.status, 404);
-    assert.equal((result.body as { error: string }).error, "workspace not found");
+    assert.equal(errorBody(result).error, "workspace not found");
     assert.deepEqual(fake.sent.map((call) => call.method), ["snapshot"]);
   });
 
@@ -160,7 +188,7 @@ describe("create_tab", () => {
     const fake = fakeHerdr();
     const result = await postHierarchy(depsFor(fake), { operation: "create_tab" });
     assert.equal(result.status, 400);
-    assert.match((result.body as { error: string }).error, /missing workspaceId/);
+    assert.match(errorBody(result).error, /missing workspaceId/);
     assert.equal(fake.sent.length, 0);
   });
 });
@@ -204,7 +232,7 @@ describe("create_workspace", () => {
     const fake = fakeHerdr();
     const result = await postHierarchy(depsFor(fake), { operation: "create_workspace", cwd: "/etc" });
     assert.equal(result.status, 400);
-    assert.equal((result.body as { error: string }).error, "path outside allowed root");
+    assert.equal(errorBody(result).error, "path outside allowed root");
     assert.equal(fake.sent.length, 0);
   });
 
@@ -212,10 +240,10 @@ describe("create_workspace", () => {
     const fake = fakeHerdr();
     const missingCwd = await postHierarchy(depsFor(fake), { operation: "create_workspace" });
     assert.equal(missingCwd.status, 400);
-    assert.match((missingCwd.body as { error: string }).error, /cwd must be a non-empty string/);
+    assert.match(errorBody(missingCwd).error, /cwd must be a non-empty string/);
     const blankLabel = await postHierarchy(depsFor(fake), { operation: "create_workspace", cwd: homedir(), label: "   " });
     assert.equal(blankLabel.status, 400);
-    assert.match((blankLabel.body as { error: string }).error, /label must be a non-empty string/);
+    assert.match(errorBody(blankLabel).error, /label must be a non-empty string/);
     assert.equal(fake.sent.length, 0);
   });
 });
@@ -254,7 +282,7 @@ describe("rename operations", () => {
       const fake = fakeHerdr(snapshot([pane()], [tab()], [workspace()]));
       const result = await postHierarchy(depsFor(fake), body);
       assert.equal(result.status, 404);
-      assert.equal((result.body as { error: string }).error, error);
+      assert.equal(errorBody(result).error, error);
       assert.deepEqual(fake.sent.map((call) => call.method), ["snapshot"]);
     }
   });
@@ -352,7 +380,7 @@ describe("close_pane", () => {
     const fake = fakeHerdr(snapshot([pane()], [tab()], [workspace()]));
     const result = await postHierarchy(depsFor(fake), { operation: "close_pane", paneId: "p-ghost" });
     assert.equal(result.status, 404);
-    assert.equal((result.body as { error: string }).error, "pane not found");
+    assert.equal(errorBody(result).error, "pane not found");
     assert.deepEqual(fake.sent.map((call) => call.method), ["snapshot"]);
   });
 
@@ -361,7 +389,7 @@ describe("close_pane", () => {
     fake.failNext("paneClose", new Error("herdr refused"));
     const result = await postHierarchy(depsFor(fake), { operation: "close_pane", paneId: "p1" });
     assert.equal(result.status, 502);
-    assert.equal((result.body as { error: string }).error, "herdr refused");
+    assert.equal(errorBody(result).error, "herdr refused");
   });
 });
 
@@ -442,7 +470,7 @@ describe("close_tab", () => {
     const fake = fakeHerdr(snapshot([pane()], [tab()], [workspace()]));
     const result = await postHierarchy(depsFor(fake), { operation: "close_tab", tabId: "t-ghost", expectedPaneCount: 1 });
     assert.equal(result.status, 404);
-    assert.equal((result.body as { error: string }).error, "tab not found");
+    assert.equal(errorBody(result).error, "tab not found");
   });
 
   test("validates expectedPaneCount", async () => {
@@ -455,7 +483,7 @@ describe("close_tab", () => {
     ]) {
       const result = await postHierarchy(depsFor(fake), body);
       assert.equal(result.status, 400);
-      assert.match((result.body as { error: string }).error, /expectedPaneCount/);
+      assert.match(errorBody(result).error, /expectedPaneCount/);
     }
     assert.equal(fake.sent.length, 0);
   });
@@ -506,6 +534,6 @@ describe("close_workspace", () => {
     const fake = fakeHerdr(snapshot([pane()], [tab()], [workspace()]));
     const result = await postHierarchy(depsFor(fake), { operation: "close_workspace", workspaceId: "ws-ghost", expectedPaneCount: 1 });
     assert.equal(result.status, 404);
-    assert.equal((result.body as { error: string }).error, "workspace not found");
+    assert.equal(errorBody(result).error, "workspace not found");
   });
 });

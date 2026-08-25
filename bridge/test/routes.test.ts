@@ -6,8 +6,18 @@ import type { DispatchRequest, Route, RouteContext, RouteResult } from "../src/r
 
 const TOKEN = "dispatcher_test_token_0001";
 
+interface ErrorBody {
+  error: string;
+}
+
 function deps(): RouteContext["deps"] {
+  // SAFETY: dispatch tests exercise auth and routing only; derived route deps are unused.
   return { config: { configDir: "/tmp/scoutr-test-config", hostId: "host_test", token: TOKEN, port: 1 } } as never;
+}
+
+function errorBody(result: RouteResult): ErrorBody {
+  // SAFETY: dispatchRoute maps every tested failure to {ok:false,error:string}.
+  return result.body as ErrorBody;
 }
 
 function request(overrides: Partial<DispatchRequest> = {}): DispatchRequest {
@@ -62,8 +72,8 @@ describe("RouteTable", () => {
       route("GET", "/api/session-catalog/:action", { status: 200, body: { ok: "get" } }),
       route("POST", "/api/session-catalog/:action", { status: 200, body: { ok: "post" } }),
     ]);
-    assert.equal((table.match("GET", "/api/session-catalog/resume")?.route as Route).path, "/api/session-catalog/:action");
-    assert.equal((table.match("POST", "/api/session-catalog/delete")?.route as Route).path, "/api/session-catalog/:action");
+    assert.equal(table.match("GET", "/api/session-catalog/resume")?.route.path, "/api/session-catalog/:action");
+    assert.equal(table.match("POST", "/api/session-catalog/delete")?.route.path, "/api/session-catalog/:action");
   });
 
   test("rejects duplicate literal routes", () => {
@@ -133,7 +143,7 @@ describe("dispatchRoute", () => {
     const table = new RouteTable([route("GET", "/x", new SessionsError("nope", 409))]);
     const result = await dispatchRoute(table, request(), deps());
     assert.equal(result.status, 409);
-    assert.equal((result.body as { error: string }).error, "nope");
+    assert.equal(errorBody(result).error, "nope");
   });
 
   test("maps unknown errors to 502", async () => {
@@ -213,7 +223,7 @@ describe("dispatchRoute", () => {
     for (const raw of ["{oops", "null", "[1,2]", '"str"', "42"]) {
       const result = await dispatchRoute(table, { ...auth, body: streamOf([Buffer.from(raw)]) }, deps());
       assert.equal(result.status, 400, raw);
-      assert.match((result.body as { error: string }).error, /JSON object|valid JSON/);
+      assert.match(errorBody(result).error, /JSON object|valid JSON/);
     }
   });
 

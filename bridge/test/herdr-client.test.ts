@@ -1,12 +1,12 @@
-import { test, describe, before, after } from "node:test";
+import { test, describe, after } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { HerdrClient, defaultSocketPath, HerdrError, herdrRequest, herdrSubscribe } from "../src/herdr/client.js";
-import { HerdrEventFeed } from "../src/herdr/feed.js";
+import { HerdrClient, HerdrError, herdrRequest, herdrSubscribe } from "../src/herdr/client.js";
+import { HerdrEventFeed, type FeedMessage, type FeedSnapshot } from "../src/herdr/feed.js";
 import type { SessionSnapshot } from "../src/herdr/types.js";
 
 /**
@@ -349,34 +349,34 @@ describe("herdr client (live socket)", { skip, timeout: LIVE_SOCKET_TIMEOUT_MS }
   test("ping returns server version and protocol", async () => {
     const pong = await client!.ping();
     assert.equal(pong.type, "pong");
-    assert.equal(typeof pong.version, "string");
-    assert.equal(typeof pong.protocol, "number");
+    assert.ok(pong.version.length > 0);
+    assert.ok(Number.isInteger(pong.protocol));
     assert.ok(pong.protocol >= 17, `protocol ${pong.protocol} should be >= 17`);
   });
 
   test("session.snapshot returns the full herd shape", async () => {
     const snapshot: SessionSnapshot = await client!.snapshot();
-    assert.equal(typeof snapshot.version, "string");
-    assert.equal(typeof snapshot.protocol, "number");
+    assert.ok(snapshot.version.length > 0);
+    assert.ok(Number.isInteger(snapshot.protocol));
     assert.ok(Array.isArray(snapshot.workspaces));
     assert.ok(Array.isArray(snapshot.panes));
     assert.ok(Array.isArray(snapshot.agents));
     assert.ok(Array.isArray(snapshot.tabs));
 
     for (const pane of snapshot.panes) {
-      assert.equal(typeof pane.pane_id, "string");
+      assert.ok(pane.pane_id.length > 0);
       assert.ok(
         ["idle", "working", "blocked", "done", "unknown"].includes(pane.agent_status),
         `unexpected agent_status ${pane.agent_status}`,
       );
-      assert.equal(typeof pane.workspace_id, "string");
+      assert.ok(pane.workspace_id.length > 0);
     }
     for (const agent of snapshot.agents) {
-      assert.equal(typeof agent.agent, "string");
-      assert.equal(typeof agent.pane_id, "string");
-      assert.equal(typeof agent.agent_status, "string");
+      assert.ok(agent.agent.length > 0);
+      assert.ok(agent.pane_id.length > 0);
+      assert.ok(agent.agent_status.length > 0);
       if (agent.agent_session) {
-        assert.equal(typeof agent.agent_session.value, "string");
+        assert.ok(agent.agent_session.value.length > 0);
         assert.ok(["id", "path"].includes(agent.agent_session.kind));
       }
     }
@@ -385,9 +385,9 @@ describe("herdr client (live socket)", { skip, timeout: LIVE_SOCKET_TIMEOUT_MS }
   test("unknown method produces a HerdrError with code", async () => {
     await assert.rejects(
       client!.request("definitely.not_a_method"),
-      (error: unknown) => {
+      (error) => {
         assert.ok(error instanceof HerdrError);
-        assert.equal(typeof error.code, "string");
+        assert.ok(error.code);
         return true;
       },
     );
@@ -407,7 +407,7 @@ describe("herdr event feed (live socket)", { skip, timeout: LIVE_SOCKET_TIMEOUT_
   });
 
   test("feed emits an initial snapshot then accepts new events", async () => {
-    const received: unknown[] = [];
+    const received: FeedMessage[] = [];
     const feed = new HerdrEventFeed(socketPath!, (message) => {
       received.push(message);
     });
@@ -415,14 +415,16 @@ describe("herdr event feed (live socket)", { skip, timeout: LIVE_SOCKET_TIMEOUT_
     await feed.start();
 
     // The initial snapshot is emitted synchronously by start().
-    const snap = received.find((message) => (message as { type?: string }).type === "snapshot");
+    const snap = received.find(
+      (message): message is FeedSnapshot => "type" in message && message.type === "snapshot",
+    );
     assert.ok(snap, "expected an initial snapshot message");
     assert.ok(received.length >= 1);
     assert.ok(feed.snapshot, "feed holds the latest snapshot");
   });
 
   test("feed.stop closes cleanly and stops emitting", async () => {
-    const received: unknown[] = [];
+    const received: FeedMessage[] = [];
     const feed = new HerdrEventFeed(socketPath!, (message) => {
       received.push(message);
     });

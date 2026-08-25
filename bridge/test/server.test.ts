@@ -8,10 +8,10 @@ import WebSocket from "ws";
 import { createScoutrServer, type ScoutrServer } from "../src/server.js";
 import { REVIEW_ROOTS_TTL_MS } from "../src/routes/review.js";
 import type { AgentInfo, SessionSnapshot } from "../src/herdr/types.js";
+import type { JsonBody, JsonValue } from "../src/routes/types.js";
 import { fakeHerdr } from "./support/fake-herdr.js";
 import { fakeFeed } from "./support/fake-feed.js";
 import { FakeTerminalLauncher } from "./support/fake-terminal.js";
-import type { FakeFeedExtras } from "./support/fake-feed.js";
 
 // Offline HTTP/WS suite: the real herdr is replaced by test/support/fakes, so
 // every route runs on any machine. Live-socket coverage lives in
@@ -19,6 +19,96 @@ import type { FakeFeedExtras } from "./support/fake-feed.js";
 
 const PORT = 8790;
 const TOKEN = "test_token_for_offline_run_0001";
+
+interface ServerQuestionOption {
+  label: string;
+  description: string;
+}
+
+interface ServerQuestion {
+  id: string;
+  header: string;
+  question: string;
+  multiSelect: boolean;
+  options: ServerQuestionOption[];
+}
+
+interface ServerAttention {
+  kind: string;
+  callId: string | null;
+  questionCount: number;
+  canQuickAnswer: boolean;
+  currentQuestion: ServerQuestion | null;
+}
+
+interface ServerAgentCard {
+  live: { paneId: string; status: string; statusSinceMs: number | null };
+  key: { path: string } | null;
+  model: string | null;
+  latestActivity: string | null;
+  updatedAtMs: number | null;
+  attention: ServerAttention | null;
+}
+
+interface ServerCatalogSession {
+  session: { key: { path: string }; live: null };
+}
+
+interface ServerAgentKind {
+  id: string;
+  displayName: string;
+  capabilities: string[];
+  hasModelCatalog: boolean;
+  hasSlashCommands: boolean;
+}
+
+interface ServerResponseBody {
+  ok: boolean;
+  hostId?: string;
+  api: { protocol: number; features: string[] };
+  herdr: { connected: boolean; version: string };
+  snapshot: { workspaces: JsonValue[]; agents: JsonValue[] };
+  agents: ServerAgentCard[];
+  catalog: {
+    commands: { name: string }[];
+    providers: JsonValue[];
+    sessions: ServerCatalogSession[];
+  };
+  listing: { path: string; files: string[]; dirs: string[]; truncated: boolean };
+  exists: boolean;
+  content: string;
+  truncated: boolean;
+  binary: boolean;
+  offset: number;
+  nextOffset: number;
+  totalBytes: number;
+  entries: { entryId: string }[];
+  hasMoreBefore: boolean;
+  beforeCursor: string | null;
+  error: string;
+  kinds: ServerAgentKind[];
+}
+
+interface ServerWsMessage {
+  type: string;
+  payload?: { kind: string };
+}
+
+interface AttachmentResponse {
+  ok: boolean;
+  path: string;
+}
+
+interface QuestionPayload {
+  question: string;
+  header: string;
+  options: ServerQuestionOption[];
+}
+
+function parseWsMessage(data: string): ServerWsMessage {
+  // SAFETY: the test WebSocket only receives bridge frames with a string type.
+  return JSON.parse(data) as ServerWsMessage;
+}
 
 function snapshotWithAgents(agents: Partial<AgentInfo>[]): SessionSnapshot {
   return {
@@ -50,14 +140,14 @@ function snapshotWithAgents(agents: Partial<AgentInfo>[]): SessionSnapshot {
   };
 }
 
-async function getJson(path: string): Promise<{ status: number; body: unknown }> {
+async function getJson(path: string): Promise<{ status: number; body: ServerResponseBody }> {
   const response = await fetch(`http://127.0.0.1:${PORT}${path}`, {
     headers: { authorization: `Bearer ${TOKEN}` },
   });
   return { status: response.status, body: await response.json() };
 }
 
-async function postJson(path: string, body: unknown): Promise<{ status: number; body: unknown }> {
+async function postJson(path: string, body: JsonBody): Promise<{ status: number; body: ServerResponseBody }> {
   const response = await fetch(`http://127.0.0.1:${PORT}${path}`, {
     method: "POST",
     headers: { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" },
@@ -111,6 +201,7 @@ describe("scoutr bridge HTTP/WS API (offline)", () => {
     server = createScoutrServer({
       herdr,
       feed,
+      // SAFETY: these tests never call usage; the stub fills an unused ServerDeps field.
       usage: usage as never,
       config: { configDir, hostId: "host_test", token: TOKEN, port: PORT },
       terminal: new FakeTerminalLauncher(),
@@ -124,12 +215,7 @@ describe("scoutr bridge HTTP/WS API (offline)", () => {
   test("health reports the Scoutr API protocol and herdr connectivity", async () => {
     const { status, body } = await getJson("/api/health");
     assert.equal(status, 200);
-    const health = body as {
-      ok: boolean;
-      hostId?: string;
-      api: { protocol: number; features: string[] };
-      herdr: { connected: boolean; version: string };
-    };
+    const health = body;
     assert.equal(health.ok, true);
     assert.deepEqual(health.api, {
       protocol: 2,
@@ -152,10 +238,7 @@ describe("scoutr bridge HTTP/WS API (offline)", () => {
     herdr.failNext("ping", new Error("socket unavailable"));
 
     const { status, body } = await getJson("/api/health");
-    const health = body as {
-      api: { protocol: number; features: string[] };
-      herdr: { connected: boolean };
-    };
+    const health = body;
 
     assert.equal(status, 200);
     assert.deepEqual(health.api, {
@@ -180,7 +263,7 @@ describe("scoutr bridge HTTP/WS API (offline)", () => {
     feed.setSnapshot(snapshotWithAgents([]));
     const { status, body } = await getJson("/api/snapshot");
     assert.equal(status, 200);
-    const snapshot = (body as { snapshot: { workspaces: unknown[]; agents: unknown[] } }).snapshot;
+    const snapshot = body.snapshot;
     assert.ok(Array.isArray(snapshot.workspaces));
     assert.ok(Array.isArray(snapshot.agents));
   });
@@ -189,7 +272,7 @@ describe("scoutr bridge HTTP/WS API (offline)", () => {
     feed.setSnapshot(snapshotWithAgents([{ agent_status: "blocked", cwd: "/work/project" }]));
     const { status, body } = await getJson("/api/agents");
     assert.equal(status, 200);
-    const cards = (body as { agents: { live: { paneId: string; status: string } }[] }).agents;
+    const cards = body.agents;
     assert.equal(cards.length, 1);
     assert.equal(cards[0]?.live.paneId, "p1");
     assert.equal(cards[0]?.live.status, "blocked");
@@ -220,18 +303,20 @@ describe("scoutr bridge HTTP/WS API (offline)", () => {
         scroll: null,
       }],
     });
-    feed.emit({ kind: "pane_agent_status_changed", data: { pane_id: "p1", agent_status: "done" } } as never);
+    feed.emit({ kind: "pane_agent_status_changed", data: { pane_id: "p1", agent_status: "done" } });
     const before = await getJson("/api/agents");
-    const beforeCard = ((before.body as { agents: { live: { paneId: string; statusSinceMs: number | null } }[] }).agents)[0];
-    assert.equal(beforeCard?.live.paneId, "p1");
-    assert.equal(typeof beforeCard?.live.statusSinceMs, "number", "status entry exists before the pane closes");
+    const beforeCard = before.body.agents[0];
+    assert.ok(beforeCard);
+    assert.equal(beforeCard.live.paneId, "p1");
+    assert.notEqual(beforeCard.live.statusSinceMs, null, "status entry exists before the pane closes");
 
     feed.setSnapshot({ ...snapshot, panes: [] });
-    feed.emit({ kind: "pane_exited", data: { pane_id: "p1" } } as never);
+    feed.emit({ kind: "pane_exited", data: { pane_id: "p1" } });
     const after = await getJson("/api/agents");
-    const afterCard = ((after.body as { agents: { live: { paneId: string; statusSinceMs: number | null } }[] }).agents)[0];
-    assert.equal(afterCard?.live.paneId, "p1");
-    assert.equal(afterCard?.live.statusSinceMs, null, "status entry pruned for the closed pane");
+    const afterCard = after.body.agents[0];
+    assert.ok(afterCard);
+    assert.equal(afterCard.live.paneId, "p1");
+    assert.equal(afterCard.live.statusSinceMs, null, "status entry pruned for the closed pane");
   });
 
   test("agents enrich cards with bounded model and latest activity", async () => {
@@ -250,17 +335,12 @@ describe("scoutr bridge HTTP/WS API (offline)", () => {
     );
     const { status, body } = await getJson("/api/agents");
     assert.equal(status, 200);
-    const cards = (body as { agents: Array<{
-      key: { path: string } | null;
-      model: string | null;
-      latestActivity: string | null;
-      updatedAtMs: number | null;
-    }> }).agents;
+    const cards = body.agents;
     assert.equal(cards.length, 1);
     assert.equal(cards[0]?.key?.path, liveSession);
     assert.ok("model" in cards[0]!);
     assert.ok("latestActivity" in cards[0]!);
-    if (typeof cards[0]?.latestActivity === "string") {
+    if (cards[0]?.latestActivity) {
       assert.ok(cards[0].latestActivity.length <= 160);
     }
     assert.ok("updatedAtMs" in cards[0]!);
@@ -269,7 +349,7 @@ describe("scoutr bridge HTTP/WS API (offline)", () => {
   test("agents carry normalized attention for a simple ask, a multi-question ask, and neither", async () => {
     const askDir = join(sessionRoot, "attention-project");
     await mkdir(askDir, { recursive: true });
-    const write = async (name: string, questions: unknown[]) => {
+    const write = async (name: string, questions: QuestionPayload[]) => {
       const path = join(askDir, name);
       await writeFile(
         path,
@@ -303,16 +383,13 @@ describe("scoutr bridge HTTP/WS API (offline)", () => {
         snapshotWithAgents([{ agent_status: status, agent_session: { kind: "path", value: sessionPathValue } }]),
       );
       const { body } = await getJson("/api/agents");
-      return (body as { agents: Array<Record<string, unknown>> }).agents;
+      return body.agents;
     };
 
-    const simpleCard = (await cardsFor(simple))[0] as { attention: {
-      kind: string;
-      callId: string;
-      questionCount: number;
-      canQuickAnswer: boolean;
-      currentQuestion: { id: string; header: string; question: string; multiSelect: boolean; options: Array<Record<string, string>> };
-    } };
+    const simpleCard = (await cardsFor(simple))[0];
+    assert.ok(simpleCard);
+    assert.ok(simpleCard.attention);
+    assert.ok(simpleCard.attention.currentQuestion);
     assert.equal(simpleCard.attention.kind, "ask");
     assert.equal(simpleCard.attention.callId, "call_simple.jsonl");
     assert.equal(simpleCard.attention.questionCount, 1);
@@ -325,7 +402,10 @@ describe("scoutr bridge HTTP/WS API (offline)", () => {
       { label: "Hold", description: "Wait for review." },
     ]);
 
-    const multiCard = (await cardsFor(multi))[0] as { attention: { questionCount: number; canQuickAnswer: boolean; currentQuestion: { header: string } } };
+    const multiCard = (await cardsFor(multi))[0];
+    assert.ok(multiCard);
+    assert.ok(multiCard.attention);
+    assert.ok(multiCard.attention.currentQuestion);
     assert.equal(multiCard.attention.questionCount, 2);
     assert.equal(multiCard.attention.canQuickAnswer, false, "the board cannot submit a two-question round");
     assert.equal(multiCard.attention.currentQuestion.header, "Ship");
@@ -338,14 +418,15 @@ describe("scoutr bridge HTTP/WS API (offline)", () => {
         JSON.stringify({ type: "message", id: "e1", timestamp: "2026-01-01T00:00:01.000Z", message: { role: "assistant", content: [{ type: "text", text: "still working on it" }] } }),
       ].join("\n"),
     );
-    const workingCard = (await cardsFor(plain, "working"))[0] as { attention: unknown };
+    const workingCard = (await cardsFor(plain, "working"))[0];
+    assert.ok(workingCard);
     assert.equal(workingCard.attention, null, "a working pane with no open ask is not waiting on the user");
   });
 
   test("a blocked pane with no structured ask reports prompt attention only", async () => {
     feed.setSnapshot(snapshotWithAgents([{ agent_status: "blocked" }]));
     const { body } = await getJson("/api/agents");
-    const card = (body as { agents: Array<{ attention: unknown }> }).agents[0]!;
+    const card = body.agents[0]!;
     assert.deepEqual(card.attention, {
       kind: "prompt",
       callId: null,
@@ -358,7 +439,7 @@ describe("scoutr bridge HTTP/WS API (offline)", () => {
   test("commands returns the slash-command catalog", async () => {
     const { status, body } = await getJson("/api/commands");
     assert.equal(status, 200);
-    const commands = (body as { catalog: { commands: { name: string }[] } }).catalog.commands;
+    const commands = body.catalog.commands;
     assert.ok(commands.some((command) => command.name === "compact"));
   });
 
@@ -376,7 +457,7 @@ describe("scoutr bridge HTTP/WS API (offline)", () => {
     try {
       const { status, body } = await getJson(`/api/files?cwd=${encodeURIComponent(workspace)}`);
       assert.equal(status, 200);
-      const listing = (body as { listing: { path: string; files: string[]; truncated: boolean } }).listing;
+      const listing = body.listing;
       assert.deepEqual(listing.files, ["README.md", "src/Screen.kt"]);
       assert.equal(listing.truncated, false);
 
@@ -401,7 +482,7 @@ describe("scoutr bridge HTTP/WS API (offline)", () => {
     try {
       const hidden = await getJson(`/api/files?cwd=${encodeURIComponent(workspace)}&hidden=1`);
       assert.equal(hidden.status, 200);
-      const listing = (hidden.body as { listing: { files: string[] } }).listing;
+      const listing = hidden.body.listing;
       assert.deepEqual(listing.files, [".config/settings.json", "notes.md"]);
 
       const file = await getJson(`/api/file?path=${encodeURIComponent(join(workspace, "notes.md"))}`);
@@ -433,7 +514,7 @@ describe("scoutr bridge HTTP/WS API (offline)", () => {
 
       const missing = await getJson(`/api/file?path=${encodeURIComponent(join(workspace, "missing.md"))}`);
       assert.equal(missing.status, 200);
-      assert.equal((missing.body as { exists: boolean }).exists, false);
+      assert.equal(missing.body.exists, false);
 
       const outside = await getJson("/api/file?path=%2Fetc%2Fpasswd");
       assert.equal(outside.status, 403);
@@ -470,7 +551,7 @@ describe("scoutr bridge HTTP/WS API (offline)", () => {
     const encoded = encodeURIComponent(sessionPath);
     const { status, body } = await getJson(`/api/sessions?agentKind=pi&path=${encoded}&limit=1`);
     assert.equal(status, 200);
-    const page = body as { ok: boolean; entries: { entryId: string }[]; hasMoreBefore: boolean; beforeCursor: string | null };
+    const page = body;
     assert.equal(page.ok, true);
     assert.deepEqual(page.entries.map((entry) => entry.entryId), ["e1"]);
     assert.equal(page.hasMoreBefore, false);
@@ -489,10 +570,7 @@ describe("scoutr bridge HTTP/WS API (offline)", () => {
   test("session catalog lists persisted sessions and validates limits", async () => {
     const { status, body } = await getJson("/api/session-catalog?q=route");
     assert.equal(status, 200);
-    const catalog = body as {
-      ok: boolean;
-      sessions: { session: { key: { path: string }; live: null } }[];
-    };
+    const catalog = body;
     assert.equal(catalog.ok, true);
     assert.equal(catalog.sessions.length, 1);
     assert.ok(catalog.sessions[0]?.session.key.path.endsWith("session.jsonl"));
@@ -563,7 +641,7 @@ describe("scoutr bridge HTTP/WS API (offline)", () => {
     );
     const { status, body } = await getJson(`/api/repo?path=${encodeURIComponent(repo)}`);
     assert.equal(status, 200, JSON.stringify(body));
-    assert.equal((body as { ok: boolean }).ok, true);
+    assert.equal(body.ok, true);
     // Rewrite the completed session's cwd to a non-repo path ($HOME-like):
     // allow-list is TTL-cached, so the stale root stays allowed inside the
     // window and revocation lands once the cache expires.
@@ -589,9 +667,10 @@ describe("scoutr bridge HTTP/WS API (offline)", () => {
     });
     const body = await response.text();
     assert.equal(response.status, 201, body);
-    const parsed = JSON.parse(body) as { ok: boolean; path: string };
+    // SAFETY: the attachment route returns the documented {ok,path} JSON shape.
+    const parsed = JSON.parse(body) as AttachmentResponse;
     assert.equal(parsed.ok, true);
-    assert.ok(typeof parsed.path === "string" && parsed.path.endsWith("test.png"));
+    assert.ok(parsed.path.endsWith("test.png"));
     // The upload must land next to the SERVER's own config dir, never the
     // developer's real ~/.config/scoutr (regression: this route used to
     // hardcode defaultConfigPath() and pollute the live uploads dir).
@@ -614,10 +693,10 @@ describe("scoutr bridge HTTP/WS API (offline)", () => {
 
   test("ws streams feed messages, answers ping, and applies filters", async () => {
     const ws = new WebSocket(`ws://127.0.0.1:${PORT}/ws?token=${TOKEN}`);
-    const messages: unknown[] = [];
+    const messages: ServerWsMessage[] = [];
     const gotPong = new Promise<void>((resolve) => {
       ws.on("message", (data) => {
-        const parsed = JSON.parse(data.toString());
+        const parsed = parseWsMessage(data.toString());
         messages.push(parsed);
         if (parsed.type === "pong") resolve();
       });
@@ -628,7 +707,7 @@ describe("scoutr bridge HTTP/WS API (offline)", () => {
     });
     ws.send(JSON.stringify({ type: "ping" }));
     await gotPong;
-    assert.ok(messages.some((m) => (m as { type: string }).type === "pong"));
+    assert.ok(messages.some((m) => m.type === "pong"));
 
     // Filters are per-connection and actually applied: subscribe to one
     // kind, emit a different one first, and assert only the subscribed kind
@@ -636,21 +715,23 @@ describe("scoutr bridge HTTP/WS API (offline)", () => {
     const feedFrames: { kind: string }[] = [];
     const gotIncluded = new Promise<void>((resolve) => {
       const check = (data: Buffer): void => {
-        const parsed = JSON.parse(data.toString());
+        const parsed = parseWsMessage(data.toString());
         if (parsed.type === "subscribed") {
-          feed.emit({ kind: "pane_closed", data: { pane_id: "p1" } } as never);
-          feed.emit({ kind: "pane_agent_status_changed", data: { pane_id: "p1", agent_status: "done" } } as never);
+          feed.emit({ kind: "pane_closed", data: { pane_id: "p1" } });
+          feed.emit({ kind: "pane_agent_status_changed", data: { pane_id: "p1", agent_status: "done" } });
         }
         if (parsed.type === "feed") {
-          feedFrames.push(parsed.payload as { kind: string });
-          if (parsed.payload.kind === "pane_agent_status_changed") resolve();
+          if (parsed.payload) {
+            feedFrames.push(parsed.payload);
+            if (parsed.payload.kind === "pane_agent_status_changed") resolve();
+          }
         }
       };
       ws.on("message", check);
     });
     ws.send(JSON.stringify({ type: "subscribe", filter: ["pane_agent_status_changed"] }));
     await gotIncluded;
-    assert.ok(messages.some((m) => (m as { type: string }).type === "subscribed"));
+    assert.ok(messages.some((m) => m.type === "subscribed"));
     // The excluded pane_closed event was dropped by the connection filter.
     assert.deepEqual(feedFrames.map((f) => f.kind), ["pane_agent_status_changed"]);
     ws.close();
@@ -659,7 +740,7 @@ describe("route contracts", () => {
   it("GET /api/models serves a catalog for the default agent (pi)", async () => {
     const { status, body } = await getJson("/api/models");
     assert.equal(status, 200);
-    const parsed = body as { ok: boolean; catalog: { providers: unknown[] } };
+    const parsed = body;
     assert.equal(parsed.ok, true);
     assert.ok(Array.isArray(parsed.catalog.providers) && parsed.catalog.providers.length >= 1);
   });
@@ -679,11 +760,11 @@ describe("route contracts", () => {
   it("GET /api/agents/kinds pins the Android picker wire contract", async () => {
     const { status, body } = await getJson("/api/agents/kinds");
     assert.equal(status, 200);
-    const kinds = (body as { ok: boolean; kinds: unknown[] }).kinds;
+    const kinds = body.kinds;
     assert.ok(Array.isArray(kinds) && kinds.length >= 2);
     const WIRE_FIELDS = ["id", "displayName", "capabilities", "hasModelCatalog", "hasSlashCommands"];
     const ids = new Set<string>();
-    for (const kind of kinds as Record<string, unknown>[]) {
+    for (const kind of kinds) {
       ids.add(String(kind.id));
       // Exact field set: NewSessionSheet.kt consumes these names, so any
       // addition or rename must be a deliberate two-sided contract change.
@@ -704,7 +785,7 @@ describe("route contracts", () => {
     try {
     const { status, body } = await getJson(`/api/dirs?path=${encodeURIComponent(dir)}`);
     assert.equal(status, 200);
-    const listing = (body as { ok: boolean; listing: { path: string; dirs: string[] } }).listing;
+    const listing = body.listing;
     assert.deepEqual(listing, { path: dir, dirs: [] });
 
       const missing = await getJson("/api/dirs?path=/definitely/not/a/real/scoutr-dir");
@@ -721,8 +802,6 @@ describe("route contracts", () => {
   });
 });
 });
-
-type HerdrEventFeedLike = ReturnType<typeof fakeFeed>;
 
 describe("route table startup assertions", () => {
   it("rejects a route table with shadowing patterns", async () => {

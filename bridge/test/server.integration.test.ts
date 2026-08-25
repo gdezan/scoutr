@@ -1,13 +1,14 @@
 import { test, describe, before, after } from "node:test";
 import { existsSync } from "node:fs";
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { HerdrClient } from "../src/herdr/client.js";
 import { HerdrEventFeed } from "../src/herdr/feed.js";
 import { createScoutrServer, type ScoutrServer } from "../src/server.js";
 import { UsageService } from "../src/usage/providers.js";
+import type { JsonValue } from "../src/routes/types.js";
 import { FakeTerminalLauncher } from "./support/fake-terminal.js";
 
 // Live-herdr integration suite. Unlike the old skip-gate, this only runs when
@@ -25,7 +26,22 @@ if (skip) console.error("server.integration live suite skipped: set HERDR_SOCKET
 const PORT = 8791;
 const TOKEN = "test_token_for_live_run_0001";
 
-async function getJson(path: string): Promise<{ status: number; body: unknown }> {
+interface LiveAgentCard {
+  live: { paneId: string; status: string };
+  key: { path: string } | null;
+  model: string | null;
+  latestActivity: string | null;
+  updatedAtMs: number | null;
+}
+
+interface LiveResponseBody {
+  ok: boolean;
+  herdr: { connected: boolean; version: string };
+  snapshot: { workspaces: JsonValue[]; agents: JsonValue[] };
+  agents: LiveAgentCard[];
+}
+
+async function getJson(path: string): Promise<{ status: number; body: LiveResponseBody }> {
   const response = await fetch(`http://127.0.0.1:${PORT}${path}`, {
     headers: { authorization: `Bearer ${TOKEN}` },
   });
@@ -65,7 +81,7 @@ describe("scoutr bridge live herdr integration", { skip }, () => {
   test("health reports herdr connectivity", async () => {
     const { status, body } = await getJson("/api/health");
     assert.equal(status, 200);
-    const health = body as { ok: boolean; herdr: { connected: boolean; version: string } };
+    const health = body;
     assert.equal(health.ok, true);
     assert.equal(health.herdr.connected, true);
   });
@@ -73,7 +89,7 @@ describe("scoutr bridge live herdr integration", { skip }, () => {
   test("snapshot returns the live herd", async () => {
     const { status, body } = await getJson("/api/snapshot");
     assert.equal(status, 200);
-    const snapshot = (body as { snapshot: { workspaces: unknown[]; agents: unknown[] } }).snapshot;
+    const snapshot = body.snapshot;
     assert.ok(Array.isArray(snapshot.workspaces));
     assert.ok(Array.isArray(snapshot.agents));
   });
@@ -81,7 +97,7 @@ describe("scoutr bridge live herdr integration", { skip }, () => {
   test("agents derives cards from the snapshot", async () => {
     const { status, body } = await getJson("/api/agents");
     assert.equal(status, 200);
-    const cards = (body as { agents: { live: { paneId: string; status: string } }[] }).agents;
+    const cards = body.agents;
     assert.ok(Array.isArray(cards));
     for (const card of cards) {
       assert.ok(card.live.paneId.startsWith("w"));
@@ -92,18 +108,13 @@ describe("scoutr bridge live herdr integration", { skip }, () => {
   test("agents enrich cards with bounded model and latest activity", async () => {
     const { status, body } = await getJson("/api/agents");
     assert.equal(status, 200);
-    const cards = (body as { agents: Array<{
-      key: { path: string } | null;
-      model: string | null;
-      latestActivity: string | null;
-      updatedAtMs: number | null;
-    }> }).agents;
+    const cards = body.agents;
     for (const card of cards) {
       if (!card.key) continue;
       // Fields are always present on cards with a session path (values may be null).
       assert.ok("model" in card);
       assert.ok("latestActivity" in card);
-      if (typeof card.latestActivity === "string") {
+      if (card.latestActivity) {
         assert.ok(card.latestActivity.length <= 160);
       }
       assert.ok("updatedAtMs" in card);

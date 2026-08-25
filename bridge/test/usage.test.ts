@@ -10,6 +10,34 @@ import { parseAntigravityUsage } from "../src/usage/antigravity.js";
 import { calendarMonthSeconds } from "../src/usage/windows.js";
 import { parseOpencodeGoUsage, parseXaiUsage, USAGE_PROVIDERS, UsageService, type UsageProvider } from "../src/usage/providers.js";
 
+interface OAuthRefreshRequest {
+  grant_type: string;
+  refresh_token: string;
+  client_id: string;
+}
+
+interface ClaudeOAuthCredentials {
+  accessToken?: string;
+  refreshToken?: string;
+  expiresAt?: number;
+  subscriptionType?: string;
+}
+
+interface ClaudeCredentialsFile {
+  claudeAiOauth: ClaudeOAuthCredentials;
+}
+
+interface PiAuthRecord {
+  type: string;
+  access?: string;
+  refresh?: string;
+  expires?: number;
+  accountId?: string;
+  key?: string;
+}
+
+type PiAuthStore = Record<string, PiAuthRecord>;
+
 test("auth helpers extract codex, oauth, and api-key credentials", () => {
   const store = {
     "openai-codex": { type: "oauth", access: "tok", refresh: "ref", expires: 123, accountId: "acc" },
@@ -281,7 +309,8 @@ test("fetchClaudeUsage refreshes an expired token and persists the rotated one",
       seen.push(url);
       if (url.endsWith("/v1/oauth/token")) {
         assert.equal(init?.method, "POST");
-        const body = JSON.parse(String(init?.body)) as Record<string, string>;
+        // SAFETY: the test fetch above sends the OAuth refresh request with this fixed shape.
+        const body = JSON.parse(String(init?.body)) as OAuthRefreshRequest;
         assert.equal(body.grant_type, "refresh_token");
         assert.equal(body.refresh_token, "refresh-1");
         assert.equal(body.client_id, "9d1c250a-e61b-44d9-88ed-5944d1962f5e");
@@ -300,7 +329,8 @@ test("fetchClaudeUsage refreshes an expired token and persists the rotated one",
     assert.ok(seen.some((url) => url.includes("/v1/oauth/token")), "expected a token refresh");
 
     // The rotated refresh token must land on disk, and unrelated fields must survive.
-    const persisted = JSON.parse(await readFile(credentialsPath, "utf8")) as Record<string, any>;
+    // SAFETY: fetchClaudeUsage persists the validated Claude OAuth credential shape.
+    const persisted = JSON.parse(await readFile(credentialsPath, "utf8")) as ClaudeCredentialsFile;
     assert.equal(persisted.claudeAiOauth.accessToken, "fresh-token");
     assert.equal(persisted.claudeAiOauth.refreshToken, "refresh-2");
     assert.equal(persisted.claudeAiOauth.subscriptionType, "max");
@@ -370,7 +400,8 @@ test("persistOAuthAuth merges into pi's auth store without dropping other provid
 
   try {
     await persistOAuthAuth(authPath, "openai-codex", { access: "a2", refresh: "r2", expires: 2 });
-    const store = JSON.parse(await readFile(authPath, "utf8")) as Record<string, any>;
+    // SAFETY: persistOAuthAuth preserves the validated provider-keyed auth store shape.
+    const store = JSON.parse(await readFile(authPath, "utf8")) as PiAuthStore;
     assert.equal(store["openai-codex"].access, "a2");
     assert.equal(store["openai-codex"].refresh, "r2");
     assert.equal(store["openai-codex"].expires, 2);

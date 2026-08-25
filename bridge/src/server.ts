@@ -3,7 +3,7 @@ import { createReadStream } from "node:fs";
 import { createServer, type Server, type ServerResponse } from "node:http";
 import type { Duplex } from "node:stream";
 import { WebSocketServer, WebSocket } from "ws";
-import { HerdrEventFeed, type FeedMessage } from "./herdr/feed.js";
+import type { FeedMessage } from "./herdr/feed.js";
 import { StatusTracker } from "./status.js";
 import { BoardDetailCache } from "./board-detail.js";
 import { BoardRepoSummaryCache } from "./board-repo-summary.js";

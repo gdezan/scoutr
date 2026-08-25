@@ -7,6 +7,20 @@ import { join } from "node:path";
 import { readFile } from "node:fs/promises";
 import { ConfigError, defaultConfigPath, generateHostId, generateToken, loadOrCreateConfig } from "../src/config.js";
 
+interface PersistedConfigFile {
+  token?: string;
+  port?: number;
+  fcmServiceAccountPath?: string;
+  exposure?: { kind: string; publicUrl?: string };
+  publicHost?: string;
+  hostId?: string;
+}
+
+function parsePersistedConfig(raw: string): PersistedConfigFile {
+  // SAFETY: loadOrCreateConfig writes this validated persisted config shape.
+  return JSON.parse(raw) as PersistedConfigFile;
+}
+
 describe("defaultConfigPath", () => {
   test("honors XDG_CONFIG_HOME", () => {
     const previous = process.env.XDG_CONFIG_HOME;
@@ -88,7 +102,7 @@ describe("loadOrCreateConfig", () => {
     await writeFile(keyPath, "{}");
     const config = await loadOrCreateConfig(path);
     assert.equal(config.fcmServiceAccountPath, keyPath);
-    const persisted = JSON.parse(await readFile(path, "utf8")) as Record<string, unknown>;
+    const persisted = parsePersistedConfig(await readFile(path, "utf8"));
     assert.equal(persisted.fcmServiceAccountPath, keyPath);
   });
 
@@ -110,7 +124,7 @@ describe("loadOrCreateConfig", () => {
     const config = await loadOrCreateConfig(path);
     assert.deepEqual(config.exposure, { kind: "tailscale", publicUrl: "artemis.tail7dc568.ts.net" });
     // The canonical shape is persisted, so the migration happens once.
-    const persisted = JSON.parse(await readFile(path, "utf8")) as Record<string, unknown>;
+    const persisted = parsePersistedConfig(await readFile(path, "utf8"));
     assert.deepEqual(persisted.exposure, { kind: "tailscale", publicUrl: "artemis.tail7dc568.ts.net" });
     assert.equal(persisted.publicHost, undefined);
   });
@@ -136,7 +150,7 @@ describe("loadOrCreateConfig", () => {
     mkdirSync(join(dir, "bad-kind"), { recursive: true });
     const raw = JSON.stringify({ token: "0123456789abcdef", port: 8737, exposure: { kind: "ngrok" } });
     await writeFile(path, raw);
-    await assert.rejects(() => loadOrCreateConfig(path), (error: unknown) => {
+    await assert.rejects(() => loadOrCreateConfig(path), (error) => {
       assert.ok(error instanceof ConfigError);
       assert.match(error.message, /unknown exposure kind "ngrok"/);
       return true;
@@ -203,7 +217,7 @@ describe("hostId", () => {
     const config = await loadOrCreateConfig(path);
     assert.match(config.hostId, /^host_/);
     assert.equal(config.token, "0123456789abcdef", "migration must not rotate the token");
-    const persisted = JSON.parse(await readFile(path, "utf8")) as Record<string, unknown>;
+    const persisted = parsePersistedConfig(await readFile(path, "utf8"));
     assert.equal(persisted.hostId, config.hostId);
   });
 

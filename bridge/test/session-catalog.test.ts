@@ -10,6 +10,21 @@ import {
   SessionCatalogError,
 } from "../src/session-catalog.js";
 
+interface SessionFixtureLine {
+  type: string;
+  id?: string;
+  version?: number;
+  cwd?: string;
+  timestamp?: string;
+  provider?: string;
+  modelId?: string;
+  name?: string;
+  message?: {
+    role: string;
+    content: Array<{ type: string; text: string }>;
+  };
+}
+
 async function newCatalogRoot(): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), "scoutr-catalog-"));
   process.env.PI_CODING_AGENT_SESSION_DIR = root;
@@ -20,7 +35,7 @@ async function writeSession(
   root: string,
   project: string,
   fileName: string,
-  lines: Record<string, unknown>[],
+  lines: SessionFixtureLine[],
   modifiedAt: string,
 ): Promise<string> {
   const directory = join(root, project);
@@ -31,13 +46,13 @@ async function writeSession(
   return path;
 }
 
-function sessionLine(id: string, cwd: string, timestamp: string): Record<string, unknown> {
+function sessionLine(id: string, cwd: string, timestamp: string) {
   return { type: "session", version: 3, id, cwd, timestamp };
 }
 
 let nextEntryId = 0;
 
-function userLine(text: string): Record<string, unknown> {
+function userLine(text: string) {
   nextEntryId += 1;
   return {
     type: "message",
@@ -258,7 +273,7 @@ describe("session catalog", () => {
   });
 
   it("skips an unreadable subdirectory instead of failing the listing", async (t) => {
-    if (typeof process.getuid === "function" && process.getuid() === 0) {
+    if (process.getuid?.() === 0) {
       t.skip("running as root; chmod 0o000 is not an obstacle");
       return;
     }

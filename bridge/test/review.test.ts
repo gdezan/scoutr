@@ -5,10 +5,12 @@ import { symlinkSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { createScoutrServer, type ScoutrServer } from "../src/server.js";
 import { fakeHerdr } from "./support/fake-herdr.js";
+import { fakeFeed } from "./support/fake-feed.js";
 import { FakeTerminalLauncher } from "./support/fake-terminal.js";
 import { REVIEW_ROOTS_TTL_MS } from "../src/routes/review.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { UsageService } from "../src/usage/providers.js";
 import {
   reviewOverview,
   reviewDiff,
@@ -84,7 +86,7 @@ test("overview reports branch, status, and recent log", async () => {
   assert.equal(overview.log[0].subject, "add world and b");
   assert.equal(overview.log[1].subject, "initial commit");
   assert.ok(overview.log[0].hash.length >= 7);
-  assert.ok(typeof overview.log[0].date === "number");
+  assert.ok(Number.isInteger(overview.log[0].date));
   assert.equal(overview.statusTruncated, false);
 });
 
@@ -182,7 +184,7 @@ test("artifacts lists bounded generated files and rejects outside roots", async 
   const apk = result.artifacts.find((a) => a.path.endsWith("build/app.apk"));
   assert.equal(apk?.size, 64);
 
-  await assert.rejects(async () => reviewArtifacts(outsideRoot), (error: unknown) => {
+  await assert.rejects(async () => reviewArtifacts(outsideRoot), (error) => {
     assert.ok(error instanceof ReviewError);
     assert.equal(error.status, 403);
     return true;
@@ -190,7 +192,7 @@ test("artifacts lists bounded generated files and rejects outside roots", async 
 });
 
 test("rejects paths outside the allow-list", async () => {
-  await assert.rejects(() => reviewOverview(outsideRoot), (error: unknown) => {
+  await assert.rejects(() => reviewOverview(outsideRoot), (error) => {
     assert.ok(error instanceof ReviewError);
     assert.equal(error.status, 403);
     return true;
@@ -200,7 +202,7 @@ test("rejects paths outside the allow-list", async () => {
 test("allows a live session workspace passed as an extra root", async () => {
   // Same repo that the allow-list rejects, allowed once the bridge passes the
   // agent's workspace cwd as an extra root.
-  await assert.rejects(() => reviewOverview(sessionRepo), (error: unknown) => {
+  await assert.rejects(() => reviewOverview(sessionRepo), (error) => {
     assert.ok(error instanceof ReviewError);
     assert.equal(error.status, 403);
     return true;
@@ -225,7 +227,7 @@ test("extra roots allow subdirectories of the workspace", async () => {
 });
 
 test("403 message names the escape hatch", async () => {
-  await assert.rejects(() => reviewOverview(outsideRoot), (error: unknown) => {
+  await assert.rejects(() => reviewOverview(outsideRoot), (error) => {
     assert.ok(error instanceof ReviewError);
     assert.equal(error.status, 403);
     assert.match(error.message, /SCOUTR_REPO_ROOTS/);
@@ -234,17 +236,17 @@ test("403 message names the escape hatch", async () => {
 });
 
 test("rejects absolute path escapes and garbage refs", async () => {
-  await assert.rejects(() => reviewOverview("/etc/passwd"), (error: unknown) => {
+  await assert.rejects(() => reviewOverview("/etc/passwd"), (error) => {
     assert.ok(error instanceof ReviewError);
     assert.equal(error.status, 403);
     return true;
   });
-  await assert.rejects(() => reviewDiff(repoRoot, "../../etc/passwd"), (error: unknown) => {
+  await assert.rejects(() => reviewDiff(repoRoot, "../../etc/passwd"), (error) => {
     assert.ok(error instanceof ReviewError);
     assert.equal(error.status, 400);
     return true;
   });
-  await assert.rejects(() => reviewDiff(repoRoot, "HEAD; rm -rf /"), (error: unknown) => {
+  await assert.rejects(() => reviewDiff(repoRoot, "HEAD; rm -rf /"), (error) => {
     assert.ok(error instanceof ReviewError);
     assert.equal(error.status, 400);
     return true;
@@ -254,7 +256,7 @@ test("rejects absolute path escapes and garbage refs", async () => {
 test("rejects non-git directories", async () => {
   const plain = join(plainRoot, "nonrepo");
   await mkdir(plain);
-  await assert.rejects(() => reviewOverview(plain), (error: unknown) => {
+  await assert.rejects(() => reviewOverview(plain), (error) => {
     assert.ok(error instanceof ReviewError);
     assert.equal(error.status, 404);
     return true;
@@ -394,7 +396,7 @@ test("file content truncates at the byte cap", async () => {
 test("file content rejects a symlink escaping the repo", async () => {
   await writeFile(join(outsideRoot, "target.txt"), "secret\n");
   symlinkSync(join(outsideRoot, "target.txt"), join(repoRoot, "escape.txt"));
-  await assert.rejects(() => reviewFileContent(repoRoot, "HEAD", "working", "escape.txt"), (error: unknown) => {
+  await assert.rejects(() => reviewFileContent(repoRoot, "HEAD", "working", "escape.txt"), (error) => {
     assert.ok(error instanceof ReviewError);
     assert.equal(error.status, 403);
     return true;
@@ -403,7 +405,7 @@ test("file content rejects a symlink escaping the repo", async () => {
 
 test("per-file routes reject pathspec magic and path escapes", async () => {
   for (const bad of ["", "../etc/passwd", ":glob", "!excluded", "^top", "a\nb", "/abs"]) {
-    await assert.rejects(() => reviewFileDiff(repoRoot, "HEAD", "working", bad), (error: unknown) => {
+    await assert.rejects(() => reviewFileDiff(repoRoot, "HEAD", "working", bad), (error) => {
       assert.ok(error instanceof ReviewError, `expected ReviewError for ${JSON.stringify(bad)}`);
       assert.equal(error.status, 400);
       return true;
@@ -446,12 +448,11 @@ describe("review roots TTL", () => {
     );
 
     const fake = fakeHerdr();
-    const feed = { onMessage: () => {}, removeMessage: () => {}, stop: async () => {}, start: async () => {} };
     server = createScoutrServer(
       {
         herdr: fake,
-        feed: feed as never,
-        usage: { all: async () => ({}) } as never,
+        feed: fakeFeed(),
+        usage: new UsageService(),
         config: { configDir: "/tmp/scoutr-test-config", hostId: "host_test", token: TOKEN, port: PORT },
         terminal: new FakeTerminalLauncher(),
       },
@@ -527,12 +528,11 @@ describe("review file routes over HTTP", () => {
     await writeFile(join(repoDir, "route.txt"), "base\nchanged\n");
 
     const fake = fakeHerdr();
-    const feed = { onMessage: () => {}, removeMessage: () => {}, stop: async () => {}, start: async () => {} };
     server = createScoutrServer(
       {
         herdr: fake,
-        feed: feed as never,
-        usage: { all: async () => ({}) } as never,
+        feed: fakeFeed(),
+        usage: new UsageService(),
         config: { configDir: "/tmp/scoutr-test-config", hostId: "host_test", token: TOKEN, port: PORT },
         terminal: new FakeTerminalLauncher(),
       },

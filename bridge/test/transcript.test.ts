@@ -11,6 +11,23 @@ import {
   readTranscriptText,
 } from "../src/transcript.js";
 import { parsePiTranscript, writePiSessionTitle } from "../src/agents/pi/transcript.js";
+import type { ContentBlock, TextBlock, ToolCallBlock } from "../src/transcript.js";
+
+interface PiSessionInfoRecord {
+  type: "session_info";
+  id: string;
+  parentId: null;
+  timestamp: string;
+  name: string;
+}
+
+function isTextBlock(block: ContentBlock | undefined): block is TextBlock {
+  return block?.type === "text" && "text" in block;
+}
+
+function isToolCallBlock(block: ContentBlock | undefined): block is ToolCallBlock {
+  return block?.type === "toolCall" && "id" in block && "name" in block && "arguments" in block;
+}
 
 async function readTranscript(path: string, opts?: Parameters<typeof readTranscriptText>[1]) {
   return parsePiTranscript(await readTranscriptText(path, opts), opts ?? {});
@@ -47,11 +64,14 @@ describe("parseTranscript", () => {
     const transcript = parsePiTranscript(SAMPLE);
     const [user, assistant, toolResult] = transcript.entries;
     assert.equal(user.role, "user");
-    assert.equal((user.content[0] as { text: string }).text, "hello");
+    const userText = user.content[0];
+    assert.ok(isTextBlock(userText));
+    assert.equal(userText.text, "hello");
     assert.equal(assistant.role, "assistant");
     const kinds = assistant.content.map((block) => block.type);
     assert.deepEqual(kinds, ["thinking", "toolCall", "text"]);
-    const call = assistant.content[1] as { name: string; arguments: unknown };
+    const call = assistant.content[1];
+    assert.ok(isToolCallBlock(call));
     assert.equal(call.name, "bash");
     assert.equal(assistant.usage?.input, 100);
     assert.equal(assistant.usage?.cost?.input, 0.01);
@@ -65,7 +85,9 @@ describe("parseTranscript", () => {
     const transcript = parsePiTranscript(
       `{"type":"message","id":"s1","parentId":null,"timestamp":"2026-08-09T00:00:00Z","message":{"role":"user","content":"plain"}}`,
     );
-    assert.equal((transcript.entries[0].content[0] as { text: string }).text, "plain");
+    const text = transcript.entries[0].content[0];
+    assert.ok(isTextBlock(text));
+    assert.equal(text.text, "plain");
   });
 
   it("tolerates garbage lines in a growing file", () => {
@@ -340,12 +362,14 @@ describe("writePiSessionTitle", () => {
     // The transcript itself is untouched — the record is appended, never rewritten.
     assert.deepEqual((await readTranscript(path)).entries.map((entry) => entry.entryId), ["e1", "e2", "e3"]);
     const lines = (await readFile(path, "utf8")).trim().split("\n");
-    const record = JSON.parse(lines.at(-1) as string) as Record<string, unknown>;
+    const lastLine = lines.at(-1);
+    assert.ok(lastLine);
+    const record: PiSessionInfoRecord = JSON.parse(lastLine);
     assert.equal(record.type, "session_info");
     assert.equal(record.name, "Release follow-up");
     assert.equal(record.parentId, null);
-    assert.equal(typeof record.id, "string");
-    assert.ok(!Number.isNaN(Date.parse(record.timestamp as string)));
+    assert.ok(record.id.length > 0);
+    assert.ok(!Number.isNaN(Date.parse(record.timestamp)));
   });
 
   it("keeps the newest title when several are appended", async () => {

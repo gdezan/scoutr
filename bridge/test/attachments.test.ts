@@ -39,13 +39,13 @@ test("storeAttachment saves an image and returns its host path", async () => {
 });
 
 test("rejects non-image content types and unsupported extensions", () => {
-  assert.throws(() => storeAttachment(dir, "evil.exe", Buffer.from("MZ"), "application/octet-stream"), (e: unknown) => {
+  assert.throws(() => storeAttachment(dir, "evil.exe", Buffer.from("MZ"), "application/octet-stream"), (e) => {
     assert.ok(e instanceof AttachmentError);
     assert.equal(e.status, 400);
     return true;
   });
 
-  assert.throws(() => storeAttachment(dir, "photo.bmp", Buffer.from("BM"), "image/bmp"), (e: unknown) => {
+  assert.throws(() => storeAttachment(dir, "photo.bmp", Buffer.from("BM"), "image/bmp"), (e) => {
     assert.ok(e instanceof AttachmentError);
     assert.equal(e.status, 400);
     return true;
@@ -55,16 +55,16 @@ test("rejects non-image content types and unsupported extensions", () => {
 test("rejects image-typed bodies whose bytes do not match the extension", () => {
   
   // Text bytes declared as a PNG: the sniff must reject, not the extension.
-  assert.throws(() => storeAttachment(dir, "photo.png", Buffer.from("hello world"), "image/png"), (e: unknown) => {
+  assert.throws(() => storeAttachment(dir, "photo.png", Buffer.from("hello world"), "image/png"), (e) => {
     assert.ok(e instanceof AttachmentError);
-    assert.equal((e as AttachmentError).status, 400);
-    assert.match((e as AttachmentError).message, /bytes do not match/);
+    assert.equal(e.status, 400);
+    assert.match(e.message, /bytes do not match/);
     return true;
   });
   // A JPEG header under a .gif name is a family mismatch too.
   assert.throws(
     () => storeAttachment(dir, "photo.gif", Buffer.from([0xff, 0xd8, 0xff, 0xe0]), "image/gif"),
-    (e: unknown) => {
+    (e) => {
       assert.ok(e instanceof AttachmentError);
       return true;
     },
@@ -84,7 +84,7 @@ test("readAttachmentBody caps oversize bodies", async () => {
   const stream = (async function* () {
     for (let i = 0; i < 20; i++) yield chunk;
   })();
-  await assert.rejects(() => readAttachmentBody(stream, 10 * 1024), (e: unknown) => {
+  await assert.rejects(() => readAttachmentBody(stream, 10 * 1024), (e) => {
     assert.ok(e instanceof AttachmentError);
     assert.equal(e.status, 413);
     return true;
@@ -93,7 +93,7 @@ test("readAttachmentBody caps oversize bodies", async () => {
 
 test("readAttachmentBody rejects empty bodies", async () => {
   const stream = (async function* () {})();
-  await assert.rejects(() => readAttachmentBody(stream), (e: unknown) => {
+  await assert.rejects(() => readAttachmentBody(stream), (e) => {
     assert.ok(e instanceof AttachmentError);
     assert.equal(e.status, 400);
     return true;

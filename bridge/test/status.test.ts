@@ -8,12 +8,14 @@ describe("StatusTracker", () => {
     assert.equal(tracker.since("p1"), undefined);
     tracker.note("p1", "working");
     const at = tracker.since("p1");
-    assert.ok(typeof at === "number" && at <= Date.now());
+    assert.notEqual(at, undefined);
+    assert.ok(at <= Date.now());
     // A newer observation replaces the timestamp (Date.now() granularity
     // means the two notes can land in the same millisecond).
     tracker.note("p1", "blocked");
     const later = tracker.since("p1");
-    assert.ok(typeof later === "number" && later >= at);
+    assert.notEqual(later, undefined);
+    assert.ok(later >= at);
   });
 
   test("prune forgets panes that no longer exist", () => {
@@ -22,6 +24,7 @@ describe("StatusTracker", () => {
     tracker.note("p2", "idle");
     tracker.prune(new Set(["p2"]));
     assert.equal(tracker.since("p1"), undefined);
-    assert.ok(typeof tracker.since("p2") === "number");
+    const since = tracker.since("p2");
+    assert.notEqual(since, undefined);
   });
 });

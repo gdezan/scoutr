@@ -1,6 +1,6 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { answerAsk, dismissAsk, type AnswerDeps } from "../src/answers.js";
+import { answerAsk, dismissAsk } from "../src/answers.js";
 import { claudeAskPlan } from "../src/agents/claude/questionnaire.js";
 import { claudeAnswerAsk } from "../src/agents/claude/index.js";
 import { piAskPlan } from "../src/agents/pi/questionnaire.js";
@@ -250,7 +250,7 @@ describe("answering an ask", () => {
   function deps(
     questions: QuestionEntry[],
     agent = "claude",
-  ): { herdr: ReturnType<typeof fakeHerdr>; deps: AnswerDeps } {
+  ) {
     const herdr = fakeHerdr();
     return {
       herdr,

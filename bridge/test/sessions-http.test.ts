@@ -4,6 +4,8 @@ import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { createScoutrServer, type ScoutrServer } from "../src/server.js";
+import type { HerdrFeed } from "../src/herdr/feed.js";
+import type { JsonBody } from "../src/routes/types.js";
 import type { PaneInfo } from "../src/herdr/types.js";
 import { fakeHerdr, type SentInput } from "./support/fake-herdr.js";
 import { FakeTerminalLauncher } from "./support/fake-terminal.js";
@@ -12,6 +14,17 @@ import WebSocket from "ws";
 const PORT = 8792;
 const TOKEN = "test_token_for_sessions_0003";
 const cwd = homedir();
+
+interface WsCommand {
+  type: string;
+  paneId?: string;
+  text?: string;
+}
+
+interface SessionErrorResponse {
+  ok: boolean;
+  error: string;
+}
 
 /** Snapshot pane so control actions can resolve p1 -> ws1 (see fake-herdr.ts). */
 const SNAPSHOT_PANE: PaneInfo = {
@@ -37,12 +50,19 @@ const SNAPSHOT_PANE: PaneInfo = {
 
 function fakeDeps(sessionCatalogRoot?: string) {
   const fake = fakeHerdr({ panes: [SNAPSHOT_PANE] });
-  const feed = { onMessage: () => {}, removeMessage: () => {}, stop: async () => {}, start: async () => {} };
+  const feed: HerdrFeed = {
+    snapshot: null,
+    onMessage: () => () => {},
+    removeMessage: () => {},
+    stop: async () => {},
+    start: async () => {},
+  };
   const usage = { all: async () => ({}) };
   return {
     deps: {
       herdr: fake,
-      feed: feed as never,
+      feed,
+      // SAFETY: these tests never call usage; the stub fills an unused ServerDeps field.
       usage: usage as never,
       config: { configDir: "/tmp/scoutr-test-config", hostId: "host_test", token: TOKEN, port: PORT },
       terminal: new FakeTerminalLauncher(),
@@ -68,11 +88,11 @@ async function rawPost(path: string, body: string, token = TOKEN): Promise<{ sta
   return { status: response.status, data: await response.json() };
 }
 
-async function post(path: string, body: unknown, token = TOKEN): Promise<{ status: number; data: any }> {
+async function post(path: string, body: JsonBody, token = TOKEN): Promise<{ status: number; data: any }> {
   return rawPost(path, JSON.stringify(body), token);
 }
 
-async function wsCommand(command: unknown): Promise<any> {
+async function wsCommand(command: WsCommand): Promise<any> {
   const ws = new WebSocket(`ws://127.0.0.1:${PORT}/ws?token=${TOKEN}`);
   return new Promise((resolve, reject) => {
     ws.on("open", () => ws.send(JSON.stringify(command)));
@@ -87,7 +107,7 @@ async function wsCommand(command: unknown): Promise<any> {
 
 function lastLaunch(sent: readonly SentInput[]): string {
   const send = sent.filter((call) => call.method === "paneSendInput").at(-1);
-  return (send?.params.text as string) ?? "";
+  return send?.params.text ?? "";
 }
 
 describe("POST /api/sessions and /api/sessions/:paneId/control", () => {
@@ -305,7 +325,7 @@ describe("POST /api/sessions and /api/sessions/:paneId/control", () => {
       headers: { authorization: `Bearer ${TOKEN}` },
     });
     assert.equal(response.status, 403);
-    const data = (await response.json()) as { ok: boolean; error: string };
+    const data: SessionErrorResponse = await response.json();
     assert.match(data.error, /outside a registered session store/);
   });
 });
