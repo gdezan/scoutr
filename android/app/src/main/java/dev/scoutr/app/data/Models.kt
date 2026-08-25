@@ -240,6 +240,14 @@ data class QuestionEntry(
     val answerText: String? = null,
     val selected: List<String> = emptyList(),
     val timestamp: String = "",
+    /**
+     * Background the agent wrote above this ask, when its transcript could not
+     * carry it yet. Only an open Claude ask has one: Claude buffers the prose
+     * introducing an ask along with the tool call until the round resolves, so
+     * the bridge reads it off the pane instead (ADR 0012). Shown above the
+     * card; the transcript's own message replaces it once the round lands.
+     */
+    val preamble: String = "",
 )
 
 @Serializable

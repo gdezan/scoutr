@@ -854,6 +854,13 @@ private fun HeaderConfigurationChip(
 internal sealed interface ChatRow {
     data class Entry(val entry: SessionEntry) : ChatRow
     data class Questions(val group: List<QuestionEntry>) : ChatRow
+    /**
+     * What the agent wrote just before an open ask, when only the card can
+     * carry it. It reads as an ordinary agent message because that is what it
+     * is — the transcript replaces it with the real entry once the round
+     * lands (see QuestionEntry.preamble).
+     */
+    data class Preamble(val callId: String, val text: String) : ChatRow
     data class Pending(val message: PendingUserMessage) : ChatRow
     /** The tail busy row: starting, working, or waiting on the user. */
     data class Indicator(val mode: WorkingIndicatorMode) : ChatRow
@@ -873,17 +880,27 @@ internal fun buildChatRows(
     val questionsByCall = questions.groupBy { it.callId.ifEmpty { it.id.substringBefore('#') } }
     val groupsByAnchorEntry = questionsByCall.values.groupBy { it.first().entryId }
     val anchoredEntryIds = entries.mapTo(mutableSetOf()) { it.entryId }
+    // An ask's background belongs above the card, and only while the card is
+    // there: once the round is answered the transcript carries the same prose
+    // as a real entry, and emitting both would say it twice.
+    fun MutableList<ChatRow>.addAsk(group: List<QuestionEntry>) {
+        val first = group.first()
+        if (group.any { !it.answered } && first.preamble.isNotBlank()) {
+            add(ChatRow.Preamble(first.callId.ifEmpty { first.id }, first.preamble))
+        }
+        add(ChatRow.Questions(group))
+    }
     return buildList {
         for (entry in entries) {
             add(ChatRow.Entry(entry))
-            groupsByAnchorEntry[entry.entryId]?.forEach { add(ChatRow.Questions(it)) }
+            groupsByAnchorEntry[entry.entryId]?.forEach { addAsk(it) }
         }
         questionsByCall.values
             .filter { group ->
                 val anchorId = group.first().entryId
                 anchorId !in anchoredEntryIds && group.any { !it.answered }
             }
-            .forEach { add(ChatRow.Questions(it)) }
+            .forEach { addAsk(it) }
         pendingMessages.forEach { add(ChatRow.Pending(it)) }
         if (indicatorMode != null) add(ChatRow.Indicator(indicatorMode))
     }
@@ -986,6 +1003,7 @@ fun ChatList(
     fun keyOf(row: ChatRow): String = when (row) {
         is ChatRow.Entry -> row.entry.entryId
         is ChatRow.Questions -> row.group.joinToString("|") { it.id }
+        is ChatRow.Preamble -> "ask_preamble:${row.callId}"
         is ChatRow.Pending -> row.message.localId
         // Stable across mode changes so the row animates in place rather than
         // swapping out when working flips to waiting.
@@ -1084,6 +1102,15 @@ fun ChatList(
                             placementSpec = ScoutrMotion.itemPlacementSpec(reduceMotion),
                             fadeOutSpec = ScoutrMotion.itemSpec(reduceMotion),
                         )
+                    )
+                    is ChatRow.Preamble -> AskPreamble(
+                        text = row.text,
+                        markdownCodeFontSizeSp = markdownCodeFontSizeSp,
+                        modifier = Modifier.animateItem(
+                            fadeInSpec = ScoutrMotion.itemSpec(reduceMotion),
+                            placementSpec = ScoutrMotion.itemPlacementSpec(reduceMotion),
+                            fadeOutSpec = ScoutrMotion.itemSpec(reduceMotion),
+                        ),
                     )
                     is ChatRow.Questions -> {
                         val callId = row.group.first().callId
@@ -1365,6 +1392,26 @@ private fun UserTurn(
                 }
             }
             footer()
+        }
+    }
+}
+
+/**
+ * An open ask's background, rendered exactly like the agent prose it is. The
+ * bridge reads it off the pane while Claude still holds the assistant turn
+ * back (ADR 0012), so it arrives as plain text rather than markdown; the
+ * markdown renderer handles it either way, and the styling has to match the
+ * real entry that replaces it when the round lands.
+ */
+@Composable
+private fun AskPreamble(
+    text: String,
+    markdownCodeFontSizeSp: Float,
+    modifier: Modifier = Modifier,
+) {
+    Column(modifier.fillMaxWidth().testTag("ask_preamble")) {
+        SelectionContainer(modifier = Modifier.padding(horizontal = 2.dp, vertical = 4.dp)) {
+            AssistantMarkdown(content = text, codeFontSizeSp = markdownCodeFontSizeSp)
         }
     }
 }

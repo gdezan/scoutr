@@ -67,22 +67,28 @@ export function mergePendingAsk(sessionId: string, questions: QuestionEntry[]): 
 /** The open ask as cards: unanswered, and anchored after the last entry. */
 function pendingQuestions(pending: PendingAsk): QuestionEntry[] {
   const entryId = `pending:${pending.toolUseId}`;
-  return parseQuestions({ questions: pending.questions }).map((question, index) => ({
-    id: `${pending.toolUseId}#${index}`,
-    callId: pending.toolUseId,
-    entryId,
-    question: question.question,
-    header: question.header,
-    options: question.options.map((option) => ({
-      label: option.label,
-      description: option.description ?? "",
-    })),
-    multiSelect: question.multiSelect === true,
-    answered: false,
-    answerText: null,
-    selected: [],
-    timestamp: pending.timestamp,
-  }));
+  return parseQuestions({ questions: pending.questions }).map((question, index) => {
+    const card: QuestionEntry = {
+      id: `${pending.toolUseId}#${index}`,
+      callId: pending.toolUseId,
+      entryId,
+      question: question.question,
+      header: question.header,
+      options: question.options.map((option) => ({
+        label: option.label,
+        description: option.description ?? "",
+      })),
+      multiSelect: question.multiSelect === true,
+      answered: false,
+      answerText: null,
+      selected: [],
+      timestamp: pending.timestamp,
+    };
+    // Every question of the ask carries it: the app renders one card per call
+    // and reads the background off whichever question it draws first.
+    if (pending.preamble) card.preamble = pending.preamble;
+    return card;
+  });
 }
 
 function isToolCallBlock(block: ContentBlock): block is ToolCallBlock {

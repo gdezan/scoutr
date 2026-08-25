@@ -27,6 +27,17 @@ export interface PendingAsk {
   transcriptPath: string;
   /** Raw `tool_input.questions`, parsed by the same reader as the transcript. */
   questions: unknown[];
+  /**
+   * The prose Claude wrote above the ask, read off the pane (see
+   * `ask-preamble.ts`); "" when the pane held none to read.
+   */
+  preamble?: string;
+  /**
+   * Whether the pane has been read for a preamble. One attempt per ask: the
+   * read is a herdr round trip on a poll path, and a pane that cannot answer
+   * it once will not answer it three seconds later either.
+   */
+  preambleCaptured?: boolean;
 }
 
 /**
@@ -51,6 +62,24 @@ export function writePendingAsk(ask: PendingAsk): void {
   const path = sidecarPath(ask.sessionId);
   mkdirSync(pendingAsksDir(), { recursive: true });
   writeFileSync(path, JSON.stringify(ask), "utf8");
+}
+
+/**
+ * Record the pane-read preamble on the open ask, and that the read happened.
+ *
+ * The sidecar is re-read first: an ask answered while the pane was being read
+ * has already had its file removed, and recreating it here would put the card
+ * back on screen. Writing also moves the sidecar's stamp, which is what makes
+ * the next Chat read notice there is something new to serve.
+ */
+export function attachPendingAskPreamble(sessionId: string, preamble: string): void {
+  const ask = readPendingAsk(sessionId);
+  if (!ask) return;
+  try {
+    writePendingAsk({ ...ask, preamble, preambleCaptured: true });
+  } catch {
+    // Background is a nicety; the card it belongs to must still be answerable.
+  }
 }
 
 export function clearPendingAsk(sessionId: string): void {

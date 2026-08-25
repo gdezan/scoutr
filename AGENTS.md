@@ -56,7 +56,7 @@ skipped Gradle output.
 - ViewModels talk to `ScoutrApi`; `BridgeClient` implements it; unit tests use `FakeScoutrApi`.
 - Instrumentation runs only on an emulator, never a physical Pixel. If `emulator-5554` is absent, boot the `cockpit` AVD per `docs/dev-workflow.md` and verify with `adb devices`.
 - Composer Enter inserts a newline and never sends. Keep multiline input, `ImeAction.None`, and no-op `KeyboardActions`.
-- Question answers travel as intent (`questionId`, `selectedLabels`, `text`); the adapter owns each TUI's questionnaire grammar, not the app. Claude's live ask hook and transcript timing are documented by ADR 0006.
+- Question answers travel as intent (`questionId`, `selectedLabels`, `text`); the adapter owns each TUI's questionnaire grammar, not the app. Claude's live ask hook and transcript timing are documented by ADR 0006. Claude buffers the prose it writes above an ask along with the tool call, so an open card's background is read off the pane instead (ADR 0012).
 
 ## Task-specific pointers
 

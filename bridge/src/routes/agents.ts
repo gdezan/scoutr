@@ -51,6 +51,32 @@ export async function attachRepoSummaries(
   }));
 }
 
+/**
+ * Give every open ask the background its transcript is still holding back.
+ *
+ * Session reads are file-bound on purpose, and Claude keeps the prose it
+ * wrote above an ask in the pane alone until the round resolves (ADR 0012).
+ * This poll is the one that already holds both halves — the pane and the
+ * transcript path — so the pane read happens here and the result reaches Chat
+ * through the sidecar the card is already served from. Chat polls this
+ * endpoint immediately before the session read, so the background arrives
+ * with the card rather than a tick behind it.
+ *
+ * At most one pane read per ask: the backend records that it looked, whether
+ * or not it found anything.
+ */
+async function captureAskContexts(
+  ctx: RouteContext,
+  sessions: readonly SessionDescriptor[],
+): Promise<void> {
+  await Promise.all(sessions.map(async (session) => {
+    const paneId = session.live?.paneId;
+    const path = session.key?.path;
+    if (!paneId || !path || session.attention?.kind !== "ask") return;
+    await getBackendOrNull(session.agentKind)?.captureAskContext?.(ctx.deps.herdr, paneId, path);
+  }));
+}
+
 async function agents(ctx: RouteContext): Promise<RouteResult> {
   const current = ctx.deps.feed.snapshot;
   if (!current) {
@@ -61,6 +87,7 @@ async function agents(ctx: RouteContext): Promise<RouteResult> {
     (paneId) => ctx.deps.tracker.since(paneId),
     ctx.deps.boardDetail,
   );
+  await captureAskContexts(ctx, sessions);
   const enriched = await attachRepoSummaries(sessions, ctx.deps.boardRepoSummary);
   return { status: 200, body: { ok: true, agents: enriched } };
 }

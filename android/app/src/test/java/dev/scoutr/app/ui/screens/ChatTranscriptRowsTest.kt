@@ -25,6 +25,7 @@ class ChatTranscriptRowsTest {
         entryId: String,
         answered: Boolean,
         callId: String = "call-$entryId",
+        preamble: String = "",
     ) = QuestionEntry(
         id = id,
         callId = callId,
@@ -32,6 +33,7 @@ class ChatTranscriptRowsTest {
         question = id,
         answered = answered,
         answerText = if (answered) "yes" else null,
+        preamble = preamble,
     )
 
     @Test
@@ -58,6 +60,7 @@ class ChatTranscriptRowsTest {
             when (it) {
                 is ChatRow.Entry -> "entry:${it.entry.entryId}"
                 is ChatRow.Questions -> "ask:${it.group.first().id}"
+                is ChatRow.Preamble -> "preamble:${it.callId}"
                 is ChatRow.Pending -> "pending"
                 is ChatRow.Indicator -> "indicator"
             }
@@ -77,11 +80,56 @@ class ChatTranscriptRowsTest {
             when (it) {
                 is ChatRow.Entry -> "entry:${it.entry.entryId}"
                 is ChatRow.Questions -> "ask:${it.group.first().id}"
+                is ChatRow.Preamble -> "preamble:${it.callId}"
                 is ChatRow.Pending -> "pending"
                 is ChatRow.Indicator -> "indicator"
             }
         }
         assertEquals(listOf("entry:e1", "ask:q1", "entry:e2"), kinds)
+    }
+
+    /**
+     * An open Claude ask carries the prose that introduced it (the transcript
+     * is still holding that turn back), and it has to read as an ordinary
+     * agent message immediately above the card.
+     */
+    @Test
+    fun openAskShowsItsPreambleAboveTheCard() {
+        val rows = buildChatRows(
+            entries = listOf(entry("e1")),
+            pendingMessages = emptyList(),
+            questions = listOf(
+                question("q1", entryId = "e1", answered = false, preamble = "Here is the background."),
+            ),
+            indicatorMode = null,
+        )
+        val kinds = rows.map {
+            when (it) {
+                is ChatRow.Entry -> "entry:${it.entry.entryId}"
+                is ChatRow.Questions -> "ask:${it.group.first().id}"
+                is ChatRow.Preamble -> "preamble:${it.text}"
+                is ChatRow.Pending -> "pending"
+                is ChatRow.Indicator -> "indicator"
+            }
+        }
+        assertEquals(listOf("entry:e1", "preamble:Here is the background.", "ask:q1"), kinds)
+    }
+
+    /**
+     * Once the round lands, the transcript carries that same prose as a real
+     * entry — repeating it from the card would say it twice.
+     */
+    @Test
+    fun answeredAskDropsItsPreamble() {
+        val rows = buildChatRows(
+            entries = listOf(entry("e1")),
+            pendingMessages = emptyList(),
+            questions = listOf(
+                question("q1", entryId = "e1", answered = true, preamble = "Here is the background."),
+            ),
+            indicatorMode = null,
+        )
+        assertTrue(rows.filterIsInstance<ChatRow.Preamble>().isEmpty())
     }
 
     @Test

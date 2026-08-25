@@ -22,7 +22,13 @@ import { parseClaudeTranscript } from "./transcript.js";
 import { claudeEffortArg, claudeModelArg, readClaudeModelsCatalog } from "./models.js";
 import { readClaudeCommandsCatalog } from "./commands.js";
 import { CLAUDE_ASK_TOOL, claudeQuestions, extractClaudeQuestions, mergePendingAsk } from "./questions.js";
-import { clearPendingAsk, pendingAskStamp } from "./pending-asks.js";
+import {
+  attachPendingAskPreamble,
+  clearPendingAsk,
+  pendingAskStamp,
+  readPendingAsk,
+} from "./pending-asks.js";
+import { extractAskPreamble } from "./ask-preamble.js";
 import { claudeAskPlan } from "./questionnaire.js";
 
 /** Claude config dir honors CLAUDECONFIGDIR (default ~/.claude), like the herdr hook. */
@@ -171,6 +177,40 @@ export async function claudeReadQuestions(path: string): Promise<QuestionEntry[]
     extractClaudeQuestions,
   );
   return mergePendingAsk(claudeSessionId(path), recorded);
+}
+
+/**
+ * How long a preamble read may hold up the agents poll it rides on. One ask
+ * pays it once; a pane that cannot answer in this window leaves the card
+ * without background rather than delaying every other card on the Board.
+ */
+const PREAMBLE_READ_TIMEOUT_MS = 2_000;
+
+/**
+ * Read the prose Claude wrote above the open ask off the pane, once.
+ *
+ * The transcript cannot supply it while the questionnaire is up — the whole
+ * assistant turn is buffered until the round resolves — so the pane is the
+ * only place it exists (see `ask-preamble.ts`). `visible` is the only
+ * snapshot herdr will take of a pane that is not idle, which a blocked pane
+ * is not: `recent_unwrapped` refuses with `agent_not_idle`.
+ *
+ * Best effort throughout. A failed read, an unreadable layout and a pane that
+ * never had a preamble all end the same way — the ask is marked read and the
+ * card renders exactly as it does today.
+ */
+export async function claudeCaptureAskContext(
+  herdr: HerdrPort,
+  paneId: string,
+  path: string,
+): Promise<void> {
+  const sessionId = claudeSessionId(path);
+  const pending = readPendingAsk(sessionId);
+  if (!pending || pending.preambleCaptured) return;
+  const read = await herdr
+    .agentRead(paneId, "visible", { stripAnsi: true, requestTimeoutMs: PREAMBLE_READ_TIMEOUT_MS })
+    .catch(() => null);
+  attachPendingAskPreamble(sessionId, extractAskPreamble(read?.read?.text ?? ""));
 }
 
 /**
@@ -355,6 +395,7 @@ export const claudeBackend: AgentBackend = {
   extractQuestions: claudeExtractQuestions,
   readQuestions: claudeReadQuestions,
   questionStateStamp: claudeQuestionStateStamp,
+  captureAskContext: claudeCaptureAskContext,
   answerAsk: claudeAnswerAsk,
   dismissAsk: claudeDismissAsk,
   control: claudeControl,

@@ -426,6 +426,52 @@ class ChatListTest {
         composeRule.onNodeWithText("Waiting for you").assertIsDisplayed()
     }
 
+    /**
+     * An open ask carries the prose that introduced it, because Claude holds
+     * that assistant turn back until the round resolves (ADR 0012). It has to
+     * render above the card, as an ordinary agent message.
+     */
+    @Test
+    fun openAskShowsItsPreambleAboveTheCard() {
+        val question = QuestionEntry(
+            id = "call-p#0",
+            callId = "call-p",
+            question = "Which database?",
+            header = "Storage",
+            options = listOf(QuestionOption(label = "Postgres")),
+            preamble = "Both candidates already exist in the repo.",
+        )
+        composeRule.setContent {
+            ScoutrTheme {
+                ChatList(entries = emptyList(), questions = listOf(question), hasPendingQuestion = true)
+            }
+        }
+        composeRule.onNodeWithTag("ask_preamble").assertIsDisplayed()
+        composeRule.onNodeWithText("Both candidates already exist in the repo.").assertIsDisplayed()
+        val preamble = composeRule.onNodeWithTag("ask_preamble").getBoundsInRoot()
+        val card = composeRule.onNodeWithTag("ask_card_call-p").getBoundsInRoot()
+        assertTrue("the background belongs above the card", preamble.top < card.top)
+    }
+
+    /** Answered, the transcript owns that prose: the card must not repeat it. */
+    @Test
+    fun answeredAskDropsItsPreamble() {
+        val question = QuestionEntry(
+            id = "call-q#0",
+            callId = "call-q",
+            question = "Which database?",
+            header = "Storage",
+            options = listOf(QuestionOption(label = "Postgres")),
+            answered = true,
+            answerText = "Postgres",
+            preamble = "Both candidates already exist in the repo.",
+        )
+        composeRule.setContent {
+            ScoutrTheme { ChatList(entries = emptyList(), questions = listOf(question)) }
+        }
+        composeRule.onNodeWithTag("ask_preamble").assertDoesNotExist()
+    }
+
     @Test
     fun blockedWithAQuestionCardShowsNoIndicator() {
         val question = QuestionEntry(

@@ -127,6 +127,20 @@ export interface AgentBackend {
    */
   questionStateStamp?(path: string): string;
   /**
+   * Capture whatever an open ask needs that its transcript cannot yet carry,
+   * from the live pane, so the file-bound session read can serve it.
+   *
+   * Claude buffers the prose it wrote above an ask along with the tool call
+   * until the round resolves, leaving the pane as the only place that
+   * background exists while the card is on screen (ADR 0012). Called from the
+   * herdr-bound agents poll, which already knows the pane; backends whose
+   * transcript is complete while an ask is open leave it undefined.
+   *
+   * Best effort by contract: it never throws, and the ask stays answerable
+   * whether or not anything was captured.
+   */
+  captureAskContext?(herdr: HerdrPort, paneId: string, path: string): Promise<void>;
+  /**
    * Deliver a whole ask into the pane in one pass. The backend owns its TUI's
    * grammar — which keys move between questions, how an option is picked, how
    * a custom answer is typed, how the ask is submitted. It either lands the

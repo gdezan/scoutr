@@ -34,6 +34,14 @@ export interface QuestionEntry {
   /** Selected option labels for multi-select answers. */
   selected: string[];
   timestamp: string;
+  /**
+   * Background the agent wrote above this ask, when the transcript could not
+   * carry it yet. Present only on an open Claude ask, whose introducing prose
+   * is buffered with the tool call until the round resolves — the app shows
+   * it above the card, and the transcript's own entry takes over the moment
+   * the round lands (see `agents/claude/ask-preamble.ts`, ADR 0012).
+   */
+  preamble?: string;
 }
 
 export const ASK_USER_QUESTION_TOOL = "ask_user_question";
