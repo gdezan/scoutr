@@ -85,10 +85,13 @@ pi agents, as an alternative to Moshi's paid herdr integration.
   agree. It anchors on the most recent tag, bumps from conventional commits
   since it, and stamps version, `versionCode`, short commit, dirty flag, and
   build time.
-- **Semantic versioning**: `feat` bumps minor; `fix` and every other subject
-  (including non-conventional prose and `docs`/`chore`/`test`/`refactor`) bump
-  patch; `feat!`/`fix!` or a `BREAKING CHANGE:` footer bump major. The strongest
-  bump since the tag wins, not a running tally.
+- **Semantic versioning**: `feat` bumps minor; every other conventional type
+  (`fix`, `docs`, `chore`, `test`, `refactor`) bumps patch; `feat!`/`fix!` or a
+  `BREAKING CHANGE:` footer bumps major; the strongest bump since the tag wins,
+  not a running tally. A non-conventional subject makes `scripts/version.mjs`
+  refuse to compute a version instead of silently patching (merge commits are
+  exempt), so the post-commit hook fails until the message is reworded with a
+  type prefix.
 - **`versionCode`** = `major*1_000_000 + minor*1_000 + patch`, floored to 1
   (Android requires `versionCode >= 1`). `versionName` is the semver string.
 - **Tags are manual.** The version script never creates tags; tagging `HEAD` is

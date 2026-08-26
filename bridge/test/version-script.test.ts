@@ -32,6 +32,20 @@ function versionKey(repo: string, key: string): string {
   }).trim();
 }
 
+function runFailing(repo: string) {
+  try {
+    execFileSync(process.execPath, [join(repo, "scripts", "version.mjs"), "--key", "version"], {
+      encoding: "utf8", stdio: ["ignore", "pipe", "pipe"],
+    });
+    throw new Error("expected version.mjs to fail");
+  } catch (error) {
+    // SAFETY: execFileSync only throws Node's child-process errors; both
+    // carry `status` and `stderr` for non-zero exits.
+    const failure = error as { status?: number; stderr?: string };
+    return { status: failure.status ?? -1, stderr: failure.stderr ?? "" };
+  }
+}
+
 // Every scenario starts from a tagged v0.1.0 baseline and commits on top, so
 // each test proves exactly one bump rule rather than chaining them.
 async function fromTaggedBaseline(fn: (repo: string) => void | Promise<void>): Promise<void> {
@@ -59,13 +73,30 @@ test("a fix commit bumps patch", async () => {
   });
 });
 
-test("a non-conventional subject bumps patch", async () => {
+test("a non-conventional subject is refused, not silently patched", async () => {
   await fromTaggedBaseline((repo) => {
     commit(repo, "tidy up the wiring");
+    const { status, stderr } = runFailing(repo);
+    assert.equal(status, 1);
+    assert.match(stderr, /no conventional type/);
+    assert.match(stderr, /tidy up the wiring/);
+  });
+});
+
+test("merge commits are exempt from the conventional-subject refusal", async () => {
+  await fromTaggedBaseline((repo) => {
+    commit(repo, "Merge branch 'worktree/something'");
     assert.equal(versionKey(repo, "version"), "0.1.1");
   });
 });
 
+test("a body line mentioning a type carries no bump", async () => {
+  await fromTaggedBaseline((repo) => {
+    commit(repo, "fix: stop the crash\n\nThe body muses about feat: ideas.");
+    // fix subject -> patch; the feat: prose in the body must not bump minor.
+    assert.equal(versionKey(repo, "version"), "0.1.1");
+  });
+});
 test("a feat! subject bumps major", async () => {
   await fromTaggedBaseline((repo) => {
     commit(repo, "feat!: rework pairing protocol");

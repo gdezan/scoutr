@@ -12,7 +12,13 @@
  *   feat(scope):  -> minor bump
  *   fix(scope):   -> patch bump
  *   feat!/fix! or BREAKING CHANGE: -> major bump
- *   everything else, including non-conventional subjects -> patch bump
+ *   every other conventional type -> patch bump
+ *   non-conventional subjects -> hard failure (merge commits are exempt)
+ *
+ * A subject with no conventional type would silently version as a patch, so
+ * the script refuses to run instead; reword the commit with a type prefix.
+ * Only subjects carry a bump; bodies count solely for `BREAKING CHANGE:`
+ * footers.
  *
  * versionCode = major*1_000_000 + minor*1_000 + patch (monotonic).
  *
@@ -55,7 +61,8 @@ const CONVENTIONAL = /^([a-z]+)(?:\([^)]*\))?(!)?:/;
 /** Bump category for one commit subject (subject-level breaking `!` only). */
 function classify(subject) {
   const match = CONVENTIONAL.exec(subject.trim());
-  if (!match) return "patch"; // non-conventional -> patch (see header rules)
+  // Unreachable for validated input; kept so classify stays total.
+  if (!match) return "patch";
   if (match[2] === "!") return "major";
   if (match[1] === "feat") return "minor";
   return "patch"; // fix and every other conventional type -> patch
@@ -75,21 +82,48 @@ function computeIdentity() {
   const lastTag = gitOrNull(["describe", "--tags", "--abbrev=0"]);
   const base = (lastTag && parseSemver(lastTag)) || { major: 0, minor: 0, patch: 0 };
 
-  // Full subjects + bodies since the anchor tag, so `BREAKING CHANGE:` footers
-  // count even when the subject itself is a plain `feat:`.
-  let subjects = [];
+  // Full records (subject + body) since the anchor tag, so `BREAKING CHANGE:`
+  // footers count even when the subject itself is a plain `feat:`.
+  let commits = [];
   if (lastTag) {
-    const log = gitOrNull(["log", `${lastTag}..HEAD`, "--pretty=format:%s%n%b"]);
-    if (log) subjects = log.split("\n").filter((line) => line.length > 0);
+    const log = gitOrNull(["log", `${lastTag}..HEAD`, "--pretty=format:%h%x1f%s%x1f%b%x1e"]);
+    if (log) {
+      commits = log
+        .split("\x1e")
+        .filter((record) => record.trim().length > 0)
+        .map((record) => {
+          const [hash, subject, ...bodyLines] = record.split("\x1f");
+          return { hash: hash ?? "", subject: (subject ?? "").trim(), bodyLines };
+        });
+    }
+  }
+
+  // A subject that is neither conventional nor a merge cannot be classified,
+  // and classifying it as a patch is how a feature release silently ships as
+  // v0.17.1. Refuse and name the offenders instead.
+  const unclassified = commits.filter(
+    (commit) => !/^Merge\b/.test(commit.subject) && !CONVENTIONAL.test(commit.subject),
+  );
+  if (unclassified.length > 0) {
+    const listed = unclassified.map((commit) => `  ${commit.hash} ${commit.subject}`).join("\n");
+    console.error(
+      "version.mjs: refusing to compute a version; these commits have no conventional type:",
+      `\n${listed}\n`,
+      "Reword them (git rebase -i) with a type prefix like feat:, fix:, docs:, chore:.",
+    );
+    process.exit(1);
   }
 
   let bump = "none";
-  for (const line of subjects) {
-    if (/^BREAKING CHANGE:/i.test(line.trim())) {
-      bump = "major";
-      break;
+  for (const commit of commits) {
+    for (const line of commit.bodyLines) {
+      if (/^BREAKING CHANGE:/i.test(line.trim())) {
+        bump = "major";
+        break;
+      }
     }
-    const category = classify(line);
+    if (bump === "major") break;
+    const category = classify(commit.subject);
     if (BUMP_ORDER[category] > BUMP_ORDER[bump]) bump = category;
   }
 
@@ -120,7 +154,7 @@ function computeIdentity() {
     dirty,
     lastTag,
     bump,
-    commitsSinceTag: subjects.length,
+    commitsSinceTag: commits.length,
     buildTime: new Date().toISOString(),
     repoRoot,
   };

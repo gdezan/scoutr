@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # Tag every commit with the semantic version implied by its conventional-commit
 # subject. The bump rules live in scripts/version.mjs (feat -> minor, feat!/
-# BREAKING CHANGE -> major, everything else -> patch); this hook only decides
-# when to create the tag, never how the number is computed.
+# BREAKING CHANGE -> major, every other conventional type -> patch); this hook
+# only decides when to create the tag, never how the number is computed. A
+# non-conventional subject fails the script (and therefore this hook) instead
+# of silently tagging a patch.
 #
 # Tags are local-only: nothing is pushed. Set SCOUTR_NO_AUTOTAG=1 to skip.
 set -euo pipefail
