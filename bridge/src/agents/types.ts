@@ -18,6 +18,12 @@ export interface LaunchParams {
   model?: string;
   thinkingLevel?: string;
   name?: string;
+  /**
+   * Scoutr-awareness text (see `agents/scoutr-context.ts`) to append to the agent's
+   * system prompt. Backends whose CLI has no append mechanism (agy) ignore it;
+   * sessions launched outside Scoutr never carry it.
+   */
+  scoutrContext?: string;
 }
 
 export interface ControlParams {
@@ -99,7 +105,7 @@ export interface AgentBackend {
   readonly hasSlashCommands: boolean;
 
   launchCommand(params: LaunchParams): string;
-  resumeCommand(path: string, mode: "resume" | "fork"): string;
+  resumeCommand(path: string, mode: "resume" | "fork", scoutrContext?: string): string;
 
   sessionRoot(): string;
   ownsSessionPath(path: string): boolean;

@@ -14,6 +14,7 @@ import type { QuestionEntry } from "../questions.js";
 import { backendForSessionPath } from "../agents/registry.js";
 import type { ControlAction } from "../agents/types.js";
 import { createSession, controlSession, SessionsError } from "../sessions.js";
+import { buildScoutrContext } from "../agents/scoutr-context.js";
 import type { Route, RouteContext, RouteResult } from "./types.js";
 import * as v from "valibot";
 export const sessionsRoutes: Route[] = [
@@ -385,6 +386,7 @@ async function createSessionRoute(ctx: RouteContext): Promise<RouteResult> {
     thinkingLevel: body.thinkingLevel,
     initialPrompt: body.initialPrompt,
     agent: body.agent,
+    scoutrContext: await buildScoutrContext(ctx.deps.config),
   }, ctx.deps.workspaceRoots);
   return { status: 200, body: { ok: true, ...created } };
 }

@@ -64,7 +64,14 @@ function fakeDeps(sessionCatalogRoot?: string) {
       feed,
       // SAFETY: these tests never call usage; the stub fills an unused ServerDeps field.
       usage: usage as never,
-      config: { configDir: "/tmp/scoutr-test-config", hostId: "host_test", token: TOKEN, port: PORT },
+      // Explicit publicUrl: context injection stays deterministic (no tailscale discovery).
+      config: {
+        configDir: "/tmp/scoutr-test-config",
+        hostId: "host_test",
+        token: TOKEN,
+        port: PORT,
+        exposure: { kind: "tailscale", publicUrl: "https://scoutr-test.ts.net" },
+      },
       terminal: new FakeTerminalLauncher(),
       sessionCatalogRoot,
     },
@@ -108,6 +115,20 @@ async function wsCommand(command: WsCommand): Promise<any> {
 function lastLaunch(sent: readonly SentInput[]): string {
   const send = sent.filter((call) => call.method === "paneSendInput").at(-1);
   return send?.params.text ?? "";
+}
+
+/**
+ * Launch command with the injected Scoutr context stripped, for assertions on
+ * the agent's own options (the context rides `--append-system-prompt` last).
+ */
+function baseLaunch(sent: readonly SentInput[]): string {
+  return lastLaunch(sent).split(" --append-system-prompt")[0] ?? "";
+}
+
+/** The injected Scoutr context argument, shell-quoted; "" when absent. */
+function injectedContext(sent: readonly SentInput[]): string {
+  const match = lastLaunch(sent).match(/--append-system-prompt '([\s\S]*)'$/);
+  return match?.[1] ?? "";
 }
 
 describe("POST /api/sessions and /api/sessions/:paneId/control", () => {
@@ -191,7 +212,11 @@ describe("POST /api/sessions and /api/sessions/:paneId/control", () => {
     assert.equal(status, 200);
     assert.equal(data.ok, true);
     assert.equal(data.paneId, "p1");
-    assert.equal(lastLaunch(sent), "pi --model 'openai-codex/gpt-5.4' --name 'demo'");
+    assert.equal(baseLaunch(sent), "pi --model 'openai-codex/gpt-5.4' --name 'demo'");
+    // Sessions created through the API are Scoutr-aware (see agents/scoutr-context.ts).
+    assert.match(injectedContext(sent), /supervised through Scoutr/);
+    assert.match(injectedContext(sent), /scoutr-test\.ts\.net/);
+    assert.ok(!injectedContext(sent).includes(TOKEN));
   });
 
   it("resumes a stored session through a quoted headless launch", async () => {
@@ -202,7 +227,7 @@ describe("POST /api/sessions and /api/sessions/:paneId/control", () => {
 
     assert.equal(status, 201);
     assert.equal(data.paneId, "p1");
-    assert.equal(lastLaunch(sent), `pi --session '${sessionPath}'`);
+    assert.equal(baseLaunch(sent), `pi --session '${sessionPath}'`);
   });
 
   it("delivers thinking through launch and the exact prompt through agent.prompt", async () => {
@@ -217,7 +242,7 @@ describe("POST /api/sessions and /api/sessions/:paneId/control", () => {
     });
 
     assert.equal(status, 200);
-    assert.equal(lastLaunch(sent), "pi --model 'openai-codex/gpt-5.4' --thinking 'high'");
+    assert.equal(baseLaunch(sent), "pi --model 'openai-codex/gpt-5.4' --thinking 'high'");
     const promptCall = sent.slice(before).find((call) => call.method === "agentPrompt");
     assert.equal(promptCall?.params.text, prompt);
   });
@@ -227,7 +252,7 @@ describe("POST /api/sessions and /api/sessions/:paneId/control", () => {
     const { status } = await post("/api/sessions", { cwd, model: "m", initialPrompt: "" });
 
     assert.equal(status, 200);
-    assert.equal(lastLaunch(sent), "pi --model 'm'");
+    assert.equal(baseLaunch(sent), "pi --model 'm'");
     assert.equal(sent.slice(before).some((call) => call.method === "agentPrompt"), false);
   });
 

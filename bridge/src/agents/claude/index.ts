@@ -47,14 +47,19 @@ export function claudeLaunchCommand(params: LaunchParams): string {
   const effort = claudeEffortArg(params.thinkingLevel, params.model);
   if (effort) parts.push("--effort", shellQuote(effort));
   if (params.name) parts.push("--name", shellQuote(params.name));
+  if (params.scoutrContext) parts.push("--append-system-prompt", shellQuote(params.scoutrContext));
   return parts.join(" ");
 }
 
 /** Claude resumes by session **id**; the path's basename is the session uuid. */
-export function claudeResumeCommand(path: string, mode: "resume" | "fork"): string {
+export function claudeResumeCommand(path: string, mode: "resume" | "fork", scoutrContext?: string): string {
   if (mode === "fork") throw new Error("claude has no fork-at-path launch; resume the session and use /fork");
   const id = path.replace(/\.jsonl$/, "").split(/[\\/]/).pop() ?? path;
-  return `claude --resume ${shellQuote(id)}`;
+  // System-prompt flags are per-invocation for Claude (not persisted in the
+  // session), so the resume command must re-carry the Scoutr context itself.
+  const parts = [`claude --resume ${shellQuote(id)}`];
+  if (scoutrContext) parts.push("--append-system-prompt", shellQuote(scoutrContext));
+  return parts.join(" ");
 }
 
 /** Canonical containment check, symmetric with the pi adapter (see piOwnsSessionPath). */

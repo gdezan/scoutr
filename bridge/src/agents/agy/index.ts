@@ -206,6 +206,8 @@ export const agyBackend: AgentBackend = {
   hasModelCatalog: true,
   hasSlashCommands: true,
 
+  // No Scoutr-context injection: agy's CLI has no --append-system-prompt
+  // equivalent, so `scoutrContext` (see agents/scoutr-context.ts) is ignored.
   launchCommand: agyLaunchCommand,
   resumeCommand: agyResumeCommand,
   sessionRoot: agySessionRoot,

@@ -28,6 +28,11 @@ export interface CreateSessionParams {
   initialPrompt?: string;
   /** Registry backend id; defaults to "pi". */
   agent?: string;
+  /**
+   * Scoutr-awareness text appended to the agent's system prompt
+   * (see `agents/scoutr-context.ts`); absent for sessions launched outside Scoutr.
+   */
+  scoutrContext?: string;
 }
 
 export interface CreatedSession {
@@ -40,6 +45,8 @@ export type StoredSessionMode = "resume" | "fork";
 export interface LaunchStoredSessionParams {
   path: string;
   mode: StoredSessionMode;
+  /** Scoutr-awareness text appended to the agent's system prompt; see `agents/scoutr-context.ts`. */
+  scoutrContext?: string;
 }
 
 export class SessionsError extends BridgeError {
@@ -131,6 +138,7 @@ export async function createSession(
     model: params.model?.trim() || undefined,
     thinkingLevel: params.thinkingLevel,
     name: params.name?.trim() || undefined,
+    scoutrContext: params.scoutrContext,
   });
   return launchWorkspace(herdr, cwd, name, command, workspaceRoots, async (paneId) => {
     if (!params.initialPrompt) return;
@@ -157,7 +165,7 @@ export async function launchStoredSession(
   const cwd = resolveSessionWorkspace(session.cwd, path, backend.sessionRoot());
   let command: string;
   try {
-    command = backend.resumeCommand(path, params.mode);
+    command = backend.resumeCommand(path, params.mode, params.scoutrContext);
   } catch (error) {
     // e.g. forking a claude transcript, which has no fork-at-path launch.
     throw new SessionsError(error instanceof Error ? error.message : String(error), 400);

@@ -51,11 +51,14 @@ export function piLaunchCommand(params: LaunchParams): string {
   const parts = ["pi", "--model", shellQuote(params.model ?? "")];
   if (params.thinkingLevel) parts.push("--thinking", shellQuote(params.thinkingLevel));
   if (params.name) parts.push("--name", shellQuote(params.name));
+  if (params.scoutrContext) parts.push("--append-system-prompt", shellQuote(params.scoutrContext));
   return parts.join(" ");
 }
 
-export function piResumeCommand(path: string, mode: "resume" | "fork"): string {
-  return `pi --${mode === "fork" ? "fork" : "session"} ${shellQuote(path)}`;
+export function piResumeCommand(path: string, mode: "resume" | "fork", scoutrContext?: string): string {
+  const parts = [`pi --${mode === "fork" ? "fork" : "session"} ${shellQuote(path)}`];
+  if (scoutrContext) parts.push("--append-system-prompt", shellQuote(scoutrContext));
+  return parts.join(" ");
 }
 
 export function piSessionRoot(): string {

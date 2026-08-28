@@ -1,5 +1,6 @@
 import type { SessionSnapshot } from "../herdr/types.js";
 import { controlSession, launchStoredSession } from "../sessions.js";
+import { buildScoutrContext } from "../agents/scoutr-context.js";
 import {
   deleteStoredSession,
   listSessionCatalog,
@@ -83,6 +84,7 @@ async function storedSessionAction(ctx: RouteContext): Promise<RouteResult> {
     const created = await launchStoredSession(ctx.deps.herdr, {
       path: target,
       mode: action,
+      scoutrContext: await buildScoutrContext(ctx.deps.config),
     }, ctx.deps.workspaceRoots);
     return { status: 201, body: { ok: true, ...created } };
   }
