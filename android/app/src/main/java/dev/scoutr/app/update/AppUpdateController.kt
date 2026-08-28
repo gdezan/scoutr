@@ -73,6 +73,7 @@ class AppUpdateController(
     private val notifications: UpdateNotifier,
     private val staging: UpdateStaging,
     private val installer: ApkInstall,
+    private val installedVersionCode: Int = 0,
     private val pollDelayMs: Long = 2_000,
 ) {
     private val _state = MutableStateFlow<UpdateState>(UpdateState.Idle)
@@ -110,16 +111,48 @@ class AppUpdateController(
      * Adopts whatever the last process left on disk, so minutes of build and
      * download are not thrown away by a restart.
      *
-     * A complete staged APK is offered for install immediately; a partial one
-     * is left untouched for an explicit resume, and nothing here ever starts a
-     * transfer on its own. Deliberately answerable offline: the staged bytes
-     * were verified when they landed, and whether the host has since built
-     * something newer does not make this APK less installable.
+     * A complete staged APK that is newer than the installed app is offered
+     * for install immediately; a partial one is left untouched for an
+     * explicit resume, and nothing here ever starts a transfer on its own.
+     * A complete but stale one is not offered at all — see [rehydrate].
+     * Deliberately answerable offline: the staged bytes were verified when
+     * they landed, and whether the host has since built
+     * something newer does not make this APK less installable — only an APK
+     * older than the *installed* app is refused, because that one could
+     * never be committed at all.
      */
     fun rehydrate() {
         if (_state.value != UpdateState.Idle) return
         val staged = staging.complete() ?: return
+        // An APK that is not newer than the running app can never be
+        // committed — the system rejects the downgrade — and offering it
+        // anyway wedges the flow on Ready forever, with no way back to build
+        // and download. That is exactly what a self-update stages while a
+        // different version is being installed, so an unknown versionCode
+        // (a sidecar from before it was recorded) counts as stale too. A
+        // "Ready" notification the refusing process's predecessor left in
+        // the shade must go too: tapping it would deep-link into an install
+        // this app can never accept.
+        if (staged.identity.versionCode <= installedVersionCode) {
+            notifications.cancelUpdateNotifications()
+            return
+        }
         _state.value = UpdateState.Ready(staged.identity)
+    }
+
+    /**
+     * Gives up a staged APK and returns to Idle, freeing a fresh build and
+     * download.
+     *
+     * Ready is otherwise a dead end: only a *successful* install leaves it,
+     * so a stage the system will never accept — a signature mismatch, a
+     * declined downgrade — would trap the flow on "Install now" forever.
+     */
+    fun discardStaged() {
+        if (_state.value !is UpdateState.Ready) return
+        staging.discard()
+        _state.value = UpdateState.Idle
+        notifications.cancelUpdateNotifications()
     }
 
     /** Starts the pipeline from Settings or a resume action. A no-op while one is running. */
@@ -262,6 +295,18 @@ class AppUpdateController(
      * all — it would be an interruption, so the shade carries the news instead.
      */
     private fun finish(staged: StagedUpdate) {
+        // These bytes came from a live host poll, so a versionCode of 0 (an
+        // old bridge that never sent one) is tolerated — but a build that is
+        // provably not newer than the installed app can never be committed
+        // and must not enter Ready, or it wedges the flow the same way a
+        // stale rehydrate would.
+        if (staged.identity.versionCode in 1..installedVersionCode) {
+            staging.discard()
+            val message = "the host built an APK older than the installed app"
+            _state.value = UpdateState.Failed(message, resumable = false)
+            notifications.showUpdateFailed(message, resumable = false)
+            return
+        }
         if (updateScreenVisible) {
             _state.value = UpdateState.Ready(staged.identity)
             install()

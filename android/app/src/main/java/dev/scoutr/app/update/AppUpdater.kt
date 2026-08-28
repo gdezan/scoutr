@@ -49,6 +49,7 @@ class AppUpdater(
                 sha256 = artifact.sha256,
                 size = artifact.size,
                 version = artifact.version,
+                versionCode = artifact.versionCode,
             ),
         )
 

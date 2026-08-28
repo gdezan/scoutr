@@ -2,6 +2,7 @@ package dev.scoutr.app
 
 import android.app.Application
 import android.content.Context
+import android.os.Build
 import android.util.Log
 import dev.scoutr.app.data.ConnectionStore
 import dev.scoutr.app.data.FcmTokenStore
@@ -204,6 +205,7 @@ class AppContainer(application: Application) {
         notifications = notifications,
         staging = UpdateStaging(File(appContext.filesDir, "update")),
         installer = ApkInstaller.forContext(appContext),
+        installedVersionCode = installedVersionCode(),
     ).apply {
         rehydrate()
         // The install session reports back long after — and from anywhere but —
@@ -231,6 +233,17 @@ class AppContainer(application: Application) {
         val hostId = state.updateHostId ?: return null
         return currentHostBinding(hostId)
     }
+
+    /**
+     * This app's own versionCode, so [AppUpdateController.rehydrate] can tell
+     * a staged APK it could actually install from one the system would
+     * reject as a downgrade.
+     */
+    private fun installedVersionCode(): Int = runCatching {
+        val info = appContext.packageManager.getPackageInfo(appContext.packageName, 0)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) info.longVersionCode.toInt()
+        else @Suppress("DEPRECATION") info.versionCode
+    }.getOrDefault(0)
 
     fun startUpdate() {
         val binding = updateBinding() ?: return

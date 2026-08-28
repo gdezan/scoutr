@@ -358,6 +358,7 @@ class SettingsScreenTest {
                 sha256 = "ab",
                 size = bytes.size.toLong(),
                 version = "0.4.0",
+                versionCode = 12,
             ),
         )
         staging.apkFile().writeBytes(bytes)

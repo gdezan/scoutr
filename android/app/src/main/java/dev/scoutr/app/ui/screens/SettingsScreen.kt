@@ -231,8 +231,11 @@ private fun UpdateSection(
         when (updateAction.value) {
             null -> Unit
             PendingUpdateAction.Install -> {
-                if (updateState !is UpdateState.Ready) return@LaunchedEffect
                 updateAction.value = null
+                // A stale notification's install can arrive after rehydrate
+                // refused its stage; consume it instead of leaving it queued
+                // to fire against some later, unrelated Ready state.
+                if (updateState !is UpdateState.Ready) return@LaunchedEffect
                 updates.install()
             }
             PendingUpdateAction.Resume -> {
@@ -375,6 +378,17 @@ private fun UpdateSection(
                         else -> "Update app"
                     },
                 )
+            }
+            // Ready is a dead end by design — only a successful install leaves
+            // it — so a stage the system will never take needs an explicit way
+            // out, or the row blocks a fresh build and download forever.
+            if (updateState is UpdateState.Ready) {
+                TextButton(
+                    onClick = { updates.discardStaged() },
+                    modifier = Modifier.fillMaxWidth().testTag("settings_update_discard"),
+                ) {
+                    Text("Discard staged update", color = MaterialTheme.colorScheme.error)
+                }
             }
         }
     }

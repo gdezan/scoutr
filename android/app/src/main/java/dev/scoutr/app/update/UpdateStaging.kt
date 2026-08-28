@@ -16,6 +16,18 @@ data class StagedIdentity(
     val size: Long,
     val version: String,
     /**
+     * The versionCode gradle stamped into the APK, straight from the host's
+     * artifact descriptor.
+     *
+     * An APK older than what is already installed cannot be committed — the
+     * system rejects the downgrade — so a staged build that is not newer than
+     * the running app must never be offered for install. 0 means the sidecar
+     * predates this field and the version is simply unknown; such a stage is
+     * also not offered, because offering it is how a stale stage wedges the
+     * whole update flow.
+     */
+    val versionCode: Int = 0,
+    /**
      * True only once the downloaded bytes were hashed and matched [sha256].
      *
      * Length alone cannot stand in for this: a process killed between the last

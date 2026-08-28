@@ -14,6 +14,7 @@ import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.test.runTest
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -42,7 +43,7 @@ class AppUpdateControllerTest {
         MessageDigest.getInstance("SHA-256").digest(data).joinToString("") { "%02x".format(it) }
 
     private fun artifact() =
-        ApkArtifact(size = bytes.size.toLong(), sha256 = sha256(bytes), commit = "abc1234", version = "0.4.0")
+        ApkArtifact(size = bytes.size.toLong(), sha256 = sha256(bytes), commit = "abc1234", version = "0.4.0", versionCode = 12)
 
     private val binding = HostConnectionBinding(
         hostId = "host-1",
@@ -78,6 +79,7 @@ class AppUpdateControllerTest {
         notifier: UpdateNotifier = RecordingNotifier(),
         installer: ApkInstall = RecordingInstaller(),
         staging: UpdateStaging = UpdateStaging(File(files.root, "update")),
+        installedVersionCode: Int = 0,
     ): AppUpdateController {
         val work = HostWorkCoordinator().apply { activate(binding) }
         return AppUpdateController(
@@ -86,6 +88,7 @@ class AppUpdateControllerTest {
             notifications = notifier,
             staging = staging,
             installer = installer,
+            installedVersionCode = installedVersionCode,
             pollDelayMs = 0,
         )
     }
@@ -171,7 +174,7 @@ class AppUpdateControllerTest {
         // What an interrupted transfer actually leaves behind: bytes plus the
         // sidecar that says which APK they belong to.
         staging.record(
-            StagedIdentity(commit = "abc1234", sha256 = sha256(bytes), size = bytes.size.toLong(), version = "0.4.0"),
+            StagedIdentity(commit = "abc1234", sha256 = sha256(bytes), size = bytes.size.toLong(), version = "0.4.0", versionCode = 12),
         )
         staging.apkFile().writeBytes(bytes.copyOfRange(0, 6))
 
@@ -205,7 +208,7 @@ class AppUpdateControllerTest {
     fun `a complete staged APK from a previous process is offered for install`() = runTest {
         val staging = UpdateStaging(File(files.root, "update"))
         staging.record(
-            StagedIdentity(commit = "abc1234", sha256 = sha256(bytes), size = bytes.size.toLong(), version = "0.4.0"),
+            StagedIdentity(commit = "abc1234", sha256 = sha256(bytes), size = bytes.size.toLong(), version = "0.4.0", versionCode = 12),
         )
         staging.apkFile().writeBytes(bytes)
         staging.markVerified()
@@ -220,7 +223,7 @@ class AppUpdateControllerTest {
     fun `an unverified full-length staged APK is not offered for install`() = runTest {
         val staging = UpdateStaging(File(files.root, "update"))
         staging.record(
-            StagedIdentity(commit = "abc1234", sha256 = sha256(bytes), size = bytes.size.toLong(), version = "0.4.0"),
+            StagedIdentity(commit = "abc1234", sha256 = sha256(bytes), size = bytes.size.toLong(), version = "0.4.0", versionCode = 12),
         )
         // Killed between the last byte and the checksum: full length, unproven.
         staging.apkFile().writeBytes(bytes)
@@ -235,7 +238,7 @@ class AppUpdateControllerTest {
     fun `a partial staged APK is not mistaken for something installable`() = runTest {
         val staging = UpdateStaging(File(files.root, "update"))
         staging.record(
-            StagedIdentity(commit = "abc1234", sha256 = sha256(bytes), size = bytes.size.toLong(), version = "0.4.0"),
+            StagedIdentity(commit = "abc1234", sha256 = sha256(bytes), size = bytes.size.toLong(), version = "0.4.0", versionCode = 12),
         )
         staging.apkFile().writeBytes(bytes.copyOfRange(0, 6))
         val controller = controller(this, staging = staging)
@@ -250,7 +253,7 @@ class AppUpdateControllerTest {
     fun `a declined install keeps the staged APK and stays one tap from retrying`() = runTest {
         val staging = UpdateStaging(File(files.root, "update"))
         staging.record(
-            StagedIdentity(commit = "abc1234", sha256 = sha256(bytes), size = bytes.size.toLong(), version = "0.4.0"),
+            StagedIdentity(commit = "abc1234", sha256 = sha256(bytes), size = bytes.size.toLong(), version = "0.4.0", versionCode = 12),
         )
         staging.apkFile().writeBytes(bytes)
         staging.markVerified()
@@ -287,7 +290,7 @@ class AppUpdateControllerTest {
             pollDelayMs = 0,
         )
         staging.record(
-            StagedIdentity(commit = "abc1234", sha256 = sha256(bytes), size = bytes.size.toLong(), version = "0.4.0"),
+            StagedIdentity(commit = "abc1234", sha256 = sha256(bytes), size = bytes.size.toLong(), version = "0.4.0", versionCode = 12),
         )
         staging.apkFile().writeBytes(bytes.copyOfRange(0, 6))
 
@@ -346,7 +349,7 @@ class AppUpdateControllerTest {
     fun `a successful install drops the staged bytes`() = runTest {
         val staging = UpdateStaging(File(files.root, "update"))
         staging.record(
-            StagedIdentity(commit = "abc1234", sha256 = sha256(bytes), size = bytes.size.toLong(), version = "0.4.0"),
+            StagedIdentity(commit = "abc1234", sha256 = sha256(bytes), size = bytes.size.toLong(), version = "0.4.0", versionCode = 12),
         )
         staging.apkFile().writeBytes(bytes)
         staging.markVerified()
@@ -355,6 +358,85 @@ class AppUpdateControllerTest {
         controller.onInstallOutcome(ApkInstallOutcome.Success)
 
         assertEquals(UpdateState.Idle, controller.state.value)
+        assertEquals(0L, staging.partialBytes())
+        assertNull(staging.identity())
+    }
+
+    @Test
+    fun `a staged APK older than the installed app is not adopted on rehydrate`() = runTest {
+        // What a self-update staged while a different, newer version was
+        // being installed looks like: verified bytes the system would only
+        // ever reject as a downgrade.
+        val staging = UpdateStaging(File(files.root, "update"))
+        staging.record(
+            StagedIdentity(commit = "abc1234", sha256 = sha256(bytes), size = bytes.size.toLong(), version = "0.3.0", versionCode = 11),
+        )
+        staging.apkFile().writeBytes(bytes)
+        staging.markVerified()
+        val controller = controller(this, staging = staging, installedVersionCode = 12)
+
+        controller.rehydrate()
+
+        assertEquals(UpdateState.Idle, controller.state.value)
+    }
+
+    @Test
+    fun `a staged APK whose version is unknown is not adopted on rehydrate`() = runTest {
+        // A sidecar written before versionCode was recorded: the version is
+        // unknowable, and offering it anyway is how the flow wedges on Ready.
+        val staging = UpdateStaging(File(files.root, "update"))
+        staging.record(
+            StagedIdentity(commit = "abc1234", sha256 = sha256(bytes), size = bytes.size.toLong(), version = "0.4.0"),
+        )
+        staging.apkFile().writeBytes(bytes)
+        staging.markVerified()
+        val controller = controller(this, staging = staging, installedVersionCode = 12)
+
+        controller.rehydrate()
+
+        assertEquals(UpdateState.Idle, controller.state.value)
+    }
+
+    @Test
+    fun `discarding a ready update drops the bytes and frees a fresh build`() = runTest {
+        val staging = UpdateStaging(File(files.root, "update"))
+        staging.record(
+            StagedIdentity(commit = "abc1234", sha256 = sha256(bytes), size = bytes.size.toLong(), version = "0.4.0", versionCode = 12),
+        )
+        staging.apkFile().writeBytes(bytes)
+        staging.markVerified()
+        val notifier = RecordingNotifier()
+        val controller = controller(this, notifier = notifier, staging = staging)
+        controller.rehydrate()
+        assertTrue(controller.state.value is UpdateState.Ready)
+
+        controller.discardStaged()
+
+        assertEquals(UpdateState.Idle, controller.state.value)
+        assertEquals(0L, staging.partialBytes())
+        assertNull(staging.identity())
+        assertEquals(1, notifier.cancelled)
+
+        // The whole point of the escape hatch: Idle again means build and
+        // download is reachable once more.
+        controller.start(readyApi(), binding)
+        advanceUntilIdle()
+        assertTrue(controller.state.value is UpdateState.Ready)
+    }
+
+    @Test
+    fun `a host build older than the installed app fails instead of wedging on Ready`() = runTest {
+        val staging = UpdateStaging(File(files.root, "update"))
+        val controller = controller(this, staging = staging, installedVersionCode = 20)
+
+        // readyApi()'s artifact carries versionCode 12 — a downgrade against
+        // the running app, so committing it is impossible no matter what.
+        controller.start(readyApi(), binding)
+        advanceUntilIdle()
+
+        val state = controller.state.value
+        assertTrue(state is UpdateState.Failed)
+        assertFalse((state as UpdateState.Failed).resumable)
         assertEquals(0L, staging.partialBytes())
         assertNull(staging.identity())
     }
