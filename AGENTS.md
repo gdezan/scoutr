@@ -4,6 +4,7 @@
 
 - Work directly on `main` and commit there unless the user explicitly specifies another branch or workflow.
 - When committing, push the branch and its release tags together (`git push --follow-tags`) so a new `vX.Y.Z` tag always travels with the commit.
+- After that push, if the phone or live app would only see the commit through the supervised bridge, deploy with the live-bridge recipe in `docs/dev-workflow.md`. The push is not done until `check:deployed` is green.
 - Never add "Co-authored-by" lines to commits; the user is the only author of record.
 
 ## Project map
@@ -33,7 +34,7 @@ API; the Android app talks only to that API.
 - **Watch hung work:** before a long command, name the next expected progress. If that progress is late, inspect the process and last output and stop waiting. Recognized agents use Herdr lifecycle waits; slow/noisy/device-bound checks use the sibling-pane completion recipe in `skills/scoutr-verification/SKILL.md`. Timeouts are safety ceilings, not completion.
 - **Keep Android verification serial:** one Gradle invocation per checkout and one instrumentation run on `emulator-5554` at a time.
 - **Emulator is on-demand (artemis is always-on):** boot `emulator-5554` (`cockpit` AVD) only for final acceptance; kill with `adb -s emulator-5554 emu kill` when done. See `docs/dev-workflow.md` for boot/kill recipes.
-- **Deploy finalized bridge work:** when the phone or live app would only see the change through the supervised service, run the deploy recipe in `docs/dev-workflow.md`. Source-green is not live.
+- **Source-green is not live:** the phone talks to the supervised bridge `dist/`, not this checkout. Deploy is the git-workflow step after a live-path push.
 
 ## Verification boundary
 
@@ -60,7 +61,7 @@ skipped Gradle output.
 
 ## Task-specific pointers
 
-- **Live bridge deploy, scratch-bridge, or Android/emulator diagnostics:** use `docs/dev-workflow.md`. Deploy after finalized bridge work the phone talks to.
+- **Live bridge deploy, scratch-bridge, or Android/emulator diagnostics:** recipes live in `docs/dev-workflow.md`. Reach for it on a live-path push (deploy), scratch-bridge isolation, emulator boot/kill, or Android test recovery.
 - **Verification selection and final runtime evidence:** use `skills/scoutr-verification/SKILL.md`.
 - **Pre-commit review:** use `skills/scoutr-review/SKILL.md` and resolve or dismiss every finding. An explicit ask to commit, tag, or push without requesting review is the commit itself.
 - **Visual evidence when the active model cannot inspect images:** use `skills/scoutr-vision/SKILL.md`.
