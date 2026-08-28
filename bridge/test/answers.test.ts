@@ -103,6 +103,67 @@ describe("claude questionnaire grammar", () => {
     ]);
   });
 
+  describe("preview layout", () => {
+    // Verified live against Claude Code 2.1.250: a single-select question whose
+    // options carry preview text renders as list-plus-preview-pane, where a
+    // digit only moves the cursor and Enter is what picks and advances.
+    test("a preview question needs Enter to pick: its digit only moves the cursor", () => {
+      const q = question(0, { hasPreviews: true });
+      assert.deepEqual(steps(claudeAskPlan([q], [pick(0, "Beta")])), ['"2"', "Enter"]);
+    });
+
+    test("a multi-question preview ask answers each question, not just the first", () => {
+      // The regression: with digits alone the cursor never left question 0, so
+      // the trailing Enter confirmed whichever option the last digit had
+      // highlighted there and every later question submitted unanswered.
+      const group = [question(0, { hasPreviews: true }), question(1, { hasPreviews: true })];
+      assert.deepEqual(steps(claudeAskPlan(group, [pick(0, "Alpha"), pick(1, "Gamma")])), [
+        '"1"',
+        "Enter",
+        '"3"',
+        "Enter",
+        "Enter",
+      ]);
+    });
+
+    test("layout is chosen per question, so one ask can mix both grammars", () => {
+      const group = [question(0, { hasPreviews: true }), question(1)];
+      assert.deepEqual(steps(claudeAskPlan(group, [pick(0, "Alpha"), pick(1, "Gamma")])), [
+        '"1"',
+        "Enter",
+        '"3"',
+        "Enter",
+      ]);
+    });
+
+    test("multi-select ignores previews and keeps the plain grammar", () => {
+      const q = question(0, { hasPreviews: true, multiSelect: true });
+      // Two Enters: the question's own Next/Submit row, then the review tab.
+      assert.deepEqual(steps(claudeAskPlan([q], [pick(0, "Alpha", "Gamma")])), [
+        '"1"',
+        '"3"',
+        "Down",
+        "Down",
+        "Down",
+        "Down",
+        "Enter",
+        "Enter",
+      ]);
+    });
+
+    test("a custom answer goes through Notes, the layout's only free-text field", () => {
+      // There is no "Type something" row here; Enter from the notes field
+      // submits the question as "(notes only)" and advances like a pick.
+      const q = question(0, { hasPreviews: true });
+      assert.deepEqual(steps(claudeAskPlan([q], [typed(0, "Delta")])), ['"n"', '"Delta"', "Enter"]);
+    });
+
+    test("a preview answer with neither an option nor text is refused", () => {
+      const q = question(0, { hasPreviews: true });
+      assert.throws(() => claudeAskPlan([q], [pick(0)]), /neither an option nor text/);
+    });
+  });
+
   test("an answer with neither an option nor text is refused, not silently dropped", () => {
     const q = question(0);
     assert.throws(() => claudeAskPlan([q], [pick(0)]), /neither an option nor text/);

@@ -35,6 +35,33 @@ import type { AskAnswer } from "../types.js";
  *  - Keys are delivered one at a time: a batched `down down space` arrives as
  *    one chunk and is misread (the space toggled the row the cursor had left).
  *
+ * A single-select question whose options carry `preview` text renders in a
+ * second, different layout — option list left, preview pane right — and its
+ * grammar is NOT the one above. Verified live against 2.1.250:
+ *
+ *     ←  ☐ Alpha  ☐ Beta  ✔ Submit  →
+ *     Alpha question?
+ *     ❯ 1. Alpha One      ┌────────────────────┐
+ *       2. Alpha Two      │ ALPHA-ONE-PREVIEW  │
+ *                         └────────────────────┘
+ *                         Notes: press n to add notes
+ *     Enter to select · ↑/↓ to navigate · n to add notes · Tab to switch questions
+ *
+ *  - A digit only MOVES the cursor. It does not pick and does not advance the
+ *    tab — the difference that desynced every preview ask before this branch
+ *    existed, because the digits meant for later questions kept re-aiming the
+ *    first one and the trailing Enter confirmed whichever option they left the
+ *    cursor on (usually the first).
+ *  - `Enter` picks the option under the cursor and advances one tab, so the
+ *    strip still walks itself; a pick costs `digit` + `Enter` instead of a
+ *    lone digit.
+ *  - There is no "Type something" entry. Free text goes to the Notes field:
+ *    `n` focuses it, and Enter from inside it submits the question as the
+ *    literal answer "(notes only)" with the text carried in `annotations`.
+ *  - The layout is chosen per QUESTION, not per ask: a preview question and a
+ *    plain question in the same ask each use their own grammar.
+ *  - Multi-select ignores `preview` entirely and always uses the layout above.
+ *
  * Because answering tab `k` lands on tab `k + 1`, a plan that answers every
  * question in ask order starting from tab 0 never needs a single `Left` or
  * `Right`: the questionnaire walks itself. That is the whole reason the ask is
@@ -74,8 +101,18 @@ export function claudeAskPlan(group: QuestionEntry[], answers: AskAnswer[]): Cla
   return steps;
 }
 
+/**
+ * True when Claude renders this question with the preview pane instead of the
+ * plain numbered list. Multi-select ignores `preview`, so only a single-select
+ * question with preview text switches layout.
+ */
+function usesPreviewLayout(question: QuestionEntry): boolean {
+  return question.hasPreviews === true && !question.multiSelect;
+}
+
 /** Keystrokes that answer one question, with the cursor already on its tab. */
 function claudeQuestionSteps(question: QuestionEntry, answer: AskAnswer): ClaudeAnswerStep[] {
+  if (usesPreviewLayout(question)) return claudePreviewQuestionSteps(question, answer);
   const steps: ClaudeAnswerStep[] = [];
   const indices = answer.selectedLabels
     .map((label) => question.options.findIndex((option) => option.label === label))
@@ -111,4 +148,24 @@ function claudeQuestionSteps(question: QuestionEntry, answer: AskAnswer): Claude
     steps.push(text(String((indices[0] ?? 0) + 1)));
   }
   return steps;
+}
+
+/**
+ * Keystrokes for one single-select question in the preview layout, with the
+ * cursor already on its tab and on the first option.
+ *
+ * A digit only moves the cursor here, so the pick needs an explicit Enter —
+ * which is also what advances to the next tab, exactly like a digit does in
+ * the plain layout.
+ */
+function claudePreviewQuestionSteps(question: QuestionEntry, answer: AskAnswer): ClaudeAnswerStep[] {
+  const index = question.options.findIndex((option) => option.label === answer.selectedLabels[0]);
+  if (index < 0) {
+    // No authored option matches, so this is a custom answer. The preview
+    // layout has no "Type something" row; Notes is the only free-text field,
+    // and Enter from inside it submits the question as "(notes only)".
+    if (!answer.text) throw new Error(`answer for ${question.id} has neither an option nor text`);
+    return [text("n"), text(answer.text), key("Enter")];
+  }
+  return [text(String(index + 1)), key("Enter")];
 }

@@ -22,7 +22,7 @@ export const CLAUDE_ASK_TOOL = "AskUserQuestion";
 interface RawQuestion {
   question: string;
   header: string;
-  options: Array<{ label: string; description?: string }>;
+  options: Array<{ label: string; description?: string; preview?: string }>;
   multiSelect?: boolean;
 }
 
@@ -36,6 +36,7 @@ const questionSchema = v.looseObject({
 const optionSchema = v.looseObject({
   label: v.string(),
   description: v.optional(v.string()),
+  preview: v.optional(v.string()),
 });
 export const claudeAnswersSchema = v.looseObject({ answers: v.optional(v.record(v.string(), v.string())) });
 
@@ -84,6 +85,7 @@ function pendingQuestions(pending: PendingAsk): QuestionEntry[] {
       selected: [],
       timestamp: pending.timestamp,
     };
+    if (question.options.some((option) => option.preview)) card.hasPreviews = true;
     // Every question of the ask carries it: the app renders one card per call
     // and reads the background off whichever question it draws first.
     if (pending.preamble) card.preamble = pending.preamble;
@@ -124,7 +126,7 @@ export function extractClaudeQuestions(entries: TranscriptEntry[]): QuestionEntr
         description: option.description ?? "",
       }));
       const multiSelect = question.multiSelect === true;
-      questions.push({
+      const card: QuestionEntry = {
         id: `${call.id}#${index}`,
         callId: call.id,
         entryId,
@@ -136,7 +138,10 @@ export function extractClaudeQuestions(entries: TranscriptEntry[]): QuestionEntr
         answerText: answer !== undefined && !multiSelect ? answer : null,
         selected: answer !== undefined && multiSelect ? splitMultiAnswer(answer, options) : [],
         timestamp,
-      });
+      };
+      // Set only when true, so an ordinary card's payload is unchanged.
+      if (question.options.some((option) => option.preview)) card.hasPreviews = true;
+      questions.push(card);
     });
   }
   return questions;
@@ -201,7 +206,11 @@ function parseQuestions(container: QuestionContainer | undefined): RawQuestion[]
     for (const raw of question.options) {
       const option = v.safeParse(optionSchema, raw);
       if (!option.success) continue;
-      options.push({ label: option.output.label, description: option.output.description ?? "" });
+      options.push({
+        label: option.output.label,
+        description: option.output.description ?? "",
+        preview: option.output.preview ?? "",
+      });
     }
     questions.push({
       question: question.question,

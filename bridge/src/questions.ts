@@ -35,6 +35,13 @@ export interface QuestionEntry {
   selected: string[];
   timestamp: string;
   /**
+   * Whether this question's options carry preview text. Claude renders such a
+   * question in a side-by-side layout with a different key grammar, so the
+   * adapter's questionnaire needs the fact; see `agents/claude/questionnaire.ts`.
+   * Only the Claude adapter sets it — absent means no previews.
+   */
+  hasPreviews?: boolean;
+  /**
    * Background the agent wrote above this ask, when the transcript could not
    * carry it yet. Present only on an open Claude ask, whose introducing prose
    * is buffered with the tool call until the round resolves — the app shows

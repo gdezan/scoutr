@@ -85,6 +85,39 @@ describe("claude pending asks", () => {
     assert.deepEqual(questions[0]?.options.map((o) => o.label), ["Red", "Green"]);
   });
 
+  it("flags a question whose options carry previews, which changes its key grammar", () => {
+    // Claude renders a single-select preview question in a different layout;
+    // the adapter's questionnaire reads this flag to pick the right keys.
+    handleClaudeHook(
+      JSON.stringify({
+        hook_event_name: "PreToolUse",
+        session_id: SESSION,
+        transcript_path: "/home/u/.claude/projects/p/s.jsonl",
+        tool_name: "AskUserQuestion",
+        tool_use_id: "toolu_ask",
+        tool_input: {
+          questions: [
+            {
+              question: "Which layout?",
+              header: "Layout",
+              multiSelect: false,
+              options: [{ label: "Wide", preview: "WIDE\nlines" }, { label: "Tall" }],
+            },
+            {
+              question: "Which color?",
+              header: "Color",
+              multiSelect: false,
+              options: [{ label: "Red" }, { label: "Green" }],
+            },
+          ],
+        },
+      }),
+    );
+    const questions = claudeQuestions(emptyTranscript());
+    // Per question, not per ask: one preview option does not flag its sibling.
+    assert.deepEqual(questions.map((q) => q.hasPreviews), [true, undefined]);
+  });
+
   it("clears the ask when the tool result comes back", () => {
     handleClaudeHook(preToolUse());
     handleClaudeHook(JSON.stringify({
