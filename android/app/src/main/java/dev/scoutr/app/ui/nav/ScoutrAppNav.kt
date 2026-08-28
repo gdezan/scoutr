@@ -46,6 +46,7 @@ import dev.scoutr.app.state.BoardViewModel
 import dev.scoutr.app.state.CommandPaletteViewModel
 import dev.scoutr.app.state.NewSessionViewModel
 import dev.scoutr.app.state.viewModelFactory
+import dev.scoutr.app.update.PendingUpdateAction
 import dev.scoutr.app.ui.motion.HapticEvent
 import dev.scoutr.app.ui.motion.ScoutrMotion
 import dev.scoutr.app.ui.motion.OverlayPresence
@@ -62,7 +63,11 @@ private val SESSION_PANEL_WIDTH = 320.dp
 
 /** Root shell. Hostless Board/Sessions choose a default; remote routes carry the key. */
 @Composable
-fun ScoutrAppNav(deepLink: MutableState<ScoutrDeepLink?>) {
+fun ScoutrAppNav(
+    deepLink: MutableState<ScoutrDeepLink?>,
+    /** Set by an update notification: land on Settings and act on it there. */
+    updateAction: MutableState<PendingUpdateAction?>,
+) {
     val app = LocalContext.current.applicationContext as ScoutrApp
     val navController = rememberNavController()
     val container = app.container
@@ -329,7 +334,7 @@ fun ScoutrAppNav(deepLink: MutableState<ScoutrDeepLink?>) {
                     usageDestination(navController, container, isWide)
                     reviewDestination(navController, container, isWide)
                     terminalDestination(navController, container)
-                    settingsDestination(navController, container) {
+                    settingsDestination(navController, container, updateAction) {
                         // HostsViewModel did the forgetting; here we only clear
                         // host-bound back stack entries and land on Connect.
                         navController.navigate(AppRoutes.CONNECT) {

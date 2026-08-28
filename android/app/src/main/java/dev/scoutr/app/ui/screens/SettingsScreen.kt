@@ -28,6 +28,8 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -72,10 +74,10 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.scoutr.app.BuildConfig
 import dev.scoutr.app.data.UpdateStatusResponse
 import dev.scoutr.app.net.ScoutrApi
-import dev.scoutr.app.update.ApkInstallOutcome
 import dev.scoutr.app.update.ApkInstaller
-import dev.scoutr.app.update.AppUpdater
-import dev.scoutr.app.update.UpdateProgress
+import dev.scoutr.app.update.AppUpdateController
+import dev.scoutr.app.update.PendingUpdateAction
+import dev.scoutr.app.update.UpdateState
 import kotlin.math.roundToInt
 
 /**
@@ -103,7 +105,10 @@ fun SettingsScreen(
      */
     terminalPreferences: TerminalPreferencesStore,
     api: ScoutrApi?,
-    trackUpdateWork: suspend (suspend () -> Unit) -> Unit = { work -> work() },
+    /** Process-wide owner of the update; this screen only observes and commands it. */
+    updates: AppUpdateController,
+    onStartUpdate: () -> Unit = {},
+    updateAction: MutableState<PendingUpdateAction?> = mutableStateOf(null),
     modifier: Modifier = Modifier,
     /** Multi-host management; null only before the first pairing. */
     hostsViewModel: HostsViewModel? = null,
@@ -149,7 +154,12 @@ fun SettingsScreen(
             )
         }
 
-        UpdateSection(api = api, trackUpdateWork = trackUpdateWork)
+        UpdateSection(
+            api = api,
+            updates = updates,
+            onStartUpdate = onStartUpdate,
+            updateAction = updateAction,
+        )
         UpdateHostSection(
             currentHostId = updateHostId,
             currentHostAlias = updateHostAlias,
@@ -196,15 +206,41 @@ fun SettingsScreen(
 @Composable
 private fun UpdateSection(
     api: ScoutrApi?,
-    trackUpdateWork: suspend (suspend () -> Unit) -> Unit,
+    updates: AppUpdateController,
+    onStartUpdate: () -> Unit,
+    updateAction: MutableState<PendingUpdateAction?>,
 ) {
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
     var status by remember { mutableStateOf<UpdateStatusResponse?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     var confirming by remember { mutableStateOf(false) }
-    var progress by remember { mutableStateOf<UpdateProgress?>(null) }
+    val updateState by updates.state.collectAsStateWithLifecycle()
     var canInstall by remember { mutableStateOf(ApkInstaller.canInstall(context)) }
+
+    // The controller commits to the system install sheet on its own only when
+    // the user is actually looking at this screen; anywhere else it notifies.
+    DisposableEffect(updates) {
+        updates.setUpdateScreenVisible(true)
+        onDispose { updates.setUpdateScreenVisible(false) }
+    }
+
+    // Arriving from an update notification. Both actions need this foreground
+    // Activity, and the request is cleared as it is consumed so a rotation
+    // cannot fire a second install or a second service start.
+    LaunchedEffect(updateAction.value, updateState) {
+        when (updateAction.value) {
+            null -> Unit
+            PendingUpdateAction.Install -> {
+                if (updateState !is UpdateState.Ready) return@LaunchedEffect
+                updateAction.value = null
+                updates.install()
+            }
+            PendingUpdateAction.Resume -> {
+                updateAction.value = null
+                onStartUpdate()
+            }
+        }
+    }
 
     // Returning from the "install unknown apps" screen carries no result, so
     // re-read the permission rather than trusting the launcher's callback.
@@ -226,45 +262,27 @@ private fun UpdateSection(
 
     // A failed install session reports back through the receiver long after the
     // download coroutine finished, so the section listens for it separately.
-    val installOutcome by ApkInstaller.outcome.collectAsStateWithLifecycle()
-    LaunchedEffect(installOutcome) {
-        (installOutcome as? ApkInstallOutcome.Failed)?.let {
-            error = it.message
-            progress = null
-            ApkInstaller.clearOutcome()
+    // The controller owns the outcome (AppContainer routes it there); the row
+    // only mirrors a failure into its own error line.
+    LaunchedEffect(updateState) {
+        when (val current = updateState) {
+            is UpdateState.Failed -> error = current.message
+            is UpdateState.Ready -> error = current.lastError
+            else -> Unit
         }
     }
 
     if (confirming) {
         ConfirmDialog(
             title = "Update app?",
-            text = "The host builds the latest version, this phone downloads and installs it. " +
-                "Building takes about a minute. Keep this screen open until Android asks you " +
-                "to confirm the install.",
+            text = "The host builds the latest version, then this phone downloads it. " +
+                "Building takes about a minute. You can leave this screen — the update keeps " +
+                "going and notifies you when it is ready to install.",
             confirmLabel = "Update now",
             onConfirm = {
                 confirming = false
                 error = null
-                val updateApi = api ?: return@ConfirmDialog
-                scope.launch {
-                    try {
-                        trackUpdateWork {
-                            val updater = AppUpdater(
-                                api = updateApi,
-                                installer = ApkInstaller.forContext(context),
-                                cacheDir = context.cacheDir,
-                            )
-                            updater.run { progress = it }
-                        }
-                    } catch (cancelled: kotlinx.coroutines.CancellationException) {
-                        throw cancelled
-                    } catch (failure: Exception) {
-                        error = failure.message ?: "update failed"
-                    } finally {
-                        // The system sheet owns the flow after install starts; otherwise clear stale progress.
-                        progress = null
-                    }
-                }
+                onStartUpdate()
             },
             onDismiss = { confirming = false },
         )
@@ -276,18 +294,21 @@ private fun UpdateSection(
             "over your bridge connection. Only the app is updated, never the bridge.",
     ) {
         val current = status
-        val stage = progress
+        val running = updateState is UpdateState.Building || updateState is UpdateState.Downloading
+        val stateLabel = updateStateLabel(updateState)
         val statusLabel = when {
             api == null -> "Updates disabled"
-            stage != null -> progressLabel(stage)
+            stateLabel != null -> stateLabel
             error != null -> error!!
             current?.updateAvailable == true -> "Update available"
             current != null -> "Up to date"
             else -> "Checking…"
         }
         val statusColor = when {
-            stage != null -> MaterialTheme.colorScheme.onSurfaceVariant
-            error != null -> MaterialTheme.colorScheme.error
+            running -> MaterialTheme.colorScheme.onSurfaceVariant
+            updateState is UpdateState.Failed || error != null -> MaterialTheme.colorScheme.error
+            updateState is UpdateState.Ready -> MaterialTheme.colorScheme.tertiary
+
             current?.updateAvailable == true -> MaterialTheme.colorScheme.tertiary
             else -> MaterialTheme.colorScheme.onSurfaceVariant
         }
@@ -298,7 +319,7 @@ private fun UpdateSection(
             ) {
                 StatusRing(
                     color = statusColor,
-                    animation = if (stage == null) StatusRingAnimation.Static else StatusRingAnimation.Live,
+                    animation = if (running) StatusRingAnimation.Live else StatusRingAnimation.Static,
                 )
                 Spacer(Modifier.width(8.dp))
                 Text(
@@ -326,26 +347,31 @@ private fun UpdateSection(
                 )
             }
         }
-        if (current?.updateAvailable == true) {
+        // A staged update stays installable even when the host has since moved
+        // on, so the row shows up for a Ready state too, not only an available one.
+        if (current?.updateAvailable == true || updateState is UpdateState.Ready) {
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             // PackageInstaller refuses the session without the "install unknown
             // apps" grant, so the one button routes to that screen first and
             // becomes the real trigger once the user comes back.
             TextButton(
                 onClick = {
-                    if (canInstall) {
-                        confirming = true
-                    } else {
-                        grantInstallPermission.launch(ApkInstaller.unknownSourcesSettings(context))
+                    when {
+                        !canInstall -> grantInstallPermission.launch(ApkInstaller.unknownSourcesSettings(context))
+                        running -> updates.cancel()
+                        updateState is UpdateState.Ready -> updates.install()
+                        else -> confirming = true
                     }
                 },
-                enabled = stage == null,
+                enabled = updateState !is UpdateState.Installing,
                 modifier = Modifier.fillMaxWidth().testTag("settings_update_button"),
             ) {
                 Text(
                     when {
-                        stage != null -> progressLabel(stage)
                         !canInstall -> "Allow installs, then update"
+                        running -> "Cancel update"
+                        updateState is UpdateState.Ready -> "Install now"
+                        updateState is UpdateState.Installing -> "Installing…"
                         else -> "Update app"
                     },
                 )
@@ -461,15 +487,22 @@ private fun NotificationsSection(notificationPrefs: NotificationPreferencesStore
     }
 }
 
-private fun progressLabel(progress: UpdateProgress): String = when (progress) {
-    is UpdateProgress.Building -> "Building on host… (~1 min)"
-    is UpdateProgress.Downloading ->
-        if (progress.total > 0) {
-            "Downloading… ${(progress.bytes * 100 / progress.total)}%"
+/** The row's own words for a controller state, or null when it has nothing to say. */
+private fun updateStateLabel(state: UpdateState): String? = when (state) {
+    is UpdateState.Idle -> null
+    is UpdateState.Building -> "Building on host… (~1 min)"
+    is UpdateState.Downloading ->
+        if (state.total > 0) {
+            "Downloading… ${(state.bytes * 100 / state.total)}%"
         } else {
             "Downloading…"
         }
-    is UpdateProgress.Installing -> "Installing…"
+    // A failed or declined install keeps the APK staged, so the row stays on
+    // "Ready" — but the reason it did not install has to be visible, or the
+    // user taps Install now again with no idea what went wrong.
+    is UpdateState.Ready -> state.lastError ?: "Ready to install"
+    is UpdateState.Installing -> "Installing…"
+    is UpdateState.Failed -> state.message
 }
 
 private fun installedIdentity(): String =

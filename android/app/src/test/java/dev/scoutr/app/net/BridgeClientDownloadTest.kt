@@ -7,6 +7,7 @@ import kotlinx.coroutines.runBlocking
 import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
+import okhttp3.mockwebserver.SocketPolicy
 import okio.Buffer
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -81,6 +82,68 @@ class BridgeClientDownloadTest {
         val request = server.takeRequest()
         assertEquals("/api/update/apk", request.path)
         assertEquals("Bearer test-token", request.getHeader("Authorization"))
+    }
+
+    @Test
+    fun `downloadApk resumes from the staged bytes and appends the tail`() = runBlocking {
+        val apk = ByteArray(200_000) { (it % 251).toByte() }
+        val staged = 80_000
+        server.enqueue(
+            MockResponse().setResponseCode(206)
+                .setHeader("content-range", "bytes $staged-${apk.size - 1}/${apk.size}")
+                .setBody(Buffer().write(apk.copyOfRange(staged, apk.size))),
+        )
+        val destination = File(temp.root, "scoutr-update.apk")
+        destination.writeBytes(apk.copyOfRange(0, staged))
+        val progress = mutableListOf<Pair<Long, Long>>()
+
+        val written = client.downloadApk(destination, staged.toLong()) { bytes, total -> progress += bytes to total }
+
+        assertEquals(apk.size.toLong(), written)
+        assertEquals(apk.toList(), destination.readBytes().toList())
+        // Progress counts the staged prefix, so the bar never jumps backwards.
+        assertTrue("progress must start past the staged bytes", progress.first().first > staged)
+        assertEquals(apk.size.toLong(), progress.last().second)
+
+        val request = server.takeRequest()
+        assertEquals("bytes=$staged-", request.getHeader("Range"))
+    }
+
+    @Test
+    fun `downloadApk restarts from zero when an old bridge answers a range with 200`() = runBlocking {
+        // A bridge without range support ignores the header and sends the whole
+        // APK; appending it to the staged prefix would produce a corrupt file.
+        val apk = ByteArray(200_000) { (it % 251).toByte() }
+        server.enqueue(
+            MockResponse().setResponseCode(200).setBody(Buffer().write(apk)),
+        )
+        val destination = File(temp.root, "scoutr-update.apk")
+        destination.writeBytes(apk.copyOfRange(0, 80_000))
+
+        val written = client.downloadApk(destination, 80_000L)
+
+        assertEquals(apk.size.toLong(), written)
+        assertEquals(apk.toList(), destination.readBytes().toList())
+    }
+
+    @Test
+    fun `downloadApk rejects a resumed body that stops short of the full APK`() = runBlocking {
+        val apk = ByteArray(200_000) { (it % 251).toByte() }
+        val staged = 80_000
+        server.enqueue(
+            MockResponse().setResponseCode(206)
+                .setBody(Buffer().write(apk.copyOfRange(staged, apk.size - 5_000)))
+                // setBody rewrites content-length, so the promise of a full
+                // tail has to be re-stated after it.
+                .setHeader("content-length", (apk.size - staged).toString())
+                .setSocketPolicy(SocketPolicy.DISCONNECT_AT_END),
+        )
+        val destination = File(temp.root, "scoutr-update.apk")
+        destination.writeBytes(apk.copyOfRange(0, staged))
+
+        val failure = runCatching { client.downloadApk(destination, staged.toLong()) }.exceptionOrNull()
+
+        assertTrue("a short resumed body must fail, not silently stage a partial APK", failure != null)
     }
 
     @Test

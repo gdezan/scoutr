@@ -16,23 +16,36 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.test.platform.app.InstrumentationRegistry
 import dev.scoutr.app.data.AppearancePreferencesStore
-import dev.scoutr.app.data.TerminalPreferencesStore
 import dev.scoutr.app.data.ApkBuild
+import dev.scoutr.app.data.HealthResponse
+import dev.scoutr.app.data.HerdrInfo
+import dev.scoutr.app.data.REQUIRED_SCOUTR_API_FEATURES
+import dev.scoutr.app.data.ScoutrApiInfo
+import dev.scoutr.app.data.TerminalPreferencesStore
 import dev.scoutr.app.data.UpdateApkStatusResponse
-import dev.scoutr.app.data.UpdateInstalled
 import dev.scoutr.app.data.UpdateIdentity
+import dev.scoutr.app.data.UpdateInstalled
 import dev.scoutr.app.data.UpdateStatusResponse
 import dev.scoutr.app.net.FakeScoutrApi
+import dev.scoutr.app.net.HostWorkCoordinator
 import dev.scoutr.app.net.ScoutrApi
-import dev.scoutr.app.ui.screens.SettingsConnection
+import dev.scoutr.app.state.BoardHarness
+import dev.scoutr.app.state.HostsViewModel
 import dev.scoutr.app.ui.screens.SettingsScreen
 import dev.scoutr.app.ui.theme.ScoutrTheme
+import dev.scoutr.app.update.AppUpdateController
+import dev.scoutr.app.update.StagedIdentity
+import dev.scoutr.app.update.UpdateNotifier
+import dev.scoutr.app.update.UpdateStaging
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
+import java.io.File
 
 /**
  * Settings: the seven sections, the durable stores behind them, and the
@@ -61,13 +74,36 @@ class SettingsScreenTest {
 
     private fun terminalStore() = TerminalPreferencesStore(context)
 
+    private object SilentUpdateNotifier : UpdateNotifier {
+        override fun showUpdateReady(identity: StagedIdentity) {}
+        override fun showUpdateFailed(message: String, resumable: Boolean) {}
+        override fun cancelUpdateNotifications() {}
+    }
+
+    /**
+     * A controller wired to a scratch staging dir and a no-op installer, so the
+     * screen has real state to observe without committing anything on-device.
+     */
+    private fun updateController(
+        staging: UpdateStaging = UpdateStaging(File(context.cacheDir, "settings-test-update-${System.nanoTime()}")),
+    ): AppUpdateController =
+        AppUpdateController(
+            scope = CoroutineScope(SupervisorJob()),
+            work = HostWorkCoordinator(),
+            notifications = SilentUpdateNotifier,
+            staging = staging,
+            installer = {},
+        )
+
     private fun setSettings(
         hosts: Int = 1,
         terminalPreferences: TerminalPreferencesStore = terminalStore(),
         api: ScoutrApi = FakeScoutrApi(),
+        updates: AppUpdateController = updateController(),
+        onStartUpdate: () -> Unit = {},
         onForget: () -> Unit = {},
-    ): dev.scoutr.app.state.HostsViewModel {
-        val harness = dev.scoutr.app.state.BoardHarness(context)
+    ): HostsViewModel {
+        val harness = BoardHarness(context)
         repeat(hosts) { index ->
             harness.addHost(
                 if (index == 0) hostId else "$hostId-$index",
@@ -84,6 +120,8 @@ class SettingsScreenTest {
                     hostsViewModel = viewModel,
                     terminalPreferences = terminalPreferences,
                     api = api,
+                    updates = updates,
+                    onStartUpdate = onStartUpdate,
                     onAllHostsForgotten = onForget,
                 )
             }
@@ -91,13 +129,13 @@ class SettingsScreenTest {
         return viewModel
     }
 
-    private fun healthy() = dev.scoutr.app.data.HealthResponse(
+    private fun healthy() = HealthResponse(
         ok = true,
-        api = dev.scoutr.app.data.ScoutrApiInfo(
+        api = ScoutrApiInfo(
             protocol = 2,
-            features = dev.scoutr.app.data.REQUIRED_SCOUTR_API_FEATURES,
+            features = REQUIRED_SCOUTR_API_FEATURES,
         ),
-        herdr = dev.scoutr.app.data.HerdrInfo(connected = true),
+        herdr = HerdrInfo(connected = true),
     )
 
     @Test
@@ -283,14 +321,59 @@ class SettingsScreenTest {
         api.updateApkStatusResult = Result.success(
             UpdateApkStatusResponse(build = ApkBuild(state = "building", buildId = 1)),
         )
-        setSettings(api = api)
+        // The screen no longer owns the update job — it asks the foreground
+        // service to start one — so the trigger is what this asserts.
+        var started = 0
+        setSettings(api = api, onStartUpdate = { started += 1 })
 
         compose.onNodeWithTag("settings_update_button").performScrollTo().performClick()
         compose.onNodeWithText("Update app?").assertExists()
         compose.onNodeWithText("Update now").performClick()
+        compose.waitForIdle()
 
-        compose.waitUntil(timeoutMillis = 5_000) { api.calls.any { it.name == "updateBuild" } }
-        assertTrue("the host build must be started", api.calls.any { it.name == "updateBuild" })
+        assertEquals("confirming must start exactly one update", 1, started)
+    }
+
+    @Test
+    fun updateConfirmNoLongerTellsTheUserToStayOnTheScreen() {
+        allowUnknownSources()
+        val api = FakeScoutrApi()
+        api.updateStatusResult = Result.success(updateStatusResponse(available = true))
+        setSettings(api = api)
+
+        compose.onNodeWithTag("settings_update_button").performScrollTo().performClick()
+
+        compose.onNodeWithText("Keep this screen open", substring = true).assertDoesNotExist()
+        compose.onNodeWithText("keeps going", substring = true).assertExists()
+    }
+
+    @Test
+    fun aStagedUpdateOffersInstallEvenBeforeAnyHostCheck() {
+        allowUnknownSources()
+        val staging = UpdateStaging(File(context.cacheDir, "settings-test-staged-${System.nanoTime()}"))
+        val bytes = ByteArray(24)
+        staging.record(
+            StagedIdentity(
+                commit = "abc1234",
+                sha256 = "ab",
+                size = bytes.size.toLong(),
+                version = "0.4.0",
+            ),
+        )
+        staging.apkFile().writeBytes(bytes)
+        staging.markVerified()
+        val updates = updateController(staging).apply { rehydrate() }
+
+        val api = FakeScoutrApi()
+        api.updateStatusResult = Result.success(updateStatusResponse(available = false))
+        setSettings(api = api, updates = updates)
+
+        // Bytes that already cost a build and a download stay installable even
+        // though the host now reports nothing new.
+        compose.onNodeWithTag("settings_update_status").performScrollTo().assertExists()
+        compose.onNodeWithText("Ready to install").assertExists()
+        compose.onNodeWithTag("settings_update_button").performScrollTo().assertExists()
+        compose.onNodeWithText("Install now").assertExists()
     }
 
     @Test

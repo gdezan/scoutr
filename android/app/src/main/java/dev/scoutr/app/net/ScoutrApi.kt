@@ -131,11 +131,21 @@ interface ScoutrApi {
     suspend fun updateApkStatus(): UpdateApkStatusResponse
 
     /**
-     * Streams the built APK into [destination]. [onProgress] reports bytes
-     * written against the total from the response's content-length (0 when the
-     * bridge sent none). Returns the number of bytes written.
+     * Streams the built APK into [destination]. [onProgress] reports bytes now
+     * in the file against the full APK size (0 when the bridge sent no
+     * content-length). Returns the number of bytes now in the file.
+     *
+     * [resumeFrom] is the number of bytes already staged in [destination]. At 0
+     * the file is truncated and the whole APK is fetched. Above 0 the client
+     * asks for `Range: bytes=<resumeFrom>-` and appends the tail; a bridge too
+     * old to honour ranges answers 200 with the whole APK, which restarts the
+     * transfer from zero rather than corrupting the file.
      */
-    suspend fun downloadApk(destination: File, onProgress: (Long, Long) -> Unit = { _, _ -> }): Long
+    suspend fun downloadApk(
+        destination: File,
+        resumeFrom: Long = 0,
+        onProgress: (Long, Long) -> Unit = { _, _ -> },
+    ): Long
 }
 
 /** One question's answer inside a batched ask. */

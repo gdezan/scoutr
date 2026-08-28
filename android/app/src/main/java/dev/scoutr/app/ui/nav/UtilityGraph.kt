@@ -10,9 +10,11 @@ import androidx.compose.material3.Text
 import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavGraphBuilder
 import androidx.navigation.NavHostController
@@ -28,6 +30,8 @@ import dev.scoutr.app.state.TerminalViewModel
 import dev.scoutr.app.state.UsageViewModel
 import dev.scoutr.app.state.HostsViewModel
 import dev.scoutr.app.state.viewModelFactory
+import dev.scoutr.app.update.PendingUpdateAction
+import dev.scoutr.app.update.UpdateService
 import dev.scoutr.app.ui.screens.ConnectScreen
 import dev.scoutr.app.ui.screens.HostUnavailableScreen
 import dev.scoutr.app.ui.screens.ReviewScreen
@@ -233,10 +237,13 @@ internal fun NavGraphBuilder.terminalDestination(navController: NavHostControlle
 internal fun NavGraphBuilder.settingsDestination(
     navController: NavHostController,
     container: AppContainer,
+    /** Set by an update notification; consumed once by the update row. */
+    updateAction: MutableState<PendingUpdateAction?>,
     /** Runs after HostsViewModel already forgot the final host; navigate only. */
     onAllHostsForgotten: () -> Unit,
 ) {
     composable(AppRoutes.SETTINGS) {
+        val context = LocalContext.current
         val registryState by container.hostRegistry.states.collectAsState()
         val updateHost = registryState.updateHostId?.let { id ->
             registryState.profiles.firstOrNull { it.hostId == id }
@@ -262,10 +269,11 @@ internal fun NavGraphBuilder.settingsDestination(
             onBack = { navController.popBackStack() },
             terminalPreferences = container.terminalPreferences,
             api = updateBinding?.let(container.hostClients::api),
-            trackUpdateWork = { work ->
-                checkNotNull(updateBinding) { "Update host binding is unavailable" }
-                container.hostWorkCoordinator.track(updateBinding, work)
-            },
+            updates = container.appUpdates,
+            // Through the foreground service, not the controller directly: the
+            // service is what keeps the process alive for the whole transfer.
+            onStartUpdate = { UpdateService.start(context) },
+            updateAction = updateAction,
             updateHostId = updateHost?.hostId,
             updateHostAlias = updateHost?.alias,
             updateHostOptions = registryState.profiles.associate { it.hostId to it.alias },

@@ -249,7 +249,7 @@ class NotificationPresenterTest {
     }
 
     @Test
-    fun exactlyOneChannelExistsAndTheLegacyOnesAreGone() {
+    fun onlyTheIntendedChannelsExistAndTheLegacyOnesAreGone() {
         // Simulate an upgrading install that still carries the dead channels.
         manager.createNotificationChannel(
             android.app.NotificationChannel("agents", "Agents", NotificationManager.IMPORTANCE_HIGH),
@@ -261,7 +261,12 @@ class NotificationPresenterTest {
         presenter.showBlocked(blocked("w1:p1"))
 
         assertEquals(
-            setOf(NotificationPresenter.CHANNEL_NEEDS_YOU, NotificationPresenter.CHANNEL_DONE),
+            setOf(
+                NotificationPresenter.CHANNEL_NEEDS_YOU,
+                NotificationPresenter.CHANNEL_DONE,
+                NotificationPresenter.CHANNEL_UPDATE_PROGRESS,
+                NotificationPresenter.CHANNEL_UPDATE_READY,
+            ),
             manager.notificationChannels.map { it.id }.toSet(),
         )
     }
@@ -342,5 +347,71 @@ class NotificationPresenterTest {
         assertEquals(1, slots().size)
         assertEquals("w1:p2".hashCode(), slots().single().id)
         assertNull("one live slot needs no summary", summary())
+    }
+
+    @Test
+    fun `update notifications live on their own channels, not the agent ones`() {
+        presenter.showUpdateReady(
+            dev.scoutr.app.update.StagedIdentity(commit = "abc1234", sha256 = "ab", size = 10, version = "0.4.0"),
+        )
+
+        val progress = manager.getNotificationChannel(NotificationPresenter.CHANNEL_UPDATE_PROGRESS)
+        val ready = manager.getNotificationChannel(NotificationPresenter.CHANNEL_UPDATE_READY)
+        assertNotNull(progress)
+        assertNotNull(ready)
+        // Progress rides along with the foreground service for minutes, so it
+        // must never make a sound; "ready" is the one moment worth alerting on.
+        assertEquals(NotificationManager.IMPORTANCE_LOW, progress!!.importance)
+        assertEquals(NotificationManager.IMPORTANCE_DEFAULT, ready!!.importance)
+
+        val posted = manager.activeNotifications.single { it.id == NotificationPresenter.UPDATE_READY_ID }
+        assertEquals(NotificationPresenter.CHANNEL_UPDATE_READY, posted.notification.channelId)
+        assertNull("an update belongs to no agent group", posted.notification.group)
+    }
+
+    @Test
+    fun `update notifications ignore the agent notification preferences`() {
+        // "Notify when blocked" and "Ring for finished" are about agents. A user
+        // who turned those off has not asked to be kept in the dark about their
+        // own app finishing an update.
+        val prefs = NotificationPreferencesStore(context)
+        prefs.blockedEnabled = false
+        prefs.doneEnabled = false
+        val gated = NotificationPresenter(context, mutes, prefs)
+
+        gated.showUpdateReady(
+            dev.scoutr.app.update.StagedIdentity(commit = "abc1234", sha256 = "ab", size = 10, version = "0.4.0"),
+        )
+        gated.showUpdateFailed("connection reset", resumable = true)
+
+        assertNotNull(manager.activeNotifications.firstOrNull { it.id == NotificationPresenter.UPDATE_READY_ID })
+        assertNotNull(manager.activeNotifications.firstOrNull { it.id == NotificationPresenter.UPDATE_FAILED_ID })
+    }
+
+    @Test
+    fun `a failure with nothing downloaded offers no resume`() {
+        presenter.showUpdateFailed("the host build failed", resumable = false)
+        val without = manager.activeNotifications.single { it.id == NotificationPresenter.UPDATE_FAILED_ID }
+        val withoutLabels = without.notification.actions.orEmpty().map { it.title.toString() }
+
+        presenter.showUpdateFailed("connection reset", resumable = true)
+        val with = manager.activeNotifications.single { it.id == NotificationPresenter.UPDATE_FAILED_ID }
+        val withLabels = with.notification.actions.orEmpty().map { it.title.toString() }
+
+        assertEquals(listOf("Cancel"), withoutLabels)
+        assertEquals(listOf("Resume", "Cancel"), withLabels)
+    }
+
+    @Test
+    fun `cancelling update notifications leaves agent notifications alone`() {
+        presenter.showBlocked(blocked("pane-1"))
+        presenter.showUpdateReady(
+            dev.scoutr.app.update.StagedIdentity(commit = "abc1234", sha256 = "ab", size = 10, version = "0.4.0"),
+        )
+
+        presenter.cancelUpdateNotifications()
+
+        assertNull(manager.activeNotifications.firstOrNull { it.id == NotificationPresenter.UPDATE_READY_ID })
+        assertTrue("the agent notification must survive", manager.activeNotifications.isNotEmpty())
     }
 }

@@ -4,9 +4,11 @@ import { createHash } from "node:crypto";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { createServer as createHttpServer } from "node:http";
 import { ApkBuilder, APK_RELATIVE_PATH, type BuildRunner } from "../src/apk.js";
 import { createUpdateRoutes } from "../src/routes/update.js";
 import { BridgeError } from "../src/errors.js";
+import { sendFile } from "../src/send-file.js";
 import type { Route, RouteContext } from "../src/routes/types.js";
 
 const identity = { commit: "abc1234", version: "0.4.0", versionCode: 4000 };
@@ -155,4 +157,96 @@ test("the download route surfaces the build failure reason in its 409", async ()
     async () => route.handle({} as RouteContext),
     (error) => error instanceof BridgeError && error.status === 409 && /gradle exploded/.test(error.message),
   );
+});
+
+/**
+ * Range support lives in the wire layer, so these drive a real socket: a
+ * one-route http server handing sendFile the request's Range header, exactly
+ * as bridge/src/server.ts does.
+ */
+async function serveFile(bytes: Buffer): Promise<{ url: string; close: () => Promise<void> }> {
+  const root = await mkdtemp(join(tmpdir(), "scoutr-range-"));
+  const path = join(root, "scoutr.apk");
+  await writeFile(path, bytes);
+  const file = {
+    path,
+    size: bytes.length,
+    contentType: "application/vnd.android.package-archive",
+    filename: "scoutr-0.4.0.apk",
+  };
+  const server = createHttpServer((request, response) => {
+    void sendFile(response, file, request.headers.range).catch(() => {});
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  if (address == null || !("port" in address)) {
+    throw new Error("listen(0, 127.0.0.1) did not bind a TCP port");
+  }
+
+  return {
+    url: `http://127.0.0.1:${address.port}/`,
+    close: async () => {
+      // fetch keeps its sockets alive, so close() would otherwise idle out.
+      server.closeAllConnections();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+      await rm(root, { recursive: true, force: true });
+    },
+  };
+}
+
+async function fetchRange(url: string, range?: string): Promise<{ status: number; headers: Headers; body: Buffer }> {
+  const response = await fetch(url, { headers: range ? { range } : {} });
+  return { status: response.status, headers: response.headers, body: Buffer.from(await response.arrayBuffer()) };
+}
+
+test("a download without a Range serves the whole file and advertises range support", async () => {
+  const bytes = Buffer.from("0123456789abcdef");
+  const served = await serveFile(bytes);
+
+  const result = await fetchRange(served.url);
+  assert.equal(result.status, 200);
+  assert.equal(result.headers.get("accept-ranges"), "bytes");
+  assert.equal(result.headers.get("content-length"), String(bytes.length));
+  assert.equal(result.headers.get("content-range"), null);
+  assert.deepEqual(result.body, bytes);
+  await served.close();
+});
+
+test("a resumed download answers 206 with the tail bytes", async () => {
+  const bytes = Buffer.from("0123456789abcdef");
+  const served = await serveFile(bytes);
+
+  const result = await fetchRange(served.url, "bytes=5-");
+  assert.equal(result.status, 206);
+  assert.equal(result.headers.get("accept-ranges"), "bytes");
+  assert.equal(result.headers.get("content-range"), `bytes 5-${bytes.length - 1}/${bytes.length}`);
+  assert.equal(result.headers.get("content-length"), String(bytes.length - 5));
+  assert.deepEqual(result.body, bytes.subarray(5));
+  await served.close();
+});
+
+test("a range at or past the end of the file is unsatisfiable", async () => {
+  const bytes = Buffer.from("0123456789abcdef");
+  const served = await serveFile(bytes);
+
+  const result = await fetchRange(served.url, `bytes=${bytes.length}-`);
+  assert.equal(result.status, 416);
+  assert.equal(result.headers.get("content-range"), `bytes */${bytes.length}`);
+  assert.equal(result.body.length, 0);
+  await served.close();
+});
+
+test("an unsupported or malformed range serves the whole file instead of failing", async () => {
+  const bytes = Buffer.from("0123456789abcdef");
+  const served = await serveFile(bytes);
+
+  // A malformed range, a closed range, and a non-bytes unit are all ignored:
+  // 200 is always a correct answer to a Range the server does not understand.
+  for (const range of ["bytes=abc", "bytes=2-9", "items=0-", "bytes=0-1, 4-5"]) {
+    const result = await fetchRange(served.url, range);
+    assert.equal(result.status, 200, `range ${range} should fall back to 200`);
+    assert.equal(result.headers.get("content-range"), null);
+    assert.deepEqual(result.body, bytes);
+  }
+  await served.close();
 });

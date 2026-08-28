@@ -8,6 +8,8 @@ import dev.scoutr.app.net.FakeScoutrApi
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -18,74 +20,102 @@ import java.io.IOException
 import java.security.MessageDigest
 
 /**
- * The adb-free update sequence: build on the host, poll, download, verify,
- * install. Every failure mode has to stop before the installer is handed a
- * file, because a bad APK reaches the user as a system install prompt.
+ * The adb-free update sequence: build on the host, poll, download, verify.
+ * Every failure mode has to stop before a staged file is declared installable,
+ * because a bad APK reaches the user as a system install prompt.
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 class AppUpdaterTest {
 
     @get:Rule
-    val cache = TemporaryFolder()
+    val files = TemporaryFolder()
 
     private val bytes = "pretend this is an APK".toByteArray()
 
     private fun sha256(data: ByteArray): String =
         MessageDigest.getInstance("SHA-256").digest(data).joinToString("") { "%02x".format(it) }
 
+    private fun artifact(sha: String = sha256(bytes)) =
+        ApkArtifact(size = bytes.size.toLong(), sha256 = sha, commit = "abc1234", version = "0.4.0")
+
     private fun readyStatus(sha: String = sha256(bytes)) = UpdateApkStatusResponse(
-        build = ApkBuild(
-            state = "ready",
-            buildId = 1,
-            apk = ApkArtifact(size = bytes.size.toLong(), sha256 = sha, commit = "abc1234", version = "0.4.0"),
-        ),
+        build = ApkBuild(state = "ready", buildId = 1, apk = artifact(sha)),
     )
 
-    /** Records the bytes the updater hands to the device installer. */
-    private class RecordingInstaller : ApkInstall {
-        var installedBytes: ByteArray? = null
-        override suspend fun install(apk: File) {
-            installedBytes = apk.readBytes()
-        }
-    }
+    private val staging: UpdateStaging by lazy { UpdateStaging(File(files.root, "update")) }
 
-    private fun updater(api: FakeScoutrApi, installer: ApkInstall) = AppUpdater(
-        api = api,
-        installer = installer,
-        cacheDir = cache.root,
-        pollDelayMs = 0,
-    )
+    private fun updater(api: FakeScoutrApi) = AppUpdater(api = api, staging = staging, pollDelayMs = 0)
+
+    /** The `resumeFrom` the updater asked the transport for. */
+    private fun requestedResumeFrom(api: FakeScoutrApi): Long =
+        api.calls.first { it.name == "downloadApk" }.args["resumeFrom"] as Long
 
     @Test
-    fun `a good build downloads, verifies, and installs`() = runTest {
+    fun `a good build downloads, verifies, and leaves a staged APK behind`() = runTest {
         val api = FakeScoutrApi()
         api.apkBytes = bytes
         api.updateApkStatusResult = Result.success(readyStatus())
-        val installer = RecordingInstaller()
         val stages = mutableListOf<UpdateProgress>()
 
-        updater(api, installer).run { stages += it }
+        val staged = updater(api).stage { stages += it }
 
-        assertTrue("the installer must receive the downloaded APK", installer.installedBytes != null)
-        assertArrayEqualsBytes(bytes, installer.installedBytes!!)
+        assertEquals(bytes.toList(), staged.apk.readBytes().toList())
+        assertEquals("abc1234", staged.identity.commit)
         assertEquals(listOf("updateBuild", "updateApkStatus", "downloadApk"), api.calls.map { it.name })
         assertTrue("must report a building stage", stages.any { it is UpdateProgress.Building })
-        assertTrue("must report an installing stage", stages.last() is UpdateProgress.Installing)
+        assertTrue("must report a downloading stage", stages.any { it is UpdateProgress.Downloading })
+        // The sidecar outlives the pipeline so a later launch can offer the
+        // install without rebuilding or re-downloading.
+        assertNotNull(staging.identity())
+        assertEquals(bytes.size.toLong(), staging.partialBytes())
     }
 
     @Test
-    fun `a checksum mismatch aborts before the installer sees the file`() = runTest {
+    fun `a partial file for the same artifact resumes instead of restarting`() = runTest {
+        val api = FakeScoutrApi()
+        api.apkBytes = bytes
+        api.updateApkStatusResult = Result.success(readyStatus())
+        staging.record(
+            StagedIdentity(commit = "abc1234", sha256 = sha256(bytes), size = bytes.size.toLong(), version = "0.4.0"),
+        )
+        staging.apkFile().writeBytes(bytes.copyOfRange(0, 6))
+
+        val staged = updater(api).stage {}
+
+        assertEquals(6L, requestedResumeFrom(api))
+        assertEquals(bytes.toList(), staged.apk.readBytes().toList())
+    }
+
+    @Test
+    fun `a partial file from a superseded build is discarded and downloaded fresh`() = runTest {
+        val api = FakeScoutrApi()
+        api.apkBytes = bytes
+        api.updateApkStatusResult = Result.success(readyStatus())
+        // The host rebuilt while the phone was offline: the staged prefix
+        // belongs to bytes nobody is serving any more.
+        staging.record(
+            StagedIdentity(commit = "abc1234", sha256 = sha256("older".toByteArray()), size = 99, version = "0.3.0"),
+        )
+        staging.apkFile().writeBytes("older".toByteArray())
+
+        val staged = updater(api).stage {}
+
+        assertEquals(0L, requestedResumeFrom(api))
+        assertEquals(bytes.toList(), staged.apk.readBytes().toList())
+    }
+
+    @Test
+    fun `a checksum mismatch discards the staged file instead of leaving it resumable`() = runTest {
         val api = FakeScoutrApi()
         api.apkBytes = bytes
         api.updateApkStatusResult = Result.success(readyStatus(sha = sha256("different bytes".toByteArray())))
-        val installer = RecordingInstaller()
 
-        val failure = runCatching { updater(api, installer).run {} }.exceptionOrNull()
+        val failure = runCatching { updater(api).stage {} }.exceptionOrNull()
 
         assertTrue("must fail with an IOException", failure is IOException)
         assertTrue("must name the checksum", failure!!.message!!.contains("checksum"))
-        assertNull("nothing may be installed", installer.installedBytes)
-        assertTrue("the bad download must be deleted", File(cache.root, "update/scoutr-update.apk").exists().not())
+        assertFalse("the bad download must not survive", File(files.root, "update/staged.apk").exists())
+        assertNull("and must not be describable as a resumable partial", staging.identity())
     }
 
     @Test
@@ -94,12 +124,10 @@ class AppUpdaterTest {
         api.updateApkStatusResult = Result.success(
             UpdateApkStatusResponse(build = ApkBuild(state = "failed", buildId = 1, error = "compileDebugKotlin FAILED")),
         )
-        val installer = RecordingInstaller()
 
-        val failure = runCatching { updater(api, installer).run {} }.exceptionOrNull()
+        val failure = runCatching { updater(api).stage {} }.exceptionOrNull()
 
         assertEquals("compileDebugKotlin FAILED", failure?.message)
-        assertNull(installer.installedBytes)
     }
 
     @Test
@@ -120,12 +148,11 @@ class AppUpdaterTest {
             }
         }
         api.updateBuildResult = Result.success(UpdateBuildResponse(build = ApkBuild(state = "building", buildId = 1)))
-        val installer = RecordingInstaller()
 
-        updater(api, installer).run {}
+        val staged = updater(api).stage {}
 
         assertEquals("must poll until the build is ready", 3, polls)
-        assertTrue(installer.installedBytes != null)
+        assertEquals(bytes.toList(), staged.apk.readBytes().toList())
     }
 
     @Test
@@ -133,23 +160,11 @@ class AppUpdaterTest {
         val api = FakeScoutrApi()
         api.updateApkStatusResult =
             Result.success(UpdateApkStatusResponse(build = ApkBuild(state = "building", buildId = 1)))
-        val installer = RecordingInstaller()
-        val bounded = AppUpdater(
-            api = api,
-            installer = installer,
-            cacheDir = cache.root,
-            pollDelayMs = 1,
-            buildTimeoutMs = 3,
-        )
+        val bounded = AppUpdater(api = api, staging = staging, pollDelayMs = 1, buildTimeoutMs = 3)
 
-        val failure = runCatching { bounded.run {} }.exceptionOrNull()
+        val failure = runCatching { bounded.stage {} }.exceptionOrNull()
 
         assertTrue("must fail with an IOException", failure is IOException)
         assertTrue("must mention the timeout", failure!!.message!!.contains("did not finish"))
-        assertNull(installer.installedBytes)
-    }
-
-    private fun assertArrayEqualsBytes(expected: ByteArray, actual: ByteArray) {
-        assertEquals(expected.toList(), actual.toList())
     }
 }

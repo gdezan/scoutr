@@ -279,13 +279,24 @@ class FakeScoutrApi : ScoutrApi {
     override suspend fun updateApkStatus(): UpdateApkStatusResponse =
         record("updateApkStatus") { updateApkStatusResult }
 
-    override suspend fun downloadApk(destination: File, onProgress: (Long, Long) -> Unit): Long {
-        calls += ApiCall("downloadApk", mapOf("destination" to destination.path))
+    /**
+     * Mirrors the real client's resume contract: [resumeFrom] bytes are assumed
+     * already staged, so only the tail of [apkBytes] is appended and progress
+     * counts from there. Tests assert the recorded `resumeFrom` to pin the
+     * updater's decision about *whether* to resume.
+     */
+    override suspend fun downloadApk(destination: File, resumeFrom: Long, onProgress: (Long, Long) -> Unit): Long {
+        calls += ApiCall("downloadApk", mapOf("destination" to destination.path, "resumeFrom" to resumeFrom))
         downloadApkFailure?.let { throw it }
         destination.parentFile?.mkdirs()
-        destination.writeBytes(apkBytes)
-        onProgress(apkBytes.size.toLong(), apkBytes.size.toLong())
-        return apkBytes.size.toLong()
+        val total = apkBytes.size.toLong()
+        if (resumeFrom in 1..total) {
+            destination.appendBytes(apkBytes.copyOfRange(resumeFrom.toInt(), apkBytes.size))
+        } else {
+            destination.writeBytes(apkBytes)
+        }
+        onProgress(total, total)
+        return total
     }
 
     /**

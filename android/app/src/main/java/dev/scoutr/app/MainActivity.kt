@@ -16,6 +16,7 @@ import dev.scoutr.app.service.ScoutrDeepLink
 import dev.scoutr.app.service.parseScoutrUri
 import dev.scoutr.app.service.resolveCurrentNotificationLink
 import dev.scoutr.app.state.ReduceMotionStore
+import dev.scoutr.app.update.PendingUpdateAction
 import dev.scoutr.app.ui.nav.ScoutrAppNav
 import dev.scoutr.app.ui.theme.ScoutrTheme
 
@@ -29,10 +30,21 @@ class MainActivity : ComponentActivity() {
     /** Consumed by the NavHost: scoutr://chat/<paneId> links from notifications. */
     private val deepLink = mutableStateOf<ScoutrDeepLink?>(null)
 
+    /**
+     * Set by an update notification: go to Settings and either commit the
+     * staged APK or resume a dropped transfer. Both need a foreground Activity,
+     * which is exactly what routing them through here provides.
+     *
+     * A plain extra rather than a scoutr:// URI: [parseScoutrUri] is the chat
+     * grammar, host-generation validated, and an update has no pane.
+     */
+    private val updateAction = mutableStateOf<PendingUpdateAction?>(null)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
         deepLink.value = validatedDeepLink(intent.dataString)
+        updateAction.value = updateActionFrom(intent)
         enableEdgeToEdge(
             statusBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
             navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
@@ -47,7 +59,7 @@ class MainActivity : ComponentActivity() {
             }
             val reduceMotion by motionStore.reduceMotion.collectAsState()
             ScoutrTheme(reduceMotion = reduceMotion) {
-                ScoutrAppNav(deepLink = deepLink)
+                ScoutrAppNav(deepLink = deepLink, updateAction = updateAction)
             }
         }
     }
@@ -56,6 +68,17 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         deepLink.value = validatedDeepLink(intent.dataString)
+        updateAction.value = updateActionFrom(intent)
+    }
+
+    /** Unknown or absent names read as "no action" rather than crashing. */
+    private fun updateActionFrom(intent: Intent): PendingUpdateAction? =
+        intent.getStringExtra(EXTRA_UPDATE_ACTION)
+            ?.let { name -> PendingUpdateAction.entries.firstOrNull { it.name == name } }
+
+    companion object {
+        /** Names a [PendingUpdateAction] when an update notification launched us. */
+        const val EXTRA_UPDATE_ACTION = "scoutr.updateAction"
     }
 
     /** External notification links must name the current host generation. */

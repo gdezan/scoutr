@@ -51,6 +51,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
 import java.io.File
+import java.io.FileOutputStream
 import java.io.IOException
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
@@ -498,10 +499,17 @@ class BridgeClient private constructor(
      * Runs on the IO dispatcher because OkHttp's blocking `execute` plus the
      * copy loop must not sit on the caller's thread.
      */
-    override suspend fun downloadApk(destination: File, onProgress: (Long, Long) -> Unit): Long =
+    override suspend fun downloadApk(
+        destination: File,
+        resumeFrom: Long,
+        onProgress: (Long, Long) -> Unit,
+    ): Long =
         withBinding { binding ->
             withContext(Dispatchers.IO) {
-                val call = okHttp.newCall(request(binding, "/api/update/apk"))
+                val ranged = resumeFrom > 0
+                val builder = request(binding, "/api/update/apk").newBuilder()
+                if (ranged) builder.header("Range", "bytes=$resumeFrom-")
+                val call = okHttp.newCall(builder.build())
                 val cancellation = currentCoroutineContext()[kotlinx.coroutines.Job]
                     ?.invokeOnCompletion { call.cancel() }
                 try {
@@ -511,10 +519,17 @@ class BridgeClient private constructor(
                         if (!it.isSuccessful) {
                             throw BridgeException(it.code, bridgeReason(it, body.string()))
                         }
-                        val total = body.contentLength().coerceAtLeast(0L)
+                        // A 200 answering a Range request means the bridge is
+                        // older than range support: it sent the whole APK, so
+                        // the staged prefix must go rather than be appended to.
+                        val resumed = ranged && it.code == HTTP_PARTIAL_CONTENT
+                        val base = if (resumed) resumeFrom else 0L
+                        val total = body.contentLength().let { length ->
+                            if (length > 0) base + length else 0L
+                        }
                         var written = 0L
                         body.byteStream().use { input ->
-                            destination.outputStream().use { output ->
+                            FileOutputStream(destination, resumed).use { output ->
                                 val buffer = ByteArray(DOWNLOAD_BUFFER_BYTES)
                                 while (true) {
                                     ensureActive()
@@ -522,14 +537,15 @@ class BridgeClient private constructor(
                                     if (read == -1) break
                                     output.write(buffer, 0, read)
                                     written += read
-                                    onProgress(written, total)
+                                    onProgress(base + written, total)
                                 }
                             }
                         }
-                        if (total > 0 && written != total) {
-                            throw BridgeException(it.code, "APK download truncated at $written of $total bytes")
+                        val staged = base + written
+                        if (total > 0 && staged != total) {
+                            throw BridgeException(it.code, "APK download truncated at $staged of $total bytes")
                         }
-                        written
+                        staged
                     }
                 } finally {
                     cancellation?.dispose()
@@ -540,5 +556,6 @@ class BridgeClient private constructor(
     private companion object {
         val EMPTY_JSON_BODY: RequestBody = "{}".toRequestBody("application/json".toMediaType())
         const val DOWNLOAD_BUFFER_BYTES = 64 * 1024
+        const val HTTP_PARTIAL_CONTENT = 206
     }
 }

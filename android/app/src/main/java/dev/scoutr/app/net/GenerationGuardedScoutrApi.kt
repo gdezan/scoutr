@@ -104,8 +104,8 @@ class GenerationGuardedScoutrApi(
     }
     override suspend fun updateBuild() = checked { delegate.updateBuild() }
     override suspend fun updateApkStatus() = checked { delegate.updateApkStatus() }
-    override suspend fun downloadApk(destination: File, onProgress: (Long, Long) -> Unit) = checked {
-        delegate.downloadApk(destination, onProgress)
+    override suspend fun downloadApk(destination: File, resumeFrom: Long, onProgress: (Long, Long) -> Unit) = checked {
+        delegate.downloadApk(destination, resumeFrom, onProgress)
     }
 
     private suspend fun <T> checked(call: suspend () -> T): T {

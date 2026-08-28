@@ -49,7 +49,7 @@ object ApkInstaller {
     fun unknownSourcesSettings(context: Context): Intent =
         Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${context.packageName}"))
 
-    /** An [ApkInstall] bound to [context], for [AppUpdater] to commit through. */
+    /** An [ApkInstall] bound to [context], for [AppUpdateController] to commit through. */
     fun forContext(context: Context): ApkInstall {
         val appContext = context.applicationContext
         return ApkInstall { apk -> commit(appContext, apk) }

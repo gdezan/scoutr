@@ -37,6 +37,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
+import dev.scoutr.app.update.ApkInstaller
+import dev.scoutr.app.update.AppUpdateController
+import dev.scoutr.app.update.UpdateStaging
+import java.io.File
 import java.io.IOException
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
@@ -189,6 +193,49 @@ class AppContainer(application: Application) {
 
     fun registerFcmToken(token: String) = pushRegistrations.updateToken(token)
     fun registerCachedFcmToken() = Unit
+
+    /**
+     * Process-wide owner of the self-update, so a build plus a multi-megabyte
+     * download outlives the Settings screen that started it.
+     */
+    val appUpdates = AppUpdateController(
+        scope = applicationScope,
+        work = hostWorkCoordinator,
+        notifications = notifications,
+        staging = UpdateStaging(File(appContext.filesDir, "update")),
+        installer = ApkInstaller.forContext(appContext),
+    ).apply {
+        rehydrate()
+        // The install session reports back long after — and from anywhere but —
+        // the screen that started it, so the outcome is routed process-wide
+        // rather than only while Settings happens to be composed.
+        applicationScope.launch {
+            ApkInstaller.outcome.collect { outcome ->
+                if (outcome != null) {
+                    onInstallOutcome(outcome)
+                    ApkInstaller.clearOutcome()
+                }
+            }
+        }
+    }
+
+    /**
+     * The host the update pipeline may talk to right now, or null when updates
+     * are disabled, no host is chosen, or the chosen one is not connectable.
+     * Resolved here rather than passed in, because the foreground service has
+     * no composition to read it from.
+     */
+    private fun updateBinding(): HostConnectionBinding? {
+        val state = hostRegistry.snapshot()
+        if (!state.inAppUpdatesEnabled) return null
+        val hostId = state.updateHostId ?: return null
+        return currentHostBinding(hostId)
+    }
+
+    fun startUpdate() {
+        val binding = updateBinding() ?: return
+        appUpdates.start(hostClients.api(binding), binding)
+    }
 
     fun currentHostBinding(hostId: String): HostConnectionBinding? =
         concreteHostClients.coordinator().currentBinding(hostId)

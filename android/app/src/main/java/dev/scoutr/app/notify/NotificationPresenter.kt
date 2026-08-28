@@ -1,5 +1,6 @@
 package dev.scoutr.app.notify
 
+import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -21,6 +22,11 @@ import dev.scoutr.app.service.putHostPaneIdentity
 import dev.scoutr.app.service.resolveNotificationLink
 import dev.scoutr.app.service.scoutrChatUri
 import dev.scoutr.app.state.MuteStore
+import dev.scoutr.app.update.PendingUpdateAction
+import dev.scoutr.app.update.StagedIdentity
+import dev.scoutr.app.update.UpdateActionReceiver
+import dev.scoutr.app.update.UpdateNotifier
+import dev.scoutr.app.update.UpdateState
 
 /**
  * The one place Scoutr posts, updates, and clears notifications.
@@ -34,7 +40,7 @@ class NotificationPresenter(
     private val context: Context,
     private val muteStore: MuteStore = MuteStore(context),
     private val preferencesStore: NotificationPreferencesStore = NotificationPreferencesStore(context),
-) {
+) : UpdateNotifier {
 
     private val manager: NotificationManager =
         context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
@@ -493,6 +499,111 @@ class NotificationPresenter(
         }
     }
 
+    /**
+     * The ongoing notification the update foreground service runs under.
+     *
+     * Not posted from here: a foreground service must hand its notification to
+     * startForeground, or the system kills it for starting without one.
+     */
+    fun updateProgressNotification(state: UpdateState): Notification {
+        ensureChannels()
+        val builder = NotificationCompat.Builder(context, CHANNEL_UPDATE_PROGRESS)
+            .setSmallIcon(R.drawable.ic_scoutr_notification)
+            .setColor(ACCENT)
+            .setContentTitle("Updating Scoutr")
+            .setOngoing(true)
+            // The bar ticks constantly during a multi-megabyte download; each
+            // tick must not re-alert.
+            .setOnlyAlertOnce(true)
+            .setContentIntent(updateContentIntent(null))
+            .addAction(UpdateActionReceiver.cancelAction(context))
+        when (state) {
+            is UpdateState.Downloading -> {
+                val percent = if (state.total > 0) (state.bytes * 100 / state.total).toInt() else 0
+                builder.setContentText("Downloading… $percent%")
+                builder.setProgress(100, percent, state.total <= 0)
+            }
+            else -> {
+                // The host build reports no fraction, so the bar stays
+                // indeterminate rather than inventing one.
+                builder.setContentText("Building on host…")
+                builder.setProgress(0, 0, true)
+            }
+        }
+        return builder.build()
+    }
+
+    /** The update finished downloading while the user was somewhere else. */
+    override fun showUpdateReady(identity: StagedIdentity) {
+        ensureChannels()
+        manager.cancel(UPDATE_FAILED_ID)
+        manager.notify(
+            UPDATE_READY_ID,
+            NotificationCompat.Builder(context, CHANNEL_UPDATE_READY)
+                .setSmallIcon(R.drawable.ic_scoutr_notification)
+                .setColor(ACCENT)
+                .setContentTitle("Scoutr ${identity.version} is ready")
+                .setContentText("Tap to install")
+                .setAutoCancel(true)
+                .setOnlyAlertOnce(true)
+                .setContentIntent(updateContentIntent(PendingUpdateAction.Install))
+                .build(),
+        )
+    }
+
+    override fun showUpdateFailed(message: String, resumable: Boolean) {
+        ensureChannels()
+        val builder = NotificationCompat.Builder(context, CHANNEL_UPDATE_READY)
+            .setSmallIcon(R.drawable.ic_scoutr_notification)
+            .setColor(ACCENT)
+            .setContentTitle("Scoutr update failed")
+            .setContentText(message)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(message))
+            .setAutoCancel(true)
+            .setOnlyAlertOnce(true)
+            .setContentIntent(updateContentIntent(null))
+        // Resume is only offered when there are bytes to continue from; a build
+        // that never produced an APK has nothing to resume. It is an Activity
+        // intent, not a broadcast: resuming restarts the dataSync service, and
+        // that is legal only once an Activity is actually in the foreground.
+        if (resumable) {
+            builder.addAction(
+                NotificationCompat.Action.Builder(
+                    android.R.drawable.stat_sys_download,
+                    "Resume",
+                    updateContentIntent(PendingUpdateAction.Resume),
+                ).build(),
+            )
+        }
+        builder.addAction(UpdateActionReceiver.cancelAction(context))
+        manager.notify(UPDATE_FAILED_ID, builder.build())
+    }
+
+    override fun cancelUpdateNotifications() {
+        manager.cancel(UPDATE_READY_ID)
+        manager.cancel(UPDATE_FAILED_ID)
+    }
+
+    /**
+     * Brings the app forward on Settings, optionally asking it to perform
+     * [action] once there. Both actions require a foreground Activity: an
+     * install sheet is suppressed without one, and a dataSync service may not
+     * be started without one.
+     */
+    private fun updateContentIntent(action: PendingUpdateAction?): PendingIntent {
+        val intent = Intent(context, MainActivity::class.java)
+            .setFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            .putExtra(MainActivity.EXTRA_UPDATE_ACTION, action?.name)
+        return PendingIntent.getActivity(
+            context,
+            // Distinct request codes, or the three intents would collide on
+            // FLAG_UPDATE_CURRENT and the last one built would win everywhere.
+            UPDATE_READY_ID + (action?.ordinal ?: -1),
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+    }
+
     @Suppress("DEPRECATION")
     private fun ensureChannels() {
         manager.deleteNotificationChannel(LEGACY_CHANNEL_AGENTS)
@@ -504,6 +615,18 @@ class NotificationPresenter(
         manager.createNotificationChannel(
             NotificationChannel(CHANNEL_DONE, "Finished", NotificationManager.IMPORTANCE_HIGH)
                 .apply { description = "An agent finished" },
+        )
+        // App updates get their own channels rather than borrowing the agent
+        // ones: "Finished" and its ringtone preference are about agents, and a
+        // user who silences agents has not asked to be kept in the dark about
+        // their own app updating.
+        manager.createNotificationChannel(
+            NotificationChannel(CHANNEL_UPDATE_PROGRESS, "App update progress", NotificationManager.IMPORTANCE_LOW)
+                .apply { description = "A Scoutr update is building or downloading" },
+        )
+        manager.createNotificationChannel(
+            NotificationChannel(CHANNEL_UPDATE_READY, "App update ready", NotificationManager.IMPORTANCE_DEFAULT)
+                .apply { description = "A Scoutr update finished downloading and is ready to install" },
         )
     }
 
@@ -543,8 +666,17 @@ class NotificationPresenter(
         const val GROUP_KEY = "dev.scoutr.app.NEEDS_YOU"
         const val GROUP_DONE = "dev.scoutr.app.AGENT_DONE"
 
+        const val CHANNEL_UPDATE_PROGRESS = "app_update_progress"
+        const val CHANNEL_UPDATE_READY = "app_update_ready"
+
         const val SUMMARY_ID = 0x5C0F7A
         const val DONE_SUMMARY_ID = 0x5C0F7B
+
+        // Fixed slots, outside the agent id space (which is derived from pane
+        // identity hashes) and outside both group summaries.
+        const val UPDATE_PROGRESS_ID = 0x5C0F80
+        const val UPDATE_READY_ID = 0x5C0F81
+        const val UPDATE_FAILED_ID = 0x5C0F82
 
         private const val BLOCKED = "blocked"
         private const val ERRORED = "errored"
