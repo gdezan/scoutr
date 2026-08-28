@@ -144,7 +144,10 @@ function computeIdentity() {
   const versionCode = Math.max(1, major * 1_000_000 + minor * 1_000 + patch);
 
   const commit = gitOrNull(["rev-parse", "--short", "HEAD"]) ?? "";
-  const status = gitOrNull(["status", "--porcelain"]);
+  // Only tracked modifications count as dirty. Untracked scratch files (plan
+  // notes, build droppings) change nothing the app could install, so flagging
+  // the host dirty for them would offer an "update" the row can never clear.
+  const status = gitOrNull(["status", "--porcelain", "--untracked-files=no"]);
   const dirty = status !== null && status !== "";
 
   return {

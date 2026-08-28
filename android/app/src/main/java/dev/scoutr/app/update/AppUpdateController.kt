@@ -28,8 +28,10 @@ sealed interface UpdateState {
      */
     data class Ready(val identity: StagedIdentity, val lastError: String? = null) : UpdateState
 
-    /** Commit issued; the system's confirmation sheet owns the flow now. */
-    data object Installing : UpdateState
+    /** Commit issued; the system's confirmation sheet owns the flow now. The
+     *  identity rides along because a suppressed sheet must fall back to
+     *  Ready with it. */
+    data class Installing(val identity: StagedIdentity) : UpdateState
     data class Failed(val message: String, val resumable: Boolean) : UpdateState
 }
 
@@ -92,8 +94,14 @@ class AppUpdateController(
     /** The generation the *user* cancelled, as opposed to host retirement. */
     private var userCancelledGeneration: Long = -1
 
+    /** The install-submission coroutine, so a suppressed sheet can be abandoned. */
+    private var installJob: Job? = null
+
     /**
-     * True while the Settings update screen is composed and started.
+     * True while the Settings update screen is actually resumed (ON_RESUME),
+     * not merely composed — composition happens before the activity is
+     * resumed, and a commit issued in that window is suppressed by Android,
+     * leaving the flow wedged.
      *
      * [dev.scoutr.app.state.ForegroundTracker] cannot answer this: it is
      * app-wide, so it would also say "yes" when the user is mid-sentence in a
@@ -101,10 +109,21 @@ class AppUpdateController(
      * would be an ambush.
      */
     @Volatile
-    private var updateScreenVisible: Boolean = false
+    private var updateScreenResumed: Boolean = false
 
-    fun setUpdateScreenVisible(visible: Boolean) {
-        updateScreenVisible = visible
+    fun setUpdateScreenResumed(resumed: Boolean) {
+        updateScreenResumed = resumed
+        if (resumed) return
+        // The system install sheet only shows over a resumed Activity. Pausing
+        // while a commit is pending and no outcome has arrived means the sheet
+        // was suppressed or abandoned; the staged bytes are still good, so
+        // fall back to Ready rather than leave the row stuck on "Installing…"
+        // until the next process start. The submission is cancelled with it —
+        // letting a session copying toward PackageInstaller race a retry would
+        // leave two competing sessions.
+        val installing = _state.value as? UpdateState.Installing ?: return
+        installJob?.cancel()
+        _state.value = UpdateState.Ready(installing.identity)
     }
 
     /**
@@ -173,19 +192,22 @@ class AppUpdateController(
     }
 
     /**
-     * Commits a [UpdateState.Ready] state. The caller guarantees a foreground
-     * Activity, without which the system silently swallows the install sheet.
+     * Commits a [UpdateState.Ready] state. Refuses to run unless the update
+     * screen is resumed: the system silently swallows the install sheet of a
+     * non-resumed Activity, and a commit issued in the gap before ON_RESUME
+     * (composition, a deep link consumed early) is exactly that.
      */
     fun install() {
         val ready = _state.value as? UpdateState.Ready ?: return
+        if (!updateScreenResumed) return
         val staged = staging.complete()
         if (staged == null || staged.identity.size != ready.identity.size) {
             _state.value = UpdateState.Failed("the staged update is no longer on disk", resumable = false)
             return
         }
-        _state.value = UpdateState.Installing
+        _state.value = UpdateState.Installing(ready.identity)
         notifications.cancelUpdateNotifications()
-        scope.launch {
+        installJob = scope.launch {
             try {
                 installer.install(staged.apk)
             } catch (cancelled: CancellationException) {
@@ -307,7 +329,7 @@ class AppUpdateController(
             notifications.showUpdateFailed(message, resumable = false)
             return
         }
-        if (updateScreenVisible) {
+        if (updateScreenResumed) {
             _state.value = UpdateState.Ready(staged.identity)
             install()
         } else {

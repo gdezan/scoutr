@@ -94,26 +94,47 @@ class AppUpdateControllerTest {
     }
 
     @Test
-    fun `a completed download with the update screen visible commits straight to the install sheet`() = runTest {
+    fun `a completed download with the update screen resumed commits straight to the install sheet`() = runTest {
         val installer = RecordingInstaller()
         val notifier = RecordingNotifier()
         val controller = controller(this, notifier, installer)
-        controller.setUpdateScreenVisible(true)
+        controller.setUpdateScreenResumed(true)
 
         controller.start(readyApi(), binding)
         advanceUntilIdle()
 
         assertEquals(bytes.toList(), installer.installedBytes?.toList())
         assertNull("the shade must stay quiet while the user is watching", notifier.ready)
-        assertEquals(UpdateState.Installing, controller.state.value)
+        assertEquals("0.4.0", (controller.state.value as UpdateState.Installing).identity.version)
     }
 
     @Test
-    fun `a completed download with the screen hidden notifies instead of ambushing the user`() = runTest {
+    fun `pausing the update screen while installing falls back to Ready`() = runTest {
+        // Android suppresses the system sheet unless the app is resumed; if the
+        // screen pauses with no outcome, the commit was never shown and the row
+        // must not stay on Installing until the next process start.
         val installer = RecordingInstaller()
         val notifier = RecordingNotifier()
         val controller = controller(this, notifier, installer)
-        controller.setUpdateScreenVisible(false)
+        controller.setUpdateScreenResumed(true)
+
+        controller.start(readyApi(), binding)
+        advanceUntilIdle()
+        assertEquals("0.4.0", (controller.state.value as UpdateState.Installing).identity.version)
+
+        controller.setUpdateScreenResumed(false)
+
+        val state = controller.state.value
+        assertTrue("expected Ready, was $state", state is UpdateState.Ready)
+        assertNull((state as UpdateState.Ready).lastError)
+    }
+
+    @Test
+    fun `a completed download with the screen not resumed notifies instead of ambushing the user`() = runTest {
+        val installer = RecordingInstaller()
+        val notifier = RecordingNotifier()
+        val controller = controller(this, notifier, installer)
+        controller.setUpdateScreenResumed(false)
 
         controller.start(readyApi(), binding)
         advanceUntilIdle()
@@ -270,6 +291,7 @@ class AppUpdateControllerTest {
         assertEquals("install cancelled", (state as UpdateState.Ready).lastError)
         assertEquals(bytes.size.toLong(), staging.partialBytes())
 
+        controller.setUpdateScreenResumed(true)
         controller.install()
         advanceUntilIdle()
         assertEquals("retrying must not need a new download", bytes.toList(), installer.installedBytes?.toList())

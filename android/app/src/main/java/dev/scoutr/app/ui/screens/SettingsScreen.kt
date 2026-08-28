@@ -28,7 +28,6 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -56,6 +55,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import dev.scoutr.app.data.UpdateHostDisposition
 import dev.scoutr.app.state.HostAvailability
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CancellationException
 import androidx.compose.foundation.layout.Box
 import dev.scoutr.app.state.HostRowUi
 import dev.scoutr.app.state.HostsViewModel
@@ -70,6 +70,7 @@ import dev.scoutr.app.ui.components.SectionLabel
 import dev.scoutr.app.ui.components.StatusRing
 import dev.scoutr.app.ui.components.StatusRingAnimation
 import androidx.compose.runtime.LaunchedEffect
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.scoutr.app.BuildConfig
 import dev.scoutr.app.data.UpdateStatusResponse
@@ -217,17 +218,29 @@ private fun UpdateSection(
     val updateState by updates.state.collectAsStateWithLifecycle()
     var canInstall by remember { mutableStateOf(ApkInstaller.canInstall(context)) }
 
+    var updateScreenResumed by remember { mutableStateOf(false) }
+
     // The controller commits to the system install sheet on its own only when
     // the user is actually looking at this screen; anywhere else it notifies.
-    DisposableEffect(updates) {
-        updates.setUpdateScreenVisible(true)
-        onDispose { updates.setUpdateScreenVisible(false) }
+    // "Looking" means resumed: composition runs before ON_RESUME, and a commit
+    // issued in that gap is suppressed by Android — so gate on the lifecycle,
+    // not on composition.
+    LifecycleResumeEffect(updates) {
+        updateScreenResumed = true
+        updates.setUpdateScreenResumed(true)
+        onPauseOrDispose {
+            updateScreenResumed = false
+            updates.setUpdateScreenResumed(false)
+        }
     }
 
     // Arriving from an update notification. Both actions need this foreground
     // Activity, and the request is cleared as it is consumed so a rotation
-    // cannot fire a second install or a second service start.
-    LaunchedEffect(updateAction.value, updateState) {
+    // cannot fire a second install or a second service start. The consumption
+    // also waits for ON_RESUME: a deep link consumed during composition would
+    // commit the install sheet while Android still suppresses it.
+    LaunchedEffect(updateAction.value, updateState, updateScreenResumed) {
+        if (!updateScreenResumed) return@LaunchedEffect
         when (updateAction.value) {
             null -> Unit
             PendingUpdateAction.Install -> {
@@ -253,14 +266,21 @@ private fun UpdateSection(
 
     LaunchedEffect(api) {
         if (api == null) return@LaunchedEffect
-        runCatching {
-            api.updateStatus(
+        // This coroutine belongs to the composition: leaving Settings cancels it
+        // mid-request. runCatching would store the cancellation's message ("the
+        // coroutine scope left the composition") as the row's error, so rethrow
+        // it and only record real failures.
+        try {
+            status = api.updateStatus(
                 commit = BuildConfig.GIT_COMMIT,
                 version = BuildConfig.VERSION_NAME,
                 dirty = BuildConfig.GIT_DIRTY,
             )
-        }.onSuccess { status = it }
-            .onFailure { error = it.message ?: "could not read host version" }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (failure: Exception) {
+            error = failure.message ?: "could not read host version"
+        }
     }
 
     // A failed install session reports back through the receiver long after the
