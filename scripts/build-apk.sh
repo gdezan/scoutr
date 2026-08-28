@@ -41,6 +41,14 @@ echo "== resolving $REF -> $SHORT ($DATE): $SUBJECT"
 git worktree remove --force "$WORKTREE" 2>/dev/null || true
 git worktree add --detach "$WORKTREE" "$SHA" >/dev/null
 
+GOOGLE_SERVICES="android/app/google-services.json"
+if [ ! -f "$GOOGLE_SERVICES" ]; then
+  echo "error: $GOOGLE_SERVICES is missing from the working tree" >&2
+  echo "       it is gitignored; the worktree build needs a copy of yours" >&2
+  exit 1
+fi
+cp "$GOOGLE_SERVICES" "$WORKTREE/$GOOGLE_SERVICES"
+
 echo "== building (first build in a fresh worktree may take a few minutes)"
 (
   cd "$WORKTREE/android"
