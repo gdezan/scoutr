@@ -126,7 +126,7 @@ private fun FileViewerBody(file: String, body: FileReadResponse) {
                 ) {
                     Box(Modifier.fillMaxSize().verticalScroll(scrollState)) {
                         SelectionContainer {
-                            Box(Modifier.fillMaxWidth().padding(16.dp)) {
+                            Column(Modifier.fillMaxWidth().padding(16.dp)) {
                                 key(file) {
                                     when {
                                         isMarkdownFile(file) -> AssistantMarkdown(
