@@ -78,7 +78,7 @@ status metadata and controls.
   bridge's repo surface is read-only, so Review has nothing to write.
 - **Subagent progress:** read-only run-store payload — role/label, status ring,
   model · thinking line, context · turns · cost · elapsed facts line, task,
-  bounded recent tool tail in mono, markdown last message and result, error,
+  one-line chat-spine `monoTool` tool lines (name emphasised, args dimmed, error lines red), markdown last message and result, error,
   truncated notice. No composer, no asks, no steer. Back is the only exit.
   Orphan cards and nested rows land here, not Chat.
 - **Terminal:** edge-to-edge true mono output, JetBrains Mono, with a compact

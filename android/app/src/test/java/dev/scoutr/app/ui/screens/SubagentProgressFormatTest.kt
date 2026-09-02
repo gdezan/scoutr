@@ -3,7 +3,9 @@ package dev.scoutr.app.ui.screens
 import dev.scoutr.app.data.PiSubagentProgress
 import dev.scoutr.app.data.PiSubagentUsage
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class SubagentProgressFormatTest {
@@ -38,10 +40,10 @@ class SubagentProgressFormatTest {
     }
 
     @Test
-    fun glyphsTrackToolStatus() {
-        assertEquals("✓", subagentToolGlyph("done"))
-        assertEquals("✗", subagentToolGlyph("error"))
-        assertEquals("…", subagentToolGlyph("running"))
-        assertEquals("·", subagentToolGlyph(null))
+    fun failureTracksToolStatus() {
+        assertTrue(subagentToolFailed("error"))
+        assertTrue(subagentToolFailed("failed"))
+        assertFalse(subagentToolFailed("done"))
+        assertFalse(subagentToolFailed(null))
     }
 }

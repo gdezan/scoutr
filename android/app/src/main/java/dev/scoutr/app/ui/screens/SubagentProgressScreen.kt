@@ -31,6 +31,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -188,7 +192,9 @@ private fun SubagentProgressBody(body: PiSubagentProgress) {
                         color = scheme.onSurfaceVariant,
                     )
                 }
-                body.recentTools.forEach { call -> SubagentToolRow(call, scheme) }
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    body.recentTools.forEach { call -> SubagentToolRow(call, scheme) }
+                }
             }
             body.lastMessage?.takeIf { it.isNotBlank() }?.let { message ->
                 Text("Last message", style = ScoutrType.monoSection, color = scheme.onSurfaceVariant)
@@ -229,13 +235,9 @@ internal fun subagentProgressRingAnimation(status: String): StatusRingAnimation 
     else -> StatusRingAnimation.Static
 }
 
-/** Glyph for a run-store tool-call status; unknown states stay quiet. */
-internal fun subagentToolGlyph(status: String?): String = when (status?.lowercase()) {
-    "done", "ok", "success" -> "✓"
-    "error", "failed" -> "✗"
-    null, "" -> "·"
-    else -> "…"
-}
+/** Run-store tool status that means the call itself failed (Chat: error line). */
+internal fun subagentToolFailed(status: String?): Boolean =
+    status?.lowercase() in setOf("error", "failed")
 
 internal fun formatSubagentTokens(tokens: Long): String = "%,d".format(Locale.US, tokens)
 
@@ -272,34 +274,33 @@ internal fun subagentRunFactsLine(progress: PiSubagentProgress): String? {
     return parts.joinToString(" · ").ifEmpty { null }
 }
 
+/**
+ * One tool call as a chat-spine machine fact: name emphasised, args dimmed,
+ * one line at the chat `monoTool` slot. Errors follow Chat's tool-line
+ * treatment — the line itself turns error-colored, no separate glyph.
+ */
 @Composable
 private fun SubagentToolRow(call: PiSubagentToolCall, scheme: ColorScheme) {
-    val mono = ScoutrType.monoCode(13f)
-    val glyph = subagentToolGlyph(call.status)
-    Row(
-        Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            call.tool,
-            style = mono,
-            color = scheme.onSurface,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-        Text(
-            call.args.orEmpty(),
-            style = mono,
-            color = scheme.onSurfaceVariant,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f),
-        )
-        Text(
-            glyph,
-            style = mono,
-            color = if (glyph == "✗") scheme.error else scheme.onSurfaceVariant,
-        )
-    }
+    val failed = subagentToolFailed(call.status)
+    Text(
+        buildAnnotatedString {
+            withStyle(SpanStyle(color = if (failed) scheme.error else scheme.onSurfaceVariant)) {
+                append(call.tool)
+            }
+            if (failed) append(" (error)")
+            call.args?.takeIf { it.isNotBlank() }?.let { args ->
+                append("  ")
+                withStyle(
+                    SpanStyle(
+                        color = scheme.onSurfaceVariant.copy(alpha = 0.55f),
+                        fontWeight = FontWeight.Normal,
+                    ),
+                ) { append(args) }
+            }
+        },
+        style = ScoutrType.monoTool,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        modifier = Modifier.fillMaxWidth(),
+    )
 }
