@@ -21,12 +21,36 @@ const runJsonSchema = v.looseObject({
   task: optionalText,
   taskPreview: optionalText,
   error: optionalText,
+  model: optionalText,
+  thinking: optionalText,
+});
+
+const usageJsonSchema = v.looseObject({
+  input: v.optional(v.number()),
+  output: v.optional(v.number()),
+  cacheRead: v.optional(v.number()),
+  cacheWrite: v.optional(v.number()),
+  cost: v.optional(v.number()),
+  turns: v.optional(v.number()),
+});
+
+const toolCallJsonSchema = v.looseObject({
+  tool: optionalText,
+  args: optionalText,
+  status: optionalText,
 });
 
 const progressFieldsSchema = v.looseObject({
   status: optionalText,
   lastMessage: optionalText,
   error: optionalText,
+  model: optionalText,
+  thinking: optionalText,
+  contextTokens: v.optional(v.number()),
+  durationMs: v.optional(v.number()),
+  toolCount: v.optional(v.number()),
+  usage: v.optional(usageJsonSchema),
+  recentTools: v.optional(v.array(toolCallJsonSchema)),
 });
 
 const progressJsonSchema = v.looseObject({
@@ -74,6 +98,24 @@ export interface IndexedLiveRun {
 }
 
 /** Progress payload for GET /api/subagents/:runId. */
+/** Token/cost accounting mirrored from pi-workflow `progress.json`. */
+export interface PiSubagentUsage {
+  input: number | null;
+  output: number | null;
+  cacheRead: number | null;
+  cacheWrite: number | null;
+  cost: number | null;
+  turns: number | null;
+}
+
+/** One recent tool call from pi-workflow `progress.json`. */
+export interface PiSubagentToolCall {
+  tool: string;
+  args: string | null;
+  status: string | null;
+}
+
+/** Progress payload for GET /api/subagents/:runId. */
 export interface PiSubagentProgress {
   runId: string;
   role: string;
@@ -86,6 +128,14 @@ export interface PiSubagentProgress {
   error: string | null;
   output: string | null;
   truncated: boolean;
+  /** Resolved runtime model (progress.json) falling back to requested (run.json). */
+  model: string | null;
+  thinking: string | null;
+  contextTokens: number | null;
+  usage: PiSubagentUsage | null;
+  durationMs: number | null;
+  toolCount: number | null;
+  recentTools: PiSubagentToolCall[];
 }
 
 export interface PiSubagentStoreOptions {
@@ -144,12 +194,51 @@ function preferLiveRun(current: IndexedLiveRun, next: IndexedLiveRun): IndexedLi
   return current;
 }
 
-function progressFields(file: ProgressJson | null): {
-  status?: string;
-  lastMessage?: string;
-  error?: string;
-} | null {
+function progressFields(
+  file: ProgressJson | null,
+): v.InferOutput<typeof progressFieldsSchema> | null {
   return file?.progress ?? file;
+}
+
+/** Bound on the recent tool tail sent to the progress screen. */
+const RECENT_TOOLS_LIMIT = 8;
+
+function finiteOrNull(value: number | undefined): number | null {
+  return value !== undefined && Number.isFinite(value) ? value : null;
+}
+
+/** Token/turn counts stay integral on the wire so Kotlin can decode them as Long/Int. */
+function integralOrNull(value: number | undefined): number | null {
+  const finite = finiteOrNull(value);
+  return finite === null ? null : Math.round(finite);
+}
+
+function usagePayload(
+  usage: v.InferOutput<typeof usageJsonSchema> | undefined,
+): PiSubagentUsage | null {
+  if (!usage) return null;
+  return {
+    input: integralOrNull(usage.input),
+    output: integralOrNull(usage.output),
+    cacheRead: integralOrNull(usage.cacheRead),
+    cacheWrite: integralOrNull(usage.cacheWrite),
+    cost: finiteOrNull(usage.cost),
+    turns: integralOrNull(usage.turns),
+  };
+}
+
+function recentToolsPayload(
+  tools: v.InferOutput<typeof toolCallJsonSchema>[] | undefined,
+): PiSubagentToolCall[] {
+  if (!tools || tools.length === 0) return [];
+  return tools
+    .slice(-RECENT_TOOLS_LIMIT)
+    .map((call) => ({
+      tool: nonempty(call.tool) ?? "",
+      args: nonempty(call.args),
+      status: nonempty(call.status),
+    }))
+    .filter((call) => call.tool.length > 0);
 }
 
 /**
@@ -211,5 +300,12 @@ export async function readPiSubagentProgress(
       ?? nonempty(progress?.error),
     output: nonempty(result?.output),
     truncated: result?.truncated === true,
+    model: nonempty(progress?.model) ?? nonempty(raw?.model),
+    thinking: nonempty(progress?.thinking) ?? nonempty(raw?.thinking),
+    contextTokens: integralOrNull(progress?.contextTokens),
+    usage: usagePayload(progress?.usage),
+    durationMs: integralOrNull(progress?.durationMs),
+    toolCount: integralOrNull(progress?.toolCount),
+    recentTools: recentToolsPayload(progress?.recentTools),
   };
 }

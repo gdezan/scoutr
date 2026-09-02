@@ -73,6 +73,86 @@ describe("GET /api/subagents/:runId", () => {
         error: null,
         output: "ok",
         truncated: false,
+        model: null,
+        thinking: null,
+        contextTokens: null,
+        usage: null,
+        durationMs: null,
+        toolCount: null,
+        recentTools: [],
+      });
+    });
+  });
+
+  test("surfaces model, context, usage, and bounded recent tools", async () => {
+    await withHome(async (home) => {
+      const dir = join(home, "runs", "run-rich");
+      await mkdir(dir, { recursive: true });
+      await writeFile(join(dir, "run.json"), JSON.stringify({
+        runId: "run-rich",
+        paneId: "p2",
+        agent: "worker",
+        label: "Build it",
+        task: "build the thing",
+        taskPreview: "build",
+        status: "running",
+        model: "openai-codex/gpt-5.6",
+        thinking: "xhigh",
+      }));
+      await writeFile(join(dir, "progress.json"), JSON.stringify({
+        progress: {
+          status: "running",
+          model: "gpt-5.6-terra",
+          thinking: "xhigh",
+          contextTokens: 146260,
+          durationMs: 204223,
+          toolCount: 14,
+          usage: { input: 145481, output: 31519, cacheRead: 4018325, cacheWrite: 0, cost: 0.0288, turns: 37 },
+          recentTools: Array.from({ length: 10 }, (_, i) => ({
+            tool: `tool-${i}`,
+            args: `arg-${i}`,
+            status: "done",
+          })),
+        },
+      }));
+      const result: RouteResult = await dispatchRoute(table, request("/api/subagents/run-rich"), deps());
+      assert.equal(result.status, 200);
+      assert.deepEqual(result.body, {
+        ok: true,
+        runId: "run-rich",
+        role: "worker",
+        label: "Build it",
+        task: "build the thing",
+        taskPreview: "build",
+        status: "running",
+        paneId: "p2",
+        lastMessage: null,
+        error: null,
+        output: null,
+        truncated: false,
+        model: "gpt-5.6-terra",
+        thinking: "xhigh",
+        contextTokens: 146260,
+        usage: {
+          input: 145481,
+          output: 31519,
+          cacheRead: 4018325,
+          cacheWrite: 0,
+          cost: 0.0288,
+          turns: 37,
+        },
+        durationMs: 204223,
+        toolCount: 14,
+        recentTools: [
+          { tool: "tool-2", args: "arg-2", status: "done" },
+          { tool: "tool-3", args: "arg-3", status: "done" },
+          { tool: "tool-4", args: "arg-4", status: "done" },
+          { tool: "tool-5", args: "arg-5", status: "done" },
+          { tool: "tool-6", args: "arg-6", status: "done" },
+          { tool: "tool-7", args: "arg-7", status: "done" },
+          { tool: "tool-8", args: "arg-8", status: "done" },
+          { tool: "tool-9", args: "arg-9", status: "done" },
+        ],
       });
     });
   });

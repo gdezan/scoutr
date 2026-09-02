@@ -207,7 +207,34 @@ data class PiSubagentProgress(
     val error: String? = null,
     val output: String? = null,
     val truncated: Boolean = false,
+    val model: String? = null,
+    val thinking: String? = null,
+    val contextTokens: Long? = null,
+    val usage: PiSubagentUsage? = null,
+    val durationMs: Long? = null,
+    val toolCount: Int? = null,
+    val recentTools: List<PiSubagentToolCall> = emptyList(),
 )
+
+/** Token/cost accounting mirrored from the bridge run-store payload. */
+@Serializable
+data class PiSubagentUsage(
+    val input: Long? = null,
+    val output: Long? = null,
+    val cacheRead: Long? = null,
+    val cacheWrite: Long? = null,
+    val cost: Double? = null,
+    val turns: Int? = null,
+)
+
+/** One recent tool call from the run-store progress tail. */
+@Serializable
+data class PiSubagentToolCall(
+    val tool: String,
+    val args: String? = null,
+    val status: String? = null,
+)
+
 /** The one session model shared by Board, history, palette, and Chat. */
 @Serializable
 data class SessionDescriptor(

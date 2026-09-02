@@ -17,6 +17,7 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -34,12 +35,15 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.scoutr.app.data.PiSubagentProgress
+import dev.scoutr.app.data.PiSubagentToolCall
 import dev.scoutr.app.state.Loadable
 import dev.scoutr.app.state.SubagentProgressViewModel
+import dev.scoutr.app.ui.components.AssistantMarkdown
 import dev.scoutr.app.ui.components.StatusRing
 import dev.scoutr.app.ui.components.StatusRingAnimation
 import dev.scoutr.app.ui.imeOrNavigationBarsPadding
 import dev.scoutr.app.ui.theme.ScoutrType
+import java.util.Locale
 
 /**
  * Read-only PI-workflow run progress. No composer, no asks, no steer —
@@ -150,14 +154,45 @@ private fun SubagentProgressBody(body: PiSubagentProgress) {
                 )
                 Text(body.status, style = MaterialTheme.typography.labelLarge)
             }
+            subagentModelLine(body)?.let { meta ->
+                Text(
+                    meta,
+                    style = ScoutrType.monoMeta,
+                    color = scheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.testTag("subagent_progress_model"),
+                )
+            }
+            subagentRunFactsLine(body)?.let { facts ->
+                Text(
+                    facts,
+                    style = ScoutrType.monoMeta,
+                    color = scheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.testTag("subagent_progress_facts"),
+                )
+            }
             val task = body.task.ifBlank { body.taskPreview }
             if (task.isNotBlank()) {
                 Text("Task", style = ScoutrType.monoSection, color = scheme.onSurfaceVariant)
                 Text(task, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.testTag("subagent_progress_task"))
             }
+            if (body.recentTools.isNotEmpty()) {
+                Text("Recent activity", style = ScoutrType.monoSection, color = scheme.onSurfaceVariant)
+                body.toolCount?.takeIf { it > body.recentTools.size }?.let { total ->
+                    Text(
+                        "last ${body.recentTools.size} of $total tool calls",
+                        style = ScoutrType.monoMeta,
+                        color = scheme.onSurfaceVariant,
+                    )
+                }
+                body.recentTools.forEach { call -> SubagentToolRow(call, scheme) }
+            }
             body.lastMessage?.takeIf { it.isNotBlank() }?.let { message ->
                 Text("Last message", style = ScoutrType.monoSection, color = scheme.onSurfaceVariant)
-                Text(message, style = MaterialTheme.typography.bodyMedium)
+                AssistantMarkdown(content = message)
             }
             body.error?.takeIf { it.isNotBlank() }?.let { error ->
                 Text("Error", style = ScoutrType.monoSection, color = scheme.error)
@@ -165,7 +200,7 @@ private fun SubagentProgressBody(body: PiSubagentProgress) {
             }
             body.output?.takeIf { it.isNotBlank() }?.let { output ->
                 Text("Result", style = ScoutrType.monoSection, color = scheme.onSurfaceVariant)
-                Text(output, style = ScoutrType.monoCode(13f))
+                AssistantMarkdown(content = output)
             }
             if (body.truncated) {
                 Text(
@@ -192,4 +227,79 @@ internal fun subagentProgressStatusColor(
 internal fun subagentProgressRingAnimation(status: String): StatusRingAnimation = when (status.lowercase()) {
     "queued", "running" -> StatusRingAnimation.Live
     else -> StatusRingAnimation.Static
+}
+
+/** Glyph for a run-store tool-call status; unknown states stay quiet. */
+internal fun subagentToolGlyph(status: String?): String = when (status?.lowercase()) {
+    "done", "ok", "success" -> "✓"
+    "error", "failed" -> "✗"
+    null, "" -> "·"
+    else -> "…"
+}
+
+internal fun formatSubagentTokens(tokens: Long): String = "%,d".format(Locale.US, tokens)
+
+internal fun formatSubagentCost(cost: Double): String = "\$%.2f".format(Locale.US, cost)
+
+internal fun formatSubagentDuration(ms: Long): String {
+    if (ms <= 0) return "0s"
+    val totalSeconds = ms / 1000
+    val hours = totalSeconds / 3600
+    val minutes = (totalSeconds % 3600) / 60
+    val seconds = totalSeconds % 60
+    return when {
+        hours > 0 -> "%dh %02dm".format(Locale.US, hours, minutes)
+        minutes > 0 -> "%dm %ds".format(Locale.US, minutes, seconds)
+        else -> "%ds".format(Locale.US, seconds)
+    }
+}
+
+/** Machine-facts meta line: resolved model and thinking level. */
+internal fun subagentModelLine(progress: PiSubagentProgress): String? =
+    listOfNotNull(
+        progress.model?.takeIf { it.isNotBlank() },
+        progress.thinking?.takeIf { it.isNotBlank() },
+    ).joinToString(" · ").ifEmpty { null }
+
+/** Context, turns, cost, and elapsed run time as one glanceable line. */
+internal fun subagentRunFactsLine(progress: PiSubagentProgress): String? {
+    val parts = buildList {
+        progress.contextTokens?.let { add("${formatSubagentTokens(it)} ctx") }
+        progress.usage?.turns?.let { add("$it turns") }
+        progress.usage?.cost?.let { add(formatSubagentCost(it)) }
+        progress.durationMs?.let { add(formatSubagentDuration(it)) }
+    }
+    return parts.joinToString(" · ").ifEmpty { null }
+}
+
+@Composable
+private fun SubagentToolRow(call: PiSubagentToolCall, scheme: ColorScheme) {
+    val mono = ScoutrType.monoCode(13f)
+    val glyph = subagentToolGlyph(call.status)
+    Row(
+        Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            call.tool,
+            style = mono,
+            color = scheme.onSurface,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Text(
+            call.args.orEmpty(),
+            style = mono,
+            color = scheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+        Text(
+            glyph,
+            style = mono,
+            color = if (glyph == "✗") scheme.error else scheme.onSurfaceVariant,
+        )
+    }
 }
