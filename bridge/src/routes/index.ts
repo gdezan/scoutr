@@ -11,6 +11,7 @@ import { reviewRoutes } from "./review.js";
 import { attachmentRoutes } from "./attachments.js";
 import { sessionsRoutes } from "./sessions.js";
 import { sessionCommandsRoutes } from "./session-commands.js";
+import { subagentsRoutes } from "./subagents.js";
 import { terminalRoutes } from "./terminal.js";
 import { updateRoutes } from "./update.js";
 import { usageRoutes } from "./usage.js";
@@ -21,6 +22,7 @@ export function buildRoutes(): Route[] {
     ...healthRoutes,
     ...terminalRoutes,
     ...agentsRoutes,
+    ...subagentsRoutes,
     ...sessionsRoutes,
     ...sessionCommandsRoutes,
     ...catalogRoutes,

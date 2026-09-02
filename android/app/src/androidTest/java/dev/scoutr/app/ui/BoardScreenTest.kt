@@ -34,6 +34,7 @@ import dev.scoutr.app.data.AttentionSummary
 import dev.scoutr.app.data.QuestionOption
 import dev.scoutr.app.data.SessionDescriptor
 import dev.scoutr.app.data.AgentsResponse
+import dev.scoutr.app.data.NestedPiSubagent
 import dev.scoutr.app.data.ConnectionStore
 import dev.scoutr.app.state.BoardViewModel
 import dev.scoutr.app.data.ScoutrApiCompatibility
@@ -710,5 +711,44 @@ class BoardScreenTest {
         branch = "main",
         dirty = false,
     )
+
+
+    @Test
+    fun nestedPiSubagentRowOpensProgressNotChat() {
+        val parent = workingAgent(
+            "p1",
+            "Parent session",
+            "/repo/a",
+            "anthropic/claude-sonnet-4-6",
+            "Working",
+        ).copy(
+            subagents = listOf(
+                NestedPiSubagent(
+                    runId = "run-abc",
+                    paneId = "child-pane",
+                    role = "scout",
+                    label = "Find nest join",
+                    status = "working",
+                ),
+            ),
+        )
+        val openedAgents = mutableListOf<String>()
+        val openedSubagents = mutableListOf<String>()
+        compose.setContent {
+            ScoutrTheme {
+                BoardScreen(
+                    onOpenAgent = { openedAgents += it.session.live?.paneId.orEmpty() },
+                    onOpenSubagent = { _, runId -> openedSubagents += runId },
+                    viewModel = StaticBoards.boardViewModel(listOf(parent)),
+                )
+            }
+        }
+        compose.onNodeWithTag("board_subagent_row_run-abc").assertIsDisplayed()
+        compose.onNodeWithContentDescription("WORKING 1").assertIsDisplayed()
+        compose.onNodeWithTag("board_subagent_row_run-abc").performClick()
+        assertEquals(listOf("run-abc"), openedSubagents)
+        assertTrue("nested row must not open Chat", openedAgents.isEmpty())
+        capture("board-nested-subagent")
+    }
 
 }

@@ -1,6 +1,7 @@
 package dev.scoutr.app.ui.nav
 
 import dev.scoutr.app.data.SessionKey
+import dev.scoutr.app.data.HostProfileKey
 import dev.scoutr.app.data.decodeSessionKey
 import java.net.URLDecoder
 import org.junit.Assert.assertEquals
@@ -33,6 +34,7 @@ class AppRoutesTest {
             AppRoutes.TERMINAL to AppRoutes.terminal(),
             AppRoutes.CHAT to AppRoutes.chat(SessionKey("pi", "/t.jsonl"), "working"),
             AppRoutes.CHAT to AppRoutes.bootstrapChat("p1", "working"),
+            AppRoutes.SUBAGENT_PROGRESS to AppRoutes.subagentProgress(HostProfileKey("host-a", 1), "run-abc"),
         )
         for ((pattern, filled) in pairs) {
             assertEquals(pattern.substringBefore('?'), filled.substringBefore('?'))

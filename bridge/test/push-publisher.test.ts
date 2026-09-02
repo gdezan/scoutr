@@ -331,3 +331,52 @@ test("a probe failure on a done transition falls back to the normal done ping", 
 
   assert.deepEqual(sender.sent, [{ kind: "done", paneId: "w1:p1" }]);
 });
+
+test("a nested subagent pane never pings; its parent still does", async () => {
+  const sender = fakeSender();
+  const publisher = new FcmPublisher(
+    sender,
+    fakeDevices(),
+    "host-a",
+    undefined,
+    async (paneId) => paneId === "child",
+  );
+
+  assert.equal(await publisher.handleEvent(statusEvent("child", "blocked")), false);
+  assert.equal(await publisher.handleEvent(statusEvent("parent", "blocked")), true);
+  assert.deepEqual(sender.sent, [{ kind: "blocked", paneId: "parent" }]);
+});
+
+test("an orphan subagent pane still pings", async () => {
+  const sender = fakeSender();
+  const publisher = new FcmPublisher(
+    sender,
+    fakeDevices(),
+    "host-a",
+    undefined,
+    async () => false,
+  );
+
+  assert.equal(await publisher.handleEvent(statusEvent("orphan", "blocked")), true);
+  assert.deepEqual(sender.sent, [{ kind: "blocked", paneId: "orphan" }]);
+});
+
+test("a pane that was already pinged then classifies as nested sends resolve", async () => {
+  const sender = fakeSender();
+  let nested = false;
+  const publisher = new FcmPublisher(
+    sender,
+    fakeDevices(),
+    "host-a",
+    undefined,
+    async (paneId) => paneId === "child" && nested,
+  );
+
+  assert.equal(await publisher.handleEvent(statusEvent("child", "blocked")), true);
+  nested = true;
+  assert.equal(await publisher.handleEvent(statusEvent("child", "blocked")), true);
+  assert.deepEqual(sender.sent, [
+    { kind: "blocked", paneId: "child" },
+    { kind: "resolve", paneId: "child" },
+  ]);
+});

@@ -53,8 +53,10 @@ status metadata and controls.
 ## Components
 
 - **Board:** section header plus compact count; cards carry a 9dp status ring, title,
-  latest activity, mono workspace path, and quiet time-in-state. Needs-you is
-  the only loud card treatment: red ring/border and red metadata. Done is gray.
+  latest activity, mono workspace path, and quiet time-in-state. Nested PI-workflow
+  subagents sit as compact role/label rows under the parent machine-facts line, each
+  with its own status ring; tapping a row or an orphan card opens progress, not Chat.
+  Needs-you is the only loud card treatment: red ring/border and red metadata. Done is gray.
   Idle collapses to a count row until tapped.
 - **Chat:** assistant rows use a quiet 1px outline spine with readable text; tool
   calls are one-line mono facts with a right-side details icon and expand into
@@ -74,6 +76,9 @@ status metadata and controls.
   `#3FC9E8`, not the live green. Paths, hashes, and diff lines use Martian Mono.
   The reference's Commit / Stage / Revert bar is deliberately absent — the
   bridge's repo surface is read-only, so Review has nothing to write.
+- **Subagent progress:** read-only run-store payload — role/label, status ring,
+  task, last message, error, truncated result. No composer, no asks, no steer.
+  Back is the only exit. Orphan cards and nested rows land here, not Chat.
 - **Terminal:** edge-to-edge true mono output, JetBrains Mono, with a compact
   workspace › tab › pane breadcrumb selector above the grid and hierarchy and
   modifier rows kept out of the transcript.
@@ -89,7 +94,7 @@ splits:
   same way.
 - **Session panel, 320dp fixed**, on the left; the detail pane takes the
   remainder. The panel shows on the four tab destinations and on Chat, and is
-  absent on Terminal, Files, File viewer, Settings and Connect.
+  absent on Terminal, Files, File viewer, Settings, Connect, and Subagent progress.
 - **Navigation lives in the session panel.** The four destinations render as
   an icon row at the panel's foot, below a hairline divider (shared
   `DestinationNavRow`); the row stays visible on Chat when wide and keeps

@@ -2,6 +2,7 @@ import type { BoardDetailCache } from "../board-detail.js";
 import type { BoardRepoSummaryCache } from "../board-repo-summary.js";
 import type { SessionSnapshot } from "../herdr/types.js";
 import { backendForAgentSessionInfo, getBackendOrNull, knownBackends } from "../agents/registry.js";
+import { nestLiveSubagentsFromStore } from "../pi-subagents/nest-live-subagents.js";
 import {
   descriptorForLiveAgent,
   keyForAgent,
@@ -82,11 +83,12 @@ async function agents(ctx: RouteContext): Promise<RouteResult> {
   if (!current) {
     return { status: 503, body: { ok: false, error: "no herdr snapshot yet" } };
   }
-  const sessions = await deriveSessionDescriptors(
+  const derived = await deriveSessionDescriptors(
     current,
     (paneId) => ctx.deps.tracker.since(paneId),
     ctx.deps.boardDetail,
   );
+  const sessions = await nestLiveSubagentsFromStore(derived);
   await captureAskContexts(ctx, sessions);
   const enriched = await attachRepoSummaries(sessions, ctx.deps.boardRepoSummary);
   return { status: 200, body: { ok: true, agents: enriched } };

@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
@@ -85,6 +86,7 @@ import dev.scoutr.app.data.RepoSummary
 import dev.scoutr.app.ui.theme.DiffPalette
 import dev.scoutr.app.data.QuestionOption
 import dev.scoutr.app.data.SessionDescriptor
+import dev.scoutr.app.data.NestedPiSubagent
 import dev.scoutr.app.data.AgentStatus
 import dev.scoutr.app.state.BoardUiState
 import dev.scoutr.app.state.BoardViewModel
@@ -121,6 +123,7 @@ import kotlinx.coroutines.launch
 @Composable
 fun BoardScreen(
     onOpenAgent: (HostedSession) -> Unit = {},
+    onOpenSubagent: (HostedSession, String) -> Unit = { _, _ -> },
     viewModel: BoardViewModel,
     modifier: Modifier = Modifier,
     onReviewAgent: (HostedSession) -> Unit = {},
@@ -206,6 +209,7 @@ fun BoardScreen(
                     selectedHostId = ui.filter,
                     onSelectHost = viewModel::selectFilter,
                     onOpenAgent = onOpenAgent,
+                    onOpenSubagent = onOpenSubagent,
                     onReviewAgent = onReviewAgent,
                     onCloseAgent = { pendingClose = it },
                     onQuickAnswer = onQuickAnswer,
@@ -245,6 +249,7 @@ internal fun LazyListScope.boardListContent(
     selectedHostId: String?,
     onSelectHost: (String?) -> Unit,
     onOpenAgent: (HostedSession) -> Unit,
+    onOpenSubagent: (HostedSession, String) -> Unit = { _, _ -> },
     onReviewAgent: (HostedSession) -> Unit,
     onCloseAgent: (HostedSession) -> Unit,
     onQuickAnswer: (HostedSession, String) -> Unit,
@@ -307,11 +312,11 @@ internal fun LazyListScope.boardListContent(
             rows.filter { AgentStatus.fromWire(it.session.status) == status }
         // Only needs-you cards carry quick answers; the other sections take
         // the default no-op, as they did before the body was shared.
-        boardSection("Needs you", section(AgentStatus.NeedsYou), ui, compact, selectedPaneId, onOpenAgent, reduceMotion, onReviewAgent, onCloseAgent, onQuickAnswer)
-        boardSection("Working", section(AgentStatus.Working), ui, compact, selectedPaneId, onOpenAgent, reduceMotion, onReviewAgent, onCloseAgent)
-        boardSection("Done", section(AgentStatus.Done), ui, compact, selectedPaneId, onOpenAgent, reduceMotion, onReviewAgent, onCloseAgent)
-        boardSection("Idle", section(AgentStatus.Idle), ui, compact, selectedPaneId, onOpenAgent, reduceMotion, onReviewAgent, onCloseAgent)
-        boardSection("Other", section(AgentStatus.Unknown), ui, compact, selectedPaneId, onOpenAgent, reduceMotion, onReviewAgent, onCloseAgent)
+        boardSection("Needs you", section(AgentStatus.NeedsYou), ui, compact, selectedPaneId, onOpenAgent, onOpenSubagent, reduceMotion, onReviewAgent, onCloseAgent, onQuickAnswer)
+        boardSection("Working", section(AgentStatus.Working), ui, compact, selectedPaneId, onOpenAgent, onOpenSubagent, reduceMotion, onReviewAgent, onCloseAgent)
+        boardSection("Done", section(AgentStatus.Done), ui, compact, selectedPaneId, onOpenAgent, onOpenSubagent, reduceMotion, onReviewAgent, onCloseAgent)
+        boardSection("Idle", section(AgentStatus.Idle), ui, compact, selectedPaneId, onOpenAgent, onOpenSubagent, reduceMotion, onReviewAgent, onCloseAgent)
+        boardSection("Other", section(AgentStatus.Unknown), ui, compact, selectedPaneId, onOpenAgent, onOpenSubagent, reduceMotion, onReviewAgent, onCloseAgent)
     }
     item { Spacer(Modifier.height(24.dp)) }
 }
@@ -390,6 +395,7 @@ private fun LazyListScope.boardSection(
     compact: Boolean,
     selectedPaneId: String?,
     onOpenAgent: (HostedSession) -> Unit,
+    onOpenSubagent: (HostedSession, String) -> Unit,
     reduceMotion: Boolean,
     onReviewAgent: (HostedSession) -> Unit,
     onCloseAgent: (HostedSession) -> Unit,
@@ -448,7 +454,11 @@ private fun LazyListScope.boardSection(
             hostLabel = hostLabel,
             staleLine = staleLine,
             answering = answering,
-            onClick = { onOpenAgent(agent) },
+            onClick = {
+                val stamp = agent.session.subagent
+                if (stamp != null) onOpenSubagent(agent, stamp.runId) else onOpenAgent(agent)
+            },
+            onOpenSubagent = { runId -> onOpenSubagent(agent, runId) },
             compact = compact,
             selected = selectedPaneId != null && selectedPaneId == agent.session.live?.paneId,
             onReview = { onReviewAgent(agent) },
@@ -501,9 +511,14 @@ private fun DisconnectedBanner(error: String?, onRetry: () -> Unit) {
 }
 
 /** The name the card shows, so the close confirmation names the same thing. */
-internal fun SessionDescriptor.cardTitle(): String =
-    agentDisplayTitle(title).takeIf { it.isNotBlank() } ?: agentKind
-
+internal fun SessionDescriptor.cardTitle(): String {
+    val stamp = subagent
+    if (stamp != null) {
+        stamp.label?.takeIf { it.isNotBlank() }?.let { return it }
+        if (stamp.role.isNotBlank()) return stamp.role
+    }
+    return agentDisplayTitle(title).takeIf { it.isNotBlank() } ?: agentKind
+}
 /** Swipe-to-reveal anchor values for a board card. */
 private enum class BoardReveal { Closed, Open }
 
@@ -529,6 +544,7 @@ private fun AgentCardRow(
     staleLine: String?,
     answering: Boolean,
     onClick: () -> Unit,
+    onOpenSubagent: (String) -> Unit = {},
     modifier: Modifier = Modifier,
     compact: Boolean = false,
     selected: Boolean = false,
@@ -562,6 +578,7 @@ private fun AgentCardRow(
             agent = agent,
             actions = actions,
             selected = selected,
+            onOpenSubagent = onOpenSubagent,
             compact = true,
             hostLabel = hostLabel,
             staleLine = staleLine,
@@ -630,6 +647,7 @@ private fun AgentCardRow(
             agent = agent,
             actions = actions,
             selected = selected,
+            onOpenSubagent = onOpenSubagent,
             compact = false,
             hostLabel = hostLabel,
             staleLine = staleLine,
@@ -659,6 +677,7 @@ private fun AgentCardBody(
     selected: Boolean,
     compact: Boolean,
     onClick: () -> Unit,
+    onOpenSubagent: (String) -> Unit = {},
     onReview: () -> Unit,
     onQuickAnswer: (String) -> Unit,
     modifier: Modifier = Modifier,
@@ -779,6 +798,15 @@ private fun AgentCardBody(
                             overflow = TextOverflow.Ellipsis,
                         )
                     }
+                    if (session.subagents.isNotEmpty()) {
+                        Spacer(Modifier.height(6.dp))
+                        session.subagents.forEach { child ->
+                            NestedSubagentRow(
+                                child = child,
+                                onOpen = { onOpenSubagent(child.runId) },
+                            )
+                        }
+                    }
                 }
                 Spacer(Modifier.width(12.dp))
                 TimeInState(status, session.statusSinceMs ?: session.updatedAtMs)
@@ -816,6 +844,45 @@ private fun AgentCardBody(
                 }
             }
         }
+    }
+}
+
+
+/**
+ * Compact nested PI-workflow child under a parent Board card. Status color
+ * only — no Close, Review, git, or quick-answer. Tap opens progress, not Chat.
+ */
+@Composable
+private fun NestedSubagentRow(
+    child: NestedPiSubagent,
+    onOpen: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val status = AgentStatus.fromWire(child.status)
+    val title = child.label?.takeIf { it.isNotBlank() } ?: child.role
+    Row(
+        modifier
+            .fillMaxWidth()
+            .heightIn(min = 36.dp)
+            .clickable(onClick = onOpen)
+            .padding(vertical = 4.dp)
+            .testTag("board_subagent_row_${child.runId}")
+            .semantics { contentDescription = "Open $title subagent progress" },
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        StatusRing(
+            color = statusColor(status),
+            animation = ringAnimation(status),
+        )
+        Text(
+            text = title,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurface,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
     }
 }
 

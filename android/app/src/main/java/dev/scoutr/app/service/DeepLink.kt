@@ -20,6 +20,12 @@ data class ScoutrDeepLink(
     val profile: HostProfileKey? = null,
 )
 
+/** Notification destination for an orphan PI-workflow run: progress, never Chat. */
+data class ScoutrSubagentLink(
+    val runId: String,
+    val profile: HostProfileKey,
+)
+
 /** Parses a scoutr URI; returns null for anything that is not a chat link. */
 fun parseScoutrUri(uri: String?): ScoutrDeepLink? {
     if (uri == null) return null
@@ -55,6 +61,39 @@ fun parseScoutrUri(uri: String?): ScoutrDeepLink? {
         status = parsed.getQueryParameter(QUERY_STATUS),
         profile = paneAndProfile.second,
     )
+}
+
+/** Parses a scoutr subagent URI; returns null for anything that is not a progress link. */
+fun parseScoutrSubagentUri(uri: String?): ScoutrSubagentLink? {
+    if (uri == null) return null
+    val parsed = Uri.parse(uri)
+    if (parsed.scheme != "scoutr" || parsed.authority != "subagent") return null
+    val segments = parsed.pathSegments
+    if (segments.size != 3) return null
+    val profile = parseProfile(segments[0], segments[1]) ?: return null
+    val runId = segments[2].takeIf { it.isNotBlank() } ?: return null
+    return ScoutrSubagentLink(runId = runId, profile = profile)
+}
+
+/** Builds scoutr://subagent/<hostId>/<generation>/<runId>. */
+fun scoutrSubagentUri(profile: HostProfileKey, runId: String): String =
+    Uri.Builder()
+        .scheme("scoutr")
+        .authority("subagent")
+        .appendPath(profile.hostId)
+        .appendPath(profile.profileGeneration.toString())
+        .appendPath(runId)
+        .build()
+        .toString()
+
+/** Resolves a parsed subagent destination against the current registry generation. */
+fun resolveCurrentSubagentLink(
+    link: ScoutrSubagentLink,
+    registry: HostRegistryStore,
+    isRetiring: (String) -> Boolean = { false },
+) : ScoutrSubagentLink? {
+    val profile = currentHostProfile(registry, link.profile, isRetiring) ?: return null
+    return link.copy(profile = HostProfileKey(profile.hostId, profile.profileGeneration))
 }
 
 /** Builds the legacy, unqualified form retained for old tests and old links. */

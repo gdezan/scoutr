@@ -16,6 +16,8 @@ import type { DeviceRegistry, FcmSender, PingKind } from "./fcm.js";
 import type { ErrorStopProbe } from "./stopped-on-error.js";
 import * as v from "valibot";
 
+export type SuppressPingProbe = (paneId: string) => Promise<boolean>;
+
 // herdr emits status events in both dot-form and snake_case across versions.
 const statusEventSchema = v.looseObject({
   pane_id: v.optional(v.string()),
@@ -32,6 +34,7 @@ export class FcmPublisher {
     private readonly devices: DeviceRegistry,
     private readonly hostId: string,
     private readonly errorStop?: ErrorStopProbe,
+    private readonly suppressPing?: SuppressPingProbe,
   ) {}
 
   /**
@@ -66,6 +69,9 @@ export class FcmPublisher {
   }
 
   private async applyStatus(paneId: string, status: string): Promise<boolean> {
+    if (this.suppressPing && await this.suppressPing(paneId).catch(() => false)) {
+      return this.resolveSuppressedNested(paneId);
+    }
     if (status === "blocked") {
       this.donePanes.delete(paneId);
       const clearedErrored = await this.clearErrorStop(paneId);
@@ -119,6 +125,16 @@ export class FcmPublisher {
       didSomething = (await this.clearErrorStop(paneId)) || didSomething;
     }
     return didSomething;
+  }
+
+  /** Nested PI-workflow children never ping; resolve any ping already sent. */
+  private async resolveSuppressedNested(paneId: string): Promise<boolean> {
+    let needsResolve = false;
+    if (this.blockedPanes.delete(paneId)) needsResolve = true;
+    if (this.erroredPanes.delete(paneId)) needsResolve = true;
+    if (this.donePanes.delete(paneId)) needsResolve = true;
+    if (needsResolve) return this.ping("resolve", paneId);
+    return false;
   }
 
   /** The pane moved on from an error stop; clear the phone's notification. */

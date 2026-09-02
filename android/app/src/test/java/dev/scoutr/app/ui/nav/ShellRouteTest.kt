@@ -27,6 +27,7 @@ class ShellRouteTest {
             "files?cwd={cwd}",
             "file-viewer?cwd={cwd}&file={file}",
             "connect",
+            AppRoutes.SUBAGENT_PROGRESS,
         )
         for (route in fullWindow) {
             assertFalse("$route should own the whole window", isShellRoute(route))

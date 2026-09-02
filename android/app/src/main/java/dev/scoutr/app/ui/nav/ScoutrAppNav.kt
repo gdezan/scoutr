@@ -42,6 +42,7 @@ import dev.scoutr.app.data.HostProfileKey
 import dev.scoutr.app.data.ScoutrApiCompatibility
 import dev.scoutr.app.data.encode
 import dev.scoutr.app.service.ScoutrDeepLink
+import dev.scoutr.app.service.ScoutrSubagentLink
 import dev.scoutr.app.state.BoardViewModel
 import dev.scoutr.app.state.CommandPaletteViewModel
 import dev.scoutr.app.state.NewSessionViewModel
@@ -67,6 +68,7 @@ fun ScoutrAppNav(
     deepLink: MutableState<ScoutrDeepLink?>,
     /** Set by an update notification: land on Settings and act on it there. */
     updateAction: MutableState<PendingUpdateAction?>,
+    subagentLink: MutableState<ScoutrSubagentLink?>,
 ) {
     val app = LocalContext.current.applicationContext as ScoutrApp
     val navController = rememberNavController()
@@ -136,6 +138,19 @@ fun ScoutrAppNav(
         deepLink.value = null
     }
 
+
+
+    val pendingSubagentLink = subagentLink.value
+    LaunchedEffect(pendingSubagentLink, registryState) {
+        val link = pendingSubagentLink ?: return@LaunchedEffect
+        if (container.currentHostProfile(link.profile) == null) {
+            subagentLink.value = null
+            return@LaunchedEffect
+        }
+        runCatching { container.hostRegistry.markUsed(link.profile.hostId) }
+        navController.navigate(AppRoutes.subagentProgress(link.profile, link.runId))
+        subagentLink.value = null
+    }
     fun markExplicitTarget(profile: HostProfileKey) {
         if (container.currentHostProfile(profile) != null) {
             runCatching { container.hostRegistry.markUsed(profile.hostId) }
@@ -263,6 +278,10 @@ fun ScoutrAppNav(
                                 navController.navigateToChatFromPanel(agent.profile, session.key, it.paneId, it.status)
                             }
                         },
+                        onOpenSubagent = { agent, runId ->
+                            markExplicitTarget(agent.profile)
+                            navController.navigateToSubagentProgress(agent.profile, runId)
+                        },
                         onReviewAgent = { agent ->
                             agent.session.cwd?.let { cwd -> openReview(agent.profile, cwd) }
                         },
@@ -331,6 +350,7 @@ fun ScoutrAppNav(
                     )
                     chatDestination(navController, container, openReview, ::markExplicitTarget)
                     fileDestinations(navController, container)
+                    subagentDestination(navController, container)
                     usageDestination(navController, container, isWide)
                     reviewDestination(navController, container, isWide)
                     terminalDestination(navController, container)

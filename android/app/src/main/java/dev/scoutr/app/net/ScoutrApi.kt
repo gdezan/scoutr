@@ -4,6 +4,7 @@ import dev.scoutr.app.data.CatalogAction
 import dev.scoutr.app.data.SessionAction
 import dev.scoutr.app.data.AgentKindsResponse
 import dev.scoutr.app.data.AgentsResponse
+import dev.scoutr.app.data.PiSubagentProgress
 import dev.scoutr.app.data.AttachmentResponse
 import dev.scoutr.app.data.CommandResponse
 import dev.scoutr.app.data.CommandsCatalogResponse
@@ -41,6 +42,8 @@ interface ScoutrApi {
 
     suspend fun health(): HealthResponse
     suspend fun agents(): AgentsResponse
+    /** One PI-workflow run's progress.json + result.json, joined by runId. */
+    suspend fun subagentProgress(runId: String): PiSubagentProgress
     /** Registers this phone using the profile generation local to this installation. */
     suspend fun registerDevice(fcmToken: String, profileGeneration: Long)
     /** Removes this phone's token from the current bridge; absence is successful. */

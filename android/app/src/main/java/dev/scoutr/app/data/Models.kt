@@ -168,6 +168,46 @@ data class RepoSummary(
     val diffTruncated: Boolean = false,
 )
 
+
+/**
+ * Top-level PI-workflow subagent stamp on a Board card. Nested children
+ * are omitted from `agents[]` and never carry this.
+ */
+@Serializable
+data class SessionSubagent(
+    val runId: String,
+    val role: String,
+    val label: String? = null,
+    val orphan: Boolean = false,
+)
+
+/** Compact nested PI-workflow child under a live parent Board card. */
+@Serializable
+data class NestedPiSubagent(
+    val runId: String,
+    val paneId: String,
+    val role: String,
+    val label: String? = null,
+    /** Herdr agent_status of the child pane. */
+    val status: String,
+)
+
+/** GET /api/subagents/:runId — run-store progress, not Herdr status. */
+@Serializable
+data class PiSubagentProgress(
+    val ok: Boolean = true,
+    val runId: String,
+    val role: String,
+    val label: String? = null,
+    val task: String = "",
+    val taskPreview: String = "",
+    val status: String,
+    val paneId: String? = null,
+    val lastMessage: String? = null,
+    val error: String? = null,
+    val output: String? = null,
+    val truncated: Boolean = false,
+)
 /** The one session model shared by Board, history, palette, and Chat. */
 @Serializable
 data class SessionDescriptor(
@@ -194,6 +234,10 @@ data class SessionDescriptor(
      */
     val liveSummary: RepoSummary? = null,
     val live: SessionLiveAttachment? = null,
+    /** Present on a top-level PI-workflow subagent card; nested children omit this. */
+    val subagent: SessionSubagent? = null,
+    /** Compact children nested under a live parent. Empty unless this is a parent. */
+    val subagents: List<NestedPiSubagent> = emptyList(),
 ) {
     val status: String get() = live?.status ?: "done"
     val statusSinceMs: Double? get() = live?.statusSinceMs

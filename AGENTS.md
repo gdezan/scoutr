@@ -18,6 +18,7 @@ API; the Android app talks only to that API.
   - `routes/` owns auth, body, and error mapping.
   - `agents/` contains agent adapters; `transcript.ts` owns shared JSONL parsing.
   - `terminal/` owns terminal child-process transport; keep it off `HerdrPort`.
+  - `pi-subagents/` classifies live PI-workflow children from the on-disk run store and nests them on `GET /api/agents`.
   - Tests live in `bridge/test/`; offline HTTP tests use `test/support/fake-herdr.ts` and `fake-feed.ts`.
 - `android/` — Kotlin + Jetpack Compose Material 3, package `dev.scoutr.app`; manual DI through `ScoutrApp.AppContainer` (no Hilt/Room).
   - `data/` DTOs and SharedPreferences stores; `net/` API clients; `state/` ViewModels;

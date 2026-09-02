@@ -19,6 +19,8 @@ fun liveSessionFixture(
     attention: AttentionSummary? = null,
     doneSummary: RepoSummary? = null,
     liveSummary: RepoSummary? = null,
+    subagent: SessionSubagent? = null,
+    subagents: List<NestedPiSubagent> = emptyList(),
 ): SessionDescriptor = SessionDescriptor(
     key = key,
     agentKind = agentKind,
@@ -32,6 +34,8 @@ fun liveSessionFixture(
     attention = attention,
     doneSummary = doneSummary,
     liveSummary = liveSummary,
+    subagent = subagent,
+    subagents = subagents,
     live = SessionLiveAttachment(
         paneId = paneId,
         workspaceId = workspaceId,

@@ -54,6 +54,25 @@ export interface SessionDescriptor {
    */
   liveSummary: RepoSummary | null;
   live: SessionLiveAttachment | null;
+  /**
+   * Present on a top-level PI-workflow subagent card. Nested children are
+   * omitted from `agents[]` and never carry this field.
+   */
+  subagent?: {
+    runId: string;
+    role: string;
+    label: string | null;
+    orphan: boolean;
+  } | null;
+  /** Compact children nested under a live parent. Empty/absent otherwise. */
+  subagents?: Array<{
+    runId: string;
+    paneId: string;
+    role: string;
+    label: string | null;
+    /** Herdr agent_status of the child pane. */
+    status: string;
+  }>;
 }
 
 /** Resolve a live backend reference without allowing a path outside that backend's store. */

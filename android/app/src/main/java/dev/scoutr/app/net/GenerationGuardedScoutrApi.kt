@@ -40,6 +40,7 @@ class GenerationGuardedScoutrApi(
 
     override suspend fun health() = checked { delegate.health() }
     override suspend fun agents() = checked { delegate.agents() }
+    override suspend fun subagentProgress(runId: String) = checked { delegate.subagentProgress(runId) }
     override suspend fun registerDevice(fcmToken: String, profileGeneration: Long) = checked {
         delegate.registerDevice(fcmToken, profileGeneration)
     }

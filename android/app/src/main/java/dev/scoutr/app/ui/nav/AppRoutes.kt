@@ -25,6 +25,7 @@ object AppRoutes {
     const val FILE_VIEWER = "file-viewer?cwd={cwd}&file={file}&hostProfile={hostProfile}"
     const val SETTINGS = "settings"
     const val TERMINAL = "terminal?paneId={paneId}&hostProfile={hostProfile}"
+    const val SUBAGENT_PROGRESS = "subagent-progress?runId={runId}&hostProfile={hostProfile}"
 
     /** Chat's argument names and defaults, shared by both chat entry paths. */
     object ChatArgs {
@@ -45,6 +46,11 @@ object AppRoutes {
 
     object TerminalArgs {
         const val PANE_ID = "paneId"
+        const val HOST_PROFILE = "hostProfile"
+    }
+
+    object SubagentArgs {
+        const val RUN_ID = "runId"
         const val HOST_PROFILE = "hostProfile"
     }
 
@@ -94,6 +100,10 @@ object AppRoutes {
 
     fun terminal(paneId: String? = null): String =
         "terminal?${TerminalArgs.PANE_ID}=${paneId?.let(::encode) ?: ""}"
+
+
+    fun subagentProgress(profile: HostProfileKey, runId: String): String =
+        "subagent-progress?${SubagentArgs.RUN_ID}=${encode(runId)}&${SubagentArgs.HOST_PROFILE}=${profile.encode()}"
 }
 
 /** The single URL-encoding path; no call site hand-rolls encoder fragments. */
@@ -155,6 +165,11 @@ internal fun NavController.navigateToChatFromPanel(key: SessionKey?, bootstrapPa
         popUpTo(Destination.Board.route) { inclusive = false }
         launchSingleTop = true
     }
+}
+
+
+internal fun NavController.navigateToSubagentProgress(profile: HostProfileKey, runId: String) {
+    navigate(AppRoutes.subagentProgress(profile, runId))
 }
 
 /** Arguments shared by host-qualified shell destinations. */

@@ -96,4 +96,25 @@ class DeepLinkValidationTest {
         assertEquals("p1", parseScoutrUri("scoutr://chat/p1?status=blocked")?.paneId)
     }
 
+
+    @Test
+    fun parseScoutrUriStaysChatOnly() {
+        assertNull(parseScoutrUri("scoutr://subagent/host-a/1/run-abc"))
+    }
+
+    @Test
+    fun parseScoutrSubagentUriRequiresHostGenerationAndRunId() {
+        val profile = HostProfileKey("host-a", 1)
+        val uri = scoutrSubagentUri(profile, "run-abc")
+
+        val parsed = parseScoutrSubagentUri(uri)
+
+        assertEquals("run-abc", parsed?.runId)
+        assertEquals(profile, parsed?.profile)
+        assertTrue(uri.contains("host-a"))
+        assertNull(parseScoutrSubagentUri("scoutr://subagent/run-abc"))
+        assertNull(parseScoutrSubagentUri("scoutr://chat/host-a/1/p1"))
+        assertNull(parseScoutrSubagentUri("https://evil.example/x"))
+    }
+
 }

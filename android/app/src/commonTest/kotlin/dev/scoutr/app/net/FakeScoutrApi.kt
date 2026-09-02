@@ -4,6 +4,7 @@ import dev.scoutr.app.data.CatalogAction
 import dev.scoutr.app.data.SessionAction
 import dev.scoutr.app.data.AgentKindsResponse
 import dev.scoutr.app.data.AgentsResponse
+import dev.scoutr.app.data.PiSubagentProgress
 import dev.scoutr.app.data.AttachmentResponse
 import dev.scoutr.app.data.CommandsCatalogResponse
 import dev.scoutr.app.data.ControlResponse
@@ -61,6 +62,9 @@ class FakeScoutrApi : ScoutrApi {
         HealthResponse(ok = true, api = ScoutrApiInfo(protocol = 2, features = REQUIRED_SCOUTR_API_FEATURES)),
     )
     var agentsResult: Result<AgentsResponse> = Result.success(AgentsResponse())
+    var subagentProgressResult: Result<PiSubagentProgress> = Result.success(
+        PiSubagentProgress(runId = "", role = "", status = ""),
+    )
     var registerDeviceResult: Result<Unit> = Result.success(Unit)
     var unregisterDeviceResult: Result<Unit> = Result.success(Unit)
     var sessionResult: Result<SessionReadResponse> = Result.success(SessionReadResponse())
@@ -120,6 +124,9 @@ class FakeScoutrApi : ScoutrApi {
         record("health") { healthResult }
 
     override suspend fun agents(): AgentsResponse = record("agents") { agentsResult }
+
+    override suspend fun subagentProgress(runId: String): PiSubagentProgress =
+        record("subagentProgress", mapOf("runId" to runId)) { subagentProgressResult }
 
     override suspend fun registerDevice(fcmToken: String, profileGeneration: Long) {
         record(

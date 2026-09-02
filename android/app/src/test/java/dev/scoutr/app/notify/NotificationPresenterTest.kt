@@ -8,6 +8,7 @@ import dev.scoutr.app.data.NotificationPreferencesStore
 import dev.scoutr.app.data.RepoSummary
 import dev.scoutr.app.data.SessionDescriptor
 import dev.scoutr.app.data.SessionLiveAttachment
+import dev.scoutr.app.data.SessionSubagent
 import dev.scoutr.app.state.MuteStore
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -58,6 +59,7 @@ class NotificationPresenterTest {
         cwd: String? = "/home/gdezan/Dev/scoutr",
         liveSummary: RepoSummary? = null,
         doneSummary: RepoSummary? = null,
+        subagent: SessionSubagent? = null,
     ) = SessionDescriptor(
         agentKind = "pi",
         displayName = name,
@@ -71,7 +73,27 @@ class NotificationPresenterTest {
             tabId = "t1",
             status = status,
         ),
+        subagent = subagent,
     )
+
+
+    @Test
+    fun orphanBlockedOmitsReplyAndOpensProgress() {
+        val profile = HostProfileKey("host-a", 1)
+        presenter.showBlocked(
+            profile,
+            session(
+                paneId = "same-pane",
+                status = "blocked",
+                subagent = SessionSubagent(runId = "run-abc", role = "researcher", orphan = true),
+            ),
+        )
+
+        val posted = slots().single().notification
+        assertEquals(listOf("Mute this agent"), posted.actions.map { it.title.toString() })
+        val intent = org.robolectric.Shadows.shadowOf(posted.contentIntent).savedIntent
+        assertEquals("scoutr://subagent/host-a/1/run-abc", intent.dataString)
+    }
 
     /**
      * Done pushes are opt-in (`DEFAULT_DONE = false`), so every done-path

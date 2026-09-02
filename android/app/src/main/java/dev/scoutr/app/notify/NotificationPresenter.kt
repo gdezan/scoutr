@@ -21,6 +21,7 @@ import dev.scoutr.app.service.NotificationReplyReceiver
 import dev.scoutr.app.service.putHostPaneIdentity
 import dev.scoutr.app.service.resolveNotificationLink
 import dev.scoutr.app.service.scoutrChatUri
+import dev.scoutr.app.service.scoutrSubagentUri
 import dev.scoutr.app.state.MuteStore
 import dev.scoutr.app.update.PendingUpdateAction
 import dev.scoutr.app.update.StagedIdentity
@@ -54,7 +55,7 @@ class NotificationPresenter(
         if (session.live?.paneId != key.paneId) return
         val workspace = session.cwd?.trimEnd('/')?.substringAfterLast('/').orEmpty()
         val title = if (workspace.isEmpty()) session.displayName else "${session.displayName} · $workspace"
-        postBlocked(key, title, bodyWithBranch("Needs your input", session.liveSummary))
+        postBlocked(key, title, bodyWithBranch("Needs your input", session.liveSummary), session.subagentProgressRunId())
     }
 
     fun showBlocked(profile: HostProfileKey, session: SessionDescriptor) {
@@ -65,6 +66,7 @@ class NotificationPresenter(
             HostPaneKey(profile, paneId),
             title,
             bodyWithBranch("Needs your input", session.liveSummary),
+            session.subagentProgressRunId(),
         )
     }
 
@@ -77,7 +79,7 @@ class NotificationPresenter(
         if (session.live?.paneId != key.paneId) return
         val workspace = session.cwd?.trimEnd('/')?.substringAfterLast('/').orEmpty()
         val title = if (workspace.isEmpty()) session.displayName else "${session.displayName} · $workspace"
-        postDone(key, title, bodyWithBranch("Finished", session.doneSummary))
+        postDone(key, title, bodyWithBranch("Finished", session.doneSummary), session.subagentProgressRunId())
     }
 
     fun showDone(profile: HostProfileKey, session: SessionDescriptor) {
@@ -88,6 +90,7 @@ class NotificationPresenter(
             HostPaneKey(profile, paneId),
             title,
             bodyWithBranch("Finished", session.doneSummary),
+            session.subagentProgressRunId(),
         )
     }
 
@@ -96,7 +99,8 @@ class NotificationPresenter(
      * agent gave up). Same attention class as blocked — the agent cannot
      * proceed without the user — so it shares the needs-you slot, channel,
      * preference, and Reply/Mute actions; only the text differs. Replying is
-     * the natural recovery: it steers the pane, e.g. "continue".
+     * the natural recovery: it steers the pane, e.g. "continue". Orphan
+     * PI-workflow runs omit Reply and open progress instead of Chat.
      */
     fun showErrored(session: SessionDescriptor) {
         val paneId = session.live?.paneId ?: return
@@ -111,6 +115,7 @@ class NotificationPresenter(
             HostPaneKey(profile, paneId),
             title,
             bodyWithBranch("Stopped on an error", session.liveSummary),
+            session.subagentProgressRunId(),
         )
     }
 
@@ -286,11 +291,11 @@ class NotificationPresenter(
             ).joinToString(" · ")
         }
 
-    private fun postBlocked(key: HostPaneKey, title: String, body: String) {
+    private fun postBlocked(key: HostPaneKey, title: String, body: String, progressRunId: String? = null) {
         if (!preferencesStore.blockedEnabled) return
         if (muteStore.isMuted(key)) return
         ensureChannels()
-        val notification = NotificationCompat.Builder(context, CHANNEL_NEEDS_YOU)
+        val builder = NotificationCompat.Builder(context, CHANNEL_NEEDS_YOU)
             .setSmallIcon(R.drawable.ic_scoutr_notification)
             .setColor(ACCENT)
             .setContentTitle(title)
@@ -300,20 +305,21 @@ class NotificationPresenter(
             .setAutoCancel(true)
             .setOnlyAlertOnce(true)
             .setGroup(GROUP_KEY)
-            .setContentIntent(openPaneIntent(key, BLOCKED))
-            .addAction(NotificationReplyReceiver.replyAction(context, key))
-            .addAction(NotificationMuteReceiver.muteAction(context, key))
-            .build()
-        manager.notify(tagOf(key), slotOf(key), notification)
+            .setContentIntent(openProgressOrChatIntent(key, BLOCKED, progressRunId))
+        if (progressRunId == null) {
+            builder.addAction(NotificationReplyReceiver.replyAction(context, key))
+        }
+        builder.addAction(NotificationMuteReceiver.muteAction(context, key))
+        manager.notify(tagOf(key), slotOf(key), builder.build())
         syncBlockedSummary()
     }
 
     /** Shares the blocked slot: one pane cannot be both, and latest wins. */
-    private fun postErrored(key: HostPaneKey, title: String, body: String) {
+    private fun postErrored(key: HostPaneKey, title: String, body: String, progressRunId: String? = null) {
         if (!preferencesStore.blockedEnabled) return
         if (muteStore.isMuted(key)) return
         ensureChannels()
-        val notification = NotificationCompat.Builder(context, CHANNEL_NEEDS_YOU)
+        val builder = NotificationCompat.Builder(context, CHANNEL_NEEDS_YOU)
             .setSmallIcon(R.drawable.ic_scoutr_notification)
             .setColor(ACCENT)
             .setContentTitle(title)
@@ -323,11 +329,12 @@ class NotificationPresenter(
             .setAutoCancel(true)
             .setOnlyAlertOnce(true)
             .setGroup(GROUP_KEY)
-            .setContentIntent(openPaneIntent(key, ERRORED))
-            .addAction(NotificationReplyReceiver.replyAction(context, key))
-            .addAction(NotificationMuteReceiver.muteAction(context, key))
-            .build()
-        manager.notify(tagOf(key), slotOf(key), notification)
+            .setContentIntent(openProgressOrChatIntent(key, ERRORED, progressRunId))
+        if (progressRunId == null) {
+            builder.addAction(NotificationReplyReceiver.replyAction(context, key))
+        }
+        builder.addAction(NotificationMuteReceiver.muteAction(context, key))
+        manager.notify(tagOf(key), slotOf(key), builder.build())
         syncBlockedSummary()
     }
 
@@ -361,7 +368,7 @@ class NotificationPresenter(
         syncBlockedSummary()
     }
 
-    private fun postDone(key: HostPaneKey, title: String, body: String) {
+    private fun postDone(key: HostPaneKey, title: String, body: String, progressRunId: String? = null) {
         if (!preferencesStore.doneEnabled) return
         if (muteStore.isMuted(key)) return
         ensureChannels()
@@ -375,7 +382,7 @@ class NotificationPresenter(
             .setAutoCancel(true)
             .setOnlyAlertOnce(true)
             .setGroup(GROUP_DONE)
-            .setContentIntent(openPaneIntent(key, DONE))
+            .setContentIntent(openProgressOrChatIntent(key, DONE, progressRunId))
             .build()
         manager.notify(tagOf(key), doneSlotOf(key), notification)
         syncDoneSummary()
@@ -440,6 +447,27 @@ class NotificationPresenter(
         return PendingIntent.getActivity(
             context,
             requestCode(key, status),
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+    }
+
+
+    private fun openProgressOrChatIntent(key: HostPaneKey, status: String, progressRunId: String?): PendingIntent =
+        if (progressRunId != null) openSubagentIntent(key, progressRunId) else openPaneIntent(key, status)
+
+    private fun openSubagentIntent(key: HostPaneKey, runId: String): PendingIntent {
+        val uri = scoutrSubagentUri(key.profile, runId)
+        val intent = Intent(context, MainActivity::class.java)
+            .putHostPaneIdentity(key, "subagent")
+            .apply {
+                action = Intent.ACTION_VIEW
+                data = Uri.parse(uri)
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            }
+        return PendingIntent.getActivity(
+            context,
+            requestCode(key, "subagent"),
             intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
@@ -688,3 +716,7 @@ class NotificationPresenter(
         private const val LEGACY_CHANNEL_MONITOR = "scoutr_monitor"
     }
 }
+
+
+private fun SessionDescriptor.subagentProgressRunId(): String? =
+    subagent?.runId?.takeIf { it.isNotBlank() }

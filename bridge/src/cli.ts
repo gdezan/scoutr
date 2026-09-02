@@ -160,6 +160,7 @@ async function main(): Promise<void> {
           try {
             const devices = await JsonDeviceRegistry.open(config.configDir);
             const { makeErrorStopInspector } = await import("./push/stopped-on-error.js");
+            const { makeNestedSubagentPingSuppressor } = await import("./pi-subagents/nested-ping-suppressor.js");
             push = {
               publisher: new FcmPublisher(
                 await createFcmSender(config.fcmServiceAccountPath),
@@ -168,6 +169,7 @@ async function main(): Promise<void> {
                 // Settle-to-idle events ask this whether the transcript ends in
                 // a failed model call; only then does the phone get woken.
                 makeErrorStopInspector(feed),
+                makeNestedSubagentPingSuppressor(feed),
               ),
               devices,
             };

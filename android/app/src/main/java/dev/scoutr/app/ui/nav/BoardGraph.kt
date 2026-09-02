@@ -71,6 +71,10 @@ internal fun NavGraphBuilder.boardDestination(
                         navController.navigateToChat(agent.profile, session.key, it.paneId, it.status)
                     }
                 },
+                onOpenSubagent = { agent, runId ->
+                    markHostUsed(agent.profile)
+                    navController.navigateToSubagentProgress(agent.profile, runId)
+                },
                 onReviewAgent = { agent ->
                     agent.session.cwd?.let { cwd -> openReview(agent.profile, cwd) }
                 },

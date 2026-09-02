@@ -4,6 +4,7 @@ import dev.scoutr.app.data.CatalogAction
 import dev.scoutr.app.data.SessionAction
 import dev.scoutr.app.data.AgentKindsResponse
 import dev.scoutr.app.data.AgentsResponse
+import dev.scoutr.app.data.PiSubagentProgress
 import dev.scoutr.app.data.AttachmentResponse
 import dev.scoutr.app.data.CommandResponse
 import dev.scoutr.app.data.CommandsCatalogResponse
@@ -372,6 +373,11 @@ class BridgeClient private constructor(
 
     override suspend fun agents(): AgentsResponse =
         call("/api/agents") { json.decodeFromString(AgentsResponse.serializer(), it) }
+
+    override suspend fun subagentProgress(runId: String): PiSubagentProgress =
+        call("/api/subagents/${segment(runId)}") {
+            json.decodeFromString(PiSubagentProgress.serializer(), it)
+        }
 
     override suspend fun registerDevice(fcmToken: String, profileGeneration: Long) {
         require(profileGeneration > 0L) { "profileGeneration must be positive" }

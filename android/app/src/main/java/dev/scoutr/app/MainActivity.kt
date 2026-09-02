@@ -13,8 +13,11 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
 import dev.scoutr.app.service.ScoutrDeepLink
+import dev.scoutr.app.service.ScoutrSubagentLink
+import dev.scoutr.app.service.parseScoutrSubagentUri
 import dev.scoutr.app.service.parseScoutrUri
 import dev.scoutr.app.service.resolveCurrentNotificationLink
+import dev.scoutr.app.service.resolveCurrentSubagentLink
 import dev.scoutr.app.state.ReduceMotionStore
 import dev.scoutr.app.update.PendingUpdateAction
 import dev.scoutr.app.ui.nav.ScoutrAppNav
@@ -27,9 +30,11 @@ import dev.scoutr.app.ui.theme.ScoutrTheme
  */
 class MainActivity : ComponentActivity() {
 
-    /** Consumed by the NavHost: scoutr://chat/<paneId> links from notifications. */
+    /** Consumed by the NavHost: scoutr://chat/<hostId>/<generation>/<paneId> from notifications. */
     private val deepLink = mutableStateOf<ScoutrDeepLink?>(null)
 
+    /** Consumed by the NavHost: scoutr://subagent/<hostId>/<generation>/<runId> from orphan notifications. */
+    private val subagentLink = mutableStateOf<ScoutrSubagentLink?>(null)
     /**
      * Set by an update notification: go to Settings and either commit the
      * staged APK or resume a dropped transfer. Both need a foreground Activity,
@@ -43,7 +48,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        deepLink.value = validatedDeepLink(intent.dataString)
+        ingestDeepLink(intent.dataString)
         updateAction.value = updateActionFrom(intent)
         enableEdgeToEdge(
             statusBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
@@ -59,7 +64,7 @@ class MainActivity : ComponentActivity() {
             }
             val reduceMotion by motionStore.reduceMotion.collectAsState()
             ScoutrTheme(reduceMotion = reduceMotion) {
-                ScoutrAppNav(deepLink = deepLink, updateAction = updateAction)
+                ScoutrAppNav(deepLink = deepLink, updateAction = updateAction, subagentLink = subagentLink)
             }
         }
     }
@@ -67,7 +72,7 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        deepLink.value = validatedDeepLink(intent.dataString)
+        ingestDeepLink(intent.dataString)
         updateAction.value = updateActionFrom(intent)
     }
 
@@ -81,10 +86,24 @@ class MainActivity : ComponentActivity() {
         const val EXTRA_UPDATE_ACTION = "scoutr.updateAction"
     }
 
+    private fun ingestDeepLink(uri: String?) {
+        deepLink.value = validatedDeepLink(uri)
+        subagentLink.value = validatedSubagentLink(uri)
+    }
+
     /** External notification links must name the current host generation. */
     private fun validatedDeepLink(uri: String?) =
         parseScoutrUri(uri)?.let {
             resolveCurrentNotificationLink(
+                it,
+                ScoutrApp.container(this).hostRegistry,
+                ScoutrApp.container(this).pushRegistrations::isRetiring,
+            )
+        }
+
+    private fun validatedSubagentLink(uri: String?) =
+        parseScoutrSubagentUri(uri)?.let {
+            resolveCurrentSubagentLink(
                 it,
                 ScoutrApp.container(this).hostRegistry,
                 ScoutrApp.container(this).pushRegistrations::isRetiring,
