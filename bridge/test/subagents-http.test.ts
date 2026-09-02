@@ -102,6 +102,7 @@ describe("GET /api/subagents/:runId", () => {
       await writeFile(join(dir, "progress.json"), JSON.stringify({
         progress: {
           status: "running",
+          error: null,
           model: "gpt-5.6-terra",
           thinking: "xhigh",
           contextTokens: 146260,

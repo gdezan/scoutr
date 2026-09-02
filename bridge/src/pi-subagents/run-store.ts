@@ -9,55 +9,58 @@ export const PI_SUBAGENT_RUN_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;
 const ACTIVE_RUN_STATUSES = new Set(["queued", "running"]);
 
 const optionalText = v.optional(v.string());
+/** Display fields: pi-workflow writes null for "absent", not a missing key. */
+const optionalNullableText = v.optional(v.nullable(v.string()));
+const optionalNullableNumber = v.optional(v.nullable(v.number()));
 
 const runJsonSchema = v.looseObject({
   runId: optionalText,
   paneId: optionalText,
   sessionId: optionalText,
   agent: optionalText,
-  label: optionalText,
-  status: optionalText,
-  createdAt: optionalText,
-  task: optionalText,
-  taskPreview: optionalText,
-  error: optionalText,
-  model: optionalText,
-  thinking: optionalText,
+  label: optionalNullableText,
+  status: optionalNullableText,
+  createdAt: optionalNullableText,
+  task: optionalNullableText,
+  taskPreview: optionalNullableText,
+  error: optionalNullableText,
+  model: optionalNullableText,
+  thinking: optionalNullableText,
 });
 
 const usageJsonSchema = v.looseObject({
-  input: v.optional(v.number()),
-  output: v.optional(v.number()),
-  cacheRead: v.optional(v.number()),
-  cacheWrite: v.optional(v.number()),
-  cost: v.optional(v.number()),
-  turns: v.optional(v.number()),
+  input: optionalNullableNumber,
+  output: optionalNullableNumber,
+  cacheRead: optionalNullableNumber,
+  cacheWrite: optionalNullableNumber,
+  cost: optionalNullableNumber,
+  turns: optionalNullableNumber,
 });
 
 const toolCallJsonSchema = v.looseObject({
-  tool: optionalText,
-  args: optionalText,
-  status: optionalText,
+  tool: optionalNullableText,
+  args: optionalNullableText,
+  status: optionalNullableText,
 });
 
 const progressFieldsSchema = v.looseObject({
-  status: optionalText,
-  lastMessage: optionalText,
-  error: optionalText,
-  model: optionalText,
-  thinking: optionalText,
-  contextTokens: v.optional(v.number()),
-  durationMs: v.optional(v.number()),
-  toolCount: v.optional(v.number()),
-  usage: v.optional(usageJsonSchema),
-  recentTools: v.optional(v.array(toolCallJsonSchema)),
+  status: optionalNullableText,
+  lastMessage: optionalNullableText,
+  error: optionalNullableText,
+  model: optionalNullableText,
+  thinking: optionalNullableText,
+  contextTokens: optionalNullableNumber,
+  durationMs: optionalNullableNumber,
+  toolCount: optionalNullableNumber,
+  usage: v.optional(v.nullable(usageJsonSchema)),
+  recentTools: v.optional(v.nullable(v.array(toolCallJsonSchema))),
 });
 
 const progressJsonSchema = v.looseObject({
   progress: v.optional(progressFieldsSchema),
-  status: optionalText,
-  lastMessage: optionalText,
-  error: optionalText,
+  status: optionalNullableText,
+  lastMessage: optionalNullableText,
+  error: optionalNullableText,
 });
 
 const resultJsonSchema = v.looseObject({
@@ -203,18 +206,18 @@ function progressFields(
 /** Bound on the recent tool tail sent to the progress screen. */
 const RECENT_TOOLS_LIMIT = 8;
 
-function finiteOrNull(value: number | undefined): number | null {
+function finiteOrNull(value: number | null | undefined): number | null {
   return value !== undefined && Number.isFinite(value) ? value : null;
 }
 
 /** Token/turn counts stay integral on the wire so Kotlin can decode them as Long/Int. */
-function integralOrNull(value: number | undefined): number | null {
+function integralOrNull(value: number | null | undefined): number | null {
   const finite = finiteOrNull(value);
   return finite === null ? null : Math.round(finite);
 }
 
 function usagePayload(
-  usage: v.InferOutput<typeof usageJsonSchema> | undefined,
+  usage: v.InferOutput<typeof usageJsonSchema> | null | undefined,
 ): PiSubagentUsage | null {
   if (!usage) return null;
   return {
@@ -228,7 +231,7 @@ function usagePayload(
 }
 
 function recentToolsPayload(
-  tools: v.InferOutput<typeof toolCallJsonSchema>[] | undefined,
+  tools: v.InferOutput<typeof toolCallJsonSchema>[] | null | undefined,
 ): PiSubagentToolCall[] {
   if (!tools || tools.length === 0) return [];
   return tools
