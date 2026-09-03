@@ -21,6 +21,21 @@ function parsePersistedConfig(raw: string): PersistedConfigFile {
   return JSON.parse(raw) as PersistedConfigFile;
 }
 
+/** Runs fn with console.error captured; every bridge log under test goes there. */
+async function captureConsoleError(run: () => Promise<void>): Promise<string[]> {
+  const logged: string[] = [];
+  const original = console.error;
+  console.error = (...args: unknown[]) => {
+    logged.push(args.map((arg) => String(arg)).join(" "));
+  };
+  try {
+    await run();
+  } finally {
+    console.error = original;
+  }
+  return logged;
+}
+
 describe("defaultConfigPath", () => {
   test("honors XDG_CONFIG_HOME", () => {
     const previous = process.env.XDG_CONFIG_HOME;
@@ -80,6 +95,47 @@ describe("loadOrCreateConfig", () => {
     const config = await loadOrCreateConfig(path);
     assert.ok(config.token.length >= 16);
     assert.notEqual(config.token, "short");
+  });
+
+  test("logs the reason when a schema-invalid file is replaced with a fresh config", async () => {
+    const folder = join(dir, "invalid-shape");
+    mkdirSync(folder, { recursive: true });
+    const path = join(folder, "config.json");
+    const token = "0123456789abcdef";
+    // publicHost: null fails the schema (optional means undefined-only) —
+    // the exact shape that once silently rotated a scratch bridge's token.
+    await writeFile(path, JSON.stringify({ token, port: 8737, publicHost: null }));
+    const logged = await captureConsoleError(async () => {
+      const config = await loadOrCreateConfig(path);
+      assert.ok(config.token.length >= 16);
+      assert.notEqual(config.token, token);
+    });
+    assert.equal(logged.length, 1);
+    assert.match(logged[0], /unreadable or invalid/);
+    assert.match(logged[0], /minting a fresh config/);
+    assert.ok(!logged[0].includes(token), "the rejected token must never reach the log");
+  });
+
+  test("logs a fixed reason for malformed JSON instead of the parser snippet", async () => {
+    const folder = join(dir, "malformed-json");
+    mkdirSync(folder, { recursive: true });
+    const path = join(folder, "config.json");
+    await writeFile(path, `{"token": "0123456789abcdef", ooops}`);
+    const logged = await captureConsoleError(async () => {
+      await loadOrCreateConfig(path);
+    });
+    assert.equal(logged.length, 1);
+    assert.match(logged[0], /not valid JSON/);
+    assert.ok(!logged[0].includes("0123456789abcdef"), "parser snippets can echo input; never log them");
+  });
+
+  test("stays quiet when a missing file mints the first config", async () => {
+    const path = join(dir, "first-boot", "config.json");
+    const logged = await captureConsoleError(async () => {
+      const config = await loadOrCreateConfig(path);
+      assert.ok(config.token.length >= 16);
+    });
+    assert.equal(logged.length, 0);
   });
 
   test("keeps the configured FCM service-account path", async () => {

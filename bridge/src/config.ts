@@ -147,7 +147,7 @@ export async function loadOrCreateConfig(path = defaultConfigPath()): Promise<Br
   try {
     const parsed = v.safeParse(bridgeConfigSchema, JSON.parse(await readFile(path, "utf8")));
     if (!parsed.success || parsed.output.token.length < 16) {
-      throw new Error("invalid scoutr config (token or port missing)");
+      throw new Error("invalid scoutr config (failed schema validation)");
     }
     const exposure = normalizeExposure(parsed.output, path);
     readOk = true;
@@ -164,7 +164,22 @@ export async function loadOrCreateConfig(path = defaultConfigPath()): Promise<Br
     // A misconfigured exposure is the operator's to fix; minting a fresh
     // config over it would rotate the token behind their back.
     if (error instanceof ConfigError) throw error;
-    // Unreadable, missing, or invalid file: mint a fresh config below.
+    // Unreadable, missing, or invalid file: mint a fresh config below. Say
+    // why — a rejected file is otherwise silently replaced, which rotates
+    // the token behind the operator's back (401s every paired phone). Only
+    // the failure class is logged, never parser output: JSON syntax errors
+    // echo input snippets that could carry token fragments into the journal.
+    // A missing file is the normal first boot, not a rejection — stay quiet.
+    // Anything else (unreadable, malformed, schema-invalid) replaces operator
+    // state and must say why.
+    const isMissing = error instanceof Error && "code" in error && error.code === "ENOENT";
+    if (!isMissing) {
+      let reason: string;
+      if (error instanceof SyntaxError) reason = "not valid JSON";
+      else if (error instanceof Error) reason = error.message;
+      else reason = String(error);
+      console.error(`scoutr config at ${path} is unreadable or invalid (${reason}); minting a fresh config`);
+    }
     config = null;
   }
   if (!config) {

@@ -63,7 +63,10 @@ The app on the interactive emulator is a real build with a saved connection.
    adb -s emulator-5554 shell input text "http://10.0.2.2:8791"
    # tap "Pairing token", then:
    adb -s emulator-5554 shell input text "testtoken1234567890"
-   # tap "Connect"; the ViewModel probes /api/health before it saves.
+  # tap "Connect"; the ViewModel probes /api/health before it saves.
+  # Resolve every field's center from the uiautomator dump first: taps near
+  # the fields land on "Scan QR", which opens a camera permission dialog and
+  # a broken scanner error on emulators without a camera.
    ```
    (10.0.2.2 is the host loopback from the emulator.) The Connect fields carry
    test tags `connect_host`, `connect_token`, and `connect_button`, so
@@ -76,7 +79,7 @@ unit (which owns `~/.config/scoutr/config.json` and port 8737):
 
 ```bash
 mkdir -p /tmp/scoutr-scratch/scoutr
-printf '{"token":"testtoken1234567890","port":8791,"publicHost":null}\n' \
+printf '{"token":"testtoken1234567890","port":8791}\n' \
   > /tmp/scoutr-scratch/scoutr/config.json
 cd bridge && setsid env XDG_CONFIG_HOME=/tmp/scoutr-scratch SCOUTR_REPO_ROOTS=/home/gdezan/Dev \
   node --import tsx src/cli.ts serve > /tmp/scoutr-scratch/bridge.log 2>&1 < /dev/null &
@@ -84,7 +87,10 @@ curl -s -H "Authorization: Bearer testtoken1234567890" http://127.0.0.1:8791/api
 ```
 
 - Config path is `$XDG_CONFIG_HOME/scoutr/config.json`; the token must be
-  ≥16 chars or `loadOrCreateConfig` regenerates it.
+  ≥16 chars or `loadOrCreateConfig` regenerates it. `publicHost` and
+  `fcmServiceAccountPath` must be omitted, not nulled — an explicit
+  `"publicHost": null` fails the schema and the file is replaced with a
+  fresh config (the bridge logs why). (`hostId` and `exposure` tolerate null.)
 - `SCOUTR_REPO_ROOTS` overrides the review allow-list (default
   `~/.herdr/worktrees`, which the picker hides as a dot-dir).
 - Stop it with `pkill -f 'cli[.]ts serve'` (bracket trick — a plain
