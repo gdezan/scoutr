@@ -100,6 +100,13 @@ internal fun NavGraphBuilder.chatDestination(
                 markHostUsed(profile)
                 navController.navigate(AppRoutes.fileBrowser(profile, it))
             },
+            onOpenWorkspaceFile = { absolutePath ->
+                val cwd = chatUi.cwd?.takeIf { it.isNotBlank() } ?: return@ChatScreen
+                val relative = absolutePath.removePrefix(cwd.trimEnd('/') + "/")
+                if (relative == absolutePath) return@ChatScreen
+                markHostUsed(profile)
+                navController.navigate(AppRoutes.fileViewer(profile, cwd, relative))
+            },
             onOpenReview = { cwd -> openReview(profile, cwd) },
         )
     }

@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { readdirSync, realpathSync, statSync } from "node:fs";
-import { dirname, isAbsolute, join, resolve, sep } from "node:path";
+import { dirname, basename, isAbsolute, join, resolve, sep } from "node:path";
 import { BridgeError } from "./errors.js";
 import { isMissingFileError, readFileHead, readFilePage } from "./file-head.js";
 
@@ -33,6 +33,10 @@ export interface FileRead {
   offset?: number;
   nextOffset?: number | null;
   totalBytes?: number;
+  /** Best-effort host stat for viewer triage; absent when the file is missing. */
+  sizeBytes?: number;
+  /** Extension-based content type for viewer triage; absent when the file is missing. */
+  mime?: string;
 }
 
 export interface FileReadOptions {
@@ -56,6 +60,8 @@ export class FileReadError extends BridgeError {
 
 /** Path cap shared by both the git and walk paths. */
 export const MAX_FILES = 20_000;
+/** Raw-bytes cap for GET /api/file/bytes: streams past this answer 413 instead. */
+export const FILE_BYTES_MAX_BYTES = 20 * 1024 * 1024;
 
 /** Depth cap for the non-repo walk; `1` means the directory's own children. */
 const MAX_WALK_DEPTH = 6;
@@ -83,15 +89,7 @@ export async function listFiles(requested: string, includeHidden = false): Promi
  * whether a file exists. Paged reads keep each filesystem response bounded.
  */
 export function readWorkspaceFile(requested: string, cwds: string[], options?: FileReadOptions): FileRead {
-  if (!requested || requested.length > 4096 || /\p{Cc}/u.test(requested)) {
-    throw new FileReadError("invalid file path", 400);
-  }
-  if (!isAbsolute(requested)) throw new FileReadError("file path must be absolute", 400);
-
-  const lexicalTarget = resolve(requested);
-  if (!cwds.some((cwd) => isWithin(lexicalTarget, cwd))) {
-    throw new FileReadError("file is outside an active agent workspace", 403);
-  }
+  const lexicalTarget = checkWorkspacePath(requested, cwds);
 
   let target: string;
   try {
@@ -103,10 +101,125 @@ export function readWorkspaceFile(requested: string, cwds: string[], options?: F
   if (!cwds.some((cwd) => isWithin(target, cwd))) {
     throw new FileReadError("file resolves outside an active agent workspace", 403);
   }
-  if (!options) return readFileHead(target);
-  return readFilePage(target, options.offset ?? 0, options.limit);
+  const read = !options ? readFileHead(target) : readFilePage(target, options.offset ?? 0, options.limit);
+  return withWorkspaceFileMeta(target, read);
 }
 
+/** Extension-based content types for workspace previews; unknown types stream as bytes. */
+const WORKSPACE_MIME_BY_EXTENSION = new Map<string, string>([
+  [".png", "image/png"],
+  [".jpg", "image/jpeg"],
+  [".jpeg", "image/jpeg"],
+  [".gif", "image/gif"],
+  [".webp", "image/webp"],
+  [".svg", "image/svg+xml"],
+  [".html", "text/html; charset=utf-8"],
+  [".htm", "text/html; charset=utf-8"],
+  [".pdf", "application/pdf"],
+  [".md", "text/markdown; charset=utf-8"],
+  [".markdown", "text/markdown; charset=utf-8"],
+  [".txt", "text/plain; charset=utf-8"],
+  [".log", "text/plain; charset=utf-8"],
+  [".json", "application/json; charset=utf-8"],
+  [".csv", "text/csv; charset=utf-8"],
+]);
+
+/** Extension-based content type for a workspace path; unknown types stream as bytes. */
+export function workspaceMimeForPath(path: string): string {
+  const dot = path.lastIndexOf(".");
+  const slash = path.lastIndexOf("/");
+  const ext = dot > slash ? path.slice(dot).toLowerCase() : "";
+  return WORKSPACE_MIME_BY_EXTENSION.get(ext) ?? "application/octet-stream";
+}
+
+/**
+ * Shared lexical gate for workspace file access: shape and absolute-path
+ * checks plus containment before realpath, so outside paths never reveal
+ * whether a file exists. Returns the lexically-resolved target.
+ */
+function checkWorkspacePath(requested: string, cwds: string[]): string {
+  if (!requested || requested.length > 4096 || /\p{Cc}/u.test(requested)) {
+    throw new FileReadError("invalid file path", 400);
+  }
+  if (!isAbsolute(requested)) throw new FileReadError("file path must be absolute", 400);
+  const lexicalTarget = resolve(requested);
+  if (!cwds.some((cwd) => isWithin(lexicalTarget, cwd))) {
+    throw new FileReadError("file is outside an active agent workspace", 403);
+  }
+  return lexicalTarget;
+}
+
+/** Stat result backing GET /api/file/bytes: the real path, its size, and its download name. */
+export interface WorkspaceFileStat {
+  path: string;
+  sizeBytes: number;
+  mime: string;
+  filename: string;
+}
+
+/**
+ * Stat a regular file inside one of the already-authorized active-agent
+ * workspaces. Same containment as readWorkspaceFile (lexical first, then
+ * realpath, with missing-path ancestors checked so a symlink escape reads
+ * 403 instead of 404). Missing paths and non-files read 404; files past
+ * FILE_BYTES_MAX_BYTES read 413 so the phone can triage before downloading.
+ */
+export function statWorkspaceFile(requested: string, cwds: string[]): WorkspaceFileStat {
+  const lexicalTarget = checkWorkspacePath(requested, cwds);
+  let target: string;
+  try {
+    target = realpathSync(lexicalTarget);
+  } catch (error) {
+    if (!isMissingFileError(error)) throw error;
+    assertMissingWithinWorkspace(lexicalTarget, cwds);
+    throw new FileReadError("no such file", 404);
+  }
+  if (!cwds.some((cwd) => isWithin(target, cwd))) {
+    throw new FileReadError("file resolves outside an active agent workspace", 403);
+  }
+  let sizeBytes: number;
+  try {
+    const info = statSync(target);
+    if (!info.isFile()) throw new FileReadError("not a file", 404);
+    sizeBytes = info.size;
+  } catch (error) {
+    if (error instanceof FileReadError) throw error;
+    if (isMissingFileError(error)) throw new FileReadError("no such file", 404);
+    throw error;
+  }
+  if (sizeBytes > FILE_BYTES_MAX_BYTES) throw new FileReadError("file too large", 413);
+  return { path: target, sizeBytes, mime: workspaceMimeForPath(target), filename: basename(target) };
+}
+
+/** Missing-file twin of the escape check: 403 when an ancestor escapes, else silent. */
+function assertMissingWithinWorkspace(path: string, cwds: string[]): void {
+  let ancestor = path;
+  while (true) {
+    try {
+      const resolved = realpathSync(ancestor);
+      if (!cwds.some((cwd) => isWithin(resolved, cwd))) {
+        throw new FileReadError("file resolves outside an active agent workspace", 403);
+      }
+      return;
+    } catch (error) {
+      if (error instanceof FileReadError) throw error;
+      if (!isMissingFileError(error)) throw error;
+      const parent = dirname(ancestor);
+      if (parent === ancestor) return;
+      ancestor = parent;
+    }
+  }
+}
+
+/** Attach best-effort stat triage to a file read; missing files stay bare. */
+function withWorkspaceFileMeta(target: string, read: FileRead): FileRead {
+  if (!read.exists) return read;
+  try {
+    return { ...read, sizeBytes: statSync(target).size, mime: workspaceMimeForPath(target) };
+  } catch {
+    return read;
+  }
+}
 /** Check resolvable parents before reporting a missing path. */
 function missingWorkspaceFile(path: string, cwds: string[], options?: FileReadOptions): FileRead {
   let ancestor = path;

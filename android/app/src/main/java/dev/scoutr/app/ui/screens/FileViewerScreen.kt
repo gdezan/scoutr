@@ -110,8 +110,8 @@ private fun FileViewerBody(file: String, body: FileReadResponse) {
             detail = "It may have been moved or removed from the workspace.",
         )
         body.binary -> ViewerMessage(
-            title = "Binary file",
-            detail = "Scoutr only previews text files.",
+            title = binaryPreviewTitle(body.mime),
+            detail = binaryPreviewDetail(body.mime, body.sizeBytes),
         )
         else -> {
             val scrollState = rememberScrollState()
@@ -186,6 +186,38 @@ private fun FileTypeBar(file: String) {
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
+}
+
+/** Triage title for a binary file: names the coming preview when the type is known. */
+private fun binaryPreviewTitle(mime: String?): String = when {
+    mime?.startsWith("image/") == true -> "Image preview is coming"
+    mime?.startsWith("text/html") == true -> "Browser handoff is coming"
+    mime == "application/pdf" -> "PDF handoff is coming"
+    else -> "Binary file"
+}
+
+/** Triage detail: what this file is and which slice will open it. */
+private fun binaryPreviewDetail(mime: String?, sizeBytes: Long?): String {
+    val size = sizeBytes?.let { " (${formatViewerBytes(it)})" } ?: ""
+    return when {
+        mime?.startsWith("image/") == true ->
+            "This image$size can't be previewed yet — image viewing is the next slice."
+        mime?.startsWith("text/html") == true ->
+            "This page$size can't be rendered yet — browser handoff is the next slice."
+        mime == "application/pdf" ->
+            "This document$size can't be opened yet — viewer handoff is the next slice."
+        size.isNotEmpty() ->
+            "Scoutr only previews text files (this one is$size)."
+        else -> "Scoutr only previews text files."
+    }
+}
+
+/** Compact byte count for triage lines; locale-independent by construction. */
+private fun formatViewerBytes(bytes: Long): String {
+    if (bytes < 1024) return "$bytes B"
+    val kb = bytes / 1024.0
+    if (kb < 1024) return "${(kb * 10).toInt() / 10.0} KB"
+    return "${(bytes / 104857.6).toInt() / 10.0} MB"
 }
 
 private fun isMarkdownFile(path: String): Boolean {

@@ -686,6 +686,10 @@ data class FileReadResponse(
     val offset: Long = 0,
     val nextOffset: Long? = null,
     val totalBytes: Long? = null,
+    /** Host stat for viewer triage; null on older bridges and missing files. */
+    val sizeBytes: Long? = null,
+    /** Extension-based content type for viewer triage; null when unknown. */
+    val mime: String? = null,
     val error: String? = null,
 )
 

@@ -156,6 +156,13 @@ async function postJson(path: string, body: JsonBody): Promise<{ status: number;
   return { status: response.status, body: await response.json() };
 }
 
+async function getBytes(path: string, range?: string): Promise<{ status: number; bytes: Buffer; contentType: string | null }> {
+  const headers = new Headers({ authorization: `Bearer ${TOKEN}` });
+  if (range !== undefined) headers.set("range", range);
+  const response = await fetch(`http://127.0.0.1:${PORT}${path}`, { headers });
+  return { status: response.status, bytes: Buffer.from(await response.arrayBuffer()), contentType: response.headers.get("content-type") };
+}
+
 describe("scoutr bridge HTTP/WS API (offline)", () => {
   let server: ScoutrServer;
   let feed: ReturnType<typeof fakeFeed>;
@@ -227,6 +234,7 @@ describe("scoutr bridge HTTP/WS API (offline)", () => {
         "commands.http.v1",
         "host-identity.v1",
         "push-profile-generation.v1",
+        "file-bytes.v1",
       ],
     });
     assert.match(health.hostId ?? "", /^host_/);
@@ -251,6 +259,7 @@ describe("scoutr bridge HTTP/WS API (offline)", () => {
         "commands.http.v1",
         "host-identity.v1",
         "push-profile-generation.v1",
+        "file-bytes.v1",
       ],
     });
     assert.equal(health.herdr.connected, false);
@@ -493,6 +502,8 @@ describe("scoutr bridge HTTP/WS API (offline)", () => {
         truncated: false,
         binary: false,
         exists: true,
+        sizeBytes: 8,
+        mime: "text/markdown; charset=utf-8",
       });
 
       const page = await getJson(`/api/file?path=${encodeURIComponent(join(workspace, "notes.md"))}&offset=0&limit=4`);
@@ -503,6 +514,8 @@ describe("scoutr bridge HTTP/WS API (offline)", () => {
         truncated: true,
         binary: false,
         exists: true,
+        sizeBytes: 8,
+        mime: "text/markdown; charset=utf-8",
         offset: 0,
         nextOffset: 4,
         totalBytes: 8,
@@ -520,6 +533,42 @@ describe("scoutr bridge HTTP/WS API (offline)", () => {
       assert.equal(outside.status, 403);
       const relative = await getJson("/api/file?path=notes.md");
       assert.equal(relative.status, 400);
+    } finally {
+      feed.setSnapshot(snapshotWithAgents([]));
+      await rm(workspace, { recursive: true, force: true });
+    }
+  });
+  test("file bytes streams an active workspace file and guards the rest", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "scoutr-file-bytes-route-"));
+    await writeFile(join(workspace, "report.html"), "<html>hi</html>");
+    await writeFile(join(workspace, "shot.png"), Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+    feed.setSnapshot(snapshotWithAgents([{ cwd: workspace, foreground_cwd: workspace }]));
+    try {
+      const html = await getBytes(`/api/file/bytes?path=${encodeURIComponent(join(workspace, "report.html"))}`);
+      assert.equal(html.status, 200);
+      assert.equal(html.bytes.toString("utf8"), "<html>hi</html>");
+      assert.equal(html.contentType, "text/html; charset=utf-8");
+
+      const png = await getBytes(`/api/file/bytes?path=${encodeURIComponent(join(workspace, "shot.png"))}`);
+      assert.equal(png.status, 200);
+      assert.deepEqual([...png.bytes], [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+      assert.equal(png.contentType, "image/png");
+
+      const tail = await getBytes(`/api/file/bytes?path=${encodeURIComponent(join(workspace, "report.html"))}`, "bytes=6-");
+      assert.equal(tail.status, 206);
+      assert.equal(tail.bytes.toString("utf8"), "hi</html>");
+
+      const missing = await getBytes(`/api/file/bytes?path=${encodeURIComponent(join(workspace, "missing.md"))}`);
+      assert.equal(missing.status, 404);
+
+      const outside = await getBytes("/api/file/bytes?path=%2Fetc%2Fpasswd");
+      assert.equal(outside.status, 403);
+
+      const relative = await getBytes("/api/file/bytes?path=notes.md");
+      assert.equal(relative.status, 400);
+
+      const paramless = await getBytes("/api/file/bytes");
+      assert.equal(paramless.status, 400);
     } finally {
       feed.setSnapshot(snapshotWithAgents([]));
       await rm(workspace, { recursive: true, force: true });

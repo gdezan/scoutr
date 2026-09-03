@@ -9,6 +9,7 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.scrollBy
@@ -45,6 +46,7 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.outlined.InsertDriveFile
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
@@ -186,6 +188,9 @@ import dev.scoutr.app.state.FileCandidate
 import dev.scoutr.app.state.activeFileMention
 import dev.scoutr.app.state.completeFileMention
 import dev.scoutr.app.state.matchFileMentions
+import dev.scoutr.app.state.WorkspaceFileRef
+import dev.scoutr.app.state.workspaceRefForPath
+import dev.scoutr.app.state.extractWorkspaceRefs
 import dev.scoutr.app.state.fillSlashCommand
 import dev.scoutr.app.state.matchSlashCommands
 import dev.scoutr.app.state.slashCommandQuery
@@ -203,6 +208,8 @@ fun ChatScreen(
     modifier: Modifier = Modifier,
     onOpenTerminal: (() -> Unit)? = null,
     onOpenFiles: ((String) -> Unit)? = null,
+    /** Absolute workspace path tapped in the transcript; the host owns opening it. */
+    onOpenWorkspaceFile: ((String) -> Unit)? = null,
     onOpenReview: ((String) -> Unit)? = null,
 ) {
     val ui by viewModel.ui.collectAsState()
@@ -369,6 +376,8 @@ fun ChatScreen(
                             viewModel.submitAsk(callId)
                         },
                         onAskDismiss = viewModel::dismissAsk,
+                        cwd = ui.cwd,
+                        onOpenWorkspaceFile = onOpenWorkspaceFile,
                         modifier = Modifier.fillMaxSize(),
                     )
                 }
@@ -1107,6 +1116,10 @@ fun ChatList(
     onAskPage: (callId: String, page: Int) -> Unit = { _, _ -> },
     onAskSubmit: (callId: String) -> Unit = {},
     onAskDismiss: (callId: String) -> Unit = {},
+    /** Session cwd transcript paths resolve against; null hides file chips. */
+    cwd: String? = null,
+    /** Absolute workspace path tapped in the transcript. */
+    onOpenWorkspaceFile: ((String) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val listState = state
@@ -1294,6 +1307,8 @@ fun ChatList(
                         resultHasCall = { entry -> inferredToolCallKey(entry, entries) != null },
                         fileEditFor = { toolId -> fileEdits[toolId] },
                         onToggleTool = { toolId -> toggleTool(toolId) },
+                        cwd = cwd,
+                        onOpenWorkspaceFile = onOpenWorkspaceFile,
                         modifier = Modifier.padding(top = entrySpacing(row.entry)).animateItem(
                             fadeInSpec = ScoutrMotion.itemSpec(reduceMotion),
                             placementSpec = ScoutrMotion.itemPlacementSpec(reduceMotion),
@@ -1480,6 +1495,8 @@ private fun MessageRow(
     resultToolKey: (SessionEntry) -> String,
     resultHasCall: (SessionEntry) -> Boolean,
     fileEditFor: (String) -> ContentBlock?,
+    cwd: String? = null,
+    onOpenWorkspaceFile: ((String) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     when (entry.role) {
@@ -1491,6 +1508,8 @@ private fun MessageRow(
             toolExpanded = toolExpanded,
             fileEditFor = fileEditFor,
             onToggleTool = onToggleTool,
+            cwd = cwd,
+            onOpenWorkspaceFile = onOpenWorkspaceFile,
             modifier = modifier,
         )
         "toolResult" -> ToolResultChip(
@@ -1500,6 +1519,8 @@ private fun MessageRow(
             resultToolKey = resultToolKey,
             hasCall = resultHasCall(entry),
             onToggleTool = onToggleTool,
+            cwd = cwd,
+            onOpenWorkspaceFile = onOpenWorkspaceFile,
             modifier = modifier,
         )
         else -> {}
@@ -1631,6 +1652,8 @@ private fun AssistantBubble(
     toolExpanded: (String) -> Boolean,
     fileEditFor: (String) -> ContentBlock?,
     onToggleTool: (String) -> Unit,
+    cwd: String? = null,
+    onOpenWorkspaceFile: ((String) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     // Prose runs the full column width; only tool calls hang off the spine, and
@@ -1648,6 +1671,12 @@ private fun AssistantBubble(
                         // tap-to-expand gesture without selection fighting it.
                         SelectionContainer(modifier = Modifier.padding(horizontal = 2.dp, vertical = 4.dp)) {
                             AssistantMarkdown(content = text, codeFontSizeSp = markdownCodeFontSizeSp)
+                        }
+                        if (onOpenWorkspaceFile != null && cwd != null) {
+                            val refs = remember(text, cwd) { extractWorkspaceRefs(text, cwd) }
+                            if (refs.isNotEmpty()) {
+                                ReferencedFilesRow(refs = refs, onOpen = onOpenWorkspaceFile)
+                            }
                         }
                     }
                     index++
@@ -1968,6 +1997,8 @@ private fun ToolResultChip(
     resultToolKey: (SessionEntry) -> String,
     hasCall: Boolean,
     onToggleTool: (String) -> Unit,
+    cwd: String? = null,
+    onOpenWorkspaceFile: ((String) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val expanded = toolExpanded(resultToolKey(entry))
@@ -2000,7 +2031,7 @@ private fun ToolResultChip(
                 )
             }
             if (edit != null) {
-                FileEditDiff(edit, toolOutputFontSizeSp)
+                FileEditDiff(edit, toolOutputFontSizeSp, cwd = cwd, onOpenWorkspaceFile = onOpenWorkspaceFile)
             } else if (output.isNotBlank()) {
                 Text(
                     output,
@@ -2034,6 +2065,60 @@ private fun DiffStatBadge(edit: ContentBlock, modifier: Modifier = Modifier) {
 }
 
 /**
+ * Files an assistant message names, as tappable chips under the prose (F1).
+ * A chip strip instead of inline links: prose stays long-press selectable
+ * without tap fighting, and one strip serves plain, code-fenced, and quoted
+ * paths alike. Taps carry the absolute path; navigation owns the viewer route.
+ */
+@Composable
+private fun ReferencedFilesRow(
+    refs: List<WorkspaceFileRef>,
+    onOpen: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier.fillMaxWidth().padding(top = 6.dp).testTag("referenced_files"),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        for (ref in refs) {
+            Surface(
+                onClick = { onOpen(ref.absolutePath) },
+                shape = MaterialTheme.shapes.small,
+                color = MaterialTheme.colorScheme.surfaceContainer,
+                border = BorderStroke(ScoutrBorder.hairline, MaterialTheme.colorScheme.outlineVariant),
+            ) {
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 7.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        Icons.Outlined.InsertDriveFile,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(16.dp),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        ref.name,
+                        style = ScoutrType.monoFact,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Icon(
+                        Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(14.dp),
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
  * The expanded edit: its file, then the agent's own hunks in the same diff
  * colors the review screen uses. Lines scroll horizontally rather than wrap so
  * indentation survives, matching the review diff's no-wrap default.
@@ -2042,6 +2127,8 @@ private fun DiffStatBadge(edit: ContentBlock, modifier: Modifier = Modifier) {
 private fun FileEditDiff(
     edit: ContentBlock,
     fontSizeSp: Float,
+    cwd: String? = null,
+    onOpenWorkspaceFile: ((String) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val path = edit.path.orEmpty()
@@ -2054,6 +2141,17 @@ private fun FileEditDiff(
             maxLines = 1,
             overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
         )
+        if (onOpenWorkspaceFile != null && cwd != null) {
+            val ref = remember(path, cwd) { workspaceRefForPath(path, cwd) }
+            if (ref != null) {
+                TextButton(
+                    onClick = { onOpenWorkspaceFile(ref.absolutePath) },
+                    modifier = Modifier.testTag("file_edit_open"),
+                ) {
+                    Text("Open file")
+                }
+            }
+        }
         Spacer(Modifier.height(6.dp))
         val lines = buildList {
             edit.hunks.forEachIndexed { index, hunk ->

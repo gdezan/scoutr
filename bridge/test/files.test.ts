@@ -4,7 +4,15 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { FileListingError, FileReadError, listFiles, readWorkspaceFile } from "../src/files.js";
+import {
+  FILE_BYTES_MAX_BYTES,
+  FileListingError,
+  FileReadError,
+  listFiles,
+  readWorkspaceFile,
+  statWorkspaceFile,
+  workspaceMimeForPath,
+} from "../src/files.js";
 
 function git(cwd: string, ...args: string[]): void {
   execFileSync("git", ["-C", cwd, ...args], { stdio: "ignore" });
@@ -129,6 +137,8 @@ describe("readWorkspaceFile", () => {
       truncated: false,
       binary: false,
       exists: true,
+      sizeBytes: 25,
+      mime: "text/markdown; charset=utf-8",
     });
     assert.equal(readWorkspaceFile(join(workspace, "missing.md"), [workspace]).exists, false);
   });
@@ -157,6 +167,8 @@ describe("readWorkspaceFile", () => {
       truncated: false,
       binary: true,
       exists: true,
+      sizeBytes: 3,
+      mime: "application/octet-stream",
     });
     const paged = readWorkspaceFile(join(workspace, "binary.dat"), [workspace], { offset: 0, limit: 2 });
     assert.equal(paged.binary, true);
@@ -205,5 +217,95 @@ describe("readWorkspaceFile", () => {
       return true;
     });
     assert.throws(() => readWorkspaceFile(join(workspace, "bad\u0000name"), [workspace]), FileReadError);
+  });
+});
+
+describe("statWorkspaceFile", () => {
+  let workspace: string;
+  let outside: string;
+
+  before(() => {
+    workspace = mkdtempSync(join(tmpdir(), "scoutr-file-stat-"));
+    outside = mkdtempSync(join(tmpdir(), "scoutr-file-stat-outside-"));
+    writeFileSync(join(workspace, "report.html"), "<html></html>");
+    writeFileSync(join(workspace, "shot.png"), Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+    mkdirSync(join(workspace, "sub"));
+    writeFileSync(join(outside, "secret.txt"), "do not expose");
+    symlinkSync(join(outside, "secret.txt"), join(workspace, "escape.txt"));
+  });
+
+  after(() => {
+    rmSync(workspace, { recursive: true, force: true });
+    rmSync(outside, { recursive: true, force: true });
+  });
+
+  it("stats an authorized file with its download name and mime", () => {
+    const stat = statWorkspaceFile(join(workspace, "report.html"), [workspace]);
+    assert.equal(stat.filename, "report.html");
+    assert.equal(stat.mime, "text/html; charset=utf-8");
+    assert.equal(stat.sizeBytes, 13);
+    assert.equal(stat.path, join(workspace, "report.html"));
+  });
+
+  it("rejects invalid and relative paths before touching the filesystem", () => {
+    for (const bad of ["relative.txt", "", join(workspace, "bad\u0000name")]) {
+      assert.throws(() => statWorkspaceFile(bad, [workspace]), (error) => {
+        assert.ok(error instanceof FileReadError);
+        assert.equal(error.status, 400);
+        return true;
+      });
+    }
+  });
+
+  it("rejects lexical and symlink escapes with 403, even for missing paths", () => {
+    assert.throws(() => statWorkspaceFile(join(outside, "secret.txt"), [workspace]), (error) => {
+      assert.ok(error instanceof FileReadError);
+      assert.equal(error.status, 403);
+      return true;
+    });
+    assert.throws(() => statWorkspaceFile(join(workspace, "escape.txt"), [workspace]), (error) => {
+      assert.ok(error instanceof FileReadError);
+      assert.equal(error.status, 403);
+      return true;
+    });
+    assert.throws(() => statWorkspaceFile(join(workspace, "escape.txt", "missing.md"), [workspace]), (error) => {
+      assert.ok(error instanceof FileReadError);
+      assert.equal(error.status, 403);
+      return true;
+    });
+  });
+
+  it("reports missing paths and directories as 404", () => {
+    for (const missing of [join(workspace, "missing.md"), join(workspace, "sub"), workspace]) {
+      assert.throws(() => statWorkspaceFile(missing, [workspace]), (error) => {
+        assert.ok(error instanceof FileReadError);
+        assert.equal(error.status, 404);
+        return true;
+      });
+    }
+  });
+
+  it("reports files past the bytes cap as 413", () => {
+    const large = join(workspace, "large.bin");
+    writeFileSync(large, Buffer.alloc(FILE_BYTES_MAX_BYTES + 1));
+    try {
+      assert.throws(() => statWorkspaceFile(large, [workspace]), (error) => {
+        assert.ok(error instanceof FileReadError);
+        assert.equal(error.status, 413);
+        return true;
+      });
+    } finally {
+      rmSync(large, { force: true });
+    }
+  });
+
+  it("maps viewer extensions and defaults unknown types to bytes", () => {
+    assert.equal(workspaceMimeForPath("/w/shot.png"), "image/png");
+    assert.equal(workspaceMimeForPath("/w/photo.JPG"), "image/jpeg");
+    assert.equal(workspaceMimeForPath("/w/notes.md"), "text/markdown; charset=utf-8");
+    assert.equal(workspaceMimeForPath("/w/report.HTML"), "text/html; charset=utf-8");
+    assert.equal(workspaceMimeForPath("/w/doc.pdf"), "application/pdf");
+    assert.equal(workspaceMimeForPath("/w/no-extension"), "application/octet-stream");
+    assert.equal(workspaceMimeForPath("/w/archive.tar.gz"), "application/octet-stream");
   });
 });

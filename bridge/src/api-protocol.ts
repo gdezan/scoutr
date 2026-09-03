@@ -26,4 +26,7 @@ export const SCOUTR_API_FEATURES = [
   // Device registrations may carry the app-local profile generation, allowing
   // push messages to reject stale notifications after a host is re-paired.
   "push-profile-generation.v1",
+  // Raw workspace bytes for the phone's viewers (F2); triage metadata
+  // (sizeBytes/mime) rides on /api/file without a protocol bump.
+  "file-bytes.v1",
 ] as const;
