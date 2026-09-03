@@ -77,6 +77,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
@@ -168,6 +169,9 @@ import dev.scoutr.app.ui.components.WorkingIndicatorMode
 import dev.scoutr.app.ui.components.workingIndicatorMode
 import dev.scoutr.app.ui.components.PullRefreshIndicator
 import dev.scoutr.app.ui.components.pullRefreshSemantics
+import dev.scoutr.app.ui.components.EvidencePill
+import dev.scoutr.app.ui.components.EvidenceSheet
+import dev.scoutr.app.ui.components.EvidenceSummary
 
 import dev.scoutr.app.ui.motion.ScoutrMotion
 import dev.scoutr.app.ui.motion.HapticEvent
@@ -195,6 +199,42 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonPrimitive
 
+
+internal fun thinkingId(entryId: String, blockIndex: Int) = "$entryId:thinking:$blockIndex"
+
+internal fun evidenceSummaryFor(
+    assistantEntry: SessionEntry,
+    allEntries: List<SessionEntry>,
+): EvidenceSummary {
+    val edits = allEntries
+        .filter { it.role == "toolResult" && it.parentId == assistantEntry.entryId }
+        .mapNotNull { fileEditOf(it) }
+    val bashResults = allEntries.filter {
+        it.role == "toolResult" && it.parentId == assistantEntry.entryId && it.toolName?.equals("bash", ignoreCase = true) == true
+    }
+    val readCount = assistantEntry.content.count { it.type == "toolCall" && it.name?.equals("read", ignoreCase = true) == true }
+    val added = edits.sumOf { it.added }
+    val removed = edits.sumOf { it.removed }
+    val distinctPaths = edits.mapNotNull { it.path?.takeIf { p -> p.isNotBlank() } }.distinct()
+    val fileCount = if (distinctPaths.isNotEmpty()) distinctPaths.size else edits.size
+    // For live mounting, count bash toolCalls as well as results. Use max to avoid double-count when both present.
+    val bashToolCallCount = assistantEntry.content.count { it.type == "toolCall" && it.name?.equals("bash", ignoreCase = true) == true }
+    val effectiveBashCount = maxOf(bashResults.size, bashToolCallCount)
+    val baseCalls = edits.size + effectiveBashCount + (if (readCount > 0) 1 else 0)
+    // Live: pill mounts after first toolCall even before toolResult lands (e.g. pending file edit).
+    val hasAnyToolCall = assistantEntry.content.any { it.type == "toolCall" }
+    val calls = if (hasAnyToolCall && baseCalls == 0) 1 else baseCalls
+    // Keep bash as results list for sheet display
+    return EvidenceSummary(
+        fileCount = fileCount,
+        added = added,
+        removed = removed,
+        edits = edits,
+        bash = bashResults,
+        readCount = readCount,
+        calls = calls
+    )
+}
 
 @Composable
 fun ChatScreen(
@@ -369,6 +409,8 @@ fun ChatScreen(
                             viewModel.submitAsk(callId)
                         },
                         onAskDismiss = viewModel::dismissAsk,
+                        cwd = ui.cwd,
+                        onOpenReview = onOpenReview,
                         modifier = Modifier.fillMaxSize(),
                     )
                 }
@@ -1081,6 +1123,7 @@ internal fun buildChatRows(
 }
 
 @Composable
+@OptIn(ExperimentalMaterial3Api::class)
 fun ChatList(
     entries: List<SessionEntry>,
     state: LazyListState = rememberLazyListState(),
@@ -1107,6 +1150,8 @@ fun ChatList(
     onAskPage: (callId: String, page: Int) -> Unit = { _, _ -> },
     onAskSubmit: (callId: String) -> Unit = {},
     onAskDismiss: (callId: String) -> Unit = {},
+    cwd: String? = null,
+    onOpenReview: ((String) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val listState = state
@@ -1146,6 +1191,61 @@ fun ChatList(
             .mapNotNull { entry -> fileEditOf(entry)?.let { toolResultKey(entry, entries) to it } }
             .toMap()
     }
+
+    // — Per-block thinking (C1): collapsed set seeded from showThinking, survives rotation
+    var collapsedThinkingIds by rememberSaveable { mutableStateOf(setOf<String>()) }
+    var seenThinkingIds by rememberSaveable { mutableStateOf(setOf<String>()) }
+    fun isThinkingCollapsed(id: String): Boolean {
+        return when {
+            id in collapsedThinkingIds -> true
+            id in seenThinkingIds -> false
+            else -> !showThinking
+        }
+    }
+    fun toggleThinking(id: String) {
+        val currentlyCollapsed = when {
+            id in collapsedThinkingIds -> true
+            id in seenThinkingIds -> false
+            else -> !showThinking
+        }
+        if (currentlyCollapsed) {
+            collapsedThinkingIds = collapsedThinkingIds - id
+            seenThinkingIds = seenThinkingIds + id
+        } else {
+            collapsedThinkingIds = collapsedThinkingIds + id
+            seenThinkingIds = seenThinkingIds + id
+        }
+    }
+    // Seed newly arriving thinking blocks from current showThinking (global is seed only)
+    LaunchedEffect(entries, showThinking) {
+        val allThinkingIds = entries.flatMap { entry ->
+            entry.content.mapIndexedNotNull { idx, block ->
+                if (block.type == "thinking" && !block.thinking.isNullOrBlank()) thinkingId(entry.entryId, idx) else null
+            }
+        }.toSet()
+        val newIds = allThinkingIds - seenThinkingIds
+        if (newIds.isNotEmpty()) {
+            seenThinkingIds = seenThinkingIds + newIds
+            if (!showThinking) {
+                collapsedThinkingIds = collapsedThinkingIds + newIds
+            }
+        }
+    }
+
+    // Evidence: per-assistant summary, derived for stat
+    val evidenceByEntry: Map<String, EvidenceSummary> = remember(entries) {
+        val map = mutableMapOf<String, EvidenceSummary>()
+        for (assEntry in entries.filter { it.role == "assistant" }) {
+            val summary = evidenceSummaryFor(assEntry, entries)
+            map[assEntry.entryId] = summary
+        }
+        map
+    }
+
+    // — Evidence sheet state (C1)
+    var selectedEvidence by remember { mutableStateOf<EvidenceSummary?>(null) }
+    var showEvidenceSheet by rememberSaveable { mutableStateOf(false) }
+    val evidenceSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     // One owner of programmatic scroll-to-end (plan 007): a newer request —
     // open-at-bottom, append-follow, or the button — cancels and replaces the
@@ -1294,6 +1394,16 @@ fun ChatList(
                         resultHasCall = { entry -> inferredToolCallKey(entry, entries) != null },
                         fileEditFor = { toolId -> fileEdits[toolId] },
                         onToggleTool = { toolId -> toggleTool(toolId) },
+                        collapsedThinkingIds = collapsedThinkingIds,
+                        isThinkingCollapsed = { id -> isThinkingCollapsed(id) },
+                        onToggleThinking = { id -> toggleThinking(id) },
+                        evidenceSummary = evidenceByEntry[row.entry.entryId],
+                        onOpenEvidence = { summary ->
+                            selectedEvidence = summary
+                            showEvidenceSheet = true
+                        },
+                        cwd = cwd,
+                        onOpenReview = onOpenReview,
                         modifier = Modifier.padding(top = entrySpacing(row.entry)).animateItem(
                             fadeInSpec = ScoutrMotion.itemSpec(reduceMotion),
                             placementSpec = ScoutrMotion.itemPlacementSpec(reduceMotion),
@@ -1385,6 +1495,17 @@ fun ChatList(
                     contentDescription = "Scroll to end",
                 )
             }
+        }
+        // Evidence sheet (C1) — overlay, does not own scroll
+        if (showEvidenceSheet && selectedEvidence != null) {
+            EvidenceSheet(
+                summary = selectedEvidence!!,
+                toolOutputFontSizeSp = toolOutputFontSizeSp,
+                onDismiss = { showEvidenceSheet = false },
+                onOpenReview = onOpenReview,
+                cwd = cwd,
+                sheetState = evidenceSheetState
+            )
         }
     }
 }
@@ -1480,6 +1601,13 @@ private fun MessageRow(
     resultToolKey: (SessionEntry) -> String,
     resultHasCall: (SessionEntry) -> Boolean,
     fileEditFor: (String) -> ContentBlock?,
+    collapsedThinkingIds: Set<String> = emptySet(),
+    isThinkingCollapsed: (String) -> Boolean = { false },
+    onToggleThinking: (String) -> Unit = {},
+    evidenceSummary: EvidenceSummary? = null,
+    onOpenEvidence: (EvidenceSummary) -> Unit = {},
+    cwd: String? = null,
+    onOpenReview: ((String) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     when (entry.role) {
@@ -1491,6 +1619,13 @@ private fun MessageRow(
             toolExpanded = toolExpanded,
             fileEditFor = fileEditFor,
             onToggleTool = onToggleTool,
+            isThinkingCollapsed = isThinkingCollapsed,
+            onToggleThinking = onToggleThinking,
+            evidenceSummary = evidenceSummary,
+            onOpenEvidence = onOpenEvidence,
+            toolOutputFontSizeSp = toolOutputFontSizeSp,
+            cwd = cwd,
+            onOpenReview = onOpenReview,
             modifier = modifier,
         )
         "toolResult" -> ToolResultChip(
@@ -1631,8 +1766,18 @@ private fun AssistantBubble(
     toolExpanded: (String) -> Boolean,
     fileEditFor: (String) -> ContentBlock?,
     onToggleTool: (String) -> Unit,
+    isThinkingCollapsed: (String) -> Boolean = { false },
+    onToggleThinking: (String) -> Unit = {},
+    evidenceSummary: EvidenceSummary? = null,
+    onOpenEvidence: (EvidenceSummary) -> Unit = {},
+    toolOutputFontSizeSp: Float = AppearancePreferencesStore.DEFAULT_TOOL_OUTPUT_FONT_SIZE_SP,
+    cwd: String? = null,
+    onOpenReview: ((String) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
+    // Evidence pill: visible iff calls>0 (Q7), live-updates while working
+    val evidence = evidenceSummary
+    val showPill = evidence != null && evidence.calls > 0
     // Prose runs the full column width; only tool calls hang off the spine, and
     // consecutive calls share one rail so the line is unbroken between them (§7a).
     Column(modifier.fillMaxWidth().testTag("assistant_bubble")) {
@@ -1655,8 +1800,15 @@ private fun AssistantBubble(
 
                 "thinking" -> {
                     val thinking = block.thinking
-                    if (!thinking.isNullOrBlank() && showThinking) {
-                        ThinkingBlock(thinking, Modifier.padding(top = 4.dp))
+                    if (!thinking.isNullOrBlank()) {
+                        val tid = thinkingId(entry.entryId, index)
+                        val collapsed = isThinkingCollapsed(tid)
+                        ThinkingBlock(
+                            text = thinking,
+                            isCollapsed = collapsed,
+                            onToggle = { onToggleThinking(tid) },
+                            modifier = Modifier.padding(top = 4.dp)
+                        )
                     }
                     index++
                 }
@@ -1684,6 +1836,17 @@ private fun AssistantBubble(
 
                 else -> index++
             }
+        }
+        if (showPill) {
+            // Pill sits below prose, calm evidence affordance (C1)
+            Spacer(Modifier.height(8.dp))
+            EvidencePill(
+                fileCount = evidence!!.fileCount,
+                added = evidence.added,
+                removed = evidence.removed,
+                onClick = { onOpenEvidence(evidence) },
+                modifier = Modifier.padding(start = 2.dp)
+            )
         }
     }
 }
@@ -1725,7 +1888,12 @@ private fun TimelineRail(
 }
 
 @Composable
-private fun ThinkingBlock(text: String, modifier: Modifier = Modifier) {
+private fun ThinkingBlock(
+    text: String,
+    isCollapsed: Boolean,
+    onToggle: () -> Unit,
+    modifier: Modifier = Modifier
+) {
     Column(
         modifier
             .fillMaxWidth()
@@ -1733,23 +1901,34 @@ private fun ThinkingBlock(text: String, modifier: Modifier = Modifier) {
                 MaterialTheme.colorScheme.surfaceContainer,
                 RoundedCornerShape(4.dp),
             )
+            .clip(RoundedCornerShape(4.dp))
+            .clickable(onClick = onToggle)
             .padding(horizontal = ScoutrSpace.md, vertical = 10.dp)
             .testTag("thinking_block"),
     ) {
-        Text(
-            "thinking",
-            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium),
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                if (isCollapsed) "thinking \u00b7 expand \u25b8" else "thinking \u00b7 collapse \u25b4",
+                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
         Spacer(Modifier.height(4.dp))
         Text(
             text.trim(),
             style = MaterialTheme.typography.bodyMedium,
             fontStyle = FontStyle.Italic,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = if (isCollapsed) 1 else Int.MAX_VALUE,
+            overflow = TextOverflow.Ellipsis,
         )
     }
 }
+
 
 /** The visible command/argument summary for a tool call block. */
 fun toolCallCommand(block: ContentBlock): String {
@@ -2032,6 +2211,7 @@ private fun DiffStatBadge(edit: ContentBlock, modifier: Modifier = Modifier) {
         modifier = modifier.testTag("diff_stat_badge"),
     )
 }
+
 
 /**
  * The expanded edit: its file, then the agent's own hunks in the same diff

@@ -94,7 +94,9 @@ scale. `WorkingIndicator` remains the only app-owned looping animation.
   Idle collapses to a count row until tapped.
 - **Chat:** assistant rows use a quiet 1px outline spine with readable text; tool
   calls are one-line mono facts with a right-side details icon and expand into
-  4dp-radius inline result tiles. A skill or slash-command invocation is a
+  4dp-radius inline result tiles. Evidence is a 6dp mono chip (`Evidence · N files · +A −R`)
+  that opens the evidence sheet; sheet is 12dp outer with a 4dp diff tile
+  (8dp margin, concentric 12 = 4 + 8). A skill or slash-command invocation is a
   `surfaceContainer` chip above the user bubble: the command in Martian Mono,
   tap to expand the injected body. The leftover prompt stays in the user
   bubble; the harness markup never does. The composer is a 6dp outlined
