@@ -11,8 +11,9 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * One evidence group per assistant run: every command between thinking blocks
- * in the same turn lands in a single pill under the run's last assistant bubble.
+ * One live evidence pool per content segment: thinking and prose blocks split
+ * the turn, each pool renders inside its anchor's bubble (never as a turn
+ * total after the final prose), and a new block freezes the open pool.
  */
 class EvidenceGroupingTest {
 
@@ -43,37 +44,51 @@ class EvidenceGroupingTest {
         content = listOf(ContentBlock(type = "text", text = "hi")),
     )
 
+    private fun commandOf(call: ContentBlock?) =
+        call?.arguments?.get("command").toString().trim('"')
+
     @Test
-    fun multipleCommandsInOneTurnCollapseToOnePill() {
+    fun thinkingBlocksSplitOneTurnIntoPools() {
         val entries = listOf(
             user("u1"),
-            assistant("a1", bashCall("c1", "ls")),
+            assistant("a1", ContentBlock(type = "thinking", thinking = "plan A"), bashCall("c1", "ls")),
             bashResult("r1", "c1", "a.txt"),
-            assistant("a2", bashCall("c2", "git status")),
+            assistant("a2", ContentBlock(type = "thinking", thinking = "plan B"), bashCall("c2", "git status")),
             bashResult("r2", "c2", "clean"),
             assistant("a3", ContentBlock(type = "text", text = "done")),
             user("u2"),
         )
 
-        val byEntry = evidenceByRun(entries)
+        val pools = evidenceSegments(entries)
 
-        // Single group, owned by the run's last assistant bubble.
-        assertEquals(setOf("a3"), byEntry.keys)
-        val summary = byEntry.getValue("a3")
-        assertEquals(2, summary.commands)
-        assertEquals(0, summary.fileCount)
-        assertTrue(summary.hasEvidence)
-        // Each result paired with the command that was run.
-        assertEquals(
-            listOf("ls", "git status"),
-            summary.bashRuns.map { it.call?.arguments?.get("command").toString().trim('"') },
-        )
-        assertNull(byEntry["a1"])
-        assertNull(byEntry["a2"])
+        // One pool per thinking block; nothing parked after the final prose.
+        assertEquals(setOf("a1", "a2"), pools.keys)
+        assertEquals(1, pools.getValue("a1").commands)
+        assertEquals("ls", commandOf(pools.getValue("a1").bashRuns.single().call))
+        assertEquals(1, pools.getValue("a2").commands)
+        assertEquals("git status", commandOf(pools.getValue("a2").bashRuns.single().call))
+        assertNull(pools["a3"])
     }
 
     @Test
-    fun userMessageStartsANewRun() {
+    fun proseBlocksSplitPools() {
+        val entries = listOf(
+            user("u1"),
+            assistant("a1", ContentBlock(type = "text", text = "first"), bashCall("c1", "ls")),
+            bashResult("r1", "c1", "a.txt"),
+            assistant("a2", ContentBlock(type = "text", text = "second"), bashCall("c2", "pwd")),
+            bashResult("r2", "c2", "/repo"),
+        )
+
+        val pools = evidenceSegments(entries)
+
+        assertEquals(setOf("a1", "a2"), pools.keys)
+        assertEquals("ls", commandOf(pools.getValue("a1").bashRuns.single().call))
+        assertEquals("pwd", commandOf(pools.getValue("a2").bashRuns.single().call))
+    }
+
+    @Test
+    fun userMessageClosesThePool() {
         val entries = listOf(
             user("u1"),
             assistant("a1", bashCall("c1", "ls")),
@@ -82,27 +97,31 @@ class EvidenceGroupingTest {
             assistant("a2", ContentBlock(type = "text", text = "ok")),
         )
 
-        val byEntry = evidenceByRun(entries)
+        val pools = evidenceSegments(entries)
 
-        assertEquals(setOf("a1", "a2"), byEntry.keys)
-        assertEquals(1, byEntry.getValue("a1").commands)
-        // Tool-free run yields an empty summary, so no pill renders.
-        assertTrue(!byEntry.getValue("a2").hasEvidence)
+        // Tool-free segment yields no pool, so no pill renders.
+        assertEquals(setOf("a1"), pools.keys)
+        assertEquals(1, pools.getValue("a1").commands)
     }
 
     @Test
-    fun streamingCallWithoutResultCountsAsPendingCommand() {
+    fun lateResultAfterNewBlockJoinsTheNewPool() {
         val entries = listOf(
             user("u1"),
-            assistant("a1", bashCall("c1", "sleep 60")),
+            assistant("a1", bashCall("c1", "ls")),
+            assistant("a2", ContentBlock(type = "thinking", thinking = "next")),
+            bashResult("r1", "c1", "a.txt"),
         )
 
-        val summary = evidenceByRun(entries).getValue("a1")
+        val pools = evidenceSegments(entries)
 
-        assertEquals(1, summary.commands)
-        assertEquals(1, summary.pendingCalls.size)
-        assertTrue(summary.bashRuns.isEmpty())
-        assertTrue(summary.hasEvidence)
+        // The new block froze a1's pool: c1 stays pending there...
+        assertEquals(setOf("a1", "a2"), pools.keys)
+        assertTrue(pools.getValue("a1").bashRuns.isEmpty())
+        assertEquals(1, pools.getValue("a1").pendingCalls.size)
+        // ...and the late result lands in the open pool, unpaired.
+        assertEquals(1, pools.getValue("a2").bashRuns.size)
+        assertNull(pools.getValue("a2").bashRuns.single().call)
     }
 
     @Test
@@ -119,7 +138,7 @@ class EvidenceGroupingTest {
             bashResult("r2", "c1", "out-2"),
         )
 
-        val runs = evidenceByRun(entries).getValue("a1").bashRuns
+        val runs = evidenceSegments(entries).getValue("a1").bashRuns
 
         // r2 names c1 explicitly, so the ID-less r1 falls back to c2.
         assertEquals("c2", runs[0].call?.id)
@@ -139,5 +158,46 @@ class EvidenceGroupingTest {
         )
 
         assertEquals("head\ntail", bashOutputText(entry))
+    }
+
+    @Test
+    fun resultsBeforeFirstAssistantEntryJoinItsPool() {
+        val entries = listOf(
+            user("u1"),
+            SessionEntry(
+                entryId = "r0",
+                role = "toolResult",
+                content = listOf(ContentBlock(type = "text", text = "early")),
+                toolName = "bash",
+            ),
+            assistant("a1", bashCall("c1", "ls")),
+            bashResult("r1", "c1", "a.txt"),
+        )
+
+        val pools = evidenceSegments(entries)
+
+        // The orphan waits for a1's pool; every key stays an assistant anchor.
+        assertEquals(setOf("a1"), pools.keys)
+        val runs = pools.getValue("a1").bashRuns
+        assertEquals(2, runs.size)
+        assertNull(runs[0].call)
+        assertEquals("c1", runs[1].call?.id)
+    }
+
+    @Test
+    fun orphansCutOffByUserBoundaryAreDropped() {
+        val entries = listOf(
+            user("u1"),
+            SessionEntry(
+                entryId = "r0",
+                role = "toolResult",
+                content = listOf(ContentBlock(type = "text", text = "stray")),
+                toolName = "bash",
+            ),
+            user("u2"),
+            assistant("a1", ContentBlock(type = "text", text = "ok")),
+        )
+
+        assertTrue(evidenceSegments(entries).isEmpty())
     }
 }

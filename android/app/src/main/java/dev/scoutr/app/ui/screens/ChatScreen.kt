@@ -209,35 +209,70 @@ import kotlinx.serialization.json.JsonPrimitive
 internal fun thinkingId(entryId: String, blockIndex: Int) = "$entryId:thinking:$blockIndex"
 
 /**
- * One evidence group per assistant run: the maximal run of assistant +
- * toolResult entries between user entries. Every command between thinking
- * blocks in the same turn lands in one pill, rendered under the run's last
- * assistant bubble. Returns pill-owner entryId to summary.
+ * Live pools of tool activity, one per content segment: a segment opens at
+ * every assistant entry carrying thinking or prose, collects that entry's own
+ * tool calls plus the bare toolCall entries and toolResults that follow, and
+ * freezes the moment the next thinking/prose block (or a user entry) appears.
+ * The pill renders inside its anchor's bubble, so it sits where the work ran
+ * — never as a turn total parked after the final prose. Late results that
+ * arrive after a new block join the new pool positionally. Returns anchor
+ * entryId to summary, omitting pools with nothing to show. Results arriving
+ * before the run's first assistant entry wait for its pool; orphans cut off
+ * by a user boundary are dropped — no assistant bubble owns them.
  */
-internal fun evidenceByRun(allEntries: List<SessionEntry>): Map<String, EvidenceSummary> {
+internal fun evidenceSegments(allEntries: List<SessionEntry>): Map<String, EvidenceSummary> {
     val out = mutableMapOf<String, EvidenceSummary>()
+    var anchor: String? = null
     var assistants = mutableListOf<SessionEntry>()
     var toolResults = mutableListOf<SessionEntry>()
-    fun closeRun() {
-        val lastAssistant = assistants.lastOrNull()
-        if (lastAssistant != null) {
-            out[lastAssistant.entryId] = summarizeRun(assistants, toolResults)
+    // Results that arrive before the run's first assistant entry; drained into
+    // its pool so every key stays an assistant anchor bubble.
+    var orphanResults = mutableListOf<SessionEntry>()
+    fun hasContent(entry: SessionEntry) = entry.content.any { block ->
+        (block.type == "thinking" && !block.thinking.isNullOrBlank()) ||
+            (block.type == "text" && !block.text.isNullOrBlank())
+    }
+    fun closePool() {
+        val anchorId = anchor
+        if (anchorId != null && (assistants.isNotEmpty() || toolResults.isNotEmpty())) {
+            val summary = summarizeSegment(assistants, toolResults)
+            if (summary.hasEvidence) out[anchorId] = summary
         }
         assistants = mutableListOf()
         toolResults = mutableListOf()
+        anchor = null
     }
     for (entry in allEntries) {
         when (entry.role) {
-            "assistant" -> assistants.add(entry)
-            "toolResult" -> toolResults.add(entry)
-            else -> closeRun()
+            "assistant" -> {
+                if (hasContent(entry)) {
+                    // A new thinking/prose block freezes the open pool.
+                    closePool()
+                    anchor = entry.entryId
+                } else if (anchor == null) {
+                    anchor = entry.entryId
+                }
+                if (orphanResults.isNotEmpty()) {
+                    toolResults.addAll(orphanResults)
+                    orphanResults = mutableListOf()
+                }
+                assistants.add(entry)
+            }
+            "toolResult" -> {
+                if (anchor == null) orphanResults.add(entry) else toolResults.add(entry)
+            }
+            else -> {
+                closePool()
+                // No assistant bubble owns pre-boundary orphans; drop them.
+                orphanResults = mutableListOf()
+            }
         }
     }
-    closeRun()
+    closePool()
     return out
 }
 
-private fun summarizeRun(
+private fun summarizeSegment(
     assistants: List<SessionEntry>,
     toolResults: List<SessionEntry>,
 ): EvidenceSummary {
@@ -1271,9 +1306,9 @@ fun ChatList(
         }
     }
 
-    // Evidence: one group per assistant run, rendered under the run's last bubble.
+    // Evidence: one live pool per content segment, rendered inside its anchor's bubble.
     val evidenceByEntry: Map<String, EvidenceSummary> = remember(entries) {
-        evidenceByRun(entries)
+        evidenceSegments(entries)
     }
 
     // — Evidence sheet state (C1)
@@ -1856,7 +1891,7 @@ private fun AssistantBubble(
             }
         }
         if (showPill) {
-            // Pill sits below prose, calm evidence affordance (C1)
+            // Pill sits below the anchor's content, calm evidence affordance (C1)
             Spacer(Modifier.height(8.dp))
             EvidencePill(
                 fileCount = evidence!!.fileCount,

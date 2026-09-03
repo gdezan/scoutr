@@ -18,9 +18,9 @@ import org.junit.Rule
 import org.junit.Test
 
 /**
- * Evidence grouping acceptance: one turn collapses to one pill that reads
- * `N commands` (no `Evidence` prefix, zero parts hidden), and tapping a
- * command row expands to the full command plus its output.
+ * Evidence pool acceptance: each thinking/prose block anchors its own live
+ * pool where the work ran (never a turn total after the final prose), and
+ * tapping a command row expands to the full command plus its output.
  */
 class EvidencePillTest {
 
@@ -74,16 +74,15 @@ class EvidencePillTest {
     )
 
     @Test
-    fun oneTurnCollapsesToOneCommandsPill() {
+    fun eachContentSegmentAnchorsItsOwnPool() {
         composeRule.setContent {
             ScoutrTheme { ChatList(entries = turnEntries()) }
         }
 
-        // One pill for the whole turn, not one per command.
-        composeRule.onAllNodesWithTag("evidence_pill").assertCountEquals(1)
-        composeRule.onNodeWithText("2 commands", substring = true).assertIsDisplayed()
-        composeRule.onAllNodesWithText("Evidence ·", substring = true).assertCountEquals(0)
-        composeRule.onAllNodesWithText("0 files", substring = true).assertCountEquals(0)
+        // One pool per thinking block — not one turn total after "done".
+        composeRule.onAllNodesWithTag("evidence_pill").assertCountEquals(2)
+        composeRule.onAllNodesWithText("1 command", substring = true).assertCountEquals(2)
+        composeRule.onAllNodesWithText("2 commands", substring = true).assertCountEquals(0)
     }
 
     @Test
@@ -92,7 +91,7 @@ class EvidencePillTest {
             ScoutrTheme { ChatList(entries = turnEntries()) }
         }
 
-        composeRule.onNodeWithTag("evidence_pill").performClick()
+        composeRule.onAllNodesWithTag("evidence_pill")[0].performClick()
         composeRule.onNodeWithTag("evidence_sheet").assertIsDisplayed()
 
         // Collapsed rows show the command that was run.
@@ -103,7 +102,7 @@ class EvidencePillTest {
         composeRule.onNodeWithTag("command_detail").assertIsDisplayed()
         composeRule.onNodeWithText("total 0", substring = true).assertIsDisplayed()
 
-        // Pill and sheet header agree on the count.
-        composeRule.onAllNodesWithText("2 commands", substring = true).assertCountEquals(2)
+        // Both pills plus the sheet header agree on the count.
+        composeRule.onAllNodesWithText("1 command", substring = true).assertCountEquals(3)
     }
 }

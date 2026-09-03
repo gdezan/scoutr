@@ -58,11 +58,11 @@ import dev.scoutr.app.ui.theme.ScoutrType
 import kotlinx.serialization.json.JsonPrimitive
 
 /**
- * Shared evidence aggregation. Pill is the one affordance per assistant run;
+ * Shared evidence aggregation. Pill is the one affordance per content segment;
  * sheet owns the file + command + collapsed reads detail.
  *
- * One assistant run = the maximal run of assistant + toolResult entries between
- * user entries, so every command between thinking blocks lands in the same block.
+ * One segment opens at every thinking/prose block and freezes at the next,
+ * so each pool sits where its work ran instead of piling after the final prose.
  *
  * Invariants:
  * - Pill visible iff fileCount>0 || commands>0; each zero part hidden, so a
@@ -137,7 +137,7 @@ internal fun commandsLabel(commands: Int): String =
     if (commands == 1) "1 command" else "$commands commands"
 
 /**
- * One pill per assistant run. Label hides zero parts, no `Evidence` prefix:
+ * One pill per content segment, inside its anchor's bubble. Label hides zero parts, no `Evidence` prefix:
  * `2 files · 3 commands · +A −R`, `2 files · +A −R`, or `3 commands`.
  * where +A in [DiffPalette.Added] and −R in [DiffPalette.Deleted],
  * rest in onSurfaceVariant. 6dp rsm, surfaceContainer, 1dp hairline
