@@ -1,10 +1,17 @@
 package dev.scoutr.app.ui.screens
 
+import dev.scoutr.app.state.ImageFileCache
+import dev.scoutr.app.state.Loadable
+import dev.scoutr.app.state.formatViewerBytes
 import dev.scoutr.app.ui.theme.ScoutrBorder
 import dev.scoutr.app.ui.theme.ScoutrSpace
-import androidx.activity.compose.BackHandler
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.rememberTransformableState
+import androidx.compose.foundation.gestures.transformable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -21,12 +28,16 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.WarningAmber
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -34,46 +45,137 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.text.selection.SelectionContainer
+import coil3.ImageLoader
+import coil3.compose.AsyncImage
+import coil3.gif.AnimatedImageDecoder
+import coil3.gif.GifDecoder
 import dev.scoutr.app.data.FileReadResponse
-import dev.scoutr.app.state.FileViewerViewModel
-import dev.scoutr.app.state.Loadable
+import dev.scoutr.app.state.FileViewerViewModel as ViewerModel
 import dev.scoutr.app.ui.components.AssistantMarkdown
 import dev.scoutr.app.ui.theme.ScoutrMono
 import dev.scoutr.app.ui.theme.ScoutrType
+import java.io.File
+import kotlinx.coroutines.launch
 
-/** Full-screen renderer for markdown, highlighted source, and plain workspace text. */
+/** Full-screen renderer for images, markdown, highlighted source, and plain workspace text. */
 @Composable
 fun FileViewerScreen(
-    viewModel: FileViewerViewModel,
+    viewModel: ViewerModel,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val ui by viewModel.ui.collectAsState()
-    BackHandler(onBack = onBack)
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val snackbar = remember { SnackbarHostState() }
+    val triage = (ui.content as? Loadable.Ready)?.value
+    val readyImage = (ui.imageFile as? Loadable.Ready)?.value
 
-    Column(modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
-        FileViewerHeader(ui.file, ui.cwd, viewModel::refresh, onBack)
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-        when (val content = ui.content) {
-            Loadable.Idle, Loadable.Loading -> ViewerMessage(
-                title = "Reading file",
-                detail = "Fetching the workspace content…",
-            )
-            is Loadable.Failed -> ViewerFailure(content.reason, viewModel::refresh)
-            is Loadable.Ready -> FileViewerBody(ui.file, content.value)
+    fun notice(message: String) {
+        scope.launch { snackbar.showSnackbar(message) }
+    }
+
+    fun openImage(image: File, mime: String?) {
+        val opened = try {
+            ImageShare.openWith(context, viewModel.imageCacheDir, image, mime)
+        } catch (rejected: IllegalArgumentException) {
+            notice("Could not open this image")
+            return
         }
+        if (!opened) notice("No app can open this image")
+    }
+
+    var pendingSave by remember { mutableStateOf<File?>(null) }
+    val createDocument =
+        rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("image/*")) { uri ->
+            val image = pendingSave ?: return@rememberLauncherForActivityResult
+            pendingSave = null
+            if (uri == null) return@rememberLauncherForActivityResult
+            scope.launch {
+                try {
+                    ImageShare.saveToUri(context, image, uri)
+                    notice("Saved to Downloads (${ui.file.substringAfterLast('/')})")
+                } catch (error: Exception) {
+                    notice("Save failed: ${error.message ?: "unknown error"}")
+                }
+            }
+        }
+
+    fun saveImage(image: File, mime: String?) {
+        val filename = ui.file.substringAfterLast('/')
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            scope.launch {
+                try {
+                    val stored = ImageShare.saveToDownloads(context, image, filename, mime)
+                    notice("Saved to Downloads ($stored)")
+                } catch (error: Exception) {
+                    notice("Save failed: ${error.message ?: "unknown error"}")
+                }
+            }
+        } else {
+            pendingSave = image
+            createDocument.launch(filename)
+        }
+    }
+
+    Box(modifier.fillMaxSize()) {
+        Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+            FileViewerHeader(
+                file = ui.file,
+                cwd = ui.cwd,
+                onRefresh = viewModel::refresh,
+                onBack = onBack,
+                onOpenWith = readyImage?.let { image -> { openImage(image, triage?.mime) } },
+                onSave = readyImage?.let { image -> { saveImage(image, triage?.mime) } },
+            )
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            when (val content = ui.content) {
+                Loadable.Idle, Loadable.Loading -> ViewerMessage(
+                    title = "Reading file",
+                    detail = "Fetching the workspace content…",
+                )
+                is Loadable.Failed -> ViewerFailure(content.reason, viewModel::refresh)
+                is Loadable.Ready -> FileViewerBody(
+                    file = ui.file,
+                    body = content.value,
+                    imageState = ui.imageFile,
+                    onRetry = viewModel::refresh,
+                )
+            }
+        }
+        SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter))
     }
 }
 
 @Composable
-private fun FileViewerHeader(file: String, cwd: String, onRefresh: () -> Unit, onBack: () -> Unit) {
+private fun FileViewerHeader(
+    file: String,
+    cwd: String,
+    onRefresh: () -> Unit,
+    onBack: () -> Unit,
+    onOpenWith: (() -> Unit)? = null,
+    onSave: (() -> Unit)? = null,
+) {
     Row(
         Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(horizontal = ScoutrSpace.sm, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -96,6 +198,16 @@ private fun FileViewerHeader(file: String, cwd: String, onRefresh: () -> Unit, o
                 overflow = TextOverflow.Ellipsis,
             )
         }
+        if (onOpenWith != null) {
+            IconButton(onClick = onOpenWith, modifier = Modifier.testTag("file_viewer_open_with")) {
+                Icon(Icons.Default.OpenInNew, contentDescription = "Open with")
+            }
+        }
+        if (onSave != null) {
+            IconButton(onClick = onSave, modifier = Modifier.testTag("file_viewer_save")) {
+                Icon(Icons.Default.Download, contentDescription = "Save")
+            }
+        }
         IconButton(onClick = onRefresh, modifier = Modifier.testTag("file_viewer_refresh")) {
             Icon(Icons.Default.Refresh, contentDescription = "Refresh")
         }
@@ -103,13 +215,22 @@ private fun FileViewerHeader(file: String, cwd: String, onRefresh: () -> Unit, o
 }
 
 @Composable
-private fun FileViewerBody(file: String, body: FileReadResponse) {
+private fun FileViewerBody(
+    file: String,
+    body: FileReadResponse,
+    imageState: Loadable<File>,
+    onRetry: () -> Unit,
+) {
     when {
         !body.exists -> ViewerMessage(
             title = "File is unavailable",
             detail = "It may have been moved or removed from the workspace.",
         )
-        body.binary -> ViewerMessage(
+        ImageFileCache.isImagePreviewable(body.binary, body.mime) ->
+            ImageViewer(imageState = imageState, onRetry = onRetry)
+        // SVG arrives as text (it is valid UTF-8) but stays in binary triage:
+        // without an SVG renderer the source view would dump image markup.
+        body.binary || body.mime == "image/svg+xml" -> ViewerMessage(
             title = binaryPreviewTitle(body.mime),
             detail = binaryPreviewDetail(body.mime, body.sizeBytes),
         )
@@ -160,6 +281,86 @@ private fun FileViewerBody(file: String, body: FileReadResponse) {
     }
 }
 
+/** Zoomable/pannable image surface for a downloaded workspace image. */
+@Composable
+private fun ImageViewer(imageState: Loadable<File>, onRetry: () -> Unit) {
+    when (imageState) {
+        Loadable.Idle, Loadable.Loading -> ViewerMessage(
+            title = "Loading image…",
+            detail = "Fetching the full image…",
+        )
+        is Loadable.Failed -> Box(
+            Modifier.fillMaxSize().padding(ScoutrSpace.xl),
+            contentAlignment = Alignment.Center,
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("Could not load image", style = MaterialTheme.typography.titleMedium)
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    imageState.reason,
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                TextButton(onClick = onRetry) { Text("Retry") }
+            }
+        }
+        is Loadable.Ready -> ZoomableImage(file = imageState.value)
+    }
+}
+
+@Composable
+private fun ZoomableImage(file: File) {
+    val context = LocalContext.current
+    val imageLoader = remember {
+        ImageLoader.Builder(context).components {
+            add(GifDecoder.Factory())
+            if (Build.VERSION.SDK_INT >= 28) add(AnimatedImageDecoder.Factory())
+        }.build()
+    }
+    var scale by remember(file) { mutableFloatStateOf(1f) }
+    var offset by remember(file) { mutableStateOf(Offset.Zero) }
+    var viewport by remember(file) { mutableStateOf(IntSize.Zero) }
+    val transformable = rememberTransformableState { zoomChange, panChange, _ ->
+        scale = (scale * zoomChange).coerceIn(1f, 8f)
+        offset = if (scale <= 1f) Offset.Zero else offset + panChange
+    }
+    Box(
+        Modifier.fillMaxSize()
+            .onSizeChanged { size ->
+                // A viewport change here means rotation: re-fit instead of keeping a stale zoom.
+                if (viewport != IntSize.Zero && size != viewport) {
+                    scale = 1f
+                    offset = Offset.Zero
+                }
+                viewport = size
+            }
+            .transformable(transformable)
+            .pointerInput(file) {
+                detectTapGestures(
+                    onDoubleTap = {
+                        scale = if (scale > 1f) 1f else 2f
+                        offset = Offset.Zero
+                    },
+                )
+            }
+            .testTag("file_viewer_image"),
+        contentAlignment = Alignment.Center,
+    ) {
+        AsyncImage(
+            model = file,
+            imageLoader = imageLoader,
+            contentDescription = file.name,
+            contentScale = ContentScale.Fit,
+            modifier = Modifier.fillMaxSize().graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+                translationX = offset.x
+                translationY = offset.y
+            },
+        )
+    }
+}
+
 @Composable
 private fun FileTypeBar(file: String) {
     val kind = when {
@@ -190,7 +391,6 @@ private fun FileTypeBar(file: String) {
 
 /** Triage title for a binary file: names the coming preview when the type is known. */
 private fun binaryPreviewTitle(mime: String?): String = when {
-    mime?.startsWith("image/") == true -> "Image preview is coming"
     mime?.startsWith("text/html") == true -> "Browser handoff is coming"
     mime == "application/pdf" -> "PDF handoff is coming"
     else -> "Binary file"
@@ -200,8 +400,6 @@ private fun binaryPreviewTitle(mime: String?): String = when {
 private fun binaryPreviewDetail(mime: String?, sizeBytes: Long?): String {
     val size = sizeBytes?.let { " (${formatViewerBytes(it)})" } ?: ""
     return when {
-        mime?.startsWith("image/") == true ->
-            "This image$size can't be previewed yet — image viewing is the next slice."
         mime?.startsWith("text/html") == true ->
             "This page$size can't be rendered yet — browser handoff is the next slice."
         mime == "application/pdf" ->
@@ -210,14 +408,6 @@ private fun binaryPreviewDetail(mime: String?, sizeBytes: Long?): String {
             "Scoutr only previews text files (this one is$size)."
         else -> "Scoutr only previews text files."
     }
-}
-
-/** Compact byte count for triage lines; locale-independent by construction. */
-private fun formatViewerBytes(bytes: Long): String {
-    if (bytes < 1024) return "$bytes B"
-    val kb = bytes / 1024.0
-    if (kb < 1024) return "${(kb * 10).toInt() / 10.0} KB"
-    return "${(bytes / 104857.6).toInt() / 10.0} MB"
 }
 
 private fun isMarkdownFile(path: String): Boolean {

@@ -90,6 +90,8 @@ class AppContainer(application: Application) {
     )
     val sessionCatalogStore = SharedPreferencesSessionCatalogStore(appContext)
     val sessionSnapshots = SessionSnapshotStore(appContext.filesDir)
+    /** Auto-purgeable home for workspace images the file viewer downloads (C3). */
+    val viewerImageCacheDir: File get() = File(appContext.cacheDir, "images")
     val terminalPreferences = TerminalPreferencesStore(appContext, hostRegistry::writeIfRegistered)
     val performanceCounters = PerformanceCounters()
     val muteStore = MuteStore(appContext)

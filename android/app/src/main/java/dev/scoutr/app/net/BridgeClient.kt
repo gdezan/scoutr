@@ -511,51 +511,98 @@ class BridgeClient private constructor(
         onProgress: (Long, Long) -> Unit,
     ): Long =
         withBinding { binding ->
-            withContext(Dispatchers.IO) {
-                val ranged = resumeFrom > 0
-                val builder = request(binding, "/api/update/apk").newBuilder()
-                if (ranged) builder.header("Range", "bytes=$resumeFrom-")
-                val call = okHttp.newCall(builder.build())
-                val cancellation = currentCoroutineContext()[kotlinx.coroutines.Job]
-                    ?.invokeOnCompletion { call.cancel() }
-                try {
-                    val response = call.execute()
-                    response.use {
-                        val body = it.body ?: throw BridgeException(it.code, "empty APK response")
-                        if (!it.isSuccessful) {
-                            throw BridgeException(it.code, bridgeReason(it, body.string()))
-                        }
-                        // A 200 answering a Range request means the bridge is
-                        // older than range support: it sent the whole APK, so
-                        // the staged prefix must go rather than be appended to.
-                        val resumed = ranged && it.code == HTTP_PARTIAL_CONTENT
-                        val base = if (resumed) resumeFrom else 0L
-                        val total = body.contentLength().let { length ->
-                            if (length > 0) base + length else 0L
-                        }
-                        var written = 0L
-                        body.byteStream().use { input ->
-                            FileOutputStream(destination, resumed).use { output ->
-                                val buffer = ByteArray(DOWNLOAD_BUFFER_BYTES)
-                                while (true) {
-                                    ensureActive()
-                                    val read = input.read(buffer)
-                                    if (read == -1) break
-                                    output.write(buffer, 0, read)
-                                    written += read
-                                    onProgress(base + written, total)
-                                }
+            val builder = request(binding, "/api/update/apk").newBuilder()
+            if (resumeFrom > 0) builder.header("Range", "bytes=$resumeFrom-")
+            streamToFile(
+                request = builder.build(),
+                destination = destination,
+                resumeFrom = resumeFrom,
+                onProgress = onProgress,
+                emptyBody = { code -> "empty APK response (bridge $code)" },
+                truncated = { staged, total, code -> "APK download truncated at $staged of $total bytes (bridge $code)" },
+            )
+        }
+
+    /**
+     * Streams one workspace file's raw bytes to disk. Shares the resume/
+     * restart/truncation contract with [downloadApk]; `?path=` is encoded
+     * through [request]'s query map, never string-concatenated.
+     */
+    override suspend fun downloadWorkspaceFile(
+        destination: File,
+        path: String,
+        resumeFrom: Long,
+        onProgress: (Long, Long) -> Unit,
+    ): Long =
+        withBinding { binding ->
+            val builder = request(binding, "/api/file/bytes", mapOf("path" to path)).newBuilder()
+            if (resumeFrom > 0) builder.header("Range", "bytes=$resumeFrom-")
+            streamToFile(
+                request = builder.build(),
+                destination = destination,
+                resumeFrom = resumeFrom,
+                onProgress = onProgress,
+                emptyBody = { code -> "empty file response (bridge $code)" },
+                truncated = { staged, total, code -> "file download truncated at $staged of $total bytes (bridge $code)" },
+            )
+        }
+
+    /**
+     * Executes one authenticated streaming download to disk on the IO
+     * dispatcher. `206` appends the tail to the staged prefix; a `200`
+     * answering a Range restarts from zero (truncate). Cancellation cancels
+     * the OkHttp call; a short body fails instead of staging a partial file.
+     */
+    private suspend fun streamToFile(
+        request: Request,
+        destination: File,
+        resumeFrom: Long,
+        onProgress: (Long, Long) -> Unit,
+        emptyBody: (code: Int) -> String,
+        truncated: (staged: Long, total: Long, code: Int) -> String,
+    ): Long =
+        withContext(Dispatchers.IO) {
+            val ranged = resumeFrom > 0
+            val call = okHttp.newCall(request)
+            val cancellation = currentCoroutineContext()[kotlinx.coroutines.Job]
+                ?.invokeOnCompletion { call.cancel() }
+            try {
+                val response = call.execute()
+                response.use {
+                    val body = it.body ?: throw BridgeException(it.code, emptyBody(it.code))
+                    if (!it.isSuccessful) {
+                        throw BridgeException(it.code, bridgeReason(it, body.string()))
+                    }
+                    // A 200 answering a Range request means the bridge is
+                    // older than range support: it sent the whole body, so
+                    // the staged prefix must go rather than be appended to.
+                    val resumed = ranged && it.code == HTTP_PARTIAL_CONTENT
+                    val base = if (resumed) resumeFrom else 0L
+                    val total = body.contentLength().let { length ->
+                        if (length > 0) base + length else 0L
+                    }
+                    var written = 0L
+                    body.byteStream().use { input ->
+                        FileOutputStream(destination, resumed).use { output ->
+                            val buffer = ByteArray(DOWNLOAD_BUFFER_BYTES)
+                            while (true) {
+                                ensureActive()
+                                val read = input.read(buffer)
+                                if (read == -1) break
+                                output.write(buffer, 0, read)
+                                written += read
+                                onProgress(base + written, total)
                             }
                         }
-                        val staged = base + written
-                        if (total > 0 && staged != total) {
-                            throw BridgeException(it.code, "APK download truncated at $staged of $total bytes")
-                        }
-                        staged
                     }
-                } finally {
-                    cancellation?.dispose()
+                    val staged = base + written
+                    if (total > 0 && staged != total) {
+                        throw BridgeException(it.code, truncated(staged, total, it.code))
+                    }
+                    staged
                 }
+            } finally {
+                cancellation?.dispose()
             }
         }
 

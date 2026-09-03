@@ -92,6 +92,9 @@ class FakeScoutrApi : ScoutrApi {
     /** Bytes the fake writes when [downloadApk] is called. */
     var apkBytes: ByteArray = ByteArray(0)
     var downloadApkFailure: Exception? = null
+    /** Bytes the fake writes when [downloadWorkspaceFile] is called. */
+    var workspaceFileBytes: ByteArray = ByteArray(0)
+    var downloadWorkspaceFileFailure: Exception? = null
     var terminalHierarchyResult: Result<TerminalHierarchyResponse> = Result.success(TerminalHierarchyResponse(ok = true))
 
     var commandResult: Result<CommandResponse> = Result.success(CommandResponse(ok = true))
@@ -301,6 +304,29 @@ class FakeScoutrApi : ScoutrApi {
             destination.appendBytes(apkBytes.copyOfRange(resumeFrom.toInt(), apkBytes.size))
         } else {
             destination.writeBytes(apkBytes)
+        }
+        onProgress(total, total)
+        return total
+    }
+
+    /**
+     * Mirrors [downloadApk]'s resume contract for workspace bytes: `resumeFrom`
+     * bytes are assumed already staged, so only the tail is appended.
+     */
+    override suspend fun downloadWorkspaceFile(
+        destination: File,
+        path: String,
+        resumeFrom: Long,
+        onProgress: (Long, Long) -> Unit,
+    ): Long {
+        calls += ApiCall("downloadWorkspaceFile", mapOf("destination" to destination.path, "path" to path, "resumeFrom" to resumeFrom))
+        downloadWorkspaceFileFailure?.let { throw it }
+        destination.parentFile?.mkdirs()
+        val total = workspaceFileBytes.size.toLong()
+        if (resumeFrom in 1..total) {
+            destination.appendBytes(workspaceFileBytes.copyOfRange(resumeFrom.toInt(), workspaceFileBytes.size))
+        } else {
+            destination.writeBytes(workspaceFileBytes)
         }
         onProgress(total, total)
         return total

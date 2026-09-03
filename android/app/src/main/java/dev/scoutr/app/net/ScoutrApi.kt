@@ -149,6 +149,20 @@ interface ScoutrApi {
         resumeFrom: Long = 0,
         onProgress: (Long, Long) -> Unit = { _, _ -> },
     ): Long
+
+    /**
+     * Streams one workspace file's raw bytes into [destination] via
+     * `GET /api/file/bytes?path=`. Mirrors [downloadApk]'s resume/restart/
+     * truncation rules: [resumeFrom] bytes are assumed already staged, `206`
+     * appends the tail, and a `200` answering a Range restarts from zero.
+     * Returns the number of bytes now in the file.
+     */
+    suspend fun downloadWorkspaceFile(
+        destination: File,
+        path: String,
+        resumeFrom: Long = 0,
+        onProgress: (Long, Long) -> Unit = { _, _ -> },
+    ): Long
 }
 
 /** One question's answer inside a batched ask. */

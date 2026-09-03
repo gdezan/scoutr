@@ -83,7 +83,9 @@ internal fun NavGraphBuilder.fileDestinations(
             return@composable
         }
         val viewerViewModel: FileViewerViewModel = viewModel(
-            factory = viewModelFactory<FileViewerViewModel> { FileViewerViewModel(api, cwd, file) },
+            factory = viewModelFactory<FileViewerViewModel> {
+                FileViewerViewModel(api, cwd, file, container.viewerImageCacheDir, profile.encode())
+            },
             key = "file_viewer_${profile.encode()}_${connectionRevision}_$cwd/$file",
         )
         FileViewerScreen(

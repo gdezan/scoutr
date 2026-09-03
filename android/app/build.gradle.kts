@@ -119,6 +119,8 @@ dependencies {
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.zxing.android.embedded)
     implementation(libs.markdown.renderer.m3)
+    implementation(libs.coil3.compose)
+    implementation(libs.coil3.gif)
     implementation(platform(libs.firebase.bom))
     implementation(libs.firebase.messaging)
     // Vendored Termux terminal stack (see android/vendor/termux/UPSTREAM.md).

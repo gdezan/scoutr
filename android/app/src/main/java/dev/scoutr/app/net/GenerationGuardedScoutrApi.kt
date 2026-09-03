@@ -108,7 +108,12 @@ class GenerationGuardedScoutrApi(
     override suspend fun downloadApk(destination: File, resumeFrom: Long, onProgress: (Long, Long) -> Unit) = checked {
         delegate.downloadApk(destination, resumeFrom, onProgress)
     }
-
+    override suspend fun downloadWorkspaceFile(
+        destination: File,
+        path: String,
+        resumeFrom: Long,
+        onProgress: (Long, Long) -> Unit,
+    ) = checked { delegate.downloadWorkspaceFile(destination, path, resumeFrom, onProgress) }
     private suspend fun <T> checked(call: suspend () -> T): T {
         ensureCurrent()
         val result = call()

@@ -13,6 +13,14 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
 
+    <!-- Open-with handler pre-check: lets the viewer ask whether any app handles
+         image VIEW before launching the chooser. Query-only; grants nothing. -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:mimeType="image/*" />
+        </intent>
+    </queries>
     <application
         android:name=".ScoutrApp"
         android:allowBackup="true"
@@ -74,6 +82,18 @@
             android:name=".update.UpdateService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
-    </application>
 
+        <!-- Image viewer handoff: serves only cacheDir/images/ (see
+             file_viewer_paths.xml) to the app the user picks in the Open-with
+             chooser. Unexported; each share grants read on one URI, one intent. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_viewer_paths" />
+            </provider>
+    </application>
 </manifest>
