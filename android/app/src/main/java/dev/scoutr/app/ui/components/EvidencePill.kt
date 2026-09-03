@@ -60,7 +60,7 @@ import dev.scoutr.app.ui.theme.ScoutrType
  * sheet owns the file + bash + collapsed reads detail.
  *
  * Invariants:
- * - Pill visible iff [calls] > 0 (Q7). Stat sums whole edit even when diff capped.
+ * - Pill visible iff fileCount>0 || bash not empty (hide 0 files, per user decision). Stat sums whole edit even when diff capped.
  * - Radii: pill 6dp rsm ([ScoutrRadii.sm]), sheet 12dp rlg ([ScoutrRadii.lg]),
  *   diff inner 4dp [MaterialTheme.shapes.extraSmall] with 8dp [ScoutrSpace.sm]
  *   outer margin → 12 = 4 + 8 concentric.
@@ -76,8 +76,8 @@ data class EvidenceSummary(
     val calls: Int,
     val durationMs: Long? = null,
 ) {
-    /** Pill visibility invariant: hide when no evidence. */
-    val hasEvidence: Boolean get() = calls > 0
+    /** Pill visibility invariant: hide when no file edits or bash. */
+    val hasEvidence: Boolean get() = fileCount > 0 || bash.isNotEmpty()
 }
 
 /**

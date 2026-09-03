@@ -217,13 +217,10 @@ internal fun evidenceSummaryFor(
     val removed = edits.sumOf { it.removed }
     val distinctPaths = edits.mapNotNull { it.path?.takeIf { p -> p.isNotBlank() } }.distinct()
     val fileCount = if (distinctPaths.isNotEmpty()) distinctPaths.size else edits.size
-    // For live mounting, count bash toolCalls as well as results. Use max to avoid double-count when both present.
+    // Live: count bash toolCalls as well as results to avoid double-count, hide when 0 files per product decision.
     val bashToolCallCount = assistantEntry.content.count { it.type == "toolCall" && it.name?.equals("bash", ignoreCase = true) == true }
     val effectiveBashCount = maxOf(bashResults.size, bashToolCallCount)
-    val baseCalls = edits.size + effectiveBashCount + (if (readCount > 0) 1 else 0)
-    // Live: pill mounts after first toolCall even before toolResult lands (e.g. pending file edit).
-    val hasAnyToolCall = assistantEntry.content.any { it.type == "toolCall" }
-    val calls = if (hasAnyToolCall && baseCalls == 0) 1 else baseCalls
+    val calls = edits.size + effectiveBashCount + (if (readCount > 0) 1 else 0)
     // Keep bash as results list for sheet display
     return EvidenceSummary(
         fileCount = fileCount,
@@ -1628,15 +1625,7 @@ private fun MessageRow(
             onOpenReview = onOpenReview,
             modifier = modifier,
         )
-        "toolResult" -> ToolResultChip(
-            entry = entry,
-            toolOutputFontSizeSp = toolOutputFontSizeSp,
-            toolExpanded = toolExpanded,
-            resultToolKey = resultToolKey,
-            hasCall = resultHasCall(entry),
-            onToggleTool = onToggleTool,
-            modifier = modifier,
-        )
+        "toolResult" -> Unit
         else -> {}
     }
 }
@@ -1775,9 +1764,9 @@ private fun AssistantBubble(
     onOpenReview: ((String) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
-    // Evidence pill: visible iff calls>0 (Q7), live-updates while working
+    // Evidence pill: visible iff hasEvidence (fileCount>0 || bash), hide 0 files
     val evidence = evidenceSummary
-    val showPill = evidence != null && evidence.calls > 0
+    val showPill = evidence?.hasEvidence == true
     // Prose runs the full column width; only tool calls hang off the spine, and
     // consecutive calls share one rail so the line is unbroken between them (§7a).
     Column(modifier.fillMaxWidth().testTag("assistant_bubble")) {
@@ -1814,26 +1803,8 @@ private fun AssistantBubble(
                 }
 
                 "toolCall" -> {
-                    val start = index
                     while (index < entry.content.size && entry.content[index].type == "toolCall") index++
-                    // Prose above means a fresh run (16dp); starting the turn on a
-                    // call means the rail is continuing from the entry before, so
-                    // it keeps the ordinary row gap.
-                    TimelineRail(topGap = if (start == 0) SPINE_ROW_GAP else SPINE_RUN_GAP) {
-                        for (i in start until index) {
-                            val call = entry.content[i]
-                            val key = toolCallKey(entry.entryId, call, i)
-                            ToolCallChip(
-                                block = call,
-                                fileEdit = fileEditFor(key),
-                                isExpanded = toolExpanded(key),
-                                onToggle = { onToggleTool(key) },
-                                modifier = if (i == start) Modifier else Modifier.padding(top = SPINE_ROW_GAP),
-                            )
-                        }
-                    }
                 }
-
                 else -> index++
             }
         }
