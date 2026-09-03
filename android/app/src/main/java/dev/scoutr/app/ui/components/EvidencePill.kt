@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.KeyboardArrowDown
@@ -54,78 +55,90 @@ import dev.scoutr.app.ui.theme.ScoutrBorder
 import dev.scoutr.app.ui.theme.ScoutrRadii
 import dev.scoutr.app.ui.theme.ScoutrSpace
 import dev.scoutr.app.ui.theme.ScoutrType
+import kotlinx.serialization.json.JsonPrimitive
 
 /**
- * Shared evidence aggregation for C1. Pill is the only per-assistant affordance;
- * sheet owns the file + bash + collapsed reads detail.
+ * Shared evidence aggregation. Pill is the one affordance per assistant run;
+ * sheet owns the file + command + collapsed reads detail.
+ *
+ * One assistant run = the maximal run of assistant + toolResult entries between
+ * user entries, so every command between thinking blocks lands in the same block.
  *
  * Invariants:
- * - Pill visible iff fileCount>0 || bash not empty (hide 0 files, per user decision). Stat sums whole edit even when diff capped.
+ * - Pill visible iff fileCount>0 || commands>0; each zero part hidden, so a
+ *   commands-only turn reads `2 commands` with no file stat.
+ * - Stat sums whole edit even when diff capped.
  * - Radii: pill 6dp rsm ([ScoutrRadii.sm]), sheet 12dp rlg ([ScoutrRadii.lg]),
  *   diff inner 4dp [MaterialTheme.shapes.extraSmall] with 8dp [ScoutrSpace.sm]
  *   outer margin → 12 = 4 + 8 concentric.
  * - Mono is [ScoutrType.monoTool] 10sp (repo's monoTool is 10sp, not 11sp).
  */
+/** One bash execution: the call carrying the command plus its result carrying output. */
+data class BashRun(
+    val call: ContentBlock?,
+    val result: SessionEntry,
+)
+
 data class EvidenceSummary(
     val fileCount: Int,
     val added: Int,
     val removed: Int,
     val edits: List<ContentBlock>,
-    val bash: List<SessionEntry>,
+    val bashRuns: List<BashRun>,
     val readCount: Int,
-    val calls: Int,
+    val pendingCalls: List<ContentBlock> = emptyList(),
     val durationMs: Long? = null,
 ) {
-    /** Pill visibility invariant: hide when no file edits or bash. */
-    val hasEvidence: Boolean get() = fileCount > 0 || bash.isNotEmpty()
+    /** Commands counter: one per bash execution, plus streaming calls awaiting results. */
+    val commands: Int get() = bashRuns.size + pendingCalls.size
+    /** Pill visibility invariant: hide when no file edits or commands. */
+    val hasEvidence: Boolean get() = fileCount > 0 || commands > 0
 }
 
-/**
- * Pure aggregation helper. Callers (ChatScreen) may compute live while
- * `working`; stat never understates because [DiffStatBadge] counts whole edit.
+/** Pair each bash result with its call so the sheet can show what was run.
  *
- * - file edits: any toolResult [ContentBlock] with type fileEdit + non-blank path
- * - bash: toolResult where [SessionEntry.toolName] == "bash" (case-insensitive)
- * - reads: toolResult where toolName contains "read" (case-insensitive) and not already counted as an edit
+ * Explicit [SessionEntry.toolCallId] wins; leftovers pair in transcript order.
+ * Calls without a result yet stay in [EvidenceSummary.pendingCalls], never here.
  */
-fun evidenceSummaryForEntries(
-    entries: List<SessionEntry>,
-    durationMs: Long? = null,
-): EvidenceSummary {
-    val edits = entries
-        .filter { it.role == "toolResult" }
-        .mapNotNull { entry -> entry.content.firstOrNull { it.type == "fileEdit" && !it.path.isNullOrBlank() } }
-
-    val added = edits.sumOf { it.added }
-    val removed = edits.sumOf { it.removed }
-    // Distinct files when paths differ; fallback to edit count.
-    val distinctPaths = edits.mapNotNull { it.path?.takeIf { p -> p.isNotBlank() } }.distinct()
-    val fileCount = if (distinctPaths.isNotEmpty()) distinctPaths.size else edits.size
-
-    val bash = entries.filter { it.role == "toolResult" && it.toolName?.equals("bash", ignoreCase = true) == true }
-    // Reads collapsed into one call; don't double-count edit entries.
-    val readEntries = entries.filter { entry ->
-        entry.role == "toolResult" &&
-            entry.toolName?.contains("read", ignoreCase = true) == true &&
-            entry.content.none { it.type == "fileEdit" && !it.path.isNullOrBlank() }
+fun pairBashRuns(calls: List<ContentBlock>, results: List<SessionEntry>): List<BashRun> {
+    val unmatched = calls.toMutableList()
+    val paired = arrayOfNulls<ContentBlock>(results.size)
+    // Pass 1: explicit toolCallId matches win over transcript order.
+    results.forEachIndexed { index, result ->
+        val explicitId = result.toolCallId?.takeUnless { it.isBlank() } ?: return@forEachIndexed
+        val match = unmatched.indexOfFirst { it.id == explicitId }
+        if (match >= 0) paired[index] = unmatched.removeAt(match)
     }
-    val readCount = readEntries.size
-    val calls = edits.size + bash.size + if (readCount > 0) 1 else 0
-
-    return EvidenceSummary(
-        fileCount = fileCount,
-        added = added,
-        removed = removed,
-        edits = edits,
-        bash = bash,
-        readCount = readCount,
-        calls = calls,
-        durationMs = durationMs,
-    )
+    // Pass 2: leftovers pair in transcript order.
+    results.forEachIndexed { index, result ->
+        if (paired[index] == null && unmatched.isNotEmpty()) paired[index] = unmatched.removeAt(0)
+    }
+    return results.mapIndexed { index, result -> BashRun(call = paired[index], result = result) }
 }
 
+/** Short command summary for a bash call: the `command` argument, else the tool name. */
+internal fun bashCommandSummary(call: ContentBlock?): String {
+    val args = call?.arguments
+    val command = args?.get("command")
+    if (command is JsonPrimitive && command.isString && command.content.isNotBlank()) return command.content
+    val filePath = args?.get("file_path")
+    if (filePath is JsonPrimitive && filePath.isString && filePath.content.isNotBlank()) return filePath.content
+    return call?.name ?: "bash"
+}
+
+/** Full output of a bash result across every text block it carries. */
+internal fun bashOutputText(entry: SessionEntry): String =
+    entry.content.mapNotNull { it.text?.takeIf(String::isNotBlank) }.joinToString("\n").trim()
+
+internal fun filesLabel(fileCount: Int): String =
+    if (fileCount == 1) "1 file" else "$fileCount files"
+
+internal fun commandsLabel(commands: Int): String =
+    if (commands == 1) "1 command" else "$commands commands"
+
 /**
- * One pill per assistant entry. Label: `Evidence · N files · +A −R`
+ * One pill per assistant run. Label hides zero parts, no `Evidence` prefix:
+ * `2 files · 3 commands · +A −R`, `2 files · +A −R`, or `3 commands`.
  * where +A in [DiffPalette.Added] and −R in [DiffPalette.Deleted],
  * rest in onSurfaceVariant. 6dp rsm, surfaceContainer, 1dp hairline
  * outline, monoTool, min 44dp touch target.
@@ -133,6 +146,7 @@ fun evidenceSummaryForEntries(
 @Composable
 fun EvidencePill(
     fileCount: Int,
+    commands: Int,
     added: Int,
     removed: Int,
     onClick: () -> Unit,
@@ -159,12 +173,19 @@ fun EvidencePill(
         ) {
             Text(
                 buildAnnotatedString {
-                    withStyle(SpanStyle(color = MaterialTheme.colorScheme.onSurfaceVariant)) {
-                        append("Evidence · $fileCount files · ")
+                    val parts = buildList {
+                        if (fileCount > 0) add(filesLabel(fileCount))
+                        if (commands > 0) add(commandsLabel(commands))
                     }
-                    withStyle(SpanStyle(color = DiffPalette.Added)) { append("+$added") }
-                    append(" ")
-                    withStyle(SpanStyle(color = DiffPalette.Deleted)) { append("−$removed") }
+                    withStyle(SpanStyle(color = MaterialTheme.colorScheme.onSurfaceVariant)) {
+                        append(parts.joinToString(" · "))
+                    }
+                    if (fileCount > 0) {
+                        withStyle(SpanStyle(color = MaterialTheme.colorScheme.onSurfaceVariant)) { append(" · ") }
+                        withStyle(SpanStyle(color = DiffPalette.Added)) { append("+$added") }
+                        append(" ")
+                        withStyle(SpanStyle(color = DiffPalette.Deleted)) { append("−$removed") }
+                    }
                 },
                 style = ScoutrType.monoTool,
                 maxLines = 1,
@@ -179,7 +200,8 @@ fun EvidencePill(
  *
  * - ModalBottomSheet with skipPartiallyExpanded=true, handle 32×4 outlineVariant,
  *   outer 12dp rlg, surface.
- * - Header "Evidence" + "N calls · Xs".
+ * - Header "Evidence" + "2 files · 3 commands · Xs" (zero parts hidden).
+ * - Command rows expand to the full command plus capped output; error rows stay red.
  * - Rows 44dp, PressTintSurface, border-top hairline dividers, pressed surfaceContainerHigh.
  * - Motion via ScoutrMotion.sheetSpec spring 0.78/380, fade 140ms, respects LocalReduceMotion.
  * - Diff tile under expanded edit: fileEditDisplayPath + "+A −R · wrap off",
@@ -237,7 +259,11 @@ fun EvidenceSheet(
                     val secs = ms / 1000.0
                     if (secs < 10) String.format("%.1fs", secs) else String.format("%.0fs", secs)
                 }
-                val headerMeta = if (durationLabel != null) "${summary.calls} calls · $durationLabel" else "${summary.calls} calls"
+                val headerMeta = buildList {
+                    if (summary.fileCount > 0) add(filesLabel(summary.fileCount))
+                    if (summary.commands > 0) add(commandsLabel(summary.commands))
+                    if (durationLabel != null) add(durationLabel)
+                }.joinToString(" · ")
                 Text(
                     headerMeta,
                     style = ScoutrType.monoMeta,
@@ -251,6 +277,7 @@ fun EvidenceSheet(
             // from ContentBlock alone, so gate on caller-supplied error via summary
             // is approximated: edits themselves are not errors; bash error path is separate).
             var expandedEdits by remember { mutableStateOf(setOf<Int>()) }
+            var expandedRuns by remember { mutableStateOf(setOf<Int>()) }
             var readsExpanded by rememberSaveable { mutableStateOf(false) }
 
             // Edit rows
@@ -376,70 +403,102 @@ fun EvidenceSheet(
                 }
             }
 
-            // Bash rows
-            summary.bash.forEachIndexed { idx, entry ->
+            // Command rows: one per bash execution, tap to inspect what was run.
+            summary.bashRuns.forEachIndexed { idx, run ->
+                val entry = run.result
                 val isError = entry.isError == true
-                // Never auto-expanded: bash rows are not expandable, and error never expands.
+                val isExpanded = idx in expandedRuns
+                val command = bashCommandSummary(run.call)
+                val output = bashOutputText(entry)
                 val hasDivider = summary.edits.isNotEmpty() || idx > 0
                 if (hasDivider) {
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant, thickness = ScoutrBorder.hairline)
                 }
                 EvidenceRow(
-                    onClick = {},
+                    onClick = { expandedRuns = if (isExpanded) expandedRuns - idx else expandedRuns + idx },
                     isError = isError,
                     modifier = Modifier.testTag("evidence_row"),
                 ) {
-                    if (isError) {
-                        Text(
-                            "▸ bash (error)",
-                            style = ScoutrType.monoTool,
-                            color = MaterialTheme.colorScheme.error,
-                            modifier = Modifier.weight(1f),
-                        )
-                    } else {
-                        Text(
-                            "bash",
-                            style = ScoutrType.monoTool,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.weight(1f),
-                        )
-                        // In live, timing would be shown; we show check when not error.
+                    Text(
+                        if (isError) "▸ $command (error)" else command,
+                        style = ScoutrType.monoTool,
+                        color = if (isError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                    if (!isError) {
                         Text(
                             "✓",
                             style = ScoutrType.monoTool,
                             color = MaterialTheme.colorScheme.primary,
                         )
-                        // Duration per bash not available in SessionEntry; aggregate
-                        // duration shown in header. Keep row quiet.
                     }
+                    Spacer(Modifier.width(ScoutrSpace.sm))
+                    androidx.compose.material3.Icon(
+                        imageVector = if (isExpanded) Icons.Filled.KeyboardArrowDown else Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                        contentDescription = if (isExpanded) "Collapse command" else "Expand command",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(14.dp),
+                    )
                 }
-                // For error entries, optionally show truncated output capped.
-                if (isError) {
-                    val output = entry.content.firstOrNull { it.text != null }?.text?.trim().orEmpty()
-                    if (output.isNotBlank()) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = ScoutrSpace.sm, vertical = ScoutrSpace.xs)
-                                .clip(MaterialTheme.shapes.extraSmall)
-                                .background(MaterialTheme.colorScheme.surfaceVariant)
-                                .padding(ScoutrSpace.sm),
-                        ) {
-                            Text(
-                                output.take(200),
-                                style = ScoutrType.monoCode(toolOutputFontSizeSp),
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
-                    }
+                // Errors surface their output unasked; clean runs show it expanded.
+                if (isExpanded || isError) {
+                    CommandDetail(
+                        command = command,
+                        output = output,
+                        toolOutputFontSizeSp = toolOutputFontSizeSp,
+                    )
+                }
+            }
+            // Streaming calls: the command is known, its result has not arrived yet.
+            summary.pendingCalls.forEachIndexed { pendingIdx, call ->
+                val key = summary.bashRuns.size + pendingIdx
+                val isExpanded = key in expandedRuns
+                val command = bashCommandSummary(call)
+                val hasDivider = summary.edits.isNotEmpty() || summary.bashRuns.isNotEmpty() || pendingIdx > 0
+                if (hasDivider) {
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant, thickness = ScoutrBorder.hairline)
+                }
+                EvidenceRow(
+                    onClick = { expandedRuns = if (isExpanded) expandedRuns - key else expandedRuns + key },
+                    isError = false,
+                    modifier = Modifier.testTag("evidence_row"),
+                ) {
+                    Text(
+                        command,
+                        style = ScoutrType.monoTool,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Text(
+                        "···",
+                        style = ScoutrType.monoTool,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                    Spacer(Modifier.width(ScoutrSpace.sm))
+                    androidx.compose.material3.Icon(
+                        imageVector = if (isExpanded) Icons.Filled.KeyboardArrowDown else Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                        contentDescription = if (isExpanded) "Collapse command" else "Expand command",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(14.dp),
+                    )
+                }
+                if (isExpanded) {
+                    CommandDetail(
+                        command = command,
+                        output = "",
+                        toolOutputFontSizeSp = toolOutputFontSizeSp,
+                        showRunning = true,
+                    )
                 }
             }
 
             // Collapsed reads row
             if (summary.readCount > 0) {
-                val needDivider = summary.edits.isNotEmpty() || summary.bash.isNotEmpty()
+                val needDivider = summary.edits.isNotEmpty() || summary.bashRuns.isNotEmpty() || summary.pendingCalls.isNotEmpty()
                 if (needDivider) {
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant, thickness = ScoutrBorder.hairline)
                 }
@@ -481,9 +540,77 @@ fun EvidenceSheet(
                 }
             }
 
-            // Empty invariant: pill never shown when calls==0, but sheet could be
+            // Empty invariant: pill never shown when files==0 && commands==0, but the sheet could be
             // opened programmatically with empty summary — show nothing but header.
             Spacer(Modifier.height(ScoutrSpace.lg))
+        }
+    }
+}
+
+/**
+ * Expanded command detail: the full command (no-wrap scroll, selectable) plus
+ * capped output. Same 4dp tile + 8dp margin concentric contract as the diff tile.
+ */
+@Composable
+private fun CommandDetail(
+    command: String,
+    output: String,
+    toolOutputFontSizeSp: Float,
+    showRunning: Boolean = false,
+    modifier: Modifier = Modifier,
+) {
+    val outputLines = output.lines()
+    val capped = if (outputLines.size > 6) outputLines.take(6) else outputLines
+    val remaining = outputLines.size - capped.size
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = ScoutrSpace.sm, vertical = ScoutrSpace.xs)
+            .clip(MaterialTheme.shapes.extraSmall)
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .border(ScoutrBorder.hairline, MaterialTheme.colorScheme.outlineVariant, MaterialTheme.shapes.extraSmall)
+            .padding(ScoutrSpace.sm)
+            .testTag("command_detail"),
+    ) {
+        SelectionContainer(
+            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+        ) {
+            Text(
+                command.ifBlank { "bash" },
+                style = ScoutrType.monoCode(toolOutputFontSizeSp),
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                softWrap = false,
+            )
+        }
+        if (output.isNotBlank()) {
+            Spacer(Modifier.height(6.dp))
+            Column(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+                capped.forEach { line ->
+                    Text(
+                        line,
+                        style = ScoutrType.monoCode(toolOutputFontSizeSp),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        softWrap = false,
+                    )
+                }
+            }
+            if (remaining > 0) {
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "⋯ +$remaining more",
+                    style = ScoutrType.monoCaption,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        } else if (showRunning) {
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "running…",
+                style = ScoutrType.monoCaption,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }

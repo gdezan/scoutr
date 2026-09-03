@@ -174,6 +174,7 @@ import dev.scoutr.app.ui.components.pullRefreshSemantics
 import dev.scoutr.app.ui.components.EvidencePill
 import dev.scoutr.app.ui.components.EvidenceSheet
 import dev.scoutr.app.ui.components.EvidenceSummary
+import dev.scoutr.app.ui.components.pairBashRuns
 
 import dev.scoutr.app.ui.motion.ScoutrMotion
 import dev.scoutr.app.ui.motion.HapticEvent
@@ -207,34 +208,64 @@ import kotlinx.serialization.json.JsonPrimitive
 
 internal fun thinkingId(entryId: String, blockIndex: Int) = "$entryId:thinking:$blockIndex"
 
-internal fun evidenceSummaryFor(
-    assistantEntry: SessionEntry,
-    allEntries: List<SessionEntry>,
-): EvidenceSummary {
-    val edits = allEntries
-        .filter { it.role == "toolResult" && it.parentId == assistantEntry.entryId }
-        .mapNotNull { fileEditOf(it) }
-    val bashResults = allEntries.filter {
-        it.role == "toolResult" && it.parentId == assistantEntry.entryId && it.toolName?.equals("bash", ignoreCase = true) == true
+/**
+ * One evidence group per assistant run: the maximal run of assistant +
+ * toolResult entries between user entries. Every command between thinking
+ * blocks in the same turn lands in one pill, rendered under the run's last
+ * assistant bubble. Returns pill-owner entryId to summary.
+ */
+internal fun evidenceByRun(allEntries: List<SessionEntry>): Map<String, EvidenceSummary> {
+    val out = mutableMapOf<String, EvidenceSummary>()
+    var assistants = mutableListOf<SessionEntry>()
+    var toolResults = mutableListOf<SessionEntry>()
+    fun closeRun() {
+        val lastAssistant = assistants.lastOrNull()
+        if (lastAssistant != null) {
+            out[lastAssistant.entryId] = summarizeRun(assistants, toolResults)
+        }
+        assistants = mutableListOf()
+        toolResults = mutableListOf()
     }
-    val readCount = assistantEntry.content.count { it.type == "toolCall" && it.name?.equals("read", ignoreCase = true) == true }
+    for (entry in allEntries) {
+        when (entry.role) {
+            "assistant" -> assistants.add(entry)
+            "toolResult" -> toolResults.add(entry)
+            else -> closeRun()
+        }
+    }
+    closeRun()
+    return out
+}
+
+private fun summarizeRun(
+    assistants: List<SessionEntry>,
+    toolResults: List<SessionEntry>,
+): EvidenceSummary {
+    val edits = toolResults.mapNotNull { fileEditOf(it) }
     val added = edits.sumOf { it.added }
     val removed = edits.sumOf { it.removed }
     val distinctPaths = edits.mapNotNull { it.path?.takeIf { p -> p.isNotBlank() } }.distinct()
     val fileCount = if (distinctPaths.isNotEmpty()) distinctPaths.size else edits.size
-    // Live: count bash toolCalls as well as results to avoid double-count, hide when 0 files per product decision.
-    val bashToolCallCount = assistantEntry.content.count { it.type == "toolCall" && it.name?.equals("bash", ignoreCase = true) == true }
-    val effectiveBashCount = maxOf(bashResults.size, bashToolCallCount)
-    val calls = edits.size + effectiveBashCount + (if (readCount > 0) 1 else 0)
-    // Keep bash as results list for sheet display
+    val bashResults = toolResults.filter { it.toolName?.equals("bash", ignoreCase = true) == true }
+    val bashCalls = assistants
+        .flatMap { it.content }
+        .filter { it.type == "toolCall" && it.name?.equals("bash", ignoreCase = true) == true }
+    val bashRuns = pairBashRuns(bashCalls, bashResults)
+    val matched = bashRuns.mapNotNull { it.call }
+    // Identity match: two identical commands in one run are distinct executions.
+    val pendingCalls = bashCalls.filter { call -> matched.none { it === call } }
+    val readCount = toolResults.count { entry ->
+        entry.toolName?.contains("read", ignoreCase = true) == true &&
+            entry.content.none { it.type == "fileEdit" && !it.path.isNullOrBlank() }
+    }
     return EvidenceSummary(
         fileCount = fileCount,
         added = added,
         removed = removed,
         edits = edits,
-        bash = bashResults,
+        bashRuns = bashRuns,
         readCount = readCount,
-        calls = calls
+        pendingCalls = pendingCalls,
     )
 }
 
@@ -1240,14 +1271,9 @@ fun ChatList(
         }
     }
 
-    // Evidence: per-assistant summary, derived for stat
+    // Evidence: one group per assistant run, rendered under the run's last bubble.
     val evidenceByEntry: Map<String, EvidenceSummary> = remember(entries) {
-        val map = mutableMapOf<String, EvidenceSummary>()
-        for (assEntry in entries.filter { it.role == "assistant" }) {
-            val summary = evidenceSummaryFor(assEntry, entries)
-            map[assEntry.entryId] = summary
-        }
-        map
+        evidenceByRun(entries)
     }
 
     // — Evidence sheet state (C1)
@@ -1779,7 +1805,7 @@ private fun AssistantBubble(
     onOpenReview: ((String) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
-    // Evidence pill: visible iff hasEvidence (fileCount>0 || bash), hide 0 files
+    // Evidence pill: visible iff hasEvidence (fileCount>0 || commands>0); zero parts hidden.
     val evidence = evidenceSummary
     val showPill = evidence?.hasEvidence == true
     // Prose runs the full column width; only tool calls hang off the spine, and
@@ -1834,6 +1860,7 @@ private fun AssistantBubble(
             Spacer(Modifier.height(8.dp))
             EvidencePill(
                 fileCount = evidence!!.fileCount,
+                commands = evidence.commands,
                 added = evidence.added,
                 removed = evidence.removed,
                 onClick = { onOpenEvidence(evidence) },

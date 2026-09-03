@@ -88,8 +88,11 @@ scale. `WorkingIndicator` remains the only app-owned looping animation.
 
 - **Board:** section header plus compact count; cards use a two-tier Linear grounding. The topline eyebrow carries a 9dp status ring and `REPO · HOST` in `monoSection` on the left and `timeInState` plus the `⋮` actions menu on the right. The second tier is an uninterrupted title row (`AgentMark` + `titleMedium`, one line, full width). The body shows `latestActivity` as prose in `bodySmall` (`▸` prefix when not `NeedsYou`, 2 lines / 1 in 320dp compact) or an `AttentionBlock` with question text and up to three quick-answer buttons when `NeedsYou`. A hairline `outlineVariant` divider (50% alpha) docks a telemetry footer: left `model · branch` in `monoMeta`, right `+additions −deletions · N files` with `DiffPalette` colors (or `Working tree clean`), stale/offline facts in `criticalCaption`. Cards are `surfaceContainer` (`#16171B`) at `ScoutrRadii.sm` (6dp) with a 1dp `critical` border only for `NeedsYou`; inner chips/buttons stay 4dp. Voice is Space Grotesk for titles/activity/questions/buttons and Martian Mono strictly for repo/host/model/diff/time telemetry. Nested PI-workflow subagents sit as compact role/label rows with a guide-line indent under the footer, each with its own status ring; tapping a row or an orphan card opens progress, not Chat. Needs-you is the only loud card treatment: red ring/border and red metadata. Done is gray. Idle collapses to a count row until tapped.
 - **Chat:** assistant rows show prose and per-block thinking (`thinking · expand ▸` 1-line clamp, `surfaceContainer 4dp` italic) with no inline tool rail;
-  evidence hides behind a 6dp mono chip (`Evidence · N files · +A −R`)
-  that opens the evidence sheet; sheet is 12dp outer with a 4dp diff tile
+  evidence hides behind one 6dp mono chip per assistant run
+  (`2 files · 3 commands · +A −R`; zero parts hidden, so commands-only
+  reads `2 commands` with no file stat)
+  that opens the evidence sheet; command rows expand to the full command plus
+  capped output. Sheet is 12dp outer with a 4dp diff tile
   (8dp margin, concentric 12 = 4 + 8). A skill or slash-command invocation is a
   `surfaceContainer` chip above the user bubble: the command in Martian Mono,
   tap to expand the injected body. The leftover prompt stays in the user
