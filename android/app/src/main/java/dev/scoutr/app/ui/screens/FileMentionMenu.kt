@@ -1,5 +1,7 @@
 package dev.scoutr.app.ui.screens
 
+import dev.scoutr.app.ui.theme.ScoutrRadii
+import dev.scoutr.app.ui.theme.ScoutrSpace
 import dev.scoutr.app.ui.theme.ScoutrMono
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -60,8 +62,8 @@ internal fun FileMentionMenu(
         if (selectedIndex in candidates.indices) listState.scrollToItem(selectedIndex)
     }
     Surface(
-        modifier = modifier.fillMaxWidth().padding(horizontal = 12.dp).testTag("file_mention_menu"),
-        shape = RoundedCornerShape(8.dp),
+        modifier = modifier.fillMaxWidth().padding(horizontal = ScoutrSpace.md).testTag("file_mention_menu"),
+        shape = RoundedCornerShape(ScoutrRadii.md),
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
         tonalElevation = 3.dp,
     ) {
@@ -82,7 +84,7 @@ internal fun FileMentionMenu(
                             onClick = { onSelect(candidate) },
                         )
                         if (index < candidates.lastIndex) {
-                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                         }
                     }
                 }
@@ -91,7 +93,7 @@ internal fun FileMentionMenu(
                         "Showing part of a very large workspace — type to narrow",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                        modifier = Modifier.padding(horizontal = ScoutrSpace.md, vertical = 6.dp),
                     )
                 }
             }
@@ -120,7 +122,7 @@ private fun FileMentionRow(candidate: FileCandidate, selected: Boolean, onClick:
                 imageVector = if (candidate.isDirectory) Icons.Filled.Folder else Icons.Outlined.InsertDriveFile,
                 contentDescription = if (candidate.isDirectory) "Directory" else "File",
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(start = 12.dp).size(18.dp),
+                modifier = Modifier.padding(start = ScoutrSpace.md).size(18.dp),
             )
             Column(Modifier.weight(1f).padding(horizontal = 10.dp, vertical = 5.dp)) {
                 Text(
@@ -149,7 +151,7 @@ private fun FileMentionRow(candidate: FileCandidate, selected: Boolean, onClick:
 
 @Composable
 private fun FileMentionStatus(text: String) {
-    Box(Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(16.dp), contentAlignment = Alignment.CenterStart) {
+    Box(Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(ScoutrSpace.lg), contentAlignment = Alignment.CenterStart) {
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(text, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
@@ -159,7 +161,7 @@ private fun FileMentionStatus(text: String) {
 @Composable
 private fun FileMentionError(error: String, onRetry: () -> Unit) {
     Row(
-        Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(start = 16.dp, end = 8.dp),
+        Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(start = ScoutrSpace.lg, end = ScoutrSpace.sm),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {

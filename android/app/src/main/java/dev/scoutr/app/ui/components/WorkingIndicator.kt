@@ -1,5 +1,6 @@
 package dev.scoutr.app.ui.components
 
+import dev.scoutr.app.ui.theme.ScoutrSpace
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
@@ -263,7 +264,7 @@ private fun RippleGlyph(color: Color) {
     }
 }
 
-private val GLYPH_SIZE = 24.dp
+private val GLYPH_SIZE = ScoutrSpace.xl
 private val STATUS_RING_SIZE = 9.dp
 private val STATUS_RING_STROKE = 2.5.dp
 private val STATUS_RING_RADIUS = 3.25.dp

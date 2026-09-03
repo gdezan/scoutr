@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -16,6 +17,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -60,9 +62,11 @@ private fun ScoutrNavItem(
     modifier: Modifier = Modifier,
 ) {
     val haptic = rememberHaptic()
+    val showLabel = LocalDensity.current.fontScale <= 2f
     Column(
         modifier
             .clip(RoundedCornerShape(6.dp))
+            .sizeIn(minWidth = 48.dp, minHeight = 48.dp)
             .clickable {
                 haptic(HapticEvent.Select)
                 onClick()
@@ -73,7 +77,7 @@ private fun ScoutrNavItem(
         Box(contentAlignment = Alignment.TopEnd) {
             Icon(
                 imageVector = destination.icon,
-                contentDescription = null,
+                contentDescription = if (showLabel) null else destination.label,
                 tint = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.size(22.dp),
             )
@@ -97,13 +101,15 @@ private fun ScoutrNavItem(
                 }
             }
         }
-        Spacer(Modifier.size(2.dp))
-        Text(
-            text = destination.label,
-            style = MaterialTheme.typography.labelSmall,
-            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
-            color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 1,
-        )
+        if (showLabel) {
+            Spacer(Modifier.size(2.dp))
+            Text(
+                text = destination.label,
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+                color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+            )
+        }
     }
 }

@@ -1,5 +1,6 @@
 package dev.scoutr.app.ui.screens
 
+import dev.scoutr.app.ui.theme.ScoutrSpace
 import androidx.activity.compose.rememberLauncherForActivityResult
 import dev.scoutr.app.ui.components.ScoutrMark
 import androidx.compose.foundation.layout.Arrangement
@@ -107,7 +108,7 @@ fun ConnectScreen(
                 onDismissRequest = { choosingUpdateHost = false },
                 title = { Text("Choose update source") },
                 text = {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Column(verticalArrangement = Arrangement.spacedBy(ScoutrSpace.sm)) {
                         Text(
                             "Only trust the replacement for in-app updates if you trust its APK signing key. " +
                                 "You can choose another paired host or disable in-app updates instead.",
@@ -193,7 +194,7 @@ fun ConnectScreen(
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
             .imeOrNavigationBarsPadding()
-            .padding(horizontal = 24.dp, vertical = 32.dp),
+            .padding(horizontal = ScoutrSpace.xl, vertical = ScoutrSpace.xxl),
         verticalArrangement = Arrangement.Center,
     ) {
         // The wordmark is ink, not accent: green means live and AI-owned and
@@ -207,7 +208,7 @@ fun ConnectScreen(
                 color = MaterialTheme.colorScheme.onBackground,
             )
         }
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(ScoutrSpace.sm))
         Text(
             text = "Your terminal agents, at a glance.",
             style = MaterialTheme.typography.bodyLarge,
@@ -224,7 +225,7 @@ fun ConnectScreen(
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
             modifier = Modifier.fillMaxWidth().testTag("connect_host"),
         )
-        Spacer(Modifier.height(12.dp))
+        Spacer(Modifier.height(ScoutrSpace.md))
         OutlinedTextField(
             value = token,
             onValueChange = { token = it },
@@ -236,7 +237,7 @@ fun ConnectScreen(
             modifier = Modifier.fillMaxWidth().testTag("connect_token"),
         )
 
-        Spacer(Modifier.height(16.dp))
+        Spacer(Modifier.height(ScoutrSpace.lg))
 
         OutlinedButton(
             shape = MaterialTheme.shapes.small,
@@ -252,7 +253,7 @@ fun ConnectScreen(
             modifier = Modifier.fillMaxWidth().testTag("connect_scan"),
         ) {
             Icon(Icons.Filled.QrCodeScanner, contentDescription = null, modifier = Modifier.size(18.dp))
-            Spacer(Modifier.width(8.dp))
+            Spacer(Modifier.width(ScoutrSpace.sm))
             Text("Scan QR code")
         }
         if (scanError != null) {
@@ -263,12 +264,12 @@ fun ConnectScreen(
             )
         }
 
-        Spacer(Modifier.height(24.dp))
+        Spacer(Modifier.height(ScoutrSpace.xl))
 
         when (val s = state) {
             is Loadable.Loading -> {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Spacer(Modifier.width(12.dp))
+                    Spacer(Modifier.width(ScoutrSpace.md))
                     Text("Checking connection…")
                 }
             }
@@ -279,7 +280,7 @@ fun ConnectScreen(
                     color = MaterialTheme.colorScheme.error,
                     style = MaterialTheme.typography.bodyMedium,
                 )
-                Spacer(Modifier.height(12.dp))
+                Spacer(Modifier.height(ScoutrSpace.md))
                 Button(
                     shape = MaterialTheme.shapes.small,
                     onClick = { submit(host, token, ExposureKind.Custom) },

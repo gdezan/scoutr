@@ -1,5 +1,7 @@
 package dev.scoutr.app.ui.screens
 
+import dev.scoutr.app.ui.theme.ScoutrRadii
+import dev.scoutr.app.ui.theme.ScoutrSpace
 import dev.scoutr.app.ui.theme.ScoutrMono
 import android.widget.Toast
 import android.text.format.DateUtils
@@ -96,6 +98,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import dev.scoutr.app.ui.theme.ScoutrType
+import dev.scoutr.app.ui.theme.ScoutrComponentTokens
 import dev.scoutr.app.ui.agentDisplayTitle
 import dev.scoutr.app.ui.shortenHostPath
 import androidx.compose.ui.unit.sp
@@ -206,7 +209,7 @@ fun HistoryScreen(
                 },
                 selectedHostId = ui.filter,
                 onSelect = viewModel::selectFilter,
-                modifier = Modifier.padding(bottom = 8.dp),
+                modifier = Modifier.padding(bottom = ScoutrSpace.sm),
             )
         }
         Row(
@@ -335,7 +338,7 @@ private fun SearchField(query: String, onQuery: (String) -> Unit) {
         leadingIcon = Icons.Default.Search,
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 8.dp)
+            .padding(vertical = ScoutrSpace.sm)
             .testTag("history_search"),
         trailingIcon = {
             if (query.isNotEmpty()) {
@@ -443,6 +446,7 @@ private fun HistoryList(
                     HistoryScope.Pinned -> "Nothing pinned yet"
                     HistoryScope.Archived -> "Nothing archived"
                 },
+                style = ScoutrType.displayEmpty,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.testTag("history_empty"),
             )
@@ -453,7 +457,7 @@ private fun HistoryList(
     LazyColumn(
         modifier = Modifier.fillMaxSize().testTag("history_list"),
         state = listState,
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 8.dp),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = ScoutrSpace.sm),
         // Tiles in a day sit 2dp apart; the 14dp that separates days is carried by
         // the date header's own top padding (§9c).
         verticalArrangement = Arrangement.spacedBy(2.dp),
@@ -465,7 +469,7 @@ private fun HistoryList(
                 Text(
                     "Showing latest $HISTORY_CATALOG_LIMIT from $alias",
                     style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(vertical = 4.dp),
                 )
             }
@@ -482,7 +486,7 @@ private fun HistoryList(
                     Text(
                         historyDateLabel(historyItem.session.updatedAt).uppercase(),
                         style = ScoutrType.monoSection,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(
                             start = 4.dp,
                             end = 4.dp,
@@ -801,7 +805,7 @@ private fun HistoryRow(
         scope.launch { reveal.animateTo(RowReveal.Closed) }
     }
 
-    Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp))) {
+    Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(ScoutrRadii.md))) {
         // Action bar, right-aligned, revealed as the card slides left. It sizes
         // itself from the card rather than the other way round: a LazyColumn
         // item is measured with an unbounded height, so fillMaxSize() here
@@ -862,7 +866,7 @@ private fun HistoryRow(
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f),
                     )
-                    Spacer(Modifier.width(8.dp))
+                    Spacer(Modifier.width(ScoutrSpace.sm))
                     // The ring already says running or settled, so the right-hand
                     // fact is how long ago — the same glanceable column the board
                     // uses (§9c, §9d "green is live, gray is done").
@@ -870,7 +874,7 @@ private fun HistoryRow(
                         text = relativeTime(session.updatedAt),
                         style = ScoutrType.monoFact,
                         color = if (session.active) MaterialTheme.colorScheme.onSurfaceVariant
-                        else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                        else MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     Box {
                         Icon(
@@ -955,7 +959,7 @@ private fun HistoryRow(
                         session.model?.let(::shortModel)?.let(::add)
                     }.joinToString(" · "),
                     style = ScoutrType.monoMeta,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -964,16 +968,16 @@ private fun HistoryRow(
                 offlineSinceMs?.let { syncedAt ->
                     Text(
                         text = "Offline · last synced ${relativeTime(syncedAt.toDouble())}",
-                        style = ScoutrType.monoMeta,
-                        color = MaterialTheme.colorScheme.error.copy(alpha = 0.8f),
+                        style = ScoutrType.monoCaption,
+                        color = ScoutrComponentTokens.criticalCaption,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
                 if (busy) {
-                    Spacer(Modifier.height(8.dp))
+                    Spacer(Modifier.height(ScoutrSpace.sm))
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Spacer(Modifier.width(8.dp))
+                        Spacer(Modifier.width(ScoutrSpace.sm))
                         Text(
                             busyLabel ?: "Working…",
                             style = MaterialTheme.typography.labelSmall,
@@ -1047,8 +1051,8 @@ private fun OfflineBanner(onRetry: () -> Unit) {
         Modifier
             .fillMaxWidth()
             .padding(horizontal = 0.dp)
-            .background(MaterialTheme.colorScheme.errorContainer, RoundedCornerShape(8.dp))
-            .padding(horizontal = 12.dp, vertical = 8.dp),
+            .background(MaterialTheme.colorScheme.errorContainer, RoundedCornerShape(ScoutrRadii.md))
+            .padding(horizontal = ScoutrSpace.md, vertical = ScoutrSpace.sm),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(Icons.Default.WifiOff, contentDescription = null, tint = MaterialTheme.colorScheme.onErrorContainer)
@@ -1072,8 +1076,8 @@ private fun ErrorBanner(message: String, onDismiss: () -> Unit) {
         Modifier
             .fillMaxWidth()
             .padding(horizontal = 0.dp)
-            .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp))
-            .padding(horizontal = 12.dp, vertical = 8.dp),
+            .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(ScoutrRadii.md))
+            .padding(horizontal = ScoutrSpace.md, vertical = ScoutrSpace.sm),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(Icons.Default.Refresh, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)

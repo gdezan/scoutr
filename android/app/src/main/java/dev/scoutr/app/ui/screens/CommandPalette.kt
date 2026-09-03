@@ -1,5 +1,6 @@
 package dev.scoutr.app.ui.screens
 
+import dev.scoutr.app.ui.theme.ScoutrSpace
 import dev.scoutr.app.ui.theme.ScoutrMono
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -109,14 +110,14 @@ fun CommandPalette(
             Row(
                 Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                    .padding(horizontal = ScoutrSpace.md, vertical = ScoutrSpace.sm),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 if (hostAlias != null) {
                     Text(
                         hostAlias,
                         style = dev.scoutr.app.ui.theme.ScoutrType.monoMeta,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
                         modifier = Modifier.padding(end = 6.dp),
                     )
@@ -126,7 +127,7 @@ fun CommandPalette(
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                Spacer(Modifier.width(8.dp))
+                Spacer(Modifier.width(ScoutrSpace.sm))
                 ScoutrTextField(
                     value = ui.query,
                     onValueChange = viewModel::setQuery,
@@ -148,7 +149,7 @@ fun CommandPalette(
                     ui.error ?: "",
                     color = MaterialTheme.colorScheme.error,
                     style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier.padding(16.dp),
+                    modifier = Modifier.padding(ScoutrSpace.lg),
                 )
             }
             if (ui.loading && ui.results.isEmpty()) {
@@ -217,7 +218,7 @@ private fun PaletteRow(
         Modifier
             .fillMaxWidth()
             .clickable(enabled = !busy, onClick = onOpen)
-            .padding(horizontal = 16.dp, vertical = 12.dp),
+            .padding(horizontal = ScoutrSpace.lg, vertical = ScoutrSpace.md),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(
@@ -225,7 +226,7 @@ private fun PaletteRow(
             contentDescription = null,
             tint = if (isAgent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        Spacer(Modifier.width(12.dp))
+        Spacer(Modifier.width(ScoutrSpace.md))
         Column(Modifier.weight(1f)) {
             Text(
                 result.title,

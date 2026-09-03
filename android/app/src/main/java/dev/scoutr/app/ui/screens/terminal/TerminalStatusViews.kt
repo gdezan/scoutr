@@ -1,5 +1,6 @@
 package dev.scoutr.app.ui.screens.terminal
 
+import dev.scoutr.app.ui.theme.ScoutrSpace
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -21,6 +22,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import dev.scoutr.app.state.TerminalUiState
 import dev.scoutr.app.ui.components.ConfirmDialog
+import dev.scoutr.app.ui.theme.ScoutrSemantic
 
 /**
  * Overlay states for the terminal area: connecting, failed (retry), unsupported,
@@ -84,7 +86,7 @@ private fun FailedOverlay(message: String, retryable: Boolean, onRetry: () -> Un
                 color = MaterialTheme.colorScheme.error,
                 fontWeight = FontWeight.SemiBold,
             )
-            Spacer(Modifier.size(8.dp))
+            Spacer(Modifier.size(ScoutrSpace.sm))
             Text(
                 message,
                 style = MaterialTheme.typography.bodySmall,
@@ -109,7 +111,7 @@ private fun UnsupportedOverlay(explanation: String) {
                 color = MaterialTheme.colorScheme.error,
                 fontWeight = FontWeight.SemiBold,
             )
-            Spacer(Modifier.size(8.dp))
+            Spacer(Modifier.size(ScoutrSpace.sm))
             Text(
                 explanation,
                 style = MaterialTheme.typography.bodySmall,
@@ -129,7 +131,7 @@ private fun EmptyOverlay(paneCount: Int, onRetry: () -> Unit) {
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold,
             )
-            Spacer(Modifier.size(8.dp))
+            Spacer(Modifier.size(ScoutrSpace.sm))
             Text(
                 if (paneCount == 0)
                     "Create a pane in the hierarchy drawer to get started."
@@ -149,7 +151,7 @@ private fun EmptyOverlay(paneCount: Int, onRetry: () -> Unit) {
 @Composable
 private fun BoxCenter(content: @Composable () -> Unit) {
     androidx.compose.foundation.layout.Box(
-        Modifier.fillMaxSize().padding(24.dp),
+        Modifier.fillMaxSize().padding(ScoutrSpace.xl),
         contentAlignment = Alignment.Center,
     ) { content() }
 }
@@ -181,10 +183,10 @@ internal fun PaneClosedNotice(paneName: String?, onOpenDrawer: () -> Unit) {
     Surface(
         color = MaterialTheme.colorScheme.surfaceContainer,
         shape = MaterialTheme.shapes.medium,
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = ScoutrSpace.md, vertical = ScoutrSpace.sm),
     ) {
         Row(
-            Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+            Modifier.padding(horizontal = ScoutrSpace.md, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
@@ -201,26 +203,49 @@ internal fun PaneClosedNotice(paneName: String?, onOpenDrawer: () -> Unit) {
 /** Small status chip for the compact top bar. */
 @Composable
 internal fun TerminalStatusChip(state: TerminalUiState) {
-    val (label, color) = when (val c = state.connection) {
+    val (label, containerColor, contentColor) = when (val connection = state.connection) {
         is dev.scoutr.app.state.TerminalConnectionState.Ready ->
-            if (c.writable) "Control" to MaterialTheme.colorScheme.primary
-            else "Observing" to MaterialTheme.colorScheme.onSurfaceVariant
+            if (connection.writable) {
+                Triple("Control", ScoutrSemantic.live.container, ScoutrSemantic.live.onContainer)
+            } else {
+                Triple(
+                    "Observing",
+                    MaterialTheme.colorScheme.surfaceContainerHigh,
+                    MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         is dev.scoutr.app.state.TerminalConnectionState.Connecting,
         is dev.scoutr.app.state.TerminalConnectionState.Reconnecting,
-        -> "Connecting" to MaterialTheme.colorScheme.onSurfaceVariant
+        -> Triple(
+            "Connecting",
+            MaterialTheme.colorScheme.surfaceContainerHigh,
+            MaterialTheme.colorScheme.onSurfaceVariant,
+        )
         is dev.scoutr.app.state.TerminalConnectionState.Failed,
         is dev.scoutr.app.state.TerminalConnectionState.Unsupported,
-        -> "Unavailable" to MaterialTheme.colorScheme.error
-        is dev.scoutr.app.state.TerminalConnectionState.Closed -> "Closed" to MaterialTheme.colorScheme.onSurfaceVariant
-        is dev.scoutr.app.state.TerminalConnectionState.Idle -> "Idle" to MaterialTheme.colorScheme.onSurfaceVariant
+        -> Triple(
+            "Unavailable",
+            ScoutrSemantic.critical.container,
+            ScoutrSemantic.critical.onContainer,
+        )
+        is dev.scoutr.app.state.TerminalConnectionState.Closed -> Triple(
+            "Closed",
+            MaterialTheme.colorScheme.surfaceContainerHigh,
+            MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        is dev.scoutr.app.state.TerminalConnectionState.Idle -> Triple(
+            "Idle",
+            MaterialTheme.colorScheme.surfaceContainerHigh,
+            MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
-    Surface(color = color.copy(alpha = 0.14f), shape = MaterialTheme.shapes.small) {
+    Surface(color = containerColor, shape = MaterialTheme.shapes.small) {
         Text(
             label,
             style = MaterialTheme.typography.labelSmall,
-            color = color,
+            color = contentColor,
             fontWeight = FontWeight.SemiBold,
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+            modifier = Modifier.padding(horizontal = ScoutrSpace.sm, vertical = 3.dp),
         )
     }
 }

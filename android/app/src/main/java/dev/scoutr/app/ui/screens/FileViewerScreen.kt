@@ -1,5 +1,7 @@
 package dev.scoutr.app.ui.screens
 
+import dev.scoutr.app.ui.theme.ScoutrBorder
+import dev.scoutr.app.ui.theme.ScoutrSpace
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -73,7 +75,7 @@ fun FileViewerScreen(
 @Composable
 private fun FileViewerHeader(file: String, cwd: String, onRefresh: () -> Unit, onBack: () -> Unit) {
     Row(
-        Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(horizontal = 8.dp, vertical = 6.dp),
+        Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(horizontal = ScoutrSpace.sm, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         IconButton(onClick = onBack) {
@@ -114,19 +116,19 @@ private fun FileViewerBody(file: String, body: FileReadResponse) {
         else -> {
             val scrollState = rememberScrollState()
             Column(
-                Modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
+                Modifier.fillMaxSize().padding(horizontal = ScoutrSpace.md, vertical = ScoutrSpace.md),
+                verticalArrangement = Arrangement.spacedBy(ScoutrSpace.sm),
             ) {
                 FileTypeBar(file)
                 Surface(
                     modifier = Modifier.fillMaxWidth().weight(1f).testTag("file_viewer_content"),
                     color = MaterialTheme.colorScheme.surface,
                     shape = MaterialTheme.shapes.medium,
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                    border = BorderStroke(ScoutrBorder.hairline, MaterialTheme.colorScheme.outlineVariant),
                 ) {
                     Box(Modifier.fillMaxSize().verticalScroll(scrollState)) {
                         SelectionContainer {
-                            Column(Modifier.fillMaxWidth().padding(16.dp)) {
+                            Column(Modifier.fillMaxWidth().padding(ScoutrSpace.lg)) {
                                 key(file) {
                                     when {
                                         isMarkdownFile(file) -> AssistantMarkdown(
@@ -168,7 +170,7 @@ private fun FileTypeBar(file: String) {
     Row(
         Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(ScoutrSpace.sm),
     ) {
         Icon(
             Icons.Default.Description,
@@ -204,7 +206,7 @@ private fun PlainFileText(content: String) {
 
 @Composable
 private fun ViewerMessage(title: String, detail: String) {
-    Box(Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
+    Box(Modifier.fillMaxSize().padding(ScoutrSpace.xl), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Text(title, style = MaterialTheme.typography.titleMedium)
             Spacer(Modifier.height(6.dp))
@@ -223,7 +225,7 @@ private fun ViewerWarning(title: String, detail: String) {
     Surface(
         color = MaterialTheme.colorScheme.tertiaryContainer,
         shape = MaterialTheme.shapes.small,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.tertiary),
+        border = BorderStroke(ScoutrBorder.hairline, MaterialTheme.colorScheme.tertiary),
         modifier = Modifier.fillMaxWidth(),
     ) {
         Row(Modifier.fillMaxWidth().padding(10.dp), verticalAlignment = Alignment.Top) {
@@ -233,7 +235,7 @@ private fun ViewerWarning(title: String, detail: String) {
                 tint = MaterialTheme.colorScheme.tertiary,
                 modifier = Modifier.size(17.dp),
             )
-            Column(Modifier.padding(start = 8.dp)) {
+            Column(Modifier.padding(start = ScoutrSpace.sm)) {
                 Text(title, style = MaterialTheme.typography.labelLarge)
                 Text(detail, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
@@ -243,7 +245,7 @@ private fun ViewerWarning(title: String, detail: String) {
 
 @Composable
 private fun ViewerFailure(reason: String, onRetry: () -> Unit) {
-    Box(Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
+    Box(Modifier.fillMaxSize().padding(ScoutrSpace.xl), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Text("Could not read file", style = MaterialTheme.typography.titleMedium)
             Spacer(Modifier.height(6.dp))

@@ -1,5 +1,9 @@
 package dev.scoutr.app.ui.screens
 
+import dev.scoutr.app.ui.theme.ScoutrSemantic
+import dev.scoutr.app.ui.theme.ScoutrRadii
+import dev.scoutr.app.ui.theme.ScoutrBorder
+import dev.scoutr.app.ui.theme.ScoutrSpace
 import dev.scoutr.app.ui.theme.ScoutrMono
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
@@ -384,7 +388,7 @@ fun ChatScreen(
                     sendError,
                     color = MaterialTheme.colorScheme.error,
                     style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier.padding(horizontal = 16.dp),
+                    modifier = Modifier.padding(horizontal = ScoutrSpace.lg),
                 )
             }
             // An ask answered in the terminal (or on another device) takes any
@@ -400,7 +404,7 @@ fun ChatScreen(
                     askNotice,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier.padding(horizontal = 16.dp).testTag("ask_notice"),
+                    modifier = Modifier.padding(horizontal = ScoutrSpace.lg).testTag("ask_notice"),
                 )
             }
             ChatComposer(
@@ -608,14 +612,14 @@ private fun ChatHeader(
                         .testTag("chat_tasks"),
                 ) {
                     Row(
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                        modifier = Modifier.padding(horizontal = ScoutrSpace.sm, vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(4.dp),
                     ) {
                         Icon(
                             Icons.Default.Checklist,
                             contentDescription = "Tasks",
-                            modifier = Modifier.size(16.dp),
+                            modifier = Modifier.size(ScoutrSpace.lg),
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                         Text("$completed/${visibleTasks.size}", style = ScoutrType.monoFact)
@@ -716,7 +720,7 @@ private fun ChatHeader(
                 .fillMaxWidth()
                 .horizontalScroll(rememberScrollState())
                 .height(IntrinsicSize.Min)
-                .padding(start = 12.dp, end = 12.dp, bottom = 10.dp),
+                .padding(start = ScoutrSpace.md, end = ScoutrSpace.md, bottom = 10.dp),
             horizontalArrangement = Arrangement.spacedBy(2.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -762,7 +766,7 @@ private fun ChatHeader(
                 )
             }
         }
-        HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f))
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
     }
 }
 
@@ -788,14 +792,14 @@ private fun AgentTasksSheet(tasks: List<AgentTask>, onDismiss: () -> Unit) {
                 .fillMaxWidth()
                 .heightIn(max = 640.dp)
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
+                .padding(horizontal = ScoutrSpace.lg, vertical = ScoutrSpace.sm),
+            verticalArrangement = Arrangement.spacedBy(ScoutrSpace.lg),
         ) {
             Text("Tasks", style = MaterialTheme.typography.titleLarge)
             AgentTaskSection("IN PROGRESS", inProgress, byId)
             AgentTaskSection("PENDING", pending, byId)
             if (completed.isNotEmpty()) {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(ScoutrSpace.sm)) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -818,7 +822,7 @@ private fun AgentTasksSheet(tasks: List<AgentTask>, onDismiss: () -> Unit) {
                     }
                 }
             }
-            Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.height(ScoutrSpace.lg))
         }
     }
 }
@@ -830,7 +834,7 @@ private fun AgentTaskSection(
     tasksById: Map<String, AgentTask>,
 ) {
     if (tasks.isEmpty()) return
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(ScoutrSpace.sm)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(label, style = ScoutrType.monoSection, modifier = Modifier.weight(1f))
             Text(tasks.size.toString(), style = ScoutrType.monoFact)
@@ -850,14 +854,14 @@ private fun AgentTaskRow(task: AgentTask, blocked: Boolean) {
         modifier = Modifier.fillMaxWidth().testTag("task_row"),
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+            modifier = Modifier.padding(horizontal = ScoutrSpace.md, vertical = 10.dp),
             horizontalArrangement = Arrangement.spacedBy(10.dp),
             verticalAlignment = Alignment.Top,
         ) {
             Box(
                 Modifier
                     .padding(top = 5.dp)
-                    .size(8.dp)
+                    .size(ScoutrSpace.sm)
                     .background(
                         if (task.status == "completed") MaterialTheme.colorScheme.primary
                         else MaterialTheme.colorScheme.onSurfaceVariant,
@@ -1366,7 +1370,7 @@ fun ChatList(
             visible = notAtBottom && scrollJob?.isActive != true,
             enter = fadeIn(animationSpec = tween(ScoutrMotion.DURATION_ARRIVE)),
             exit = fadeOut(animationSpec = tween(ScoutrMotion.DURATION_ARRIVE)),
-            modifier = Modifier.align(Alignment.BottomEnd).padding(end = 16.dp, bottom = 10.dp),
+            modifier = Modifier.align(Alignment.BottomEnd).padding(end = ScoutrSpace.lg, bottom = 10.dp),
         ) {
             FloatingActionButton(
                 onClick = {
@@ -1528,14 +1532,14 @@ private fun PendingUserBubble(
         skill = presentation.skill,
         text = presentation.text,
         bubbleTestTag = "pending_user_bubble",
-        bubbleShape = RoundedCornerShape(8.dp),
+        bubbleShape = RoundedCornerShape(ScoutrRadii.md),
         selectable = false,
         modifier = modifier,
     ) {
         when (message.state) {
             MessageDeliveryState.SENT -> Unit
             MessageDeliveryState.QUEUED -> Row(
-                modifier = Modifier.padding(end = 8.dp, top = 2.dp).testTag("pending_message_queued"),
+                modifier = Modifier.padding(end = ScoutrSpace.sm, top = 2.dp).testTag("pending_message_queued"),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
@@ -1729,7 +1733,7 @@ private fun ThinkingBlock(text: String, modifier: Modifier = Modifier) {
                 MaterialTheme.colorScheme.surfaceContainer,
                 RoundedCornerShape(4.dp),
             )
-            .padding(horizontal = 12.dp, vertical = 10.dp)
+            .padding(horizontal = ScoutrSpace.md, vertical = 10.dp)
             .testTag("thinking_block"),
     ) {
         Text(
@@ -1873,7 +1877,7 @@ private fun ToolCallChip(
         PressTintSurface(
             onClick = onToggle,
             color = androidx.compose.ui.graphics.Color.Transparent,
-            pressedColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
+            pressedColor = MaterialTheme.colorScheme.surfaceContainerHigh,
             modifier = Modifier.fillMaxWidth().testTag("tool_chip"),
         ) {
         Row(
@@ -1890,7 +1894,7 @@ private fun ToolCallChip(
                     append(" ")
                     withStyle(
                         SpanStyle(
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                             fontWeight = FontWeight.Normal,
                         ),
                     ) {
@@ -1903,14 +1907,14 @@ private fun ToolCallChip(
                 modifier = Modifier.weight(1f),
             )
             if (fileEdit != null) {
-                Spacer(Modifier.width(8.dp))
+                Spacer(Modifier.width(ScoutrSpace.sm))
                 DiffStatBadge(fileEdit)
             }
-            Spacer(Modifier.width(8.dp))
+            Spacer(Modifier.width(ScoutrSpace.sm))
             Icon(
                 imageVector = if (expanded) Icons.Filled.KeyboardArrowDown else Icons.AutoMirrored.Filled.KeyboardArrowRight,
                 contentDescription = if (expanded) "Collapse $name" else "Expand $name",
-                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.size(14.dp),
             )
         }
@@ -1939,7 +1943,7 @@ private fun TimelineNode(isError: Boolean, modifier: Modifier = Modifier) {
         Box(
             node
                 .background(MaterialTheme.colorScheme.surfaceVariant, CircleShape)
-                .border(1.dp, MaterialTheme.colorScheme.outline, CircleShape),
+                .border(ScoutrBorder.hairline, MaterialTheme.colorScheme.outline, CircleShape),
         )
     }
 }
@@ -1954,7 +1958,7 @@ private val SPINE_NODE_X = 2.dp
 
 /** Gap between rows on the rail, and between the rail and the prose above it. */
 private val SPINE_ROW_GAP = 11.dp
-private val SPINE_RUN_GAP = 16.dp
+private val SPINE_RUN_GAP = ScoutrSpace.lg
 
 @Composable
 private fun ToolResultChip(
@@ -2001,8 +2005,8 @@ private fun ToolResultChip(
                 Text(
                     output,
                     style = ScoutrType.monoCode(toolOutputFontSizeSp),
-                    color = if (isError) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f)
-                    else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
+                    color = if (isError) MaterialTheme.colorScheme.onSurface
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = if (expanded) Int.MAX_VALUE else 2,
                     overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                 )
@@ -2046,7 +2050,7 @@ private fun FileEditDiff(
         Text(
             fileEditDisplayPath(edit),
             style = ScoutrType.monoCode(fontSizeSp),
-            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
             maxLines = 1,
             overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
         )
@@ -2064,7 +2068,7 @@ private fun FileEditDiff(
             Text(
                 "⋯ diff truncated",
                 style = ScoutrType.monoCode(fontSizeSp),
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
     }
@@ -2085,12 +2089,12 @@ private fun ToolChipContainer(
     PressTintSurface(
         onClick = onClick,
         shape = RoundedCornerShape(4.dp),
-        color = if (isError) MaterialTheme.colorScheme.error.copy(alpha = 0.08f)
+        color = if (isError) MaterialTheme.colorScheme.errorContainer
         else MaterialTheme.colorScheme.surfaceContainer,
-        pressedColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.65f),
+        pressedColor = MaterialTheme.colorScheme.surfaceContainerHigh,
         modifier = modifier.fillMaxWidth(),
     ) {
-        Column(Modifier.padding(horizontal = 10.dp, vertical = 8.dp)) {
+        Column(Modifier.padding(horizontal = 10.dp, vertical = ScoutrSpace.sm)) {
             content()
         }
     }
@@ -2203,14 +2207,14 @@ internal fun ChatComposer(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 8.dp)
+                .padding(horizontal = ScoutrSpace.md, vertical = ScoutrSpace.sm)
                 .clip(RoundedCornerShape(6.dp))
                 .background(MaterialTheme.colorScheme.surfaceContainerHigh)
                 .border(
                     width = 1.dp,
                     // Focus is the one accent stroke allowed here; the filled
                     // send square stays the only accent *surface*.
-                    color = if (focused) MaterialTheme.colorScheme.primary.copy(alpha = 0.55f)
+                    color = if (focused) ScoutrSemantic.live.muted
                     else MaterialTheme.colorScheme.outline,
                     shape = RoundedCornerShape(6.dp),
                 )
@@ -2245,7 +2249,7 @@ internal fun ChatComposer(
                             Text(
                                 placeholder,
                                 style = MaterialTheme.typography.bodyLarge,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
                         inner()
@@ -2374,9 +2378,9 @@ private fun AttachmentChip(
         }
     }
     Surface(
-        shape = RoundedCornerShape(8.dp),
+        shape = RoundedCornerShape(ScoutrRadii.md),
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp).testTag("attachment_chip"),
+        modifier = Modifier.padding(horizontal = ScoutrSpace.lg, vertical = 4.dp).testTag("attachment_chip"),
     ) {
         Row(
             Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
@@ -2394,17 +2398,17 @@ private fun AttachmentChip(
                 Spacer(Modifier.width(10.dp))
             }
             if (uploading) {
-                Spacer(Modifier.width(8.dp))
+                Spacer(Modifier.width(ScoutrSpace.sm))
                 Text("Uploading image…", style = MaterialTheme.typography.labelMedium)
             } else {
                 Text("Image attached", style = MaterialTheme.typography.labelMedium)
             }
-            Spacer(Modifier.width(8.dp))
+            Spacer(Modifier.width(ScoutrSpace.sm))
             IconButton(onClick = onClear, modifier = Modifier.width(28.dp).height(28.dp)) {
                 Icon(
                     Icons.Default.Close,
                     contentDescription = "Remove attachment",
-                    modifier = Modifier.size(16.dp),
+                    modifier = Modifier.size(ScoutrSpace.lg),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }

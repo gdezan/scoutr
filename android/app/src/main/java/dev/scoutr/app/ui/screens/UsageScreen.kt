@@ -1,7 +1,9 @@
 package dev.scoutr.app.ui.screens
 
+import dev.scoutr.app.ui.theme.ScoutrSpace
+import dev.scoutr.app.ui.motion.ScoutrMotion
+import dev.scoutr.app.ui.motion.useReduceMotion
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -17,6 +19,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import dev.scoutr.app.ui.theme.ScoutrType
+import dev.scoutr.app.ui.theme.ScoutrSemantic
+import dev.scoutr.app.ui.theme.ScoutrComponentTokens
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Card
@@ -110,8 +114,8 @@ internal fun UsageContent(
             Modifier
                 .fillMaxSize()
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 12.dp)
-                .padding(top = 8.dp, bottom = 12.dp),
+                .padding(horizontal = ScoutrSpace.md)
+                .padding(top = ScoutrSpace.sm, bottom = ScoutrSpace.md),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             when (val load = ui.providers) {
@@ -152,7 +156,7 @@ private fun ProviderCard(provider: UsageSnapshot, nowMillis: Long, onRefresh: ()
         ) {
             Row(
                 Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                horizontalArrangement = Arrangement.spacedBy(ScoutrSpace.md),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
@@ -234,7 +238,7 @@ private fun ProviderCard(provider: UsageSnapshot, nowMillis: Long, onRefresh: ()
 private fun ProviderError(message: String, hasCachedData: Boolean, onRefresh: () -> Unit) {
     Row(
         Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(ScoutrSpace.sm),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
@@ -252,19 +256,26 @@ private fun ProviderError(message: String, hasCachedData: Boolean, onRefresh: ()
 @Composable
 private fun UsageBar(window: UsageWindow, provider: String, nowSeconds: Long) {
     val percent = window.usedPercent.coerceIn(0.0, 100.0)
+    val reduceMotion = useReduceMotion()
     val progress by animateFloatAsState(
         targetValue = (percent / 100.0).toFloat(),
-        animationSpec = tween(durationMillis = 300),
+        animationSpec = ScoutrMotion.progressSpec(reduceMotion),
         label = "usage progress",
     )
-    val color = when {
-        percent >= 90 -> MaterialTheme.colorScheme.error
-        percent >= 75 -> MaterialTheme.colorScheme.tertiary
-        else -> MaterialTheme.colorScheme.secondary
+    val timeProgress = quotaTimeProgress(window, nowSeconds)
+    val threshold = usageThreshold(percent, timeProgress)
+    val labelColor = when (threshold) {
+        UsageThreshold.OnPace -> MaterialTheme.colorScheme.onSurfaceVariant
+        UsageThreshold.Ahead -> ScoutrSemantic.warning.muted
+        UsageThreshold.Critical -> ScoutrComponentTokens.criticalCaption
     }
-    // Teal is data, so it stays on the meter alone; only a crossed threshold is
-    // allowed to color the label and the number (DESIGN.md, "Usage").
-    val elevated = percent >= 75
+    val percentColor = if (threshold == UsageThreshold.OnPace) {
+        MaterialTheme.colorScheme.onSurface
+    } else {
+        labelColor
+    }
+    val barColor = ScoutrSemantic.data500
+    // Usage amount is always teal; warning and critical hues belong to labels only.
     val reset = resetLabel(window.resetAt, nowSeconds)
     val amount = amountLabel(window)
     val description = buildString {
@@ -282,7 +293,7 @@ private fun UsageBar(window: UsageWindow, provider: String, nowSeconds: Long) {
     ) {
         Row(
             Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            horizontalArrangement = Arrangement.spacedBy(ScoutrSpace.md),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
@@ -291,7 +302,7 @@ private fun UsageBar(window: UsageWindow, provider: String, nowSeconds: Long) {
                 // takes the threshold color only once the threshold is crossed.
                 text = windowTitle(window.label).uppercase(Locale.US),
                 style = ScoutrType.monoSection,
-                color = if (elevated) color else MaterialTheme.colorScheme.onSurfaceVariant,
+                color = labelColor,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
@@ -299,7 +310,7 @@ private fun UsageBar(window: UsageWindow, provider: String, nowSeconds: Long) {
             Text(
                 text = "${percent.roundToInt()}%",
                 style = MaterialTheme.typography.labelMedium,
-                color = if (elevated) color else MaterialTheme.colorScheme.onSurface,
+                color = percentColor,
                 maxLines = 1,
             )
         }
@@ -325,13 +336,13 @@ private fun UsageBar(window: UsageWindow, provider: String, nowSeconds: Long) {
                         .height(4.dp)
                         .align(Alignment.CenterStart)
                         .clip(RoundedCornerShape(2.dp))
-                        .background(color),
+                        .background(barColor),
                 )
             }
-            quotaTimeProgress(window, nowSeconds)?.let { timeProgress ->
+            timeProgress?.let { progressThroughWindow ->
                 Box(
                     Modifier
-                        .padding(start = maxWidth * timeProgress)
+                        .padding(start = maxWidth * progressThroughWindow)
                         .width(1.dp)
                         .fillMaxHeight()
                         .background(MaterialTheme.colorScheme.onSurfaceVariant)
@@ -341,12 +352,12 @@ private fun UsageBar(window: UsageWindow, provider: String, nowSeconds: Long) {
         }
         if (reset != null || amount != null) {
             Row(
-                Modifier.fillMaxWidth().padding(top = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                Modifier.fillMaxWidth().padding(top = ScoutrSpace.sm),
+                horizontalArrangement = Arrangement.spacedBy(ScoutrSpace.md),
             ) {
                 Text(
                     text = reset.orEmpty(),
-                    style = ScoutrType.monoMeta,
+                    style = ScoutrType.monoCaption,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -354,7 +365,7 @@ private fun UsageBar(window: UsageWindow, provider: String, nowSeconds: Long) {
                 )
                 Text(
                     text = amount.orEmpty(),
-                    style = ScoutrType.monoMeta,
+                    style = ScoutrType.monoCaption,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.End,
                     maxLines = 1,
@@ -385,7 +396,7 @@ private fun BalanceRow(window: UsageWindow) {
     ) {
         Row(
             Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(16.dp),
+            horizontalArrangement = Arrangement.spacedBy(ScoutrSpace.lg),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -441,8 +452,8 @@ private fun UsageError(message: String, onRefresh: () -> Unit) {
         modifier = Modifier.fillMaxWidth().testTag("usage_error"),
     ) {
         Row(
-            Modifier.fillMaxWidth().padding(start = 16.dp, top = 10.dp, bottom = 10.dp, end = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            Modifier.fillMaxWidth().padding(start = ScoutrSpace.lg, top = 10.dp, bottom = 10.dp, end = ScoutrSpace.sm),
+            horizontalArrangement = Arrangement.spacedBy(ScoutrSpace.md),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
@@ -463,7 +474,7 @@ private fun UsageEmpty(onRefresh: () -> Unit) {
     Column(
         Modifier.fillMaxWidth().padding(vertical = 40.dp).testTag("usage_empty"),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(ScoutrSpace.sm),
     ) {
         Text("No usage data", style = MaterialTheme.typography.titleMedium)
         Text(
@@ -491,6 +502,15 @@ internal fun quotaTimeProgress(window: UsageWindow, nowSeconds: Long): Float? {
     val resetAt = window.resetAt ?: return null
     val periodStart = resetAt - duration
     return ((nowSeconds - periodStart).toDouble() / duration).coerceIn(0.0, 1.0).toFloat()
+}
+
+internal enum class UsageThreshold { OnPace, Ahead, Critical }
+
+/** Classifies quota labels without changing the teal usage-bar fill. */
+internal fun usageThreshold(usedPercent: Double, timeProgress: Float?): UsageThreshold = when {
+    usedPercent >= 90.0 -> UsageThreshold.Critical
+    timeProgress != null && usedPercent > timeProgress * 100.0 + 20.0 -> UsageThreshold.Ahead
+    else -> UsageThreshold.OnPace
 }
 
 /**

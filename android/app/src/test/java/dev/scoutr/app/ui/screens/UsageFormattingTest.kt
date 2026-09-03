@@ -49,6 +49,14 @@ class UsageFormattingTest {
     }
 
     @Test
+    fun colorsUsageThresholdLabelsWithoutChangingBarSemantics() {
+        assertEquals(UsageThreshold.OnPace, usageThreshold(38.0, 0.30f))
+        assertEquals(UsageThreshold.Ahead, usageThreshold(82.0, 0.50f))
+        assertEquals(UsageThreshold.Critical, usageThreshold(94.0, 0.90f))
+        assertEquals(UsageThreshold.OnPace, usageThreshold(82.0, null))
+    }
+
+    @Test
     fun derivesDeepseekPricingFromTheUtcClock() {
         // Peak windows are 01:00–04:00 and 06:00–10:00 UTC; everything else is off-peak.
         assertEquals(DeepseekPricing(true, "peak pricing · off-peak at 04:00 UTC"), deepseekPricing(hourUtc(2)))

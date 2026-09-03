@@ -1,5 +1,6 @@
 package dev.scoutr.app.ui.screens
 
+import dev.scoutr.app.ui.theme.ScoutrSpace
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -145,7 +146,7 @@ fun SessionPanel(
                     indicator = { PullRefreshIndicator(refreshState, ui.isRefreshing) },
                 ) {
                     LazyColumn(
-                        modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp),
+                        modifier = Modifier.fillMaxSize().padding(horizontal = ScoutrSpace.md),
                         verticalArrangement = Arrangement.spacedBy(2.dp),
                         // Clear the panel's own FAB.
                         contentPadding = PaddingValues(bottom = 96.dp),
@@ -182,7 +183,7 @@ fun SessionPanel(
                         .align(Alignment.BottomEnd)
                         // The destination row at the panel's foot clears the
                         // nav bar; the FAB keeps only its 16dp stand-off.
-                        .padding(16.dp)
+                        .padding(ScoutrSpace.lg)
                         .testTag("panel_new_session"),
                 ) {
                     Icon(Icons.Default.Add, contentDescription = "New session")

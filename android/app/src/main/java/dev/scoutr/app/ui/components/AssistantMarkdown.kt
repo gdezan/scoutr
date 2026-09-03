@@ -1,5 +1,6 @@
 package dev.scoutr.app.ui.components
 
+import dev.scoutr.app.ui.theme.ScoutrSpace
 import dev.scoutr.app.data.AppearancePreferencesStore
 import dev.scoutr.app.ui.theme.ScoutrMono
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -72,10 +73,10 @@ fun AssistantMarkdown(
             ),
         ),
         padding = markdownPadding(
-            block = 8.dp,
+            block = ScoutrSpace.sm,
             listItemTop = 2.dp,
             listItemBottom = 2.dp,
-            listIndent = 12.dp,
+            listIndent = ScoutrSpace.md,
         ),
     )
 }

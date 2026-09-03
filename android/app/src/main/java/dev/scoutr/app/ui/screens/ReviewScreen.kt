@@ -1,5 +1,6 @@
 package dev.scoutr.app.ui.screens
 
+import dev.scoutr.app.ui.theme.ScoutrSpace
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -52,6 +53,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -269,7 +271,7 @@ private fun PickerMode(
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.primary,
                 )
-                Spacer(Modifier.width(12.dp))
+                Spacer(Modifier.width(ScoutrSpace.md))
                 Column(Modifier.weight(1f).testTag("review_resume_last")) {
                     Text(
                         ui.lastRepoPath?.substringAfterLast('/') ?: "",
@@ -313,7 +315,7 @@ private fun PickerMode(
                 enabled = pathText.isNotBlank() || ui.dirPath.isNotBlank(),
                 modifier = Modifier.testTag("review_select"),
             ) {
-                Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
+                Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(ScoutrSpace.lg))
                 Spacer(Modifier.width(4.dp))
                 Text("Review this folder")
             }
@@ -325,7 +327,7 @@ private fun PickerMode(
                 pickerError,
                 color = MaterialTheme.colorScheme.error,
                 style = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.padding(16.dp).testTag("review_picker_error"),
+                modifier = Modifier.padding(ScoutrSpace.lg).testTag("review_picker_error"),
             )
         }
         if (ui.dirs is Loadable.Loading) {
@@ -345,7 +347,7 @@ private fun PickerMode(
                             Modifier
                                 .fillMaxWidth()
                                 .clickable { viewModel.browseInto(dir) }
-                                .padding(vertical = 12.dp),
+                                .padding(vertical = ScoutrSpace.md),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Icon(
@@ -353,7 +355,7 @@ private fun PickerMode(
                                 contentDescription = null,
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
-                            Spacer(Modifier.width(12.dp))
+                            Spacer(Modifier.width(ScoutrSpace.md))
                             // A directory name is a path fragment, not a label (§9d).
                             Text(
                                 dir,
@@ -410,17 +412,17 @@ private fun ReviewMode(
                     diff.reason,
                     color = MaterialTheme.colorScheme.error,
                     style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier.padding(16.dp).testTag("review_diff_error"),
+                    modifier = Modifier.padding(ScoutrSpace.lg).testTag("review_diff_error"),
                 )
             is Loadable.Loading, Loadable.Idle -> CenteredLoading()
             is Loadable.Ready ->
                 if (rows.isEmpty()) {
-                    CenteredNote("No changes", "diff_no_changes")
+                    CenteredNote("No changes", "diff_no_changes", ScoutrType.displayEmpty)
                 } else {
                     LazyColumn(
                         Modifier.fillMaxWidth().weight(1f),
                         verticalArrangement = Arrangement.spacedBy(10.dp),
-                        contentPadding = PaddingValues(bottom = 24.dp),
+                        contentPadding = PaddingValues(bottom = ScoutrSpace.xl),
                     ) {
                         if (diff.value.truncated) {
                             item { TruncatedNote("file list truncated to 64 KiB — files past the cap are not listed") }
@@ -460,7 +462,7 @@ private fun ReviewMode(
 private fun StatStrip(ui: ReviewUiState, rows: List<ReviewFileRow>) {
     val stats: List<RepoDiffFileStat>? = (ui.diff as? Loadable.Ready)?.value?.stat
     Row(
-        Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 10.dp).testTag("review_stat_strip"),
+        Modifier.fillMaxWidth().padding(top = ScoutrSpace.sm, bottom = 10.dp).testTag("review_stat_strip"),
         horizontalArrangement = Arrangement.spacedBy(2.dp),
     ) {
         StatTile(
@@ -500,12 +502,12 @@ private fun StatTile(
         Text(
             value ?: "—",
             style = ScoutrType.monoFact,
-            color = if (value == null) MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f) else color,
+            color = if (value == null) MaterialTheme.colorScheme.onSurfaceVariant else color,
         )
         Text(
             label,
             style = ScoutrType.monoMeta,
-            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(top = 2.dp),
         )
     }
@@ -537,15 +539,15 @@ private fun FileTile(
             Modifier
                 .fillMaxWidth()
                 .clickable(onClick = onToggle)
-                .padding(horizontal = 12.dp, vertical = 10.dp),
+                .padding(horizontal = ScoutrSpace.md, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(ScoutrSpace.sm),
         ) {
             Icon(
                 if (expanded) Icons.Default.ExpandMore else Icons.Default.ChevronRight,
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(16.dp),
+                modifier = Modifier.size(ScoutrSpace.lg),
             )
             // Ellipsize the head, not the tail. Every path in a repo shares its
             // leading directories, so tail-truncation renders a screen of
@@ -572,7 +574,7 @@ private fun FileTile(
             // has nothing to toggle between.
             if (!row.untracked) {
                 Row(
-                    Modifier.fillMaxWidth().padding(start = 8.dp, end = 8.dp, bottom = 2.dp),
+                    Modifier.fillMaxWidth().padding(start = ScoutrSpace.sm, end = ScoutrSpace.sm, bottom = 2.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Spacer(Modifier.weight(1f))
@@ -628,7 +630,7 @@ private fun FileDiffContent(
                 load.reason,
                 color = MaterialTheme.colorScheme.error,
                 style = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.padding(12.dp),
+                modifier = Modifier.padding(ScoutrSpace.md),
             )
         is Loadable.Ready -> {
             val language = languageForPath(selectedFile)
@@ -638,7 +640,7 @@ private fun FileDiffContent(
                     lines,
                     language,
                     wrapLines,
-                    horizontalPadding = 12.dp,
+                    horizontalPadding = ScoutrSpace.md,
                     style = ScoutrType.monoCode(reviewFontSizeSp),
                 )
             }
@@ -672,19 +674,27 @@ private fun FileContent(
                 load.reason,
                 color = MaterialTheme.colorScheme.error,
                 style = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.padding(12.dp),
+                modifier = Modifier.padding(ScoutrSpace.md),
             )
         is Loadable.Ready -> {
             val body = load.value
             when {
-                !body.exists -> CenteredNote("File does not exist at ${ui.diffRef?.take(12)}", "diff_file_missing")
-                body.binary -> CenteredNote("Binary file", "diff_file_binary")
+                !body.exists -> CenteredNote(
+                    "File does not exist at ${ui.diffRef?.take(12)}",
+                    "diff_file_missing",
+                    MaterialTheme.typography.bodyMedium,
+                )
+                body.binary -> CenteredNote(
+                    "Binary file",
+                    "diff_file_binary",
+                    MaterialTheme.typography.bodyMedium,
+                )
                 else -> {
                     key(selectedFile) {
                         if (ui.viewMode == DiffViewMode.Preview && isMarkdownFile(selectedFile)) {
                             AssistantMarkdown(
                                 body.content,
-                                Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+                                Modifier.fillMaxWidth().padding(horizontal = ScoutrSpace.md),
                             )
                         } else {
                             val language = languageForPath(selectedFile)
@@ -692,7 +702,7 @@ private fun FileContent(
                                 body.content.split("\n"),
                                 language,
                                 wrapLines,
-                                horizontalPadding = 12.dp,
+                                horizontalPadding = ScoutrSpace.md,
                                 style = ScoutrType.monoCode(reviewFontSizeSp),
                             )
                         }
@@ -725,7 +735,7 @@ private fun HistorySheet(
 ) {
     var openBody by remember { mutableStateOf<String?>(null) }
     ModalBottomSheet(onDismissRequest = onDismiss, modifier = Modifier.testTag("commit_sheet")) {
-        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = ScoutrSpace.lg)) {
             HistoryRow(
                 title = "Working tree",
                 subtitle = "diff vs HEAD",
@@ -754,7 +764,7 @@ private fun HistorySheet(
                                             if (openBody == commit.hash) Icons.Default.ExpandMore else Icons.Default.ChevronRight,
                                             contentDescription = "Commit message",
                                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            modifier = Modifier.size(16.dp),
+                                            modifier = Modifier.size(ScoutrSpace.lg),
                                         )
                                     }
                                 }
@@ -778,7 +788,7 @@ private fun HistorySheet(
                     item { TruncatedNote("recent commits truncated") }
                 }
             }
-            Spacer(Modifier.height(24.dp))
+            Spacer(Modifier.height(ScoutrSpace.xl))
         }
     }
 }
@@ -825,7 +835,7 @@ private fun SectionLabel(title: String) {
     Text(
         title.uppercase(),
         style = ScoutrType.monoSection,
-        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.padding(top = 14.dp, bottom = 6.dp),
     )
 }
@@ -838,9 +848,14 @@ private fun CenteredLoading() {
 }
 
 @Composable
-private fun CenteredNote(text: String, tag: String) {
+private fun CenteredNote(text: String, tag: String, style: TextStyle) {
     Box(Modifier.fillMaxWidth().padding(vertical = 48.dp), contentAlignment = Alignment.Center) {
-        Text(text, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.testTag(tag))
+        Text(
+            text,
+            style = style,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.testTag(tag),
+        )
     }
 }
 
@@ -849,8 +864,8 @@ private fun TruncatedNote(text: String) {
     Text(
         text,
         style = MaterialTheme.typography.labelSmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(horizontal = ScoutrSpace.md, vertical = 6.dp),
     )
 }
 

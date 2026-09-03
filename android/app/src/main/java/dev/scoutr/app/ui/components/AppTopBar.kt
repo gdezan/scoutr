@@ -1,5 +1,6 @@
 package dev.scoutr.app.ui.components
 
+import dev.scoutr.app.ui.theme.ScoutrSpace
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
@@ -44,7 +45,7 @@ internal fun AppTopBar(
         // (reference §8b).
         navigationIcon = {
             if (showLockup) {
-                Box(Modifier.padding(start = 16.dp, end = 4.dp)) { ScoutrMark() }
+                Box(Modifier.padding(start = ScoutrSpace.lg, end = 4.dp)) { ScoutrMark() }
             }
         },
         title = {

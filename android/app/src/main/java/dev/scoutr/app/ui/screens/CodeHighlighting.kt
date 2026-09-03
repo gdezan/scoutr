@@ -1,5 +1,6 @@
 package dev.scoutr.app.ui.screens
 
+import dev.scoutr.app.ui.theme.ScoutrSpace
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Box
@@ -411,7 +412,7 @@ internal fun DiffLines(
     lines: List<String>,
     language: TextMateLanguage?,
     wrapLines: Boolean,
-    horizontalPadding: Dp = 16.dp,
+    horizontalPadding: Dp = ScoutrSpace.lg,
     style: TextStyle = MaterialTheme.typography.bodySmall,
 ) {
     val highlighter = rememberTextMateHighlighter()
@@ -438,7 +439,7 @@ internal fun DiffLines(
                     } else {
                         Row(Modifier.fillMaxWidth()) {
                             DiffPaneCell(pair.left, spans, DiffSide.Left, wrapLines, style, Modifier.weight(1f))
-                            Box(Modifier.width(1.dp).heightIn(min = 18.dp).background(MaterialTheme.colorScheme.outline.copy(alpha = 0.25f)))
+                            Box(Modifier.width(1.dp).heightIn(min = 18.dp).background(MaterialTheme.colorScheme.outlineVariant))
                             DiffPaneCell(pair.right, spans, DiffSide.Right, wrapLines, style, Modifier.weight(1f))
                         }
                     }
@@ -562,7 +563,7 @@ private fun RenderDiffLine(
                 text = lineNumber.toString(),
                 style = style,
                 fontFamily = ScoutrMono,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.width(34.dp).padding(horizontal = 4.dp),
                 maxLines = 1,
             )
@@ -585,7 +586,7 @@ internal fun CodeLines(
     lines: List<String>,
     language: TextMateLanguage?,
     wrapLines: Boolean,
-    horizontalPadding: Dp = 16.dp,
+    horizontalPadding: Dp = ScoutrSpace.lg,
     style: TextStyle = MaterialTheme.typography.bodySmall,
 ) {
     val highlighter = rememberTextMateHighlighter()

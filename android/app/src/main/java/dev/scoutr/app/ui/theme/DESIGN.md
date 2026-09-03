@@ -18,29 +18,51 @@ stay quiet and readable.
   or settled, red means the operator is needed or something failed, and amber
   means a warning or threshold. Teal belongs to Usage charts only.
 
-## Tokens (`ui/theme/Theme.kt`)
+## Tokens (`ui/theme/Tokens.kt`, `Theme.kt`)
+
+### Neutral and Material roles
 
 | Role | Value | Use |
 |---|---|---|
-| `background` | `#0B0C0E` | canvas, board, transcript |
-| `surface` | `#121316` | cards and panels |
-| `surfaceContainer` | `#16171B` | tiles and controls |
-| `surfaceContainerHighest` | `#1A1C20` | user bubbles, thinking blocks |
-| `surfaceVariant` | `#1B1D21` | quiet selected/secondary surfaces |
+| `neutral0` / `surfaceContainerLowest` | `#08090B` | deepest inset |
+| `neutral10` / `background` | `#0B0C0E` | canvas, board, transcript |
+| `neutral20` / `surface` | `#121316` | cards and panels |
+| `neutral40` / `surfaceContainer` | `#16171B` | tiles and controls |
+| `neutral60` / `surfaceContainerHigh` | `#1C1E22` | selected surfaces |
+| `neutral80` / `surfaceContainerHighest` | `#1E2025` | swipe bars, strong neutral bubbles |
+| `neutral100` / `surfaceElevated` | `#232529` | elevated semantic surface |
+| `surfaceVariant` | `#1B1D21` | quiet secondary surfaces |
 | `onSurface` | `#ECEDF0` | primary text |
-| `onSurfaceVariant` | `#A8AEB9` | secondary text and settled states |
-| `primary` | `#8DF08D` | live agent, AI-owned action, active send |
-| `primaryContainer` | `#12301A` | live/AI-owned container only |
-| `secondary` | `#2C6F72` | Usage data and charts only |
-| `error` | `#E5484D` | needs-you, failures, destructive actions |
-| `tertiary` | `#E8B84B` | warnings and high usage thresholds |
-| `outline` | `#363B43` | dividers and field borders |
-| `outlineVariant` | `#26292E` | quiet separators |
+| `onSurfaceVariant` | `#A8AEB9` | AA secondary text and settled states |
+| `outline` / `outlineVariant` | `#363B43` / `#26292E` | borders and quiet separators |
 
-Shapes are compact: 4dp extra-small, 6dp small, and 8dp medium/large. A
-status dot is a 9dp outlined ring with a 2.5dp stroke; it is never a filled
-circle. Pills are not a general-purpose component: use a bounded 6dp shape for
-status metadata and controls.
+### Semantic roles
+
+Every role exposes `color / on / container / onContainer / muted`. Screens consume
+`ScoutrSemantic`; raw `ScoutrPrimitive` values stay inside `ui/theme`.
+
+| Role | Stops | Use |
+|---|---|---|
+| `live` | `#8DF08D / #04241A / #12301A / #A6EFAD / #5AAD64` | live agent and AI-owned action |
+| `critical` | `#E5484D / #3A0B0C / #3A1719 / #FFDAD9 / #C03A3F` | needs-you, failures, destructive actions |
+| `warning` | `#E8B84B / #261A00 / #3B2900 / #FFDEA1 / #C49A2E` | warnings and thresholds |
+| `data` | `#3A9A9E / #002324 / #17383A / #B9E8E9 / #2C6F72` | Usage data only |
+| `diffAdded` | `#3FC9E8 / #00232B / #102B32 / #BDEFFD / #2A9AB3` | additions, never live state |
+| `diffRemoved` | `#FF6B70 / #3A0B0C / #3A1719 / #FFDAD9 / #C44A4F` | removals |
+
+`ScoutrComponentTokens.criticalCaption` is `#E95A5F`; it is the critical small-text
+color because it remains AA on both `surfaceContainer` and `surfaceContainerHigh`.
+
+Usage's sequential teal scale is `#0F3A3C`, `#164E50`, `#1E6466`, `#2C7A7E`,
+`#3A9A9E`, `#5ABAC0` (`data100`–`data600`). Bars stay teal; amber/red
+color only threshold labels.
+
+### Space, radius, border, and shape
+
+Spacing is `xs 4dp`, `sm 8dp`, `md 12dp`, `lg 16dp`, `xl 24dp`, `xxl 32dp`.
+Radii are `sm 6dp`, `md 8dp`, `lg 12dp`, `xl 16dp`; Material's extra-small
+shape remains 4dp. Borders are `hairline 1dp`, `outline 1.5dp`, `strong 2dp`.
+A status dot is a 9dp outlined ring with a 2.5dp stroke; it is never filled.
 
 ## Typography
 
@@ -49,6 +71,18 @@ status metadata and controls.
   output, model/provider identifiers, and measurements.
 - **JetBrains Mono** is bundled and used only by the full-screen terminal grid.
 - Mono is never used as decoration or for ordinary labels.
+- `monoCaption` is Martian Mono 8.5sp/13sp with +0.02sp tracking for reset, burn-rate, stale, and offline facts.
+- `displayEmpty` is Space Grotesk Bold 26sp/30sp with -0.6sp tracking for empty-state and detail-placeholder headings.
+- Tracking tokens are `tight -0.6sp`, `section +0.08sp`, and `caption +0.02sp`.
+
+## Motion tokens
+
+Durations are press 90ms, quick 140ms, normal 220ms, and slow 340ms. Standard,
+emphasized, and decelerate cubic-bezier easings cover finite transitions.
+`sheetSpec` exposes the 0.78 damping / 380 stiffness spring for app-owned sheet
+and drawer transitions. `LocalReduceMotion` makes every `ScoutrMotion` spec
+immediate; Material-owned transitions continue to follow the platform duration
+scale. `WorkingIndicator` remains the only app-owned looping animation.
 
 ## Components
 
@@ -93,7 +127,8 @@ splits:
 
 - **Breakpoint 840dp**, read from `BoxWithConstraints` in `ScoutrAppNav`. No
   window-size-class dependency; `ReadableContentColumn` already reads width the
-  same way.
+  same way. Above 2× font scale, use compact chrome even at wide widths so the
+  session panel cannot constrain enlarged text.
 - **Session panel, 320dp fixed**, on the left; the detail pane takes the
   remainder. The panel shows on the four tab destinations and on Chat, and is
   absent on Terminal, Files, File viewer, Settings, Connect, and Subagent progress.

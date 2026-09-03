@@ -1,5 +1,7 @@
 package dev.scoutr.app.ui.screens.terminal
 
+import dev.scoutr.app.ui.theme.ScoutrRadii
+import dev.scoutr.app.ui.theme.ScoutrSpace
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -170,7 +172,7 @@ internal fun ExtraKeysRow(
             Surface(
                 onClick = { page = 1 - page },
                 color = Color.Transparent,
-                shape = RoundedCornerShape(8.dp),
+                shape = RoundedCornerShape(ScoutrRadii.md),
             ) {
                 Icon(
                     if (page == 0) Icons.Default.KeyboardArrowDown else Icons.Default.KeyboardArrowUp,
@@ -222,7 +224,7 @@ private fun ModifierKeyButton(
             ),
         color = container,
         contentColor = content,
-        shape = RoundedCornerShape(8.dp),
+        shape = RoundedCornerShape(ScoutrRadii.md),
     ) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Text(
@@ -245,13 +247,13 @@ private fun ArrowKey(
         modifier = Modifier.size(40.dp),
         color = MaterialTheme.colorScheme.surfaceVariant,
         contentColor = MaterialTheme.colorScheme.onSurface,
-        shape = RoundedCornerShape(8.dp),
+        shape = RoundedCornerShape(ScoutrRadii.md),
     ) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Icon(
                 imageVector = icon,
                 contentDescription = contentDescription,
-                modifier = Modifier.size(24.dp),
+                modifier = Modifier.size(ScoutrSpace.xl),
             )
         }
     }
@@ -267,7 +269,7 @@ private fun ExtraKey(
         modifier = Modifier.size(40.dp),
         color = MaterialTheme.colorScheme.surfaceVariant,
         contentColor = MaterialTheme.colorScheme.onSurface,
-        shape = RoundedCornerShape(8.dp),
+        shape = RoundedCornerShape(ScoutrRadii.md),
     ) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Text(label, style = MaterialTheme.typography.labelMedium)

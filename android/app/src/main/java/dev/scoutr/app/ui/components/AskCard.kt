@@ -1,5 +1,8 @@
 package dev.scoutr.app.ui.components
 
+import dev.scoutr.app.ui.theme.ScoutrRadii
+import dev.scoutr.app.ui.theme.ScoutrBorder
+import dev.scoutr.app.ui.theme.ScoutrSpace
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -85,8 +88,8 @@ fun AskCard(
 
     Card(
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        shape = RoundedCornerShape(8.dp),
-        border = BorderStroke(1.dp, accent.copy(alpha = 0.6f)),
+        shape = RoundedCornerShape(ScoutrRadii.md),
+        border = BorderStroke(ScoutrBorder.hairline, accent.copy(alpha = 0.6f)),
         modifier = modifier.fillMaxWidth().testTag("ask_card_$callId"),
     ) {
         Row(Modifier.padding(14.dp)) {
@@ -120,7 +123,7 @@ fun AskCard(
                     // a card that never resolves would otherwise hold the
                     // composer shut for the rest of the session.
                     if (!submitting || submitIsSlow) {
-                        if (submitIsSlow) Spacer(Modifier.width(8.dp))
+                        if (submitIsSlow) Spacer(Modifier.width(ScoutrSpace.sm))
                         TextButton(
                             onClick = onDismiss,
                             modifier = Modifier.testTag("ask_dismiss_$callId"),
@@ -165,7 +168,7 @@ fun AskCard(
                     )
                 }
                 if (error != null) {
-                    Spacer(Modifier.height(8.dp))
+                    Spacer(Modifier.height(ScoutrSpace.sm))
                     Text(
                         error,
                         style = MaterialTheme.typography.labelSmall,
@@ -205,10 +208,10 @@ private fun QuestionChips(
             }
             Row(
                 Modifier
-                    .clip(RoundedCornerShape(12.dp))
+                    .clip(RoundedCornerShape(ScoutrRadii.lg))
                     .background(background)
                     .clickable(enabled = enabled) { onPage(index) }
-                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                    .padding(horizontal = ScoutrSpace.sm, vertical = 4.dp)
                     .testTag("ask_chip_${question.id}"),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -216,7 +219,7 @@ private fun QuestionChips(
                     Icon(
                         Icons.Default.Check,
                         contentDescription = null,
-                        modifier = Modifier.size(12.dp),
+                        modifier = Modifier.size(ScoutrSpace.md),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     Spacer(Modifier.width(4.dp))
@@ -258,7 +261,7 @@ private fun AskFooter(
             enabled = enabled && page > 0,
             modifier = Modifier.testTag("ask_back_$callId"),
         ) {
-            Icon(Icons.Default.KeyboardArrowLeft, contentDescription = null, modifier = Modifier.size(16.dp))
+            Icon(Icons.Default.KeyboardArrowLeft, contentDescription = null, modifier = Modifier.size(ScoutrSpace.lg))
             Text("Back")
         }
         Row(
@@ -290,7 +293,7 @@ private fun AskFooter(
             ) {
                 Text("Submit")
                 Spacer(Modifier.width(4.dp))
-                Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
+                Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(ScoutrSpace.lg))
             }
         } else {
             TextButton(
@@ -299,7 +302,7 @@ private fun AskFooter(
                 modifier = Modifier.testTag("ask_next_$callId"),
             ) {
                 Text("Next")
-                Icon(Icons.Default.KeyboardArrowRight, contentDescription = null, modifier = Modifier.size(16.dp))
+                Icon(Icons.Default.KeyboardArrowRight, contentDescription = null, modifier = Modifier.size(ScoutrSpace.lg))
             }
         }
     }
@@ -337,7 +340,7 @@ private fun QuestionBody(
                 Row(
                     Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(8.dp))
+                        .clip(RoundedCornerShape(ScoutrRadii.md))
                         .clickable(enabled = enabled) {
                             pick(if (checked) answer.labels - option.label else answer.labels + option.label)
                         }
@@ -355,7 +358,7 @@ private fun QuestionBody(
         question.options.isEmpty() -> FreeTextAnswer(question.id, answer, enabled, onAnswer)
 
         question.options.size == 2 -> Column {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(ScoutrSpace.sm)) {
                 question.options.forEach { option ->
                     val chosen = option.label in answer.labels
                     OutlinedButton(
@@ -382,7 +385,7 @@ private fun QuestionBody(
                 Row(
                     Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(8.dp))
+                        .clip(RoundedCornerShape(ScoutrRadii.md))
                         .clickable(enabled = enabled) { pick(listOf(option.label)) }
                         .padding(horizontal = 4.dp, vertical = 6.dp)
                         .testTag("ask_option_${question.id}_${option.label}"),
@@ -418,7 +421,7 @@ private fun QuestionBody(
     }
 
     if (showTyping && question.options.isNotEmpty()) {
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(ScoutrSpace.sm))
         FreeTextAnswer(question.id, answer, enabled, onAnswer)
     }
 }
@@ -472,7 +475,7 @@ fun AskAnswerBubble(
             Modifier
                 .padding(end = 4.dp)
                 .widthIn(max = 288.dp)
-                .background(MaterialTheme.colorScheme.surfaceContainerHighest, RoundedCornerShape(8.dp))
+                .background(MaterialTheme.colorScheme.surfaceContainerHighest, RoundedCornerShape(ScoutrRadii.md))
                 .padding(horizontal = 14.dp, vertical = 10.dp)
                 .testTag("ask_answer_${group.first().callId}"),
             verticalArrangement = Arrangement.spacedBy(2.dp),

@@ -1,5 +1,6 @@
 package dev.scoutr.app.ui.screens.terminal
 
+import dev.scoutr.app.ui.theme.ScoutrSpace
 import android.content.ClipboardManager
 import android.content.Context
 import android.view.inputmethod.InputMethodManager
@@ -189,7 +190,7 @@ fun TerminalScreen(
         Column(modifier.fillMaxSize().imeOrNavigationBarsPadding()) {
             Surface(color = MaterialTheme.colorScheme.background) {
                 Row(
-                    Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                    Modifier.fillMaxWidth().padding(horizontal = ScoutrSpace.lg, vertical = ScoutrSpace.sm),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     TerminalBreadcrumb(
@@ -200,7 +201,7 @@ fun TerminalScreen(
                         modifier = Modifier.weight(1f),
                     )
                     TerminalStatusChip(ui)
-                    Spacer(Modifier.width(8.dp))
+                    Spacer(Modifier.width(ScoutrSpace.sm))
                     IconButton(
                         onClick = { scope.launch { drawerState.open() } },
                         modifier = Modifier.testTag("terminal_hierarchy"),
@@ -292,7 +293,7 @@ fun TerminalScreen(
                     view = viewRef,
                     modifier = Modifier
                         .align(Alignment.CenterEnd)
-                        .padding(end = 8.dp),
+                        .padding(end = ScoutrSpace.sm),
                 )
 
                 TerminalOverlay(
@@ -329,7 +330,7 @@ private fun TerminalScrollControls(
 ) {
     Surface(
         modifier = modifier,
-        color = MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.92f),
+        color = MaterialTheme.colorScheme.surfaceContainer,
         shape = MaterialTheme.shapes.extraSmall,
     ) {
         Column(

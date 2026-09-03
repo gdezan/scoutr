@@ -1,5 +1,6 @@
 package dev.scoutr.app.ui.screens
 
+import dev.scoutr.app.ui.theme.ScoutrSpace
 import dev.scoutr.app.ui.theme.ScoutrMono
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -95,7 +96,7 @@ internal fun ConversationConfigSheet(
                 .navigationBarsPadding(),
         ) {
             Row(
-                modifier = Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, bottom = 12.dp),
+                modifier = Modifier.fillMaxWidth().padding(start = 20.dp, end = ScoutrSpace.sm, bottom = ScoutrSpace.md),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Column(Modifier.weight(1f)) {
@@ -126,12 +127,12 @@ internal fun ConversationConfigSheet(
                         "Thinking options appear after the active model is loaded.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
+                        modifier = Modifier.padding(horizontal = 20.dp, vertical = ScoutrSpace.sm),
                     )
                 } else {
                     LazyRow(
                         contentPadding = PaddingValues(horizontal = 20.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(ScoutrSpace.sm),
                         modifier = Modifier.testTag("thinking_level_options"),
                     ) {
                         items(ui.availableThinkingLevels, key = { it }) { level ->
@@ -173,7 +174,7 @@ internal fun ConversationConfigSheet(
                     leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                        .padding(horizontal = ScoutrSpace.lg, vertical = ScoutrSpace.sm)
                         .semantics { contentDescription = "Search models" }
                         .testTag("conversation_model_search"),
                 )

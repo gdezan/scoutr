@@ -1,5 +1,8 @@
 package dev.scoutr.app.ui.screens
 
+import dev.scoutr.app.ui.theme.ScoutrSemantic
+import dev.scoutr.app.ui.theme.ScoutrBorder
+import dev.scoutr.app.ui.theme.ScoutrSpace
 import dev.scoutr.app.ui.theme.ScoutrMono
 import dev.scoutr.app.ui.theme.ScoutrType
 import androidx.compose.foundation.layout.Column
@@ -130,7 +133,7 @@ fun SettingsScreen(
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
             .navigationBarsPadding()
-            .padding(16.dp),
+            .padding(ScoutrSpace.lg),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onBack) {
@@ -344,7 +347,7 @@ private fun UpdateSection(
                     color = statusColor,
                     animation = if (running) StatusRingAnimation.Live else StatusRingAnimation.Static,
                 )
-                Spacer(Modifier.width(8.dp))
+                Spacer(Modifier.width(ScoutrSpace.sm))
                 Text(
                     statusLabel,
                     style = MaterialTheme.typography.bodyMedium,
@@ -808,11 +811,11 @@ private fun SettingsSection(
         Column { content() }
     }
     if (footnote != null) {
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(ScoutrSpace.sm))
         Text(
             footnote,
             style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(horizontal = 4.dp),
         )
     }
@@ -849,7 +852,7 @@ private fun SettingsSwitchRow(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        Spacer(Modifier.width(12.dp))
+        Spacer(Modifier.width(ScoutrSpace.md))
         Switch(
             checked = checked,
             onCheckedChange = onCheckedChange,
@@ -902,7 +905,7 @@ private fun HostsSection(
                 "No bridge is paired.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(vertical = 8.dp),
+                modifier = Modifier.padding(vertical = ScoutrSpace.sm),
             )
         }
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
@@ -988,7 +991,7 @@ internal fun hostStatusLabel(status: HostAvailability): String = when (status) {
 @Composable
 private fun hostStatusColor(status: HostAvailability) = when (status) {
     is HostAvailability.Online -> MaterialTheme.colorScheme.primary
-    is HostAvailability.Offline -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+    is HostAvailability.Offline -> MaterialTheme.colorScheme.onSurfaceVariant
     is HostAvailability.Incompatible, is HostAvailability.IdentityChanged -> MaterialTheme.colorScheme.error
     HostAvailability.Unknown -> MaterialTheme.colorScheme.outline
 }
@@ -1034,7 +1037,7 @@ private fun HostRow(
                 Text(
                     row.url,
                     style = ScoutrType.monoMeta,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -1096,7 +1099,7 @@ private fun HostRow(
                 },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(start = 30.dp, end = 8.dp),
+                modifier = Modifier.padding(start = 30.dp, end = ScoutrSpace.sm),
             )
         }
     }
@@ -1110,7 +1113,7 @@ private fun HostBadge(label: String) {
         color = MaterialTheme.colorScheme.primary,
         modifier = Modifier
             .padding(start = 6.dp)
-            .border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f), RoundedCornerShape(4.dp))
+            .border(ScoutrBorder.hairline, ScoutrSemantic.live.muted, RoundedCornerShape(4.dp))
             .padding(horizontal = 4.dp, vertical = 1.dp),
     )
 }
@@ -1167,7 +1170,7 @@ private fun ForgetHostDialog(
                         "${row.alias} is the update host. Choose a replacement update host, or disable in-app updates.",
                         style = MaterialTheme.typography.bodyMedium,
                     )
-                    Spacer(Modifier.height(8.dp))
+                    Spacer(Modifier.height(ScoutrSpace.sm))
                     otherIds.forEachIndexed { index, hostId ->
                         Row(
                             Modifier.fillMaxWidth().clickable { choice = index },
@@ -1241,7 +1244,7 @@ private fun ReplaceIdentityDialog(
                             "Pair again with its current token to refresh URL/token/exposure without touching alias, default, updates or pins.",
                         style = MaterialTheme.typography.bodyMedium,
                     )
-                    Spacer(Modifier.height(8.dp))
+                    Spacer(Modifier.height(ScoutrSpace.sm))
                     OutlinedTextField(
                         value = token,
                         onValueChange = { token = it },
@@ -1282,7 +1285,7 @@ private fun ReplaceIdentityDialog(
                         "Replace this profile's identity with the new one, or pair it as a new host instead.",
                     style = MaterialTheme.typography.bodyMedium,
                 )
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(ScoutrSpace.sm))
                 OutlinedTextField(
                     value = token,
                     onValueChange = { token = it },
@@ -1298,7 +1301,7 @@ private fun ReplaceIdentityDialog(
                     )
                 }
                 if (needsDisposition) {
-                    Spacer(Modifier.height(8.dp))
+                    Spacer(Modifier.height(ScoutrSpace.sm))
                     otherIds.forEachIndexed { index, id ->
                         val alias = viewModel.otherHostAliases(row.hostId)[id]
                         Row(

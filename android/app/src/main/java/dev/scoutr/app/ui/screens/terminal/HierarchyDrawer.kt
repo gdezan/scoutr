@@ -1,5 +1,7 @@
 package dev.scoutr.app.ui.screens.terminal
 
+import dev.scoutr.app.ui.theme.ScoutrRadii
+import dev.scoutr.app.ui.theme.ScoutrSpace
 import dev.scoutr.app.ui.theme.ScoutrMono
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -100,7 +102,7 @@ internal fun HierarchyDrawer(
 
     Column(Modifier.fillMaxSize().imeOrNavigationBarsPadding()) {
         Row(
-            Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 14.dp),
+            Modifier.fillMaxWidth().padding(start = ScoutrSpace.lg, end = ScoutrSpace.sm, top = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(Modifier.weight(1f)) {
@@ -120,13 +122,13 @@ internal fun HierarchyDrawer(
             onValueChange = { query = it },
             placeholder = { Text("Search panes…") },
             singleLine = true,
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = ScoutrSpace.lg, vertical = 10.dp),
         )
         if (error != null) {
             Surface(
                 color = MaterialTheme.colorScheme.errorContainer,
-                shape = RoundedCornerShape(8.dp),
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                shape = RoundedCornerShape(ScoutrRadii.md),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = ScoutrSpace.lg),
             ) {
                 Text(
                     error,
@@ -136,7 +138,7 @@ internal fun HierarchyDrawer(
                 )
             }
         }
-        Row(Modifier.padding(horizontal = 16.dp, vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(Modifier.padding(horizontal = ScoutrSpace.lg, vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(ScoutrSpace.sm)) {
             TextButton(
                 onClick = {
                     val target = workspaces.keys.firstOrNull { ws ->
@@ -148,14 +150,14 @@ internal fun HierarchyDrawer(
             ) { Text("New tab") }
             TextButton(onClick = { dialog = DrawerDialog.NewWorkspace }, enabled = !busy) { Text("New workspace") }
         }
-        HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f))
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         if (busy) {
-            Box(Modifier.fillMaxWidth().padding(vertical = 24.dp), contentAlignment = Alignment.Center) {
+            Box(Modifier.fillMaxWidth().padding(vertical = ScoutrSpace.xl), contentAlignment = Alignment.Center) {
                 Text("Updating terminal…", color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
         LazyColumn(
-            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
+            contentPadding = PaddingValues(horizontal = ScoutrSpace.sm, vertical = ScoutrSpace.sm),
             verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
             workspaces.forEach { (workspaceId, panesInWorkspace) ->
@@ -327,7 +329,7 @@ private fun WorkspaceRow(
             tint = if (isActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.size(18.dp),
         )
-        Spacer(Modifier.width(8.dp))
+        Spacer(Modifier.width(ScoutrSpace.sm))
         Text(
             label,
             style = MaterialTheme.typography.bodyMedium,
@@ -356,14 +358,14 @@ private fun TabRow(
     onClose: () -> Unit,
 ) {
     Row(
-        Modifier.fillMaxWidth().padding(start = 24.dp, end = 4.dp, top = 2.dp, bottom = 2.dp),
+        Modifier.fillMaxWidth().padding(start = ScoutrSpace.xl, end = 4.dp, top = 2.dp, bottom = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(
             Icons.AutoMirrored.Filled.KeyboardArrowRight,
             contentDescription = null,
             tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.width(16.dp),
+            modifier = Modifier.width(ScoutrSpace.lg),
         )
         Text(
             label,
@@ -545,8 +547,8 @@ private fun NewWorkspaceDialog(
                                 Modifier.fillMaxWidth().clickable { browse("${path.trimEnd('/')}/$folder") }.padding(vertical = 4.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
-                                Icon(Icons.Default.Folder, contentDescription = null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                                Spacer(Modifier.width(8.dp))
+                                Icon(Icons.Default.Folder, contentDescription = null, modifier = Modifier.size(ScoutrSpace.lg), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Spacer(Modifier.width(ScoutrSpace.sm))
                                 Text(folder, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             }
                         }

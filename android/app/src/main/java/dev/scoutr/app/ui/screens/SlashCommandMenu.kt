@@ -1,5 +1,7 @@
 package dev.scoutr.app.ui.screens
 
+import dev.scoutr.app.ui.theme.ScoutrRadii
+import dev.scoutr.app.ui.theme.ScoutrSpace
 import dev.scoutr.app.ui.theme.ScoutrMono
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -54,8 +56,8 @@ internal fun SlashCommandMenu(
         if (selectedIndex in commands.indices) listState.scrollToItem(selectedIndex)
     }
     Surface(
-        modifier = modifier.fillMaxWidth().padding(horizontal = 12.dp).testTag("slash_command_menu"),
-        shape = RoundedCornerShape(8.dp),
+        modifier = modifier.fillMaxWidth().padding(horizontal = ScoutrSpace.md).testTag("slash_command_menu"),
+        shape = RoundedCornerShape(ScoutrRadii.md),
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
         tonalElevation = 3.dp,
     ) {
@@ -74,7 +76,7 @@ internal fun SlashCommandMenu(
                         selected = index == selectedIndex,
                         onClick = { onSelect(command) },
                     )
-                    if (index < commands.lastIndex) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
+                    if (index < commands.lastIndex) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 }
             }
         }
@@ -98,7 +100,7 @@ private fun CommandRow(command: SlashCommandInfo, selected: Boolean, onClick: ()
                     .fillMaxHeight()
                     .background(if (selected) MaterialTheme.colorScheme.outline else MaterialTheme.colorScheme.surfaceContainerHigh),
             )
-            Column(Modifier.weight(1f).padding(horizontal = 12.dp, vertical = 5.dp)) {
+            Column(Modifier.weight(1f).padding(horizontal = ScoutrSpace.md, vertical = 5.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         text = buildAnnotatedString {
@@ -139,7 +141,7 @@ private fun CommandRow(command: SlashCommandInfo, selected: Boolean, onClick: ()
 
 @Composable
 private fun CommandMenuStatus(text: String) {
-    Box(Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(16.dp), contentAlignment = Alignment.CenterStart) {
+    Box(Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(ScoutrSpace.lg), contentAlignment = Alignment.CenterStart) {
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(text, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
@@ -149,7 +151,7 @@ private fun CommandMenuStatus(text: String) {
 @Composable
 private fun CommandMenuError(error: String, onRetry: () -> Unit) {
     Row(
-        Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(start = 16.dp, end = 8.dp),
+        Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(start = ScoutrSpace.lg, end = ScoutrSpace.sm),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {

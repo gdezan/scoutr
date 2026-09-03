@@ -32,6 +32,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.NavHost
@@ -240,7 +241,7 @@ fun ScoutrAppNav(
     }
     BoxWithConstraints {
         val compatible = boardUi.hasCompatibleHost
-        val isWide = maxWidth >= WIDE_WINDOW_BREAKPOINT
+        val isWide = maxWidth >= WIDE_WINDOW_BREAKPOINT && LocalDensity.current.fontScale <= 2f
         val showPanel = isWide && isShellRoute(currentRoute) && compatible
         val showBottomBar = !isWide && compatible && Destination.isDestinationRoute(currentRoute)
         val selection = if (currentRoute == CHAT_ROUTE) {

@@ -95,6 +95,13 @@ private val ScoutrTypography = Typography(
     labelSmall = ui(10.0, FontWeight.SemiBold, 14.0),
 )
 
+/** Letter-spacing values, in sp, shared by display and machine-text slots. */
+object ScoutrTracking {
+    const val tight = -0.6
+    const val section = 0.08
+    const val caption = 0.02
+}
+
 /**
  * Mono slots that Material has no equivalent for. Martian Mono runs ~25% wide, so
  * the system caps it at 10sp and relies on shortened paths rather than shrinking
@@ -107,6 +114,7 @@ object ScoutrType {
         fontSize = 9.5.sp,
         fontWeight = FontWeight.SemiBold,
         lineHeight = 14.sp,
+        letterSpacing = ScoutrTracking.section.sp,
     )
 
     /** Machine metadata: `~/scoutr · gpt-5.2`, `142 msgs · 61k tok`. */
@@ -115,6 +123,24 @@ object ScoutrType {
         fontSize = 9.5.sp,
         fontWeight = FontWeight.Normal,
         lineHeight = 16.sp,
+    )
+
+    /** Compact machine caption for reset, burn-rate, stale, and offline facts. */
+    val monoCaption = TextStyle(
+        fontFamily = ScoutrMono,
+        fontSize = 8.5.sp,
+        fontWeight = FontWeight.Normal,
+        lineHeight = 13.sp,
+        letterSpacing = ScoutrTracking.caption.sp,
+    )
+
+    /** Large human-readable empty-state or detail-placeholder heading. */
+    val displayEmpty = TextStyle(
+        fontFamily = ScoutrUiFont,
+        fontSize = 26.sp,
+        fontWeight = FontWeight.Bold,
+        lineHeight = 30.sp,
+        letterSpacing = ScoutrTracking.tight.sp,
     )
 
     /** Adjustable machine text: review lines, Markdown code, and tool output. */
@@ -142,10 +168,10 @@ object ScoutrType {
 
 private val ScoutrShapes = androidx.compose.material3.Shapes(
     extraSmall = RoundedCornerShape(4.dp),
-    small = RoundedCornerShape(6.dp),
-    medium = RoundedCornerShape(8.dp),
-    large = RoundedCornerShape(8.dp),
-    extraLarge = RoundedCornerShape(8.dp),
+    small = RoundedCornerShape(ScoutrRadii.sm),
+    medium = RoundedCornerShape(ScoutrRadii.md),
+    large = RoundedCornerShape(ScoutrRadii.lg),
+    extraLarge = RoundedCornerShape(ScoutrRadii.xl),
 )
 
 /**
@@ -161,35 +187,35 @@ private val ScoutrShapes = androidx.compose.material3.Shapes(
 val BrandInk = Color(0xFF141619)
 
 private val DarkColors = darkColorScheme(
-    primary = Color(0xFF8DF08D),
-    onPrimary = Color(0xFF04241A),
-    primaryContainer = Color(0xFF12301A),
-    onPrimaryContainer = Color(0xFFA6EFAD),
-    secondary = Color(0xFF2C6F72),
-    onSecondary = Color(0xFFE0F7F7),
-    secondaryContainer = Color(0xFF17383A),
-    onSecondaryContainer = Color(0xFFB9E8E9),
-    tertiary = Color(0xFFE8B84B),
-    onTertiary = Color(0xFF261A00),
-    tertiaryContainer = Color(0xFF3B2900),
-    onTertiaryContainer = Color(0xFFFFDEA1),
-    background = Color(0xFF0B0C0E),
+    primary = ScoutrSemantic.live.color,
+    onPrimary = ScoutrSemantic.live.on,
+    primaryContainer = ScoutrSemantic.live.container,
+    onPrimaryContainer = ScoutrSemantic.live.onContainer,
+    secondary = ScoutrSemantic.data.color,
+    onSecondary = ScoutrSemantic.data.on,
+    secondaryContainer = ScoutrSemantic.data.container,
+    onSecondaryContainer = ScoutrSemantic.data.onContainer,
+    tertiary = ScoutrSemantic.warning.color,
+    onTertiary = ScoutrSemantic.warning.on,
+    tertiaryContainer = ScoutrSemantic.warning.container,
+    onTertiaryContainer = ScoutrSemantic.warning.onContainer,
+    background = ScoutrPrimitive.neutral10,
     onBackground = Color(0xFFECEDF0),
-    surface = Color(0xFF121316),
+    surface = ScoutrPrimitive.neutral20,
     onSurface = Color(0xFFECEDF0),
     surfaceVariant = Color(0xFF1B1D21),
     onSurfaceVariant = Color(0xFFA8AEB9),
     outline = Color(0xFF363B43),
     outlineVariant = Color(0xFF26292E),
-    error = Color(0xFFE5484D),
-    onError = Color(0xFF3A0B0C),
-    errorContainer = Color(0xFF3A1719),
-    onErrorContainer = Color(0xFFFFDAD9),
-    surfaceContainerLowest = Color(0xFF08090B),
+    error = ScoutrSemantic.critical.color,
+    onError = ScoutrSemantic.critical.on,
+    errorContainer = ScoutrSemantic.critical.container,
+    onErrorContainer = ScoutrSemantic.critical.onContainer,
+    surfaceContainerLowest = ScoutrPrimitive.neutral0,
     surfaceContainerLow = Color(0xFF101114),
-    surfaceContainer = Color(0xFF16171B),
-    surfaceContainerHigh = Color(0xFF16171B),
-    surfaceContainerHighest = Color(0xFF1A1C20),
+    surfaceContainer = ScoutrSemantic.surfaceCard,
+    surfaceContainerHigh = ScoutrSemantic.surfaceSelected,
+    surfaceContainerHighest = ScoutrSemantic.surfaceSwipeBar,
 )
 
 

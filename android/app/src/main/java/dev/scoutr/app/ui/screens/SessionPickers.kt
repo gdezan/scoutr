@@ -1,5 +1,6 @@
 package dev.scoutr.app.ui.screens
 
+import dev.scoutr.app.ui.theme.ScoutrSpace
 import dev.scoutr.app.ui.theme.ScoutrMono
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -100,7 +101,7 @@ internal fun ModelPickerDialog(
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                     keyboardActions = KeyboardActions(onSearch = {}),
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).semantics { contentDescription = "Search models" }.testTag("model_search"),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = ScoutrSpace.lg).semantics { contentDescription = "Search models" }.testTag("model_search"),
                 )
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 when {
@@ -143,7 +144,7 @@ internal fun FolderPickerDialog(
             Column {
                 PickerHeader("Choose a folder", onDismiss)
                 Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = ScoutrSpace.sm, vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     IconButton(onClick = viewModel::goUp, enabled = ui.path != ui.home) {
@@ -168,7 +169,7 @@ internal fun FolderPickerDialog(
                         }
                         else -> LazyColumn(
                             modifier = Modifier.fillMaxSize().testTag("folder_list"),
-                            contentPadding = androidx.compose.foundation.layout.PaddingValues(12.dp),
+                            contentPadding = androidx.compose.foundation.layout.PaddingValues(ScoutrSpace.md),
                         ) {
                             items(ui.dirs, key = { it }) { folder ->
                                 Surface(
@@ -178,11 +179,11 @@ internal fun FolderPickerDialog(
                                     modifier = Modifier.fillMaxWidth().testTag("folder_item_$folder"),
                                 ) {
                                     Row(
-                                        modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp).padding(horizontal = 12.dp),
+                                        modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp).padding(horizontal = ScoutrSpace.md),
                                         verticalAlignment = Alignment.CenterVertically,
                                     ) {
                                         Icon(Icons.Default.Folder, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                                        Spacer(Modifier.width(12.dp))
+                                        Spacer(Modifier.width(ScoutrSpace.md))
                                         Text(folder, fontFamily = ScoutrMono, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                     }
                                 }
@@ -194,7 +195,7 @@ internal fun FolderPickerDialog(
                     shape = MaterialTheme.shapes.small,
                     onClick = onDismiss,
                     enabled = ui.path.isNotBlank() && !ui.loadingDirs && ui.folderError == null,
-                    modifier = Modifier.fillMaxWidth().padding(16.dp).heightIn(min = 48.dp).testTag("use_folder"),
+                    modifier = Modifier.fillMaxWidth().padding(ScoutrSpace.lg).heightIn(min = 48.dp).testTag("use_folder"),
                 ) {
                     Text("Use this folder")
                 }
@@ -220,7 +221,7 @@ internal fun ProviderModelCatalog(
     LazyColumn(
         state = listState,
         modifier = modifier.testTag(testTag),
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = ScoutrSpace.md, vertical = ScoutrSpace.sm),
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         providerGroups.forEach { (provider, matches) ->
@@ -263,7 +264,7 @@ private fun ProviderHeader(name: String, count: Int) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(start = 12.dp, end = 12.dp, top = 26.dp, bottom = 4.dp)
+            .padding(start = ScoutrSpace.md, end = ScoutrSpace.md, top = 26.dp, bottom = 4.dp)
             .testTag("provider_header_$name"),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -278,11 +279,11 @@ private fun ProviderHeader(name: String, count: Int) {
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f),
         )
-        Spacer(Modifier.width(8.dp))
+        Spacer(Modifier.width(ScoutrSpace.sm))
         Text(
             count.toString(),
             style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.testTag("provider_count_$name"),
         )
     }
@@ -316,7 +317,7 @@ private fun ModelPickerCatalogRow(
             }
     ) {
         Row(
-            modifier = Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(start = 12.dp, end = 2.dp, top = 8.dp, bottom = 8.dp),
+            modifier = Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(start = ScoutrSpace.md, end = 2.dp, top = ScoutrSpace.sm, bottom = ScoutrSpace.sm),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(Modifier.weight(1f)) {
@@ -329,10 +330,10 @@ private fun ModelPickerCatalogRow(
                         overflow = TextOverflow.Ellipsis,
                     )
                     if (match.default) {
-                        Spacer(Modifier.width(8.dp))
+                        Spacer(Modifier.width(ScoutrSpace.sm))
                         Text("default", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
                     } else if (match.recent) {
-                        Spacer(Modifier.width(8.dp))
+                        Spacer(Modifier.width(ScoutrSpace.sm))
                         Text("recent", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
@@ -352,7 +353,7 @@ private fun ModelPickerCatalogRow(
                     Text(
                         metadata,
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
@@ -379,12 +380,12 @@ private fun PickerLoading(label: String) {
     Text(
         label,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier.fillMaxWidth().padding(16.dp),
+        modifier = Modifier.fillMaxWidth().padding(ScoutrSpace.lg),
     )
 }
 @Composable
 private fun PickerError(message: String, onRetry: () -> Unit) {
-    Box(Modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
+    Box(Modifier.fillMaxSize().padding(ScoutrSpace.xxl), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text(message, color = MaterialTheme.colorScheme.error)
             TextButton(onClick = onRetry) { Text("Retry") }
@@ -394,7 +395,7 @@ private fun PickerError(message: String, onRetry: () -> Unit) {
 
 @Composable
 private fun ModelPickerEmpty(message: String) {
-    Box(Modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
+    Box(Modifier.fillMaxSize().padding(ScoutrSpace.xxl), contentAlignment = Alignment.Center) {
         Text(message, style = MaterialTheme.typography.titleMedium)
     }
 }
@@ -402,7 +403,7 @@ private fun ModelPickerEmpty(message: String) {
 @Composable
 private fun PickerHeader(title: String, onBack: () -> Unit) {
     Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 8.dp),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = ScoutrSpace.sm),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         IconButton(onClick = onBack) {

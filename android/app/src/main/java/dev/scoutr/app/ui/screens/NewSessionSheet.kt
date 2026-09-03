@@ -1,5 +1,8 @@
 package dev.scoutr.app.ui.screens
 
+import dev.scoutr.app.ui.theme.ScoutrRadii
+import dev.scoutr.app.ui.theme.ScoutrBorder
+import dev.scoutr.app.ui.theme.ScoutrSpace
 import dev.scoutr.app.ui.theme.ScoutrMono
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -125,7 +128,7 @@ fun NewSessionSheet(
                     Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 20.dp, vertical = 10.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(ScoutrSpace.sm),
                 ) {
                     hosts.forEach { option ->
                         // Selection freezes while a create is in flight: the
@@ -221,7 +224,7 @@ fun NewSessionSheet(
 @Composable
 private fun LauncherHeader(onDismiss: () -> Unit) {
     Row(
-        modifier = Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 18.dp, bottom = 14.dp),
+        modifier = Modifier.fillMaxWidth().padding(start = 20.dp, end = ScoutrSpace.sm, top = 18.dp, bottom = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
@@ -245,14 +248,14 @@ private fun PresetsSection(ui: NewSessionUiState, viewModel: NewSessionViewModel
     // Presets are backend-scoped: a saved model + thinking level only make
     // sense for the agent they were saved under.
     val presets = ui.presets.filter { (it.agent ?: "pi") == ui.selectedAgent }
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(ScoutrSpace.sm)) {
         SectionLabel("Saved presets")
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(ScoutrSpace.sm), verticalArrangement = Arrangement.spacedBy(ScoutrSpace.sm)) {
             presets.forEach { preset ->
                 Surface(
                     color = Color.Transparent,
-                    shape = RoundedCornerShape(8.dp),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                    shape = RoundedCornerShape(ScoutrRadii.md),
+                    border = BorderStroke(ScoutrBorder.hairline, MaterialTheme.colorScheme.outlineVariant),
                     modifier = Modifier.testTag("preset_${preset.id}"),
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -262,7 +265,7 @@ private fun PresetsSection(ui: NewSessionUiState, viewModel: NewSessionViewModel
                                 .height(48.dp)
                                 .widthIn(max = 180.dp)
                                 .clickable { viewModel.applyPreset(preset.id) }
-                                .padding(horizontal = 12.dp),
+                                .padding(horizontal = ScoutrSpace.md),
                         ) {
                             Text(preset.title, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
@@ -283,7 +286,7 @@ private fun FolderSummary(
     onOpenPicker: () -> Unit,
     onJumpTo: (String) -> Unit,
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(ScoutrSpace.sm)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             SectionLabel("Folder")
             Spacer(Modifier.weight(1f))
@@ -293,13 +296,13 @@ private fun FolderSummary(
         }
         Surface(
             onClick = onOpenPicker,
-            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
-            shape = RoundedCornerShape(8.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            shape = RoundedCornerShape(ScoutrRadii.md),
             modifier = Modifier.fillMaxWidth(),
         ) {
             Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Default.Folder, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                Spacer(Modifier.width(12.dp))
+                Spacer(Modifier.width(ScoutrSpace.md))
                 Text(
                     ui.path.ifBlank { "Loading folders…" },
                     style = MaterialTheme.typography.bodyMedium,
@@ -311,7 +314,7 @@ private fun FolderSummary(
             }
         }
         if (ui.folderChoices.isNotEmpty()) {
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(ScoutrSpace.sm), verticalArrangement = Arrangement.spacedBy(ScoutrSpace.sm)) {
                 ui.folderChoices.forEach { folder ->
                     FilterChip(
                         shape = RoundedCornerShape(6.dp),
@@ -330,9 +333,9 @@ private fun FolderSummary(
 @Composable
 private fun BackendSection(ui: NewSessionUiState, onSelect: (String) -> Unit) {
     if (ui.agentKinds.size < 2) return
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(ScoutrSpace.sm)) {
         SectionLabel("Agent")
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(ScoutrSpace.sm), verticalArrangement = Arrangement.spacedBy(ScoutrSpace.sm)) {
             ui.agentKinds.forEach { kind ->
                 FilterChip(
                     shape = RoundedCornerShape(6.dp),
@@ -354,7 +357,7 @@ private fun ModelSummary(
     onToggleDefault: () -> Unit,
 ) {
     val selected = ui.selectedModel
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(ScoutrSpace.sm)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             SectionLabel("Model")
             Spacer(Modifier.weight(1f))
@@ -364,11 +367,11 @@ private fun ModelSummary(
         }
         Surface(
             onClick = onOpenPicker,
-            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
-            shape = RoundedCornerShape(8.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            shape = RoundedCornerShape(ScoutrRadii.md),
             modifier = Modifier.fillMaxWidth(),
         ) {
-            Row(Modifier.padding(start = 14.dp, top = 12.dp, bottom = 12.dp, end = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.padding(start = 14.dp, top = ScoutrSpace.md, bottom = ScoutrSpace.md, end = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text(
                         when {
@@ -411,9 +414,9 @@ private fun ModelSummary(
 private fun ThinkingLevelSection(ui: NewSessionUiState, onSelect: (String?) -> Unit) {
     val levels = ui.selectedModel?.model?.thinkingLevels.orEmpty()
     if (levels.isEmpty()) return
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(ScoutrSpace.sm)) {
         SectionLabel("Thinking")
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(ScoutrSpace.sm), verticalArrangement = Arrangement.spacedBy(ScoutrSpace.sm)) {
             FilterChip(
                 shape = RoundedCornerShape(6.dp),
                 selected = ui.selectedThinkingLevel == null,

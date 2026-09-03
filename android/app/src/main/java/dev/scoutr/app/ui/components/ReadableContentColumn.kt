@@ -1,5 +1,6 @@
 package dev.scoutr.app.ui.components
 
+import dev.scoutr.app.ui.theme.ScoutrSpace
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -33,7 +34,7 @@ fun ReadableContentColumn(
         modifier = modifier,
         contentAlignment = Alignment.TopCenter,
     ) {
-        val horizontalGutter = if (maxWidth >= 1008.dp) 24.dp else 12.dp
+        val horizontalGutter = if (maxWidth >= 1008.dp) ScoutrSpace.xl else ScoutrSpace.md
         Box(
             modifier = Modifier
                 .fillMaxSize()

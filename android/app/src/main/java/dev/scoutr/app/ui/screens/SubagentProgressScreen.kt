@@ -1,5 +1,6 @@
 package dev.scoutr.app.ui.screens
 
+import dev.scoutr.app.ui.theme.ScoutrSpace
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -80,7 +81,7 @@ fun SubagentProgressScreen(
             is Loadable.Failed -> {
                 SubagentProgressHeader(title = "Subagent", status = null, onBack = onBack)
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                Box(Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
+                Box(Modifier.fillMaxSize().padding(ScoutrSpace.xl), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text("Could not load progress", style = MaterialTheme.typography.titleMedium)
                         Spacer(Modifier.height(6.dp))
@@ -111,7 +112,7 @@ fun SubagentProgressScreen(
 @Composable
 private fun SubagentProgressHeader(title: String, status: String?, onBack: () -> Unit) {
     Row(
-        Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(horizontal = 8.dp, vertical = 6.dp),
+        Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(horizontal = ScoutrSpace.sm, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         IconButton(onClick = onBack) {
@@ -148,10 +149,10 @@ private fun SubagentProgressBody(body: PiSubagentProgress) {
             Modifier
                 .fillMaxSize()
                 .verticalScroll(scroll)
-                .padding(horizontal = 16.dp, vertical = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+                .padding(horizontal = ScoutrSpace.lg, vertical = ScoutrSpace.lg),
+            verticalArrangement = Arrangement.spacedBy(ScoutrSpace.md),
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(ScoutrSpace.sm)) {
                 StatusRing(
                     color = subagentProgressStatusColor(body.status, scheme.error, scheme.primary, scheme.onSurfaceVariant),
                     animation = subagentProgressRingAnimation(body.status),
@@ -292,7 +293,7 @@ private fun SubagentToolRow(call: PiSubagentToolCall, scheme: ColorScheme) {
                 append("  ")
                 withStyle(
                     SpanStyle(
-                        color = scheme.onSurfaceVariant.copy(alpha = 0.55f),
+                        color = scheme.onSurfaceVariant,
                         fontWeight = FontWeight.Normal,
                     ),
                 ) { append(args) }

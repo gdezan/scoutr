@@ -1,6 +1,8 @@
 package dev.scoutr.app.ui.motion
 
 import androidx.compose.animation.core.AnimationSpec
+import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.FiniteAnimationSpec
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -24,9 +26,20 @@ import androidx.compose.ui.unit.IntOffset
  */
 object ScoutrMotion {
     const val DURATION_PRESS = 90
-    const val DURATION_ARRIVE = 140
-    const val DURATION_OVERLAY = 140
+    const val DURATION_QUICK = 140
+    const val DURATION_NORMAL = 220
+    const val DURATION_SLOW = 340
 
+    const val DURATION_ARRIVE = DURATION_QUICK
+    const val DURATION_OVERLAY = DURATION_QUICK
+
+    val easeStandard = CubicBezierEasing(0.2f, 0f, 0f, 1f)
+    val easeEmphasized = CubicBezierEasing(0.05f, 0.7f, 0.1f, 1f)
+    val easeDecelerate = CubicBezierEasing(0f, 0f, 0f, 1f)
+
+    /** Progress change used by finite meters such as Usage quota bars. */
+    fun progressSpec(reduceMotion: Boolean): FiniteAnimationSpec<Float> =
+        if (reduceMotion) tween(0) else tween(DURATION_NORMAL, easing = easeStandard)
     /** Fade spec for LazyColumn entries (animateItem). */
     fun itemSpec(reduceMotion: Boolean): FiniteAnimationSpec<Float> =
         if (reduceMotion) tween(0) else tween(DURATION_ARRIVE)
@@ -38,6 +51,10 @@ object ScoutrMotion {
     /** Overlay arrival is a fade only. */
     fun overlaySpec(reduceMotion: Boolean): AnimationSpec<Float> =
         if (reduceMotion) tween(0) else tween(DURATION_OVERLAY)
+
+    /** Sheet and drawer movement becomes instantaneous when reduced motion is enabled. */
+    fun sheetSpec(reduceMotion: Boolean): FiniteAnimationSpec<Float> =
+        if (reduceMotion) tween(0) else spring(dampingRatio = 0.78f, stiffness = 380f)
 }
 
 /** System-level reduce-motion flag, provided by ScoutrTheme. */

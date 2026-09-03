@@ -1,8 +1,13 @@
 package dev.scoutr.app.ui.screens
 
+import dev.scoutr.app.ui.theme.ScoutrRadii
+import dev.scoutr.app.ui.theme.ScoutrBorder
+import dev.scoutr.app.ui.theme.ScoutrSpace
 import dev.scoutr.app.ui.agentDisplayTitle
 import dev.scoutr.app.ui.projectFolderName
 import dev.scoutr.app.ui.theme.ScoutrType
+import dev.scoutr.app.ui.theme.ScoutrSemantic
+import dev.scoutr.app.ui.theme.ScoutrComponentTokens
 import android.widget.Toast
 
 import androidx.compose.foundation.background
@@ -23,6 +28,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
@@ -302,6 +308,7 @@ internal fun LazyListScope.boardListContent(
                 ) {
                     Text(
                         text = if (selectedHostId == null) "No agents running" else "No agents on this host",
+                        style = ScoutrType.displayEmpty,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
@@ -318,7 +325,7 @@ internal fun LazyListScope.boardListContent(
         boardSection("Idle", section(AgentStatus.Idle), ui, compact, selectedPaneId, onOpenAgent, onOpenSubagent, reduceMotion, onReviewAgent, onCloseAgent)
         boardSection("Other", section(AgentStatus.Unknown), ui, compact, selectedPaneId, onOpenAgent, onOpenSubagent, reduceMotion, onReviewAgent, onCloseAgent)
     }
-    item { Spacer(Modifier.height(24.dp)) }
+    item { Spacer(Modifier.height(ScoutrSpace.xl)) }
 }
 
 /**
@@ -337,9 +344,9 @@ private fun HostIssueCard(
     Row(
         Modifier
             .fillMaxWidth()
-            .background(MaterialTheme.colorScheme.surfaceContainer, RoundedCornerShape(8.dp))
-            .border(1.dp, MaterialTheme.colorScheme.tertiary, RoundedCornerShape(8.dp))
-            .padding(12.dp),
+            .background(MaterialTheme.colorScheme.surfaceContainer, RoundedCornerShape(ScoutrRadii.md))
+            .border(ScoutrBorder.hairline, MaterialTheme.colorScheme.tertiary, RoundedCornerShape(ScoutrRadii.md))
+            .padding(ScoutrSpace.md),
         verticalAlignment = Alignment.Top,
     ) {
         Icon(
@@ -371,7 +378,7 @@ private fun HostIssueCard(
                     modifier = Modifier
                         .testTag("board_compatibility_retry")
                         .clickable(onClick = onRetry)
-                        .padding(top = 8.dp, end = 16.dp, bottom = 2.dp),
+                        .padding(top = ScoutrSpace.sm, end = ScoutrSpace.lg, bottom = 2.dp),
                 )
                 Text(
                     "Manage in Settings",
@@ -380,7 +387,7 @@ private fun HostIssueCard(
                     modifier = Modifier
                         .testTag("board_compatibility_settings")
                         .clickable(onClick = onOpenSettings)
-                        .padding(top = 8.dp, end = 8.dp, bottom = 2.dp),
+                        .padding(top = ScoutrSpace.sm, end = ScoutrSpace.sm, bottom = 2.dp),
                 )
             }
         }
@@ -415,7 +422,7 @@ private fun LazyListScope.boardSection(
                 }
                 .testTag("board_section_${title.lowercase().replace(' ', '_')}"),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(ScoutrSpace.sm),
         ) {
             Text(
                 text = title.uppercase(),
@@ -425,7 +432,7 @@ private fun LazyListScope.boardSection(
             Text(
                 text = "${agents.size}",
                 style = ScoutrType.monoMeta,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
     }
@@ -476,36 +483,58 @@ private fun LazyListScope.boardSection(
 
 @Composable
 private fun DisconnectedBanner(error: String?, onRetry: () -> Unit) {
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .background(MaterialTheme.colorScheme.errorContainer, RoundedCornerShape(8.dp))
-            .padding(start = 12.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(Icons.Default.WifiOff, contentDescription = null, tint = MaterialTheme.colorScheme.onErrorContainer)
-        Spacer(Modifier.width(10.dp))
-        Text(
-            "Disconnected from the bridge",
-            color = MaterialTheme.colorScheme.onErrorContainer,
-            modifier = Modifier.weight(1f),
-        )
-        Text(
-            "Reconnect",
-            color = MaterialTheme.colorScheme.onErrorContainer,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier
-                .testTag("board_reconnect")
-                .clickable(onClick = onRetry)
-                .padding(6.dp),
-        )
+    val largeText = LocalDensity.current.fontScale > 2f
+    val bannerModifier = Modifier
+        .fillMaxWidth()
+        .background(MaterialTheme.colorScheme.errorContainer, RoundedCornerShape(ScoutrRadii.md))
+        .padding(ScoutrSpace.md)
+    val reconnectModifier = Modifier
+        .testTag("board_reconnect")
+        .clickable(onClick = onRetry)
+        .sizeIn(minWidth = 48.dp, minHeight = 48.dp)
+        .padding(6.dp)
+
+    if (largeText) {
+        Column(bannerModifier) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.WifiOff, contentDescription = null, tint = MaterialTheme.colorScheme.onErrorContainer)
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    "Disconnected from the bridge",
+                    color = MaterialTheme.colorScheme.onErrorContainer,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+            Text(
+                "Reconnect",
+                color = MaterialTheme.colorScheme.onErrorContainer,
+                fontWeight = FontWeight.Bold,
+                modifier = reconnectModifier.align(Alignment.End),
+            )
+        }
+    } else {
+        Row(bannerModifier, verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Default.WifiOff, contentDescription = null, tint = MaterialTheme.colorScheme.onErrorContainer)
+            Spacer(Modifier.width(10.dp))
+            Text(
+                "Disconnected from the bridge",
+                color = MaterialTheme.colorScheme.onErrorContainer,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                "Reconnect",
+                color = MaterialTheme.colorScheme.onErrorContainer,
+                fontWeight = FontWeight.Bold,
+                modifier = reconnectModifier,
+            )
+        }
     }
     error?.let { detail ->
         Text(
             detail,
-            color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.85f),
+            color = MaterialTheme.colorScheme.onErrorContainer,
             style = MaterialTheme.typography.bodySmall,
-            modifier = Modifier.padding(start = 32.dp, end = 12.dp, bottom = 6.dp),
+            modifier = Modifier.padding(start = ScoutrSpace.xxl, end = ScoutrSpace.md, bottom = 6.dp),
         )
     }
 }
@@ -712,7 +741,7 @@ private fun AgentCardBody(
             // Tile anatomy per reference §8b: ring, then a text column of
             // title / latest activity / machine facts, then time in state.
             Row(
-                Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                Modifier.padding(horizontal = 14.dp, vertical = ScoutrSpace.md),
                 verticalAlignment = Alignment.Top,
             ) {
                 StatusRing(
@@ -720,7 +749,7 @@ private fun AgentCardBody(
                     animation = ringAnimation(status),
                     modifier = Modifier.padding(top = 5.dp),
                 )
-                Spacer(Modifier.width(12.dp))
+                Spacer(Modifier.width(ScoutrSpace.md))
                 Column(Modifier.weight(1f)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         AgentMark(session.agentKind)
@@ -783,7 +812,7 @@ private fun AgentCardBody(
                     Text(
                         text = machineFacts,
                         style = ScoutrType.monoMeta,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
@@ -792,8 +821,8 @@ private fun AgentCardBody(
                     staleLine?.let { stale ->
                         Text(
                             text = stale,
-                            style = ScoutrType.monoMeta,
-                            color = MaterialTheme.colorScheme.error.copy(alpha = 0.8f),
+                            style = ScoutrType.monoCaption,
+                            color = ScoutrComponentTokens.criticalCaption,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
@@ -808,7 +837,7 @@ private fun AgentCardBody(
                         }
                     }
                 }
-                Spacer(Modifier.width(12.dp))
+                Spacer(Modifier.width(ScoutrSpace.md))
                 TimeInState(status, session.statusSinceMs ?: session.updatedAtMs)
                 Box {
                     androidx.compose.material3.IconButton(
@@ -821,8 +850,8 @@ private fun AgentCardBody(
                         Icon(
                             Icons.Default.MoreVert,
                             contentDescription = null,
-                            tint = scheme.onSurfaceVariant.copy(alpha = 0.5f),
-                            modifier = Modifier.size(16.dp),
+                            tint = scheme.onSurfaceVariant,
+                            modifier = Modifier.size(ScoutrSpace.lg),
                         )
                     }
                     DropdownMenu(
@@ -869,7 +898,7 @@ private fun NestedSubagentRow(
             .testTag("board_subagent_row_${child.runId}")
             .semantics { contentDescription = "Open $title subagent progress" },
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(ScoutrSpace.sm),
     ) {
         StatusRing(
             color = statusColor(status),
@@ -913,7 +942,7 @@ private fun CardSummaryBlock(
     onReview: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val metaColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f)
+    val metaColor = MaterialTheme.colorScheme.onSurfaceVariant
     val truncated = summary.statusTruncated || summary.diffTruncated
     val stats = buildAnnotatedString {
         if (summary.dirty) {
@@ -1016,10 +1045,10 @@ private fun AttentionBlock(
     }
 
     if (options.isNotEmpty()) {
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(ScoutrSpace.sm))
         Row(
             Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(ScoutrSpace.sm),
         ) {
             options.forEach { option ->
                 OutlinedButton(
@@ -1124,7 +1153,7 @@ private fun statusColor(status: AgentStatus) = when (status) {
     AgentStatus.Working -> MaterialTheme.colorScheme.primary
     AgentStatus.Done -> MaterialTheme.colorScheme.onSurfaceVariant
     AgentStatus.Idle -> MaterialTheme.colorScheme.outline
-    AgentStatus.Unknown -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+    AgentStatus.Unknown -> MaterialTheme.colorScheme.onSurfaceVariant
 }
 
 /**
@@ -1143,7 +1172,7 @@ private fun TimeInState(status: AgentStatus, sinceMs: Double?) {
         color = when (status) {
             AgentStatus.NeedsYou -> MaterialTheme.colorScheme.error
             AgentStatus.Working -> MaterialTheme.colorScheme.onSurfaceVariant
-            else -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+            else -> MaterialTheme.colorScheme.onSurfaceVariant
         },
         modifier = Modifier.padding(top = 5.dp),
     )
@@ -1154,7 +1183,7 @@ private fun TimeInState(status: AgentStatus, sinceMs: Double?) {
 private fun sectionColor(title: String) = when (title.lowercase()) {
     "needs you" -> MaterialTheme.colorScheme.error
     "working" -> MaterialTheme.colorScheme.primary
-    else -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+    else -> MaterialTheme.colorScheme.onSurfaceVariant
 }
 
 /** Only genuinely live states animate — the ripple is the icon's own gesture. */

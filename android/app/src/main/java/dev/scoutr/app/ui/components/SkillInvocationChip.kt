@@ -1,5 +1,6 @@
 package dev.scoutr.app.ui.components
 
+import dev.scoutr.app.ui.theme.ScoutrSpace
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -82,7 +83,7 @@ private fun SkillInvocationChipBody(
     expandable: Boolean,
     expanded: Boolean,
 ) {
-    Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+    Column(Modifier.padding(horizontal = ScoutrSpace.md, vertical = ScoutrSpace.sm)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
                 skill.command,
@@ -93,7 +94,7 @@ private fun SkillInvocationChipBody(
                 modifier = Modifier.weight(1f, fill = false),
             )
             if (expandable) {
-                Spacer(Modifier.width(8.dp))
+                Spacer(Modifier.width(ScoutrSpace.sm))
                 Icon(
                     imageVector = if (expanded) {
                         Icons.Filled.KeyboardArrowDown
