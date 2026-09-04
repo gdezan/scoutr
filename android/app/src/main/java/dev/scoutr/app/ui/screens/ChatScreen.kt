@@ -79,7 +79,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
@@ -171,10 +170,6 @@ import dev.scoutr.app.ui.components.WorkingIndicatorMode
 import dev.scoutr.app.ui.components.workingIndicatorMode
 import dev.scoutr.app.ui.components.PullRefreshIndicator
 import dev.scoutr.app.ui.components.pullRefreshSemantics
-import dev.scoutr.app.ui.components.EvidencePill
-import dev.scoutr.app.ui.components.EvidenceSheet
-import dev.scoutr.app.ui.components.EvidenceSummary
-import dev.scoutr.app.ui.components.pairBashRuns
 
 import dev.scoutr.app.ui.motion.ScoutrMotion
 import dev.scoutr.app.ui.motion.HapticEvent
@@ -205,104 +200,6 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonPrimitive
 
-
-internal fun thinkingId(entryId: String, blockIndex: Int) = "$entryId:thinking:$blockIndex"
-
-/**
- * Live pools of tool activity, one per content segment: a segment opens at
- * every assistant entry carrying thinking or prose, collects that entry's own
- * tool calls plus the bare toolCall entries and toolResults that follow, and
- * freezes the moment the next thinking/prose block (or a user entry) appears.
- * The pill renders inside its anchor's bubble, so it sits where the work ran
- * — never as a turn total parked after the final prose. Late results that
- * arrive after a new block join the new pool positionally. Returns anchor
- * entryId to summary, omitting pools with nothing to show. Results arriving
- * before the run's first assistant entry wait for its pool; orphans cut off
- * by a user boundary are dropped — no assistant bubble owns them.
- */
-internal fun evidenceSegments(allEntries: List<SessionEntry>): Map<String, EvidenceSummary> {
-    val out = mutableMapOf<String, EvidenceSummary>()
-    var anchor: String? = null
-    var assistants = mutableListOf<SessionEntry>()
-    var toolResults = mutableListOf<SessionEntry>()
-    // Results that arrive before the run's first assistant entry; drained into
-    // its pool so every key stays an assistant anchor bubble.
-    var orphanResults = mutableListOf<SessionEntry>()
-    fun hasContent(entry: SessionEntry) = entry.content.any { block ->
-        (block.type == "thinking" && !block.thinking.isNullOrBlank()) ||
-            (block.type == "text" && !block.text.isNullOrBlank())
-    }
-    fun closePool() {
-        val anchorId = anchor
-        if (anchorId != null && (assistants.isNotEmpty() || toolResults.isNotEmpty())) {
-            val summary = summarizeSegment(assistants, toolResults)
-            if (summary.hasEvidence) out[anchorId] = summary
-        }
-        assistants = mutableListOf()
-        toolResults = mutableListOf()
-        anchor = null
-    }
-    for (entry in allEntries) {
-        when (entry.role) {
-            "assistant" -> {
-                if (hasContent(entry)) {
-                    // A new thinking/prose block freezes the open pool.
-                    closePool()
-                    anchor = entry.entryId
-                } else if (anchor == null) {
-                    anchor = entry.entryId
-                }
-                if (orphanResults.isNotEmpty()) {
-                    toolResults.addAll(orphanResults)
-                    orphanResults = mutableListOf()
-                }
-                assistants.add(entry)
-            }
-            "toolResult" -> {
-                if (anchor == null) orphanResults.add(entry) else toolResults.add(entry)
-            }
-            else -> {
-                closePool()
-                // No assistant bubble owns pre-boundary orphans; drop them.
-                orphanResults = mutableListOf()
-            }
-        }
-    }
-    closePool()
-    return out
-}
-
-private fun summarizeSegment(
-    assistants: List<SessionEntry>,
-    toolResults: List<SessionEntry>,
-): EvidenceSummary {
-    val edits = toolResults.mapNotNull { fileEditOf(it) }
-    val added = edits.sumOf { it.added }
-    val removed = edits.sumOf { it.removed }
-    val distinctPaths = edits.mapNotNull { it.path?.takeIf { p -> p.isNotBlank() } }.distinct()
-    val fileCount = if (distinctPaths.isNotEmpty()) distinctPaths.size else edits.size
-    val bashResults = toolResults.filter { it.toolName?.equals("bash", ignoreCase = true) == true }
-    val bashCalls = assistants
-        .flatMap { it.content }
-        .filter { it.type == "toolCall" && it.name?.equals("bash", ignoreCase = true) == true }
-    val bashRuns = pairBashRuns(bashCalls, bashResults)
-    val matched = bashRuns.mapNotNull { it.call }
-    // Identity match: two identical commands in one run are distinct executions.
-    val pendingCalls = bashCalls.filter { call -> matched.none { it === call } }
-    val readCount = toolResults.count { entry ->
-        entry.toolName?.contains("read", ignoreCase = true) == true &&
-            entry.content.none { it.type == "fileEdit" && !it.path.isNullOrBlank() }
-    }
-    return EvidenceSummary(
-        fileCount = fileCount,
-        added = added,
-        removed = removed,
-        edits = edits,
-        bashRuns = bashRuns,
-        readCount = readCount,
-        pendingCalls = pendingCalls,
-    )
-}
 
 @Composable
 fun ChatScreen(
@@ -481,7 +378,6 @@ fun ChatScreen(
                         onAskDismiss = viewModel::dismissAsk,
                         cwd = ui.cwd,
                         onOpenWorkspaceFile = onOpenWorkspaceFile,
-                        onOpenReview = onOpenReview,
                         modifier = Modifier.fillMaxSize(),
                     )
                 }
@@ -1194,7 +1090,6 @@ internal fun buildChatRows(
 }
 
 @Composable
-@OptIn(ExperimentalMaterial3Api::class)
 fun ChatList(
     entries: List<SessionEntry>,
     state: LazyListState = rememberLazyListState(),
@@ -1225,7 +1120,6 @@ fun ChatList(
     cwd: String? = null,
     /** Absolute workspace path tapped in the transcript. */
     onOpenWorkspaceFile: ((String) -> Unit)? = null,
-    onOpenReview: ((String) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val listState = state
@@ -1265,56 +1159,6 @@ fun ChatList(
             .mapNotNull { entry -> fileEditOf(entry)?.let { toolResultKey(entry, entries) to it } }
             .toMap()
     }
-
-    // — Per-block thinking (C1): collapsed set seeded from showThinking, survives rotation
-    var collapsedThinkingIds by rememberSaveable { mutableStateOf(setOf<String>()) }
-    var seenThinkingIds by rememberSaveable { mutableStateOf(setOf<String>()) }
-    fun isThinkingCollapsed(id: String): Boolean {
-        return when {
-            id in collapsedThinkingIds -> true
-            id in seenThinkingIds -> false
-            else -> !showThinking
-        }
-    }
-    fun toggleThinking(id: String) {
-        val currentlyCollapsed = when {
-            id in collapsedThinkingIds -> true
-            id in seenThinkingIds -> false
-            else -> !showThinking
-        }
-        if (currentlyCollapsed) {
-            collapsedThinkingIds = collapsedThinkingIds - id
-            seenThinkingIds = seenThinkingIds + id
-        } else {
-            collapsedThinkingIds = collapsedThinkingIds + id
-            seenThinkingIds = seenThinkingIds + id
-        }
-    }
-    // Seed newly arriving thinking blocks from current showThinking (global is seed only)
-    LaunchedEffect(entries, showThinking) {
-        val allThinkingIds = entries.flatMap { entry ->
-            entry.content.mapIndexedNotNull { idx, block ->
-                if (block.type == "thinking" && !block.thinking.isNullOrBlank()) thinkingId(entry.entryId, idx) else null
-            }
-        }.toSet()
-        val newIds = allThinkingIds - seenThinkingIds
-        if (newIds.isNotEmpty()) {
-            seenThinkingIds = seenThinkingIds + newIds
-            if (!showThinking) {
-                collapsedThinkingIds = collapsedThinkingIds + newIds
-            }
-        }
-    }
-
-    // Evidence: one live pool per content segment, rendered inside its anchor's bubble.
-    val evidenceByEntry: Map<String, EvidenceSummary> = remember(entries) {
-        evidenceSegments(entries)
-    }
-
-    // — Evidence sheet state (C1)
-    var selectedEvidence by remember { mutableStateOf<EvidenceSummary?>(null) }
-    var showEvidenceSheet by rememberSaveable { mutableStateOf(false) }
-    val evidenceSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     // One owner of programmatic scroll-to-end (plan 007): a newer request —
     // open-at-bottom, append-follow, or the button — cancels and replaces the
@@ -1463,17 +1307,8 @@ fun ChatList(
                         resultHasCall = { entry -> inferredToolCallKey(entry, entries) != null },
                         fileEditFor = { toolId -> fileEdits[toolId] },
                         onToggleTool = { toolId -> toggleTool(toolId) },
-                        collapsedThinkingIds = collapsedThinkingIds,
-                        isThinkingCollapsed = { id -> isThinkingCollapsed(id) },
-                        onToggleThinking = { id -> toggleThinking(id) },
-                        evidenceSummary = evidenceByEntry[row.entry.entryId],
-                        onOpenEvidence = { summary ->
-                            selectedEvidence = summary
-                            showEvidenceSheet = true
-                        },
                         cwd = cwd,
                         onOpenWorkspaceFile = onOpenWorkspaceFile,
-                        onOpenReview = onOpenReview,
                         modifier = Modifier.padding(top = entrySpacing(row.entry)).animateItem(
                             fadeInSpec = ScoutrMotion.itemSpec(reduceMotion),
                             placementSpec = ScoutrMotion.itemPlacementSpec(reduceMotion),
@@ -1565,17 +1400,6 @@ fun ChatList(
                     contentDescription = "Scroll to end",
                 )
             }
-        }
-        // Evidence sheet (C1) — overlay, does not own scroll
-        if (showEvidenceSheet && selectedEvidence != null) {
-            EvidenceSheet(
-                summary = selectedEvidence!!,
-                toolOutputFontSizeSp = toolOutputFontSizeSp,
-                onDismiss = { showEvidenceSheet = false },
-                onOpenReview = onOpenReview,
-                cwd = cwd,
-                sheetState = evidenceSheetState
-            )
         }
     }
 }
@@ -1673,12 +1497,6 @@ private fun MessageRow(
     fileEditFor: (String) -> ContentBlock?,
     cwd: String? = null,
     onOpenWorkspaceFile: ((String) -> Unit)? = null,
-    collapsedThinkingIds: Set<String> = emptySet(),
-    isThinkingCollapsed: (String) -> Boolean = { false },
-    onToggleThinking: (String) -> Unit = {},
-    evidenceSummary: EvidenceSummary? = null,
-    onOpenEvidence: (EvidenceSummary) -> Unit = {},
-    onOpenReview: ((String) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     when (entry.role) {
@@ -1690,17 +1508,21 @@ private fun MessageRow(
             toolExpanded = toolExpanded,
             fileEditFor = fileEditFor,
             onToggleTool = onToggleTool,
-            isThinkingCollapsed = isThinkingCollapsed,
-            onToggleThinking = onToggleThinking,
-            evidenceSummary = evidenceSummary,
-            onOpenEvidence = onOpenEvidence,
-            toolOutputFontSizeSp = toolOutputFontSizeSp,
             cwd = cwd,
             onOpenWorkspaceFile = onOpenWorkspaceFile,
-            onOpenReview = onOpenReview,
             modifier = modifier,
         )
-        "toolResult" -> Unit
+        "toolResult" -> ToolResultChip(
+            entry = entry,
+            toolOutputFontSizeSp = toolOutputFontSizeSp,
+            toolExpanded = toolExpanded,
+            resultToolKey = resultToolKey,
+            hasCall = resultHasCall(entry),
+            onToggleTool = onToggleTool,
+            cwd = cwd,
+            onOpenWorkspaceFile = onOpenWorkspaceFile,
+            modifier = modifier,
+        )
         else -> {}
     }
 }
@@ -1832,17 +1654,8 @@ private fun AssistantBubble(
     onToggleTool: (String) -> Unit,
     cwd: String? = null,
     onOpenWorkspaceFile: ((String) -> Unit)? = null,
-    isThinkingCollapsed: (String) -> Boolean = { false },
-    onToggleThinking: (String) -> Unit = {},
-    evidenceSummary: EvidenceSummary? = null,
-    onOpenEvidence: (EvidenceSummary) -> Unit = {},
-    toolOutputFontSizeSp: Float = AppearancePreferencesStore.DEFAULT_TOOL_OUTPUT_FONT_SIZE_SP,
-    onOpenReview: ((String) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
-    // Evidence pill: visible iff hasEvidence (fileCount>0 || commands>0); zero parts hidden.
-    val evidence = evidenceSummary
-    val showPill = evidence?.hasEvidence == true
     // Prose runs the full column width; only tool calls hang off the spine, and
     // consecutive calls share one rail so the line is unbroken between them (§7a).
     Column(modifier.fillMaxWidth().testTag("assistant_bubble")) {
@@ -1871,36 +1684,35 @@ private fun AssistantBubble(
 
                 "thinking" -> {
                     val thinking = block.thinking
-                    if (!thinking.isNullOrBlank()) {
-                        val tid = thinkingId(entry.entryId, index)
-                        val collapsed = isThinkingCollapsed(tid)
-                        ThinkingBlock(
-                            text = thinking,
-                            isCollapsed = collapsed,
-                            onToggle = { onToggleThinking(tid) },
-                            modifier = Modifier.padding(top = 4.dp)
-                        )
+                    if (!thinking.isNullOrBlank() && showThinking) {
+                        ThinkingBlock(thinking, Modifier.padding(top = 4.dp))
                     }
                     index++
                 }
 
                 "toolCall" -> {
+                    val start = index
                     while (index < entry.content.size && entry.content[index].type == "toolCall") index++
+                    // Prose above means a fresh run (16dp); starting the turn on a
+                    // call means the rail is continuing from the entry before, so
+                    // it keeps the ordinary row gap.
+                    TimelineRail(topGap = if (start == 0) SPINE_ROW_GAP else SPINE_RUN_GAP) {
+                        for (i in start until index) {
+                            val call = entry.content[i]
+                            val key = toolCallKey(entry.entryId, call, i)
+                            ToolCallChip(
+                                block = call,
+                                fileEdit = fileEditFor(key),
+                                isExpanded = toolExpanded(key),
+                                onToggle = { onToggleTool(key) },
+                                modifier = if (i == start) Modifier else Modifier.padding(top = SPINE_ROW_GAP),
+                            )
+                        }
+                    }
                 }
+
                 else -> index++
             }
-        }
-        if (showPill) {
-            // Pill sits below the anchor's content, calm evidence affordance (C1)
-            Spacer(Modifier.height(8.dp))
-            EvidencePill(
-                fileCount = evidence!!.fileCount,
-                commands = evidence.commands,
-                added = evidence.added,
-                removed = evidence.removed,
-                onClick = { onOpenEvidence(evidence) },
-                modifier = Modifier.padding(start = 2.dp)
-            )
         }
     }
 }
@@ -1942,12 +1754,7 @@ private fun TimelineRail(
 }
 
 @Composable
-private fun ThinkingBlock(
-    text: String,
-    isCollapsed: Boolean,
-    onToggle: () -> Unit,
-    modifier: Modifier = Modifier
-) {
+private fun ThinkingBlock(text: String, modifier: Modifier = Modifier) {
     Column(
         modifier
             .fillMaxWidth()
@@ -1955,34 +1762,23 @@ private fun ThinkingBlock(
                 MaterialTheme.colorScheme.surfaceContainer,
                 RoundedCornerShape(4.dp),
             )
-            .clip(RoundedCornerShape(4.dp))
-            .clickable(onClick = onToggle)
             .padding(horizontal = ScoutrSpace.md, vertical = 10.dp)
             .testTag("thinking_block"),
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                if (isCollapsed) "thinking \u00b7 expand \u25b8" else "thinking \u00b7 collapse \u25b4",
-                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium),
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
+        Text(
+            "thinking",
+            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
         Spacer(Modifier.height(4.dp))
         Text(
             text.trim(),
             style = MaterialTheme.typography.bodyMedium,
             fontStyle = FontStyle.Italic,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = if (isCollapsed) 1 else Int.MAX_VALUE,
-            overflow = TextOverflow.Ellipsis,
         )
     }
 }
-
 
 /** The visible command/argument summary for a tool call block. */
 fun toolCallCommand(block: ContentBlock): String {
@@ -2267,7 +2063,6 @@ private fun DiffStatBadge(edit: ContentBlock, modifier: Modifier = Modifier) {
         modifier = modifier.testTag("diff_stat_badge"),
     )
 }
-
 
 /**
  * Files an assistant message names, as tappable chips under the prose (F1).
