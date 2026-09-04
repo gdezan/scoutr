@@ -263,9 +263,6 @@ pi agents, as an alternative to Moshi's paid herdr integration.
   the request path instead.
 - Robolectric 4.14 caps at targetSdk 35, so JVM ViewModel tests pin
   `@Config(sdk = [35])` and idle the main looper for viewModelScope work.
-## Sessions v2 (layer 2) — Cursor-iOS product patterns
-
-The Cursor iOS brief remains a product-pattern reference for supervision, chat, review, and cache-first recovery. Its visual recommendations are superseded for Scoutr Android by ADR 0005 and `android/app/src/main/java/dev/scoutr/app/ui/theme/DESIGN.md`.
 
 ## Design system v2 (layer 3)
 
@@ -276,6 +273,12 @@ Scoutr Android is always dark and uses green `#8DF08D` for live/AI-owned state, 
 - **Motion** keeps the intentional live-state ripple and blocked pulse; reduce motion renders a static ring. Loading feedback is text or static feedback, not a spinner or skeleton.
 - **Mono** remains restricted to code, data, paths, commands, model ids, and terminal output.
 
+## Image viewer (settled, 2026-09-03; shipped in 55661dc)
+
+- **Coil 3 is the image pipeline.** Use `coil-compose` and `coil-gif`. `AsyncImage` renders from the app's cache. GIFs play everywhere; animated WebP uses platform `ImageDecoder` on API 28+ and shows its first frame on API 26–27.
+- **The viewer downloads before rendering.** `BridgeClient` authenticates `/api/file/bytes` and writes to `cacheDir/images/`. Coil never receives network credentials. Cache entries use bounded LRU cleanup. A custom Coil fetcher is intentionally out.
+- **I4 supports Open with and Save only.** Open with uses a non-exported `FileProvider` with a read grant. Save uses MediaStore on API 29+ and the Storage Access Framework on API 26–28. No storage permission is requested, and viewing never writes automatically to the gallery.
+- **The viewer remains additive and type-aware.** SVG, PDF, and other unsupported binary files keep their existing triage path. The image-bytes feature does not require a handshake bump; older bridges degrade gracefully.
 
 ## Session controls
 
